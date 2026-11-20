@@ -11,6 +11,7 @@
 #include <array>
 
 #include "alamo/core/dmath.hpp"
+#include "alamo/core/frames.hpp"
 #include "alamo/tactical/abilities/x86_int.hpp"
 #include "alamo/tactical/abilities/ability_system.hpp"
 #include "alamo/tactical/category_reduce.hpp"
@@ -925,7 +926,7 @@ uint32_t AbilitySystem::clip_finish(ObjectId id, int32_t anim_type) const {
     // One-shot end on sim frames: the first frame n with n x rate >= max(count - 2, 0) (OI t03 clock); 0 without the clip.
     const ClipTiming ct = clip_timing(id, anim_type, {});
     if (!(ct.count > 0.0f) || !(ct.rate > 0.0f)) return 0;
-    return static_cast<uint32_t>(std::ceil(ct.end / ct.rate));
+    return static_cast<uint32_t>(frames_ceil(ct.end / ct.rate));
 }
 
 void AbilitySystem::troopers_service(Obj& o, uint32_t frame) {

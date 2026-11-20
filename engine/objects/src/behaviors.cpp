@@ -135,7 +135,7 @@ uint32_t computed_behavior_interval(BehaviorTypeId id, const BehaviorIntervalCon
         const float v = static_cast<float>(cfg.fps) * multiplier * secs + 0.5f;
         if (!(v >= 1.0f)) return 0;  // negative, NaN or < 1 truncate to 0
         if (v >= 4294967040.0f) return 0xFFFFFF00u;
-        return static_cast<uint32_t>(v);
+        return static_cast<uint32_t>(v);  // frame-cast-ok: range-guarded above
     };
     switch (id) {
         case beh::Shielded: return rounded(cfg.shield_recharge_interval_secs);

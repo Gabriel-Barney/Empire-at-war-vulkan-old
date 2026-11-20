@@ -94,6 +94,13 @@ if(ALAMO_LINT_PYTHON)
   add_test(NAME alamo_core_mod_system_lint_selftest
            COMMAND ${ALAMO_LINT_PYTHON} ${PROJECT_SOURCE_DIR}/tools/lint/check_mod_system.py --selftest)
   set_tests_properties(alamo_core_mod_system_lint alamo_core_mod_system_lint_selftest PROPERTIES TIMEOUT 120)
+  # ref4 t03: sim code turns data-driven seconds into frame counts only through alamo/core/frames.hpp (no plain
+  # static_cast of seconds x FPS to an integer outside engine/core; tools/lint/check_frame_casts.py).
+  add_test(NAME alamo_core_frame_casts_lint
+           COMMAND ${ALAMO_LINT_PYTHON} -I ${PROJECT_SOURCE_DIR}/tools/lint/check_frame_casts.py --root ${PROJECT_SOURCE_DIR})
+  add_test(NAME alamo_core_frame_casts_lint_selftest
+           COMMAND ${ALAMO_LINT_PYTHON} -I ${PROJECT_SOURCE_DIR}/tools/lint/check_frame_casts.py --selftest)
+  set_tests_properties(alamo_core_frame_casts_lint alamo_core_frame_casts_lint_selftest PROPERTIES TIMEOUT 120)
 else()
   message(STATUS "python not found: alamo_core_mod_names_lint not registered (build_gate.cmd still runs it)")
 endif()

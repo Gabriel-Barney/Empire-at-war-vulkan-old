@@ -350,6 +350,39 @@ static void test_sty1_gate_refusals() {
 }
 
 
+// ref5 t02: every Session and Model row of the coverage table has a handler registered by its owner, and every registered
+// name is a row of that owner (no handler for a name the table gives to someone else); names register once. The Ui rows
+// are checked by the game's tests (alamo_game_story_present_tests), which link the presenter.
+static void test_reward_handlers_registered() {
+    size_t session = 0, model = 0;
+    for (const StoryRewardRow& row : story_reward_table()) {
+        const std::string name(row.name);
+        if (row.owner == StoryRewardOwner::Session) {
+            ++session;
+            if (!StorySession::has_reward_handler(row.name)) std::printf("    Session row without a handler: %s\n", name.c_str());
+            CHECK(StorySession::has_reward_handler(row.name));
+        } else if (row.owner == StoryRewardOwner::Model) {
+            ++model;
+            if (!lua::StoryModel::has_reward_handler(row.name)) std::printf("    Model row without a handler: %s\n", name.c_str());
+            CHECK(lua::StoryModel::has_reward_handler(row.name));
+        }
+    }
+    CHECK(session > 60 && model > 10);
+    const auto owned_by = [](const std::vector<std::string_view>& names, StoryRewardOwner owner, const char* who) {
+        std::set<std::string_view> seen;
+        for (const std::string_view n : names) {
+            const StoryRewardRow* row = find_story_reward(n);
+            const bool ok = row && row->owner == owner && row->name == n && seen.insert(n).second;
+            if (!ok) std::printf("    %s registers %.*s: no %s row, or twice\n", who, static_cast<int>(n.size()), n.data(), who);
+            CHECK(ok);
+        }
+        return seen.size();
+    };
+    CHECK(owned_by(StorySession::reward_names(), StoryRewardOwner::Session, "session") == session);
+    CHECK(owned_by(lua::StoryModel::reward_names(), StoryRewardOwner::Model, "model") == model);
+    CHECK(!StorySession::has_reward_handler("credits") && !lua::StoryModel::has_reward_handler("CREDITS"));  // exact names
+}
+
 // Every Session-owned table row reaches a handler (the apply_reward chain notes "has no handler" for one that does not).
 static void test_session_rows_have_handlers() {
     std::unique_ptr<DirectoryProvider> files;
@@ -911,6 +944,7 @@ int main() {
     log::set_min_level(log::Level::Error);
     story_test::test_sty1_gate_refusals();
     story_test::test_sty1_rewards();
+    story_test::test_reward_handlers_registered();  // ref5 t02
     story_test::test_session_rows_have_handlers();
     story_test::test_mcx6_rewards();
     story_test::test_mcx6_tactical_edits();

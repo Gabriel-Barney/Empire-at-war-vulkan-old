@@ -1108,7 +1108,18 @@ void test_p4_resolve_battle() {
     if (got.forces.size() != 2 || got.forces[0].start.size() < 2) return;
     BattleResult so_far;
     so_far.destroyed = {got.forces[0].start[1]};  // the defender's corvette died in the battle
+    w.sim.set_emit_events(true);
     const int32_t winner = w.cm->resolve_battle(so_far);
+    // ref5 t02 (battle_loss): the tactical Auto-resolve button decides in tactical mode, so every loss, the battle's own and
+    // the roll's, takes the "hero defeated" path (ObjectDestroyed value 0: STORY_DEFEAT_HERO stays), never the galactic
+    // auto-resolve's (value 1).
+    size_t losses = 0;
+    for (const GalacticEvent& e : w.sim.events())
+        if (e.kind == GalacticEventKind::ObjectDestroyed) {
+            ++losses;
+            CHECK(e.value == 0);
+        }
+    CHECK(losses >= 1);
     CHECK(winner == pEmpire || winner == pUnder);
     CHECK(!w.store.alive(got.forces[0].start[1]) && !w.cm->battle_active() && w.cm->space_queue().empty());
     CHECK(w.cm->log().size() == 1 && w.cm->log()[0].how == 1 && w.cm->log()[0].winner == winner);
@@ -1124,6 +1135,7 @@ void test_p4_resolve_battle() {
     v.arrive_at_b();
     BattleResult so_far2;
     if (got2.forces.size() == 2 && got2.forces[0].start.size() >= 2) so_far2.destroyed = {got2.forces[0].start[1]};
+    v.sim.set_emit_events(true);
     CHECK(v.cm->resolve_battle(so_far2) == winner && v.digest() == w.digest());
 }
 

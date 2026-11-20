@@ -7,7 +7,7 @@ log, including the output of passing tests, which would fail the gate on test ou
 Then runs the source lints that need no build (modc t04: check_mod_names.py and its self-test, docs/status/modc-audit.md;
 mcx0 t03: check_tag_ledger.py and its self-test, docs/MOD_COMPAT_DESIGN.md §7.2; mcx5 t05: check_limits.py and its
 self-test, §8; ums4 t03: check_mod_system.py and its self-test, docs/MODS.md 3.2; ref2 t01: check_battle_ledger.py and
-its self-test, the battle save ledger) and
+its self-test, the battle save ledger; ref4 t03: check_frame_casts.py and its self-test, seconds -> frames) and
 prints one line for them; a lint failure fails the gate too. (The same lints also run as ctest entries in every build.)
 Usage: gate_summary.py <logs dir>
 """
@@ -22,7 +22,8 @@ LINTS = [('mod names', ['check_mod_names.py']), ('mod names selftest', ['check_m
          ('ledgers', ['check_tag_ledger.py']), ('ledgers selftest', ['check_tag_ledger.py', '--selftest']),
          ('limits', ['check_limits.py']), ('limits selftest', ['check_limits.py', '--selftest']),
          ('mod system', ['check_mod_system.py']), ('mod system selftest', ['check_mod_system.py', '--selftest']),
-         ('battle ledger', ['check_battle_ledger.py']), ('battle ledger selftest', ['check_battle_ledger.py', '--selftest'])]
+         ('battle ledger', ['check_battle_ledger.py']), ('battle ledger selftest', ['check_battle_ledger.py', '--selftest']),
+         ('frame casts', ['check_frame_casts.py']), ('frame casts selftest', ['check_frame_casts.py', '--selftest'])]
 
 
 def run_lints():

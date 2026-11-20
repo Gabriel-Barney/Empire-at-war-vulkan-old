@@ -6,6 +6,7 @@
 #include <utility>
 
 #include "alamo/objects/behaviors.hpp"
+#include "alamo/core/frames.hpp"
 #include "alamo/objects/game_object_types.hpp"
 #include "alamo/sim/l1_loaders.hpp"
 #include "alamo/sim/tactical_battle.hpp"
@@ -130,7 +131,7 @@ void TacticalBattle::vm_cp_capture(objects::ObjectId point, int32_t new_owner) {
     }
     // Arm: round-half-away(FPS x Control_Point_Domination_Victory_Time_In_Secs) frames, 900 in FoC.
     vm_cp_armed_ = true;
-    vm_cp_timer_ = static_cast<int32_t>(std::lround(30.0 * static_cast<double>(catalog_->control_point_victory_seconds())));
+    vm_cp_timer_ = frames_round(30.0 * static_cast<double>(catalog_->control_point_victory_seconds()));
     vm_cp_player_ = new_owner;
 }
 
@@ -384,7 +385,7 @@ void TacticalBattle::check_victory(TacticalMode& mode) {
     if (vm_declared_ && frame_ > vm_declared_frame_ && vm_countdown_ > 0) --vm_countdown_;
     // ccpgt t02 (§4.2, tactical tick 0x3639d0): the domination timer counts down; at <= 0 it tests 0x15 for the armed player
     // (queued while held, as every test) and disarms. [M] +-1 frame against the capture service's order in the tick.
-    if (vm_cp_armed_ && --vm_cp_timer_ <= 0) {
+    if (vm_cp_armed_ && (vm_cp_timer_ = dec_wrap(vm_cp_timer_)) <= 0) {  // ref4 t03: INT32_MIN wraps, as on x86
         const int32_t p = vm_cp_player_;
         vm_cp_disarm();
         vm_test(kControlPointDomination, p);

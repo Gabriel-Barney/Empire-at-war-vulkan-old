@@ -9,6 +9,7 @@
 #include <algorithm>
 
 #include "alamo/galactic/campaign.hpp"
+#include "alamo/core/frames.hpp"
 #include "alamo/core/sim_crc.hpp"
 
 namespace alamo::galactic {
@@ -26,7 +27,7 @@ float level_value(const std::vector<float>& list, int8_t type) {
 
 // (int)((float)FPS x secs), truncation (cvttss2si).
 uint32_t transition_frames(float seconds) {
-    return static_cast<uint32_t>(static_cast<int32_t>(static_cast<float>(econ::kFramesPerSecond) * seconds));
+    return static_cast<uint32_t>(frames_trunc(static_cast<float>(econ::kFramesPerSecond) * seconds));
 }
 
 }  // namespace

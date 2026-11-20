@@ -12,6 +12,7 @@
 #include <vector>
 
 #include "alamo/core/ascii.hpp"
+#include "alamo/core/frames.hpp"
 
 namespace alamo::ai {
 
@@ -82,7 +83,7 @@ struct ServiceClock {
     bool due(int64_t now) const { return next <= now; }
     // Frames between two services: max(1, (int)(interval x FPS)).
     int32_t period() const {
-        const auto frames = static_cast<int32_t>(interval * static_cast<float>(kAiFps));
+        const int32_t frames = frames_trunc(interval * static_cast<float>(kAiFps));
         return frames < 1 ? 1 : frames;
     }
     void reschedule(int64_t now) { next = now + period(); }

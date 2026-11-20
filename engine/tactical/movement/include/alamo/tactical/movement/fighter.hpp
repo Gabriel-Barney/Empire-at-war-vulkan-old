@@ -22,6 +22,7 @@
 #include <vector>
 
 #include "alamo/core/bytes.hpp"
+#include "alamo/core/frames.hpp"
 #include "alamo/core/sim_crc_fwd.hpp"
 #include "alamo/tactical/movement/common.hpp"
 #include "alamo/tactical/movement/space_path.hpp"
@@ -56,7 +57,7 @@ inline constexpr float kFighterTwoPi = 6.2831855f;
 // MovementConstants.
 inline constexpr float kSpaceIdleMovementSpeed = 0.0f;
 // lock(x) duration: int(float(FPS) x 10.0) = 300 frames (§4.5).
-inline constexpr uint32_t kFighterLockFrames = static_cast<uint32_t>(30.0f * 10.0f);
+inline constexpr uint32_t kFighterLockFrames = static_cast<uint32_t>(frames_trunc(30.0f * 10.0f));
 // Avoidance hold after an evasion (pack +0x2b4 = 15, §3.5).
 inline constexpr int32_t kFighterAvoidHold = 15;
 

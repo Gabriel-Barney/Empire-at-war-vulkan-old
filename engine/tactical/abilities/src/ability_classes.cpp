@@ -20,6 +20,7 @@
 #include <cmath>
 
 #include "alamo/core/dmath.hpp"
+#include "alamo/core/frames.hpp"
 #include "alamo/tactical/abilities/x86_int.hpp"
 #include "alamo/tactical/abilities/ability_system.hpp"
 
@@ -860,7 +861,7 @@ bool AbilitySystem::class_apply(Obj& o, SpecialState& sp, ObjectId target, int32
                 const int32_t at = s.cls == C::Repair ? kAnimRepairing : kAnimHacking;
                 const uint32_t v = variant_count(actor, at) > 0 ? resolve_variant(actor, at, kDrawVariant) : 0u;
                 const ClipTiming ct = clip_timing(actor, at, {}, v);
-                len = ct.count > 0.0f ? static_cast<uint32_t>(std::ceil(ct.end / ct.rate)) : static_cast<uint32_t>(kHackFrames);
+                len = ct.count > 0.0f ? static_cast<uint32_t>(frames_ceil(ct.end / ct.rate)) : static_cast<uint32_t>(kHackFrames);
                 if (ct.count > 0.0f) queue_play(actor, at, v, false, 0.1f, 1.0f, frame);
             }
             sp.next = frame + len;

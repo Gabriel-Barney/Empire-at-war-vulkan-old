@@ -649,6 +649,16 @@ headless skirmish CRC checkpoint file (`ALAMO_CRC 2`) under `tests/goldens/mods/
 installed. A behaviour change that moves a mod golden is then as visible as a base golden move. The goldens are
 regenerated with `tools\regen_goldens.cmd --mods`, and the commit message names them.
 
+Mods set data values the stock game never uses (Age of Legends: `Defense_Duration_In_Secs` 99999999999), and a plain
+float-to-integer cast of such a value is undefined behaviour on which MSVC and clang differ. Sim code converts with the
+x86 range behaviour instead: `alamo/core/x86_int.hpp` (`trunc_i32`, `dec_wrap`, `add_wrap`; mcx8 t11) and, for data-driven
+seconds to frames, `alamo/core/frames.hpp` (`frames_trunc`, `frames_round`, `frames_ceil`; ref4 t03), whose use
+`tools/lint/check_frame_casts.py` enforces outside `engine/core`. The limits conformance mod `huge_delay`
+(`tools/conformance/limit_mods.py`) runs skirmishes with GameConstants delays of 99999999999 s, one of them with
+control points so the domination countdown starts at INT32_MIN; their MSVC and clang CRC logs must match
+(`limit_mods.py run --exe2 --runs land_cp,land,space,galactic --skirmish-ticks 6000`). A countdown that can start at
+INT32_MIN decrements with `dec_wrap`.
+
 ---
 
 ## 14. Retail as the oracle

@@ -1,5 +1,6 @@
 // tactical_battle: part 1 (bo3 t03 split; shared code in tactical_battle_internal.hpp).
 #include "tactical_battle_internal.hpp"
+#include "alamo/core/frames.hpp"
 
 #include "alamo/objects/type_fields.hpp"            // mcx4 t11: find_type_field (snap_move_point)
 #include "alamo/tactical/movement/formation.hpp"    // mcx4 t11: snap_order_center
@@ -503,7 +504,7 @@ void TacticalBattle::setup(TacticalMode& mode, terrain::MapData map, SimRng& rng
         const anim::AnimModel* m = w ? w->model(id) : nullptr;
         const anim::ClipRef* c = m ? m->clip(type, 0) : nullptr;
         if (!c || !c->clip || c->clip->fps <= 0.0f) return 0u;
-        return static_cast<uint32_t>(std::ceil(static_cast<double>(c->clip->frame_count) * 30.0 / static_cast<double>(c->clip->fps)));
+        return static_cast<uint32_t>(frames_ceil(static_cast<double>(c->clip->frame_count) * 30.0 / static_cast<double>(c->clip->fps)));
     });
     // b0173: a deployed build pad (Mobile Defense Unit) with something on it does not undeploy.
     movement_->set_undeploy_block_fn([this](objects::ObjectId id) { return pad_occupied(id); });
@@ -735,7 +736,7 @@ void TacticalBattle::setup(TacticalMode& mode, terrain::MapData map, SimRng& rng
     if (anim_) hooks_->set_anim(anim_, &anim_->world(mode), mode.kind());
     if (anim_) hooks_->set_anim_mode(&mode);  // R3 anim: behaviour hand-offs
 #endif
-    retreat_allowed_frame_ = static_cast<uint32_t>((space_ ? rules_->space_retreat_allowed : rules_->land_retreat_allowed) * 30.0f);
+    retreat_allowed_frame_ = static_cast<uint32_t>(frames_trunc((space_ ? rules_->space_retreat_allowed : rules_->land_retreat_allowed) * 30.0f));
     fog_begin(mode, players);  // fog of war: grids (owner: fog agent)
     if (before_map_load_) {  // modc t32: the host binds the object bridge before the map objects attach their scripts
         const std::function<void()> fn = std::move(before_map_load_);

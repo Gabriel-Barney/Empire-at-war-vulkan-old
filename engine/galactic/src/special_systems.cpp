@@ -11,6 +11,7 @@
 #include <climits>
 
 #include "alamo/commands/event_types.hpp"
+#include "alamo/core/frames.hpp"
 #include "alamo/core/sim_crc.hpp"
 #include "alamo/core/bytes.hpp"
 #include "alamo/core/hash.hpp"
@@ -342,7 +343,7 @@ bool GalacticSim::schedule_hero_respawn(ObjectHandle hero, PlanetIndex planet, f
             for (const RespawnEntry& e : p.respawns)
                 if (e.type == type) return true;
     RespawnEntry e;
-    e.due = frame_ + static_cast<int32_t>(30.0f * t + 0.5f);
+    e.due = frame_ + frames_trunc(30.0f * t + 0.5f);
     e.type = type;
     e.owner = owner;
     planets_[planet].respawns.push_back(e);
@@ -776,7 +777,7 @@ bool GalacticSim::apply_sabotage(const SpecialAbilityDef& a, ObjectHandle sabote
         break;
     }
     case kSabotageHalt: {  // 0x5b2450: halt-list entry, expiry now + int(FPS * duration + 0.5), -1 = permanent [H]
-        const int32_t until = a.halt_duration == -1.0f ? INT32_MAX : frame_ + static_cast<int32_t>(30.0f * a.halt_duration + 0.5f);
+        const int32_t until = a.halt_duration == -1.0f ? INT32_MAX : frame_ + frames_trunc(30.0f * a.halt_duration + 0.5f);
         set_credit_halt(planet, until);  // [port] the keyed halt list folds into PlanetState::halt_until
         ok = true;
         break;

@@ -5,6 +5,7 @@
 #include <string_view>
 
 #include "alamo/core/dmath.hpp"
+#include "alamo/core/frames.hpp"
 #include "alamo/core/sim_crc.hpp"
 #include "alamo/core/ascii.hpp"
 #include "alamo/data/values.hpp"
@@ -231,7 +232,7 @@ void TacticalBattle::pads_tick(TacticalMode& mode) {
             const float wait = pt < types.size() ? types.get_float(pt, "Minimum_Time_Before_Pad_Can_Build_Again") : 0.0f;
             if (wait > 0.0f) {
                 s.cooldown_start = frame_;
-                s.cooldown_end = frame_ + static_cast<uint32_t>(wait * 30.0f + 0.5f);
+                s.cooldown_end = frame_ + static_cast<uint32_t>(frames_trunc(wait * 30.0f + 0.5f));
             }
             if (pad_alive) play_battle_clip(s.pad, 0x75, false, 1.0f, 0.0f);  // r3h t05: 0x42e6d0 ends with Pad_Sell
         };

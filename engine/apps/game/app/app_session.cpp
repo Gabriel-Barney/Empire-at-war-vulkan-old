@@ -434,9 +434,7 @@ void App::story_reward_step() {
         for (; cursor < fired.size(); ++cursor) {
             const lua::StoryFired& f = fired[cursor];
             story_present_reward(f, mode);  // ui2: the presentation rewards (text, pointers, locks, camera, advisor)
-            if (f.reward_type != "START_MOVIE" && f.reward_type != "MULTIMEDIA" && f.reward_type != "STOP_COMMANDBAR_MOVIE" &&
-                f.reward_type != "SPEECH" && f.reward_type != "COMMANDBAR_MOVIE")
-                continue;
+            if (!story_reward_media_handles(f.reward_type)) continue;  // ref5 t02: the media rewards' own table
             std::vector<std::string> params;
             for (const lua::StoryParam& p : f.reward_params) params.push_back(p.text);
             story_reward_media(f.reward_type, params, cues);
@@ -465,6 +463,10 @@ void App::story_reward_step() {
             if (alamo::audio::AudioSystem* as = audio_.system()) as->stop_all_speech();  // 1.4: the speech manager is flushed first: the previous line is cut off
             audio_.speech(c.name);
             ++reward_speeches_;
+            continue;
+        }
+        if (c.kind == StoryMediaCue::Kind::Sfx) {  // ref5 t02: the SFX reward (STORY_REWARDS_GALACTIC §1.22), 2D
+            audio_.ui(c.name);
             continue;
         }
         if (c.kind == StoryMediaCue::Kind::AdvisorMovie || c.kind == StoryMediaCue::Kind::AdvisorStop) {

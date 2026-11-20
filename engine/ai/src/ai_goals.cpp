@@ -90,7 +90,7 @@ void GoalSystem::service(int64_t now) {
             const uint64_t seed = static_cast<uint64_t>(sources_.size()) * std::max<uint64_t>(1, hooks_->target_count());
             evals_pass_ += static_cast<uint32_t>(std::min<uint64_t>(seed, 0xFFFFFFFFu - evals_pass_));
             const auto need = static_cast<int32_t>(std::min<double>(
-                std::ceil(static_cast<double>(evals_pass_) / static_cast<double>(kAiFps * 5)), 1e9));
+                std::ceil(static_cast<double>(evals_pass_) / static_cast<double>(kAiFps * 5)), 1e9));  // frame-cast-ok: a count per 5 s, not seconds to frames
             quota_ = static_cast<uint32_t>(std::max(1, std::min(need, cap)));
         } else {  // [port]: the cap term
             quota_ = static_cast<uint32_t>(std::max(1, cap));
@@ -110,7 +110,7 @@ void GoalSystem::end_pass(int64_t now) {
     const int32_t players = std::max(1, hooks_->quota_players());
     const auto cap = static_cast<int32_t>(20.0f / static_cast<float>(players) + 0.5f);
     const auto need = static_cast<int32_t>(
-        std::ceil(static_cast<double>(evals_last_) / static_cast<double>(kAiFps * 5)));
+        std::ceil(static_cast<double>(evals_last_) / static_cast<double>(kAiFps * 5)));  // frame-cast-ok: a count per 5 s, not seconds to frames
     quota_ = static_cast<uint32_t>(std::max(1, std::min(need, cap)));
     countdown_ = cfg_.sleep_frames;
     ++passes_;

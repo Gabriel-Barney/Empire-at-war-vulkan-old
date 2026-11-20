@@ -1,5 +1,6 @@
 // tactical_battle: part 2 (bo3 t03 split; shared code in tactical_battle_internal.hpp).
 #include "tactical_battle_internal.hpp"
+#include "alamo/core/frames.hpp"
 
 namespace alamo::sim {
 void TacticalBattle::set_fleet_cohesion(uint8_t player, bool tight) {
@@ -911,7 +912,7 @@ TacticalBattle::Landing TacticalBattle::spawn_landing(TacticalMode& mode, const 
 uint32_t TacticalBattle::landing_step_frames(int32_t player) const {
     const float s = abilities_ ? abilities_->player_list(player, tactical::abilities::PlayerList::ReinforcementDeploy) : 0.0f;
     const float secs = 2.0f * (1.0f + s);
-    return secs > 0.0f ? static_cast<uint32_t>(30.0f * secs) : 0u;  // 0x4ad3a0: (int)(FPS x seconds)
+    return secs > 0.0f ? static_cast<uint32_t>(frames_trunc(30.0f * secs)) : 0u;  // 0x4ad3a0: (int)(FPS x seconds)
 }
 
 void TacticalBattle::apply_elevated_vulnerability(objects::ObjectId id) {
@@ -1569,7 +1570,7 @@ bool TacticalBattle::request_retreat(int32_t player) {
                                                                                  : galactic::kNoIndex;
     const float secs = space_ ? rules_->faction(f).space_retreat_countdown : rules_->faction(f).land_retreat_countdown;
     retreat_side_ = side;
-    retreat_done_frame_ = frame_ + static_cast<uint32_t>(secs * 30.0f);
+    retreat_done_frame_ = frame_ + static_cast<uint32_t>(frames_trunc(secs * 30.0f));
     for (const Unit& u : units_)
         if (u.side == side && u.alive) combat_->set_flag(u.id, tc::kUnitRetreating, true);
     return true;

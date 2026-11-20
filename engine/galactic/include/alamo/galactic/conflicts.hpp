@@ -430,6 +430,11 @@ private:
     // auto-resolve
     void auto_setup(const ConflictInfo& head);
     void auto_finish(const ConflictInfo& head);
+    // ref5 t02: one object lost in a battle, for every resolve path (a fought battle's end, a corruption mission's end, the
+    // tactical Auto-resolve button, a galactic auto-resolve): the hero's respawn first (mcx4 t05), then the removal. Decided in
+    // tactical mode (`tactical_mode`): destroy_object, whose "hero defeated" notification raises STORY_DEFEAT_HERO; a galactic
+    // auto-resolve: destroy_object_auto_resolve, which raises none (Q4). The starbase is the callers' (a planet level).
+    void battle_loss(ObjectHandle h, PlanetIndex planet, bool tactical_mode);
     // a2m r2: the Bounty_On_Faction credits for the auto-resolve's destroyed objects (before they are removed).
     void pay_auto_resolve_bounty(const ConflictInfo& head);
     ArCombatant combatant_of(ObjectHandle h, bool space) const;

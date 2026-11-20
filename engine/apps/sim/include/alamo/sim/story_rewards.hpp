@@ -8,6 +8,9 @@
 //   Retail   retail itself ignores the name (a misspelling in the shipped data, an unused enum); the port ignores it too
 //   Missing  a name of retail's Reward_Type enum that the port does not implement yet: skipped with a log line
 // The coverage test (tests/test_story_rewards.cpp) reads the shipped XML, looks each name up here and fails for a name with no row.
+// ref5 t02: each owner registers its handlers by name (StorySession::reward_names, lua::StoryModel::reward_names,
+// game::StoryPresenter::reward_names and game::story_reward_media_names); test_reward_handlers_registered (Session, Model) and
+// alamo_game_story_present_tests (Ui) fail for a row whose owner has no handler for it.
 // mcx0 t05 (story ledger, docs/MOD_COMPAT_DESIGN.md §9.3): the table also has a row for every name of retail's enum
 // (retail_story_rewards()), and story_event_table() lists retail's event types with how far the port dispatches each.
 // The load report (alamo_mod_check v4 `story`) reads both: a mod's Missing reward is a reward_missing issue, a name in

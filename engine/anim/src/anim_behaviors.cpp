@@ -1,4 +1,5 @@
 #include "alamo/anim/anim_behaviors.hpp"
+#include "alamo/core/frames.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -10,8 +11,8 @@ namespace alamo::anim {
 
 uint64_t seconds_to_frames(float seconds) {
     if (!(seconds > 0.0f)) return 0;
-    const float f = seconds * static_cast<float>(kSimTicksPerSecond);
-    return f >= 1.0e18f ? static_cast<uint64_t>(1000000000000000000ull) : static_cast<uint64_t>(f);
+    // ref4 t03: x86 truncation (alamo/core/frames.hpp); out of int32 range 0x80000000 frames, read unsigned.
+    return static_cast<uint32_t>(frames_trunc(seconds * static_cast<float>(kSimTicksPerSecond)));
 }
 
 int32_t flinch_type(float fx, float fy, float dx, float dy, bool attacking) {

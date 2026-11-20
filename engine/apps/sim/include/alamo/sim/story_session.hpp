@@ -134,6 +134,7 @@
 #include <functional>
 #include <memory>
 #include <optional>
+#include <span>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -584,6 +585,11 @@ public:
     lua::StoryTable* galactic_story_table();
     lua::StoryModel* first_story_model();
 
+    // ref5 t02: the Reward_Type names apply_reward has a handler for (exact, upper case), in registration order. The
+    // coverage test checks them against story_reward_table()'s Session rows.
+    static bool has_reward_handler(std::string_view name);
+    static std::vector<std::string_view> reward_names();
+
     // ---- results ----
     const std::vector<StoryTrigger>& triggers() const { return triggers_; }
     const std::vector<StoryLogEntry>& log() const { return log_; }
@@ -746,9 +752,77 @@ private:
     void drop_tactical_edits();  // the battle's tactical plot set goes
     void sync_gates() { sim_->set_story_gates(gates_); }
     PlanetIndex reward_planet(const std::string& type_name) const;  // first row whose planet type is named so, else invalid
-    // One reward of the STY1 families (galactic, tutorial, Underworld rules, tactical); false = not one of them. `tactical`:
-    // the reward comes from the tactical plot set. src/story_rewards_apply.cpp.
-    bool apply_sty1_reward(int32_t plot_player, bool tactical, const std::string& type, const std::vector<std::string>& params);
+    // ref5 t02: apply_reward's handlers, one per Reward_Type name (reward_handlers() in story_session.cpp). The STY1 families
+    // (galactic, tutorial, Underworld rules, tactical) are defined in src/story_rewards_apply.cpp; a tactical-set reward is
+    // one whose Set is the attached tactical story's.
+    using RewardFn = void (StorySession::*)(Set& s, const std::string& type, const std::vector<std::string>& params);
+    struct RewardHandler {
+        std::string_view name;
+        RewardFn fn;
+    };
+    static std::span<const RewardHandler> reward_handlers();
+    int32_t set_player(const Set& s) const;   // the plot set's player
+    bool tactical_set(const Set& s) const;    // `s` is the attached tactical story's set
+    void reward_set_tech_level(Set& s, const std::string& type, const std::vector<std::string>& params);
+    void reward_credits(Set& s, const std::string& type, const std::vector<std::string>& params);
+    void reward_link_tactical(Set& s, const std::string& type, const std::vector<std::string>& params);
+    void reward_enable_fow(Set& s, const std::string& type, const std::vector<std::string>& params);
+    void reward_switch_control(Set& s, const std::string& type, const std::vector<std::string>& params);
+    void reward_enable_victory(Set& s, const std::string& type, const std::vector<std::string>& params);
+    void reward_set_tactical_map(Set& s, const std::string& type, const std::vector<std::string>& params);
+    void reward_give_black_market(Set& s, const std::string& type, const std::vector<std::string>& params);
+    void reward_sabotage_structure(Set& s, const std::string& type, const std::vector<std::string>& params);
+    void reward_invade_planet(Set& s, const std::string& type, const std::vector<std::string>& params);
+    void reward_lock_unit(Set& s, const std::string& type, const std::vector<std::string>& params);
+    void reward_buildable_unit(Set& s, const std::string& type, const std::vector<std::string>& params);
+    void reward_enable_buildable(Set& s, const std::string& type, const std::vector<std::string>& params);
+    void reward_remove_corruption(Set& s, const std::string& type, const std::vector<std::string>& params);
+    void reward_reveal_planet(Set& s, const std::string& type, const std::vector<std::string>& params);
+    void reward_reveal_all_planets(Set& s, const std::string& type, const std::vector<std::string>& params);
+    void reward_enable_galactic_reveal(Set& s, const std::string& type, const std::vector<std::string>& params);
+    void reward_set_planet_visibility_level(Set& s, const std::string& type, const std::vector<std::string>& params);
+    void reward_disable_buildable(Set& s, const std::string& type, const std::vector<std::string>& params);
+    void reward_unique_unit(Set& s, const std::string& type, const std::vector<std::string>& params);
+    void reward_set_max_tech_level(Set& s, const std::string& type, const std::vector<std::string>& params);
+    void reward_disable_autoresolve(Set& s, const std::string& type, const std::vector<std::string>& params);
+    void reward_restrict_autoresolve(Set& s, const std::string& type, const std::vector<std::string>& params);
+    void reward_trigger_ai(Set& s, const std::string& type, const std::vector<std::string>& params);
+    void reward_pick_planet(Set& s, const std::string& type, const std::vector<std::string>& params);
+    void reward_random_story(Set& s, const std::string& type, const std::vector<std::string>& params);
+    void reward_set_planet_restricted(Set& s, const std::string& type, const std::vector<std::string>& params);
+    void reward_planet_faction(Set& s, const std::string& type, const std::vector<std::string>& params);
+    void reward_force_respawn(Set& s, const std::string& type, const std::vector<std::string>& params);
+    void reward_remove_unit(Set& s, const std::string& type, const std::vector<std::string>& params);
+    void reward_new_power_for_all(Set& s, const std::string& type, const std::vector<std::string>& params);
+    void reward_move_fleet(Set& s, const std::string& type, const std::vector<std::string>& params);
+    void reward_disable_direct_invasion(Set& s, const std::string& type, const std::vector<std::string>& params);
+    void reward_set_planet_spawn(Set& s, const std::string& type, const std::vector<std::string>& params);
+    void reward_set_weather(Set& s, const std::string& type, const std::vector<std::string>& params);
+    void reward_switch_sides(Set& s, const std::string& type, const std::vector<std::string>& params);
+    void reward_statistic_change(Set& s, const std::string& type, const std::vector<std::string>& params);
+    void reward_force_retreat(Set& s, const std::string& type, const std::vector<std::string>& params);
+    void reward_load_campaign(Set& s, const std::string& type, const std::vector<std::string>& params);
+    void reward_tutorial_player(Set& s, const std::string& type, const std::vector<std::string>& params);
+    void reward_finished_tutorial(Set& s, const std::string& type, const std::vector<std::string>& params);
+    void reward_disable_event(Set& s, const std::string& type, const std::vector<std::string>& params);
+    void reward_skirmish_rules(Set& s, const std::string& type, const std::vector<std::string>& params);
+    void reward_reset_galactic_filters(Set& s, const std::string& type, const std::vector<std::string>& params);
+    void reward_set_sandbox_objectives(Set& s, const std::string& type, const std::vector<std::string>& params);
+    void reward_enable_invasion(Set& s, const std::string& type, const std::vector<std::string>& params);
+    void reward_restrict_sabotage(Set& s, const std::string& type, const std::vector<std::string>& params);
+    void reward_restrict_corruption(Set& s, const std::string& type, const std::vector<std::string>& params);
+    void reward_enable_fleet_combine(Set& s, const std::string& type, const std::vector<std::string>& params);
+    void reward_enable_bounty_collection(Set& s, const std::string& type, const std::vector<std::string>& params);
+    void reward_enable_campaign_victory_movie(Set& s, const std::string& type, const std::vector<std::string>& params);
+    void reward_enable_sabotage(Set& s, const std::string& type, const std::vector<std::string>& params);
+    void reward_enable_combat_cinematic(Set& s, const std::string& type, const std::vector<std::string>& params);
+    void reward_restrict_black_market(Set& s, const std::string& type, const std::vector<std::string>& params);
+    void reward_restrict_all_abilities(Set& s, const std::string& type, const std::vector<std::string>& params);
+    void reward_disable_reinforcements(Set& s, const std::string& type, const std::vector<std::string>& params);
+    void reward_disable_retreat(Set& s, const std::string& type, const std::vector<std::string>& params);
+    void reward_change_owner(Set& s, const std::string& type, const std::vector<std::string>& params);
+    void reward_planet_flag(const std::string& type, const std::vector<std::string>& params, uint8_t bit, bool invert);
+    void reward_global_flag(const std::vector<std::string>& params, bool& field);
     struct Sty1Save {
         galactic::StoryGates gates;
         StoryTutorialState tutorial;
