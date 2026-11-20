@@ -4,7 +4,7 @@
 Standard library only. Parity is checked by behaviour, not by CRC or hash equality (Gabriel, 2026-10-29): travel and build
 timings, income, AI choices, battle outcomes and damage, each against a tolerance written down with its reason in
 tools/parity/scenarios.json. Replaces the `q2trace.py compare` step of Q2F t07; the trace, production-queue and AI-log
-parsers are reused from tools/probe_mod/q2_traces/analysis/q2_parity.py.
+parsers are tools/parity/trace_parsers.py (ref3 t02; the Q2 kit imports them from there).
 
   parity_harness.py run [--scenario ID ...] [--port-exe alamo_headless.exe] [--refs DIR] [--out DIR]
                         [--reuse-port] [--check-baseline FILE] [--write-baseline FILE] [--commit SHA]
@@ -47,11 +47,12 @@ REPO = os.path.dirname(os.path.dirname(HERE))
 KIT_REL = os.path.join("tools", "probe_mod", "q2_traces")
 sys.path.insert(0, os.path.join(REPO, "tools", "lint"))
 import build_trees  # noqa: E402
-sys.path.insert(0, os.path.join(REPO, KIT_REL, "analysis"))
-import q2_parity as q2  # noqa: E402  (tools/probe_mod/q2_traces/analysis/q2_parity.py: trace / queue / AI-log parsers)
+sys.path.insert(0, HERE)
+import trace_parsers as tp  # noqa: E402  (tools/parity/trace_parsers.py: trace / queue / CRC / AI-log parsers)
+import story_battle  # noqa: E402  (tools/parity/story_battle.py: the story battle reader)
 
 SKIP = 77
-FACTIONS = tuple(q2.FACTION_TOKENS)  # Empire, Rebel, Underworld
+FACTIONS = tuple(tp.FACTION_TOKENS)  # Empire, Rebel, Underworld
 CATEGORY = {"travel": "timing", "build": "timing", "econ": "income", "ai": "AI choices", "outcome": "battle outcomes",
             "combat": "damage", "diag": "diagnostic"}
 # Skirmish objects that are not units or structures: projectiles, team containers, props, markers, pads (the port lists pad
@@ -97,7 +98,7 @@ def assign_factions(by_owner, allowed=FACTIONS):
     score = {}
     for own, names in by_owner.items():
         for n in names:
-            for fac, toks in q2.FACTION_TOKENS.items():
+            for fac, toks in tp.FACTION_TOKENS.items():
                 if any(t in n.upper() for t in toks):
                     score[(fac, own)] = score.get((fac, own), 0) + 1
     out = {}
@@ -188,7 +189,7 @@ def galactic_credit_pass(trace_path, factions, sample_ticks, max_tick=None):
                     last_cycle = cyc
             elif line.startswith("C "):
                 p = line.split()
-                players[int(p[1])] = q2.f32(p[2])
+                players[int(p[1])] = tp.f32(p[2])
             elif line.strip() == "end":
                 break
     if mf is not None:
@@ -244,7 +245,7 @@ def fleet_tracks(trace_path, max_tick=None):
                 if int(p[11]) & 2:
                     objs.pop(i, None)
                 else:
-                    objs[i] = (int(p[2]), types.get(int(p[3]), "?"), q2.f32(p[4]), q2.f32(p[5]))
+                    objs[i] = (int(p[2]), types.get(int(p[3]), "?"), tp.f32(p[4]), tp.f32(p[5]))
             elif t == "X":
                 objs.pop(int(p[1]), None)
             elif t == "G":
@@ -262,7 +263,7 @@ def segment_fleet(track, ppos, stop_samples=STOP_SAMPLES):
     centre is split there into legs: a waypoint is the sample nearest that centre when it lies within one sample step of
     it (arrival and next departure as at a stop, below). trips: [(dep, owner, from, to, arr)], legs: the same per leg."""
     def same(a, b):
-        return math.hypot(a[2] - b[2], a[3] - b[3]) <= q2.ORBIT_SNAP
+        return math.hypot(a[2] - b[2], a[3] - b[3]) <= tp.ORBIT_SNAP
 
     def nearest(x, y):
         return min(((math.hypot(x - a, y - b), n) for n, (a, b) in ppos.items()), default=(None, None))[1]
@@ -286,7 +287,7 @@ def segment_fleet(track, ppos, stop_samples=STOP_SAMPLES):
         # departure tick, the port parks it at the centre (q4hf t04: the same rule both sides, no one-tick offset).
         fx, fy = ppos[frm]
         nxt = track[a[1] + 1]
-        dep = nxt[0] if math.hypot(nxt[2] - fx, nxt[3] - fy) <= q2.ORBIT_SNAP else last[0]
+        dep = nxt[0] if math.hypot(nxt[2] - fx, nxt[3] - fy) <= tp.ORBIT_SNAP else last[0]
         arr, own = first[0], first[1]
         trips.append((dep, own, frm, to, arr))
         moving = track[a[1] + 1:b[0]]
@@ -334,7 +335,7 @@ def galactic_metrics(trace_path, queue_path=None, ai_log=None, sample_ticks=(450
     """Metric values of one galactic run (retail trace or port state trace), {metric id: value}, plus notes. max_tick: only
     the mode frames up to this one (a reference run that went on longer than the scenario, q4hf t03). hop_max_tick: the
     cut for travel.hop_ticks alone (default max_tick); a reference run's later legs still measure fleet speeds (gai3 t01)."""
-    m = q2.trace_metrics(trace_path, max_tick=max_tick)
+    m = tp.trace_metrics(trace_path, max_tick=max_tick)
     fac = m["factions"]
     out, notes = {}, []
     # Travel: leg duration per route (departure = first moved sample, arrival = first sample of a stop, a pass through a
@@ -378,7 +379,7 @@ def galactic_metrics(trace_path, queue_path=None, ai_log=None, sample_ticks=(450
     builds = None
     durations = collections.defaultdict(list)
     if queue_path and os.path.exists(queue_path):
-        q2.queue_metrics(queue_path, m, max_tick)
+        tp.queue_metrics(queue_path, m, max_tick)
         builds = [(e["start"], e["faction"], e["type"]) for e in m["queue_entries"]]
         # An item leaves the queue when its object is created (the created-id field stays unset in the retail queues), so
         # done = the last frame listed + 1. Only items that ran uninterrupted to the end count: no restart (a stalled item
@@ -390,7 +391,7 @@ def galactic_metrics(trace_path, queue_path=None, ai_log=None, sample_ticks=(450
             if e["restarts"] == 0 and (e["created"] is not None or e["last"] < end) and d >= e["frames"]:
                 durations["%s@%s" % (e["type"], e["planet"])].append(d)
     elif ai_log and os.path.exists(ai_log):
-        o = q2.port_metrics(None, ai_log)
+        o = tp.port_metrics(None, ai_log)
         orders = [(tk, f, at_, t) for tk, f, at_, d in o["production"] for t in d]
         builds = [(tk, f, t) for tk, f, _, t in orders] + [(tk, f, t) for tk, f, _, t in o.get("starbase_orders") or []]
         # Completion = the first new object of that type and faction at that planet after the order (port state trace).
@@ -554,7 +555,7 @@ def skirmish_retail_metrics(trace_path, frames):
                     first_shot = int(p[2])
             elif t == "O":
                 i = int(p[1])
-                own, name, hp = int(p[2]), types.get(int(p[3]), "?"), q2.f32(p[10])
+                own, name, hp = int(p[2]), types.get(int(p[3]), "?"), tp.f32(p[10])
                 if int(p[11]) & 2:
                     objs.pop(i, None)
                     continue
@@ -567,7 +568,7 @@ def skirmish_retail_metrics(trace_path, frames):
             elif t == "X":
                 objs.pop(int(p[1]), None)
             elif t == "C":
-                players[int(p[1])] = q2.f32(p[2])
+                players[int(p[1])] = tp.f32(p[2])
                 flags[int(p[1])] = (int(p[4]), int(p[5])) if len(p) >= 6 else (0, 0)
             elif t == "E":
                 end_reason = " ".join(p[1:])
@@ -950,7 +951,6 @@ def story_metrics(trace_path):
     story_battle.py reader on both sides: objects by owner index at battle frame 1 (the two sides have the same player
     list), the first object the mission Lua spawns after frame 1, how many objects appear after frame 1, how many samples
     change an object's health, and whether the battle ended."""
-    import story_battle  # tools/probe_mod/q2_traces/analysis (on sys.path above)
     r = story_battle.retail(trace_path)
     out = {}
     for owner, c in sorted((r.get("census_frame1") or {}).items()):
@@ -1489,6 +1489,13 @@ def selftest():
         if not cond:
             fails.append(what)
             print("FAIL " + what)
+    # ref3 t02: the harness's parsers are its own (trace_parsers.py); nothing it loads comes from a probe kit.
+    kit = os.path.normcase(os.path.join(REPO, "tools", "probe_mod"))
+    loaded = [m.__name__ for m in list(sys.modules.values())
+              if os.path.normcase(os.path.abspath(getattr(m, "__file__", None) or "")).startswith(kit + os.sep)]
+    check(not loaded, "no probe-kit module loaded: %s" % loaded)
+    check(not any(os.path.normcase(os.path.abspath(p)).startswith(kit + os.sep) for p in sys.path if p),
+          "no probe-kit folder on sys.path")
     # Grading primitives.
     t = {"abs": 2}
     check(grade("travel.hop_ticks[A->B]", [26, 27], 28, t)["status"] == "PASS", "envelope: 28 within 26..27 +-2")

@@ -34,6 +34,10 @@ import subprocess
 import sys
 import zlib
 
+# The Q2TRACE 1 reader, the LCG step counter and the CRC v1 reader live in tools/parity/trace_parsers.py (ref3 t02).
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "parity"))
+from trace_parsers import Frame, lcg_steps, parse, read_crc_v1  # noqa: E402,F401
+
 MASK64 = (1 << 64) - 1
 P1, P2, P5 = 0x9E3779B185EBCA87, 0xC2B2AE3D27D4EB4F, 0x27D4EB2F165667C5
 LCG_MUL, LCG_ADD = 0x41C64E6D, 0xBDF
@@ -113,85 +117,6 @@ def combine(names, crcs):
     return h.digest()
 
 
-def lcg_steps(a, b, limit):
-    """Number of LCG steps from state a to state b (None if more than limit)."""
-    s = a
-    for i in range(limit + 1):
-        if s == b:
-            return i
-        s = (s * LCG_MUL + LCG_ADD) & 0xFFFFFFFF
-    return None
-
-
-# ---- parsing ----------------------------------------------------------------------------------------
-class Frame:
-    __slots__ = ("g", "mtype", "mframe", "rng", "pause", "stack", "flags", "cycle", "s", "key", "lines")
-
-    def __init__(self, parts):
-        self.g, self.mtype, self.mframe = int(parts[1]), int(parts[2]), int(parts[3])
-        self.rng = int(parts[4], 16)
-        self.pause, self.stack, self.flags = int(parts[5]), int(parts[6]), int(parts[7])
-        self.cycle = tuple(int(x) for x in parts[8:11]) if len(parts) >= 11 else None
-        self.s = None
-        self.key = False
-        self.lines = []
-
-
-def parse(path):
-    meta, header = {}, {}
-    frames, types, end_reason = [], {}, None
-    cur = None
-    cut = False
-    with open(path, "r", encoding="ascii", newline="\n") as fh:
-        first = fh.readline().rstrip("\n")
-        if first != "Q2TRACE 1":
-            raise ValueError("not a Q2TRACE 1 file: %r" % first)
-        in_header = True
-        for ln, line in enumerate(fh, 2):
-            if not line.endswith("\n"):
-                # storyb t09: a reader stopped mid-write (killed, PC off) leaves a cut last line. Drop it and, below,
-                # the frame it belonged to, so validate / to-q1 still give a (partial) summary of everything before.
-                cut = True
-                break
-            line = line.rstrip("\n")
-            if not line:
-                continue
-            p = line.split(" ")
-            tag = p[0]
-            if in_header:
-                if tag == "meta":
-                    meta[p[1]] = " ".join(p[2:])
-                elif tag == "end_header":
-                    in_header = False
-                else:
-                    header[tag] = p[1:]
-                continue
-            if tag == "F":
-                cur = Frame(p)
-                frames.append(cur)
-            elif tag == "S":
-                cur.s = p[1:]
-            elif tag == "K":
-                cur.key = True
-            elif tag == "M":
-                meta[p[1]] = " ".join(p[2:])
-            elif tag in ("O", "X", "G", "C", "P"):
-                cur.lines.append(p)
-            elif tag == "start":
-                header["start"] = p[1:]
-            elif tag == "T":
-                types[int(p[1])] = (int(p[2], 16), int(p[3], 16), " ".join(p[4:]))
-            elif tag == "E":
-                end_reason = " ".join(p[1:])
-            elif tag == "end":
-                break
-            else:
-                raise ValueError("line %d: unknown tag %r" % (ln, tag))
-    if cut and end_reason is None:
-        if frames:
-            frames.pop()  # its object lines may be incomplete
-        meta["truncated"] = "trace cut mid-line (reader stopped while writing); the last sampled frame was dropped"
-    return meta, header, frames, types, end_reason
 
 
 # ---- validate -----------------------------------------------------------------------------------------
@@ -391,21 +316,9 @@ def to_q1(path, out, tick_mode="mode", include_torn=False):
 
 
 def read_crc(path):
-    systems, parity, recs = [], [], {}
-    with open(path, "r", encoding="ascii") as fh:
-        if fh.readline().strip() != "ALAMO_CRC 1":
-            raise ValueError("%s: not ALAMO_CRC 1" % path)
-        for line in fh:
-            p = line.split()
-            if not p or p[0] == "#":
-                continue
-            if p[0] == "systems":
-                systems = p[2:]
-            elif p[0] == "parity":
-                parity = p[2:]
-            else:
-                recs[int(p[0])] = (int(p[1], 16), int(p[2], 16), [int(x, 16) for x in p[3:]])
-    return systems, parity, recs
+    """{tick: (combined, parity, [system digests])} view of trace_parsers.read_crc_v1."""
+    systems, parity, recs = read_crc_v1(path)
+    return systems, parity, {tick: (comb, par, cols) for tick, comb, par, cols in recs}
 
 
 def compare(ref_path, eng_path):

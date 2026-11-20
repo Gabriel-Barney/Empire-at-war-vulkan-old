@@ -2,9 +2,11 @@
 
 Roadmap group `q4h`. It compares the original game with the port **by behaviour**, not by CRC or hash equality
 (Gabriel, 2026-10-29): travel and build timings, income, AI choices, battle outcomes and damage, each against a
-tolerance that is written down with its reason. It replaces the `q2trace.py compare` step that Q2F t07 used. The trace,
-production-queue and AI-log parsers come from `tools\probe_mod\q2_traces\analysis\q2_parity.py` and are imported, not
-copied. Standard library only.
+tolerance that is written down with its reason. It replaces the `q2trace.py compare` step that Q2F t07 used. The trace
+(Q2TRACE 1), production-queue, Lua, ALAMO_CRC 1 and AI-log parsers are this folder's own `trace_parsers.py` (ref3 t02,
+2026-11-19; they were imported from the Q2 kit's `analysis\q2_parity.py` before), with the story battle reader
+`story_battle.py`; the kit's `q2_parity.py` (comparison) and `q2trace.py` and `tools\analysis\a2g_port_vs_retail.py`
+import them from here. The selftest fails if the harness loads anything from `tools\probe_mod`. Standard library only.
 
 The port side runs retail's fighter / bomber squadron lists and prices (mcx1 t06, D2, 2026-11-17: the port's
 squadrons-of-12 rule and its `--squadron-size` flag were removed; until then the harness passed `--squadron-size 0`).
@@ -185,7 +187,7 @@ report ends with the same leave-one-out counts, so a port FAIL count can be read
   galactic store the companies (`BOBA_FETT` vs `BOBA_FETT_TEAM`).
 - **Story battles** (storyb t03, 2026-11-17): scenario `story_kessel` (kind `story`) runs the Underworld campaign's
   linked Kessel UM01 mission hands-off with `alamo_headless --galactic-ai --story --battles fight --tactical-trace-out`
-  and reduces both traces with `tools/probe_mod/q2_traces/analysis/story_battle.py`: objects per owner index at battle
+  and reduces both traces with `tools/parity/story_battle.py`: objects per owner index at battle
   frame 1, the mission Lua's first spawn frame, objects appearing after frame 1, health-change samples, battle end. Only
   object counts, not types, are graded (the port's tactical type names differ in spelling: `DEFENDING FORCES POSITION`
   vs `DEFENDING_FORCES_POSITION`). Results and open divergences: `docs/re/STORY_T04_KESSEL_RUN.md` §7.

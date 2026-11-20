@@ -2,7 +2,7 @@
 
 Roadmap `story` t04 (S4 reference trace, Q2). Retail run of 2026-11-08 by Gabriel with
 `tools/probe_mod/q2_traces/run_story.cmd` (reader scenario `story`: the campaign's linked tactical battle, mode stack 2).
-Read with `tools/probe_mod/q2_traces/analysis/story_battle.py` (new) and `q2trace.py validate`; no binary read.
+Read with `tools/parity/story_battle.py` (new) and `q2trace.py validate`; no binary read.
 "Frame" = the battle's mode frame (30 per second) unless it says host frame.
 
 | Run (`tools/probe_mod/q2_traces/out/…`) | Samples | End | Notes |
@@ -232,7 +232,7 @@ Start Game**: the opening crawl and the battle's intro cinematic played in full.
 18000, exit 0: 18003 samples (frames 0-18000), 0 missed, 0 torn, 18003 digests OK, 0 errors, 412 draws from seed 0 to
 the first sample (as in §1). One stall: no frame for 75 s at frame 26 with the game in front (the sim does not advance
 while the crawl plays); the RNG state on both sides of it equals the earlier runs', so the stall changed nothing.
-`analysis/story_battle.py` on the run:
+`tools/parity/story_battle.py` on the run:
 
 | Frames | Events | Draws (/ frame) |
 |---|---|---|

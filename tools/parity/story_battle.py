@@ -17,8 +17,8 @@ import json
 import os
 import sys
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-import q2trace  # noqa: E402  (the kit's parser and LCG step counter)
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import trace_parsers as tp  # noqa: E402  (tools/parity: the Q2TRACE 1 reader and LCG step counter)
 
 WINDOWS = [(1, 1), (2, 29), (30, 128), (129, 200), (201, 1800), (1801, 18000)]
 
@@ -32,7 +32,7 @@ def draws_by_frame(frames, frame_of):
     for fr in frames:
         k = frame_of(fr)
         if prev is not None and k is not None:
-            n = q2trace.lcg_steps(prev, fr.rng, 2_000_000)
+            n = tp.lcg_steps(prev, fr.rng, 2_000_000)
             out[k] = out.get(k, 0) + (n if n is not None else 0)
         prev = fr.rng
     return out
@@ -50,7 +50,7 @@ def windows(draws):
 
 
 def retail(path):
-    meta, header, frames, types, end = q2trace.parse(path)
+    meta, header, frames, types, end = tp.parse(path)
     tn = lambda t: types.get(t, (0, 0, "?"))[2]  # noqa: E731
     objs, first, gone, players = {}, {}, [], {}
     moves = collections.defaultdict(lambda: [None, None, 0])
@@ -101,12 +101,12 @@ def retail(path):
 
 
 def port(path):
-    _, _, frames, _, end = q2trace.parse(path)
+    _, _, frames, _, end = tp.parse(path)
     start = next((fr.g for fr in frames if fr.mtype != 0), None)
     if start is None:
         return {"trace": path, "battle": False}
     before = next((fr for fr in reversed(frames) if fr.g < start), None)
-    pre = q2trace.lcg_steps(0, before.rng, 5_000_000) if before else None
+    pre = tp.lcg_steps(0, before.rng, 5_000_000) if before else None
     draws = draws_by_frame(frames, lambda fr: fr.g - start + 1 if fr.g >= start else None)
     return {
         "trace": path, "battle": True, "end_reason": end, "battle_host_frame": start,

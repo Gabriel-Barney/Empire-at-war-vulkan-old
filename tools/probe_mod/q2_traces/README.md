@@ -222,7 +222,7 @@ dropped and noted).
 If the window was closed early or the PC crashed, double-click `cleanup.cmd`. What the trace is compared with: the port's
 Full_Story_Campaign_Underworld linked Kessel battle over the same ticks (RNG draw counts, object counts by type and owner,
 the intro spawns of the M01 Lua, the victory monitor staying held: `story` t04 on the roadmap). Read a run with
-`analysis\story_battle.py out\<run> [--port-trace port.q2t]`; the first run and its comparison with the port:
+`..\..\parity\story_battle.py out\<run> [--port-trace port.q2t]`; the first run and its comparison with the port:
 `docs/re/STORY_T04_KESSEL_RUN.md`.
 
 ### Rebel slice run (a2m t07 / t13)
@@ -470,7 +470,8 @@ Skirmish (space, 2 players):
 
 The per-metric `q2trace.py compare <run dir>` report is superseded for Q4 by the behavioural parity harness
 `tools/parity/` (q4h, 2026-11-07: tolerances per metric, retail run-to-run envelope, skirmish scenario, baseline ctest).
-It imports `analysis/q2_parity.py`, so keep that module's functions stable.
+The parsers both use (trace, queue, Lua, CRC v1, AI log, the Q2TRACE 1 reader) are `tools/parity/trace_parsers.py`
+(ref3 t02); `analysis/q2_parity.py` keeps the per-metric comparison and imports them, as `q2trace.py` does.
 
 | file | what |
 |---|---|
