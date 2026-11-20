@@ -462,15 +462,28 @@ void test_trim_gate_hidden(const Data& d) {
             CHECK(r != objects::kNoObjectId && e != objects::kNoObjectId && b->fog() != nullptr);
             if (r == objects::kNoObjectId || e == objects::kNoObjectId || !b->fog()) break;
             invulnerable_all(*b);
-            // as test_guard_hidden_drop: the target stays where it landed (away from what player 0 sees), the attacker
-            // is put 900 from it along x, on the side with room
+            // the target goes to a point player 0 has fogged (this map's start reveals part of it), the attacker 700 from it
+            // along an axis, inside the playable box
             const tactical::Aabb& bb = tm->bounds();
-            const Vec3 ep = pos(*tm, e);
-            const float rx = ep.x - 900.0f >= bb.min.x + 60.0f ? ep.x - 900.0f : ep.x + 900.0f;
-            CHECK(b->teleport(*tm, r, Vec3{rx, ep.y, 0.0f}, st.facing(st.find(r))));
-            // as test_guard_hidden_drop: reveal, then undo it, so the target is hidden for player 0 from here on
-            TA::fog(*b)->reveal_all(0);
-            TA::fog(*b)->undo_reveal_all(0);
+            const tactical::fog::FogOfWar* fw = TA::fog(*b);
+            Vec3 ep{}, rp{};
+            bool spot = false;
+            for (float y = bb.min.y + 40.0f; y <= bb.max.y - 40.0f && !spot; y += 40.0f)
+                for (float x = bb.min.x + 40.0f; x <= bb.max.x - 40.0f && !spot; x += 40.0f) {
+                    if (!fw->point_fogged(0, x, y, true)) continue;
+                    for (const std::pair<float, float> dv : {std::pair{700.0f, 0.0f}, {-700.0f, 0.0f}, {0.0f, 700.0f}, {0.0f, -700.0f}}) {
+                        const float qx = x + dv.first, qy = y + dv.second;
+                        if (qx < bb.min.x + 40.0f || qx > bb.max.x - 40.0f || qy < bb.min.y + 40.0f || qy > bb.max.y - 40.0f) continue;
+                        ep = Vec3{x, y, 0.0f};
+                        rp = Vec3{qx, qy, 0.0f};
+                        spot = true;
+                        break;
+                    }
+                }
+            CHECK(spot);
+            if (!spot) break;
+            CHECK(b->teleport(*tm, e, ep, st.facing(st.find(e))));
+            CHECK(b->teleport(*tm, r, rp, st.facing(st.find(r))));
             stage = 1;
             stage_frame = b->frame();
             continue;
@@ -481,6 +494,17 @@ void test_trim_gate_hidden(const Data& d) {
             bool h = false, sl = false;
             TA::target_unseen(*b, st, r, e, h, sl);
             hidden_seen = h && !sl;
+            {
+                const tactical::fog::FogOfWar* fw = TA::fog(*b);
+                const Vec3 ep = pos(*tm, e), rp = pos(*tm, r);
+                const tactical::fog::FogGrid* g0 = fw ? fw->grid(0) : nullptr;
+                std::printf("  trim gate scene: attacker (%.0f, %.0f) target (%.0f, %.0f); fog started %d active %d reveal-all %d "
+                            "target point fogged %d / %d (force); hidden %d stealthed %d\n",
+                            static_cast<double>(rp.x), static_cast<double>(rp.y), static_cast<double>(ep.x), static_cast<double>(ep.y),
+                            fw && fw->started() ? 1 : 0, fw && fw->fow_active() ? 1 : 0, g0 && g0->reveal_all_active() ? 1 : 0,
+                            fw && fw->point_fogged(0, ep.x, ep.y, false) ? 1 : 0, fw && fw->point_fogged(0, ep.x, ep.y, true) ? 1 : 0,
+                            h ? 1 : 0, sl ? 1 : 0);
+            }
             trims0 = b->movement().stats().attack_trims;
             (void)TA::land_attack_order(*b, *tm, ids, e, pos(*tm, e), 0, rng, false);
             untrimmed = b->movement().stats().attack_trims == trims0 && b->movement().view(r).has_goal;
