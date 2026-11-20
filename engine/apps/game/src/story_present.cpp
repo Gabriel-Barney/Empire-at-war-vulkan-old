@@ -5,6 +5,7 @@
 #include <cstdlib>
 
 #include "alamo/core/ascii.hpp"
+#include "alamo/core/bytes.hpp"
 #include "alamo/data/game_database.hpp"
 #include "alamo/data/values.hpp"  // parse_floats
 #include "alamo/data/xml.hpp"
@@ -403,6 +404,248 @@ bool StoryPresenter::slot_forced(std::string_view planet, std::string_view slot)
 std::vector<StoryCameraCommand> StoryPresenter::take_camera_commands() { return std::exchange(camera_, {}); }
 std::vector<StoryTutorialDialog> StoryPresenter::take_dialogs() { return std::exchange(dialogs_, {}); }
 std::vector<std::string> StoryPresenter::take_forced_clicks() { return std::exchange(forced_clicks_, {}); }
+
+// ---- ref4 t01: save / read ----
+namespace {
+
+constexpr uint32_t kPresenterSaveVersion = 1;
+
+void put_u32s(ByteWriter& w, std::u32string_view s) {
+    w.u32(static_cast<uint32_t>(s.size()));
+    for (const char32_t c : s) w.u32(static_cast<uint32_t>(c));
+}
+std::u32string get_u32s(ByteReader& r) {
+    uint32_t n = 0;
+    if (!r.count(n, 4)) {
+        r.fail();
+        return {};
+    }
+    std::u32string s(n, U'\0');
+    for (char32_t& c : s) c = static_cast<char32_t>(r.u32());
+    return s;
+}
+void put_color(ByteWriter& w, const StoryColor& c) { w.u8(c.r).u8(c.g).u8(c.b).u8(c.a); }
+StoryColor get_color(ByteReader& r) {
+    StoryColor c;
+    c.r = r.u8();
+    c.g = r.u8();
+    c.b = r.u8();
+    c.a = r.u8();
+    return c;
+}
+// An enum stored as a byte; a value past `last` clears ok().
+template <class E>
+E get_enum(ByteReader& r, E last) {
+    const uint8_t v = r.u8();
+    if (v > static_cast<uint8_t>(last)) {
+        r.fail();
+        return static_cast<E>(0);
+    }
+    return static_cast<E>(v);
+}
+// A list: u32 count, then `put(element)` for each; get_list reads it back (each element at least `min_bytes`).
+template <class T, class F>
+void put_list(ByteWriter& w, const std::vector<T>& v, F&& put) {
+    w.u32(static_cast<uint32_t>(v.size()));
+    for (const T& e : v) put(e);
+}
+template <class T, class F>
+bool get_list(ByteReader& r, std::vector<T>& out, size_t min_bytes, F&& get) {
+    uint32_t n = 0;
+    if (!r.count(n, min_bytes)) return false;
+    out.clear();
+    out.reserve(n);
+    for (uint32_t i = 0; i < n && r.ok(); ++i) out.push_back(get());
+    return r.ok();
+}
+void put_set(ByteWriter& w, const std::set<std::string>& s) {
+    w.u32(static_cast<uint32_t>(s.size()));
+    for (const std::string& e : s) w.str(e);
+}
+bool get_set(ByteReader& r, std::set<std::string>& out) {
+    uint32_t n = 0;
+    if (!r.count(n, 4)) return false;
+    for (uint32_t i = 0; i < n && r.ok(); ++i) out.insert(r.str());
+    return r.ok();
+}
+
+}  // namespace
+
+void StoryPresenter::write(ByteWriter& w, double now) const {
+    w.u32(kPresenterSaveVersion);
+    put_list(w, lines_, [&](const StoryTextLine& l) {
+        w.str(l.id);
+        put_u32s(w, l.text);
+        put_color(w, l.color);
+        w.u8(static_cast<uint8_t>(l.channel)).f64(l.start - now).f64(l.seconds).boolean(l.persistent).boolean(l.typewriter);
+    });
+    put_list(w, arrows_, [&](const StoryArrow& a) {
+        w.u8(static_cast<uint8_t>(a.kind)).str(a.target).str(a.region).i32(a.sub).str(a.label).u8(a.hud_mode).boolean(a.has_pointer);
+    });
+    put_list(w, pointers_, [&](const StoryPointer& q) {
+        w.i32(q.id).str(q.object_type).f32(q.x).f32(q.y).f32(q.z).boolean(q.terrain);
+        w.boolean(q.until >= 0.0).f64(q.until >= 0.0 ? q.until - now : 0.0);
+    });
+    put_list(w, flashes_, [&](const StoryComponentFlash& f) { w.str(f.component).f64(f.start - now).f64(f.until - now); });
+    put_list(w, highlights_, [&](const StoryHighlight& h) { w.str(h.type_name).i32(h.object).boolean(h.small).f32(h.z_offset); });
+    for (const std::vector<StoryObjectFlash>* v : {&object_flashes_, &map_flashes_})
+        put_list(w, *v, [&](const StoryObjectFlash& f) { w.str(f.type_name).f64(f.start - now).f64(f.until - now); });
+    put_list(w, forced_clicks_, [&](const std::string& s) { w.str(s); });
+    put_list(w, camera_, [&](const StoryCameraCommand& c) { w.u8(static_cast<uint8_t>(c.kind)).str(c.type).f32(c.ox).f32(c.oy).f32(c.oz); });
+    put_list(w, dialogs_, [&](const StoryTutorialDialog& d) { w.str(d.text_id).boolean(d.continue_button); });
+    const auto put_hint = [&](const StoryHint& h) {
+        put_u32s(w, h.text);
+        put_color(w, h.color);
+        w.u8(static_cast<uint8_t>(h.sound));
+    };
+    put_list(w, hint_queue_, put_hint);
+    w.boolean(hint_shown_).boolean(hint_started_);
+    put_hint(shown_.hint);
+    w.f64(shown_.start - now).f64(shown_.seconds);
+    w.boolean(controls_locked_).boolean(scroll_locked_).boolean(planet_selection_locked_).boolean(objectives_shown_);
+    w.i32(command_bar_hide_).u32(text_hint_sounds_);
+    w.boolean(objective_event_.has_value()).boolean(objective_event_.value_or(false));
+    w.boolean(cinematic_mode_).boolean(movies_disabled_).boolean(retry_dialog_).boolean(retry_requested_);
+    w.boolean(hide_cursor_on_click_).boolean(hide_autoresolve_);
+    for (size_t m = 0; m < 3; ++m) w.boolean(advisor_[m]).u32(next_hint_[m]).u32(hint_index_[m]);
+    put_set(w, retreat_off_);
+    put_set(w, hologram_);
+    put_set(w, slots_);
+    w.u64(handled_);
+}
+
+bool StoryPresenter::read(ByteReader& r, double now) {
+    if (r.u32() != kPresenterSaveVersion || !r.ok()) return false;
+    StoryPresenter t;
+    bool ok = get_list(r, t.lines_, 30, [&] {
+        StoryTextLine l;
+        l.id = r.str();
+        l.text = get_u32s(r);
+        l.color = get_color(r);
+        l.channel = get_enum(r, StoryTextChannel::AlienSpeech);
+        l.start = r.f64() + now;
+        l.seconds = r.f64();
+        l.persistent = r.boolean();
+        l.typewriter = r.boolean();
+        return l;
+    });
+    ok = ok && get_list(r, t.arrows_, 19, [&] {
+        StoryArrow a;
+        a.kind = get_enum(r, StoryArrow::Kind::MapObject);
+        a.target = r.str();
+        a.region = r.str();
+        a.sub = r.i32();
+        a.label = r.str();
+        a.hud_mode = r.u8();
+        a.has_pointer = r.boolean();
+        return a;
+    });
+    ok = ok && get_list(r, t.pointers_, 30, [&] {
+        StoryPointer q;
+        q.id = r.i32();
+        q.object_type = r.str();
+        q.x = r.f32();
+        q.y = r.f32();
+        q.z = r.f32();
+        q.terrain = r.boolean();
+        const bool timed = r.boolean();
+        const double rel = r.f64();
+        q.until = timed ? rel + now : -1.0;
+        return q;
+    });
+    ok = ok && get_list(r, t.flashes_, 20, [&] {
+        StoryComponentFlash f;
+        f.component = r.str();
+        f.start = r.f64() + now;
+        f.until = r.f64() + now;
+        return f;
+    });
+    ok = ok && get_list(r, t.highlights_, 13, [&] {
+        StoryHighlight h;
+        h.type_name = r.str();
+        h.object = r.i32();
+        h.small = r.boolean();
+        h.z_offset = r.f32();
+        return h;
+    });
+    for (std::vector<StoryObjectFlash>* v : {&t.object_flashes_, &t.map_flashes_})
+        ok = ok && get_list(r, *v, 20, [&] {
+            StoryObjectFlash f;
+            f.type_name = r.str();
+            f.start = r.f64() + now;
+            f.until = r.f64() + now;
+            return f;
+        });
+    ok = ok && get_list(r, t.forced_clicks_, 4, [&] { return r.str(); });
+    ok = ok && get_list(r, t.camera_, 17, [&] {
+        StoryCameraCommand c;
+        c.kind = get_enum(r, StoryCameraCommand::Kind::UnpauseGalactic);
+        c.type = r.str();
+        c.ox = r.f32();
+        c.oy = r.f32();
+        c.oz = r.f32();
+        return c;
+    });
+    ok = ok && get_list(r, t.dialogs_, 5, [&] {
+        StoryTutorialDialog d;
+        d.text_id = r.str();
+        d.continue_button = r.boolean();
+        return d;
+    });
+    const auto get_hint = [&] {
+        StoryHint h;
+        h.text = get_u32s(r);
+        h.color = get_color(r);
+        h.sound = get_enum(r, StoryHint::Sound::Hint);
+        return h;
+    };
+    ok = ok && get_list(r, t.hint_queue_, 9, get_hint);
+    if (!ok) return false;
+    t.hint_shown_ = r.boolean();
+    t.hint_started_ = r.boolean();
+    t.shown_.hint = get_hint();
+    t.shown_.start = r.f64() + now;
+    t.shown_.seconds = r.f64();
+    t.controls_locked_ = r.boolean();
+    t.scroll_locked_ = r.boolean();
+    t.planet_selection_locked_ = r.boolean();
+    t.objectives_shown_ = r.boolean();
+    t.command_bar_hide_ = r.i32();
+    t.text_hint_sounds_ = r.u32();
+    const bool has_event = r.boolean(), event = r.boolean();
+    if (has_event) t.objective_event_ = event;
+    t.cinematic_mode_ = r.boolean();
+    t.movies_disabled_ = r.boolean();
+    t.retry_dialog_ = r.boolean();
+    t.retry_requested_ = r.boolean();
+    t.hide_cursor_on_click_ = r.boolean();
+    t.hide_autoresolve_ = r.boolean();
+    for (size_t m = 0; m < 3; ++m) {
+        t.advisor_[m] = r.boolean();
+        t.next_hint_[m] = r.u32();
+        t.hint_index_[m] = r.u32();
+    }
+    if (!get_set(r, t.retreat_off_) || !get_set(r, t.hologram_) || !get_set(r, t.slots_)) return false;
+    t.handled_ = r.u64();
+    if (!r.ok()) return false;
+    t.hooks_ = std::move(hooks_);
+    t.colors_ = colors_;
+    t.config_ = config_;
+    *this = std::move(t);
+    return true;
+}
+
+bool StoryPresenter::is_lasting_reward(std::string_view type) {
+    static constexpr std::string_view kLasting[] = {
+        "LOCK_CONTROLS", "SCROLL_LOCK", "LOCK_PLANET_SELECTION", "ENABLE_OBJECTIVE_DISPLAY", "SHOW_COMMAND_BAR",
+        "DISABLE_MOVIES", "SET_ADVISOR", "START_CINEMATIC_MODE", "STOP_CINEMATIC_MODE", "HIDE_AUTORESOLVE",
+        "ENABLE_GALACTIC_CORRUPTION_HOLOGRAM", "DISABLE_RETREAT", "USE_RETRY_DIALOG", "HIDE_CURSOR_ON_CLICK",
+        "SHOW_SMUGGLE_SLOT", "HIDE_SMUGGLE_SLOT", "SHOW_RAID_SLOT", "HIDE_RAID_SLOT", "SHOW_STEAL_SLOT", "HIDE_STEAL_SLOT",
+        "SHOW_SPECIAL_SLOT"};
+    for (const std::string_view k : kLasting)
+        if (ascii_iequals(type, k)) return true;
+    return false;
+}
 
 std::vector<std::string> split_story_ids(std::string_view list) {
     std::vector<std::string> out;

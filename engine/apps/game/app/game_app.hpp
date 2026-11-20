@@ -656,6 +656,7 @@ public:
     StoryPresenter story_present_;
     const void* story_present_story_ = nullptr;  // the story session the presenter state belongs to
     void story_present_setup();
+    bool story_present_restore();  // ref4 t01: the loaded save's presenter state
     void story_present_reward(const lua::StoryFired& f, uint8_t mode);
     void story_present_lua(const lua::PresentationEvent& e);
     void story_present_frame();
