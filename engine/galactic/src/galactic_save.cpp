@@ -41,6 +41,7 @@
 
 #include "alamo/galactic/campaign.hpp"
 #include "alamo/galactic/conflicts.hpp"
+#include "galactic_records.hpp"
 
 namespace alamo::galactic {
 
@@ -68,27 +69,8 @@ constexpr uint32_t kGalacticSaveVersionNoGalab = 7;
 constexpr uint32_t kGalacticSaveVersionNoNames = 6;
 constexpr uint32_t kConflictSaveVersion = 4;  // v2: BattleRequest::linked (story t10); v3: BattleRequest::sandbox (q6); v4: ArCombatant::strength_bonus (mcx4 t06)
 
-void put_handle(ByteWriter& w, const objects::ObjectStore& s, ObjectHandle h) {
-    if (s.exists(h)) {
-        w.i32(s.id(h));
-        return;
-    }
-    w.i32(objects::kNoObjectId);
-    w.u64(h.value);
-}
-
-bool get_handle(ByteReader& r, const objects::ObjectStore& s, ObjectHandle& out) {
-    const int32_t id = r.i32();
-    if (!r.ok()) return false;
-    if (id != objects::kNoObjectId) {
-        out = s.find(id);
-        return static_cast<bool>(out);  // the save names an object the restored store does not have
-    }
-    const ObjectHandle raw{r.u64()};
-    if (!r.ok()) return false;
-    out = (raw.slot() < s.capacity() && !s.exists(raw)) ? raw : ObjectHandle{};
-    return true;
-}
+using records::get_handle;
+using records::put_handle;
 
 void put_handles(ByteWriter& w, const objects::ObjectStore& s, const std::vector<ObjectHandle>& v) {
     w.u32(static_cast<uint32_t>(v.size()));
@@ -117,16 +99,6 @@ bool get_u32s(ByteReader& r, std::vector<uint32_t>& v) {
     return r.ok();
 }
 
-void put_vec3(ByteWriter& w, const Vec3& v) { w.f32(v.x).f32(v.y).f32(v.z); }
-
-Vec3 get_vec3(ByteReader& r) {
-    Vec3 v;
-    v.x = r.f32();
-    v.y = r.f32();
-    v.z = r.f32();
-    return v;
-}
-
 bool get_str(ByteReader& r, std::string& s) {
     s = r.str();
     return r.ok();
@@ -149,92 +121,18 @@ void GalacticSim::write(ByteWriter& w) const {
     w.i32(neutral_player_).i32(local_player_);
     w.boolean(auto_reveal_).boolean(reveal_sfx_).boolean(true).boolean(emit_events_).boolean(slot_choices_);
 
+    records::Writer rec(w, st);  // REF4 t02: the records' fields from one list (galactic_records.hpp)
     for (size_t i = 0; i < players_.size(); ++i) {
-        const PlayerState& p = players_[i];
-        w.u32(p.faction).boolean(p.human).boolean(p.ai).u32(p.difficulty);
-        w.f32(p.account.credits).f32(p.account.cap);
-        w.i32(p.tech_level).f32(p.tech_cost_mult).boolean(p.cheat);
-        put_u32s(w, p.bm_purchased);
-        w.boolean(p.bm_tutorial).boolean(p.sabotage_tutorial);
-        for (int32_t c : p.corruptions_completed) w.i32(c);
-        put_u32s(w, p.locked_types);
-        put_u32s(w, p.unlocked_types);
-        put_u32s(w, p.production_disabled);
-        w.i32(p.max_tech_level);
-        w.u32(static_cast<uint32_t>(p.built.size()));
-        for (const auto& [type, count] : p.built) w.u32(type).i32(count);
+        records::visit(rec, players_[i]);
         w.f32(i < last_income_.size() ? last_income_[i] : 0.0f);
     }
     w.u32(static_cast<uint32_t>(relations_.size()));
     for (uint8_t rel : relations_) w.u8(rel);
 
-    for (const PlanetState& p : planets_) {
-        w.boolean(p.is_planet).u32(p.type);
-        put_handle(w, st, p.object);
-        w.boolean(p.initialised).i32(p.owner).f32(p.control).f32(p.target_control).i32(p.leaning);
-        w.i32(p.base_value).f32(p.black_market).boolean(p.black_market_influences).boolean(p.destroyed);
-        w.u8(static_cast<uint8_t>(p.corruption)).i32(p.corrupting_player);
-        w.boolean(p.corruption_protected).boolean(p.corruption_removing);
-        w.u32(p.corruption_start).u32(p.corruption_end).u32(p.corruption_changed);
-        w.u8(static_cast<uint8_t>(p.corruption_pending)).i32(p.corruption_pending_player);
-        w.boolean(p.corruption_particles);
-        for (float v : p.corruption_pairs) w.f32(v);
-        w.boolean(p.revealed).i32(p.reveal_delay);
-        w.u32(static_cast<uint32_t>(p.visibility.size()));
-        for (const std::vector<VisibilityModifier>& l : p.visibility) {
-            w.u32(static_cast<uint32_t>(l.size()));
-            for (const VisibilityModifier& m : l) {
-                w.u32(m.value).u32(m.expiry).u32(m.name_hash);
-                w.i32(m.key.object).u32(m.key.serial).u32(m.key.sub).u32(m.key.extra);
-            }
-        }
-        w.f32(p.piracy_pool).i32(p.siphon_player).f32(p.siphon_fraction).i32(p.siphon_until).f32(p.siphon_amount);
-        w.i32(p.halt_until).boolean(p.min_income_set).boolean(p.max_income_set).f32(p.min_income).f32(p.max_income);
-        w.boolean(p.hidden).boolean(p.in_battle);
-        w.u32(static_cast<uint32_t>(p.income.size()));
-        for (const IncomeEntry& e : p.income) {
-            w.u8(e.kind).f32(e.value).i32(e.expiry);
-            w.u32(e.ability).i32(e.source).u32(e.tag).i32(e.next_eval).u32(e.def);
-        }
-        for (const std::vector<BuildEntry>& q : p.queue) {
-            w.u32(static_cast<uint32_t>(q.size()));
-            for (const BuildEntry& e : q) {
-                w.u32(e.type).f32(e.build_time).i32(e.start).i32(e.duration).f32(e.remaining).i32(e.player).f32(e.cost);
-            }
-        }
-        w.i32(p.starbase_level).i32(p.starbase_owner);
-        put_handle(w, st, p.starbase);
-        put_handles(w, st, p.structures);
-        put_handles(w, st, p.surface);
-        w.u32(static_cast<uint32_t>(p.influence.size()));
-        for (int32_t id : p.influence) w.i32(id);
-        put_u32s(w, p.orbit);
-        w.i32(p.sabotage_count);
-        w.u32(static_cast<uint32_t>(p.respawns.size()));
-        for (const RespawnEntry& e : p.respawns) w.i32(e.due).u32(e.type).i32(e.owner).u8(e.flag);
-        w.u32(static_cast<uint32_t>(p.built_objects.size()));
-        for (const PersistedBuiltObject& b : p.built_objects) w.u32(b.type).f32(b.x).f32(b.y).f32(b.z).i32(b.base_level).i32(b.owner);
-        w.i32(p.queue_phase[0]).i32(p.queue_phase[1]);
-    }
+    for (const PlanetState& p : planets_) records::visit(rec, p);
 
     w.u32(static_cast<uint32_t>(fleets_.size()));
-    for (const FleetState& f : fleets_) {
-        w.boolean(f.alive);
-        put_handle(w, st, f.object);
-        w.i32(f.owner);
-        w.u32(static_cast<uint32_t>(f.contents.size()));
-        for (size_t i = 0; i < f.contents.size(); ++i) {
-            put_handle(w, st, f.contents[i]);
-            w.u8(i < f.carried.size() ? f.carried[i] : 0);
-        }
-        w.u32(f.planet).u32(f.from).u32(f.to);
-        put_u32s(w, f.path);
-        w.u32(f.path_index).f32(f.base_speed).f32(f.hop_speed);
-        put_vec3(w, f.position);
-        put_vec3(w, f.facing);
-        w.boolean(f.moving);
-        w.u8(static_cast<uint8_t>(f.slot)).u32(f.want_planet).u8(static_cast<uint8_t>(f.want_slot));
-    }
+    for (const FleetState& f : fleets_) records::visit(rec, f);
 
     w.u32(static_cast<uint32_t>(stealthed_.size()));
     for (int32_t id : stealthed_) w.i32(id);
@@ -313,34 +211,14 @@ bool GalacticSim::read(ByteReader& r) {
 
     std::vector<PlayerState> players(np);
     std::vector<float> last_income(np, 0.0f);
+    records::Reader rec(r, st);
     for (uint32_t i = 0; i < np; ++i) {
         PlayerState& p = players[i];
-        p.faction = r.u32();
-        p.human = r.boolean();
-        p.ai = r.boolean();
-        p.difficulty = r.u32();
-        p.account.credits = r.f32();
-        p.account.cap = r.f32();
-        p.tech_level = r.i32();
-        p.tech_cost_mult = r.f32();
-        p.cheat = r.boolean();
-        if (!get_u32s(r, p.bm_purchased)) return false;
-        p.bm_tutorial = r.boolean();
-        p.sabotage_tutorial = r.boolean();
-        for (int32_t& c : p.corruptions_completed) c = r.i32();
-        if (!get_u32s(r, p.locked_types) || !get_u32s(r, p.unlocked_types) || !get_u32s(r, p.production_disabled)) return false;
-        if (!types_ok(p.locked_types) || !types_ok(p.unlocked_types) || !types_ok(p.production_disabled)) return false;
-        p.max_tech_level = r.i32();
-        uint32_t nb = 0;
-        if (!r.count(nb, 8)) return false;
-        p.built.resize(nb);
-        for (auto& [type, count] : p.built) {
-            type = r.u32();
-            count = r.i32();
-            if (type >= types) return false;
-        }
+        records::visit(rec, p);
         last_income[i] = r.f32();
-        if (!r.ok()) return false;
+        if (!r.ok() || !types_ok(p.locked_types) || !types_ok(p.unlocked_types) || !types_ok(p.production_disabled)) return false;
+        for (const auto& [type, count] : p.built)
+            if (type >= types) return false;
     }
     uint32_t nrel = 0;
     if (!r.count(nrel, 1) || (nrel != 0 && nrel != np * np)) return false;
@@ -353,162 +231,33 @@ bool GalacticSim::read(ByteReader& r) {
     std::vector<PlanetState> planets = planets_;  // keeps the definition-derived position / links of start()
     for (uint32_t i = 0; i < rows; ++i) {
         PlanetState& p = planets[i];
-        const bool is_planet = r.boolean();
-        const uint32_t type = r.u32();
-        if (!r.ok() || is_planet != p.is_planet || type != p.type) return false;  // not the session's galaxy
-        if (!get_handle(r, st, p.object)) return false;
-        p.initialised = r.boolean();
-        p.owner = r.i32();
-        p.control = r.f32();
-        p.target_control = r.f32();
-        p.leaning = r.i32();
-        p.base_value = r.i32();
-        p.black_market = r.f32();
-        p.black_market_influences = r.boolean();
-        p.destroyed = r.boolean();
-        p.corruption = static_cast<int8_t>(r.u8());
-        p.corrupting_player = r.i32();
-        p.corruption_protected = r.boolean();
-        p.corruption_removing = r.boolean();
-        p.corruption_start = r.u32();
-        p.corruption_end = r.u32();
-        p.corruption_changed = r.u32();
-        p.corruption_pending = static_cast<int8_t>(r.u8());
-        p.corruption_pending_player = r.i32();
-        p.corruption_particles = r.boolean();
-        for (float& v : p.corruption_pairs) v = r.f32();
-        p.revealed = r.boolean();
-        p.reveal_delay = r.i32();
-        uint32_t nlists = 0;
-        if (!r.count(nlists, 4) || nlists > np) return false;
-        p.visibility.assign(nlists, {});
-        for (std::vector<VisibilityModifier>& l : p.visibility) {
-            uint32_t nm = 0;
-            if (!r.count(nm, 28)) return false;
-            l.resize(nm);
-            for (VisibilityModifier& m : l) {
-                m.value = r.u32();
-                m.expiry = r.u32();
-                m.name_hash = r.u32();
-                m.key.object = r.i32();
-                m.key.serial = r.u32();
-                m.key.sub = r.u32();
-                m.key.extra = r.u32();
-            }
-        }
-        p.piracy_pool = r.f32();
-        p.siphon_player = r.i32();
-        p.siphon_fraction = r.f32();
-        p.siphon_until = r.i32();
-        p.siphon_amount = r.f32();
-        p.halt_until = r.i32();
-        p.min_income_set = r.boolean();
-        p.max_income_set = r.boolean();
-        p.min_income = r.f32();
-        p.max_income = r.f32();
-        p.hidden = r.boolean();
-        p.in_battle = r.boolean();
+        records::visit(rec, p);  // is_planet and type are checked against the session's galaxy
         if (!r.ok()) return false;
         if (!player_ok(p.owner) || !player_ok(p.leaning) || !player_ok(p.corrupting_player) ||
-            !player_ok(p.corruption_pending_player) || !player_ok(p.siphon_player))
+            !player_ok(p.corruption_pending_player) || !player_ok(p.siphon_player) || !player_ok(p.starbase_owner) ||
+            p.visibility.size() > np)
             return false;
-        uint32_t ni = 0;
-        if (!r.count(ni, 29)) return false;
-        p.income.resize(ni);
-        for (IncomeEntry& e : p.income) {
-            e.kind = r.u8();
-            e.value = r.f32();
-            e.expiry = r.i32();
-            e.ability = r.u32();
-            e.source = r.i32();
-            e.tag = r.u32();
-            e.next_eval = r.i32();
-            e.def = r.u32();
+        for (const IncomeEntry& e : p.income)
             if (e.def != 0xFFFFFFFFu && e.def >= rules_->special.abilities.size()) return false;
-        }
-        for (std::vector<BuildEntry>& q : p.queue) {
-            uint32_t nq = 0;
-            if (!r.count(nq, 28)) return false;
-            q.resize(nq);
-            for (BuildEntry& e : q) {
-                e.type = r.u32();
-                e.build_time = r.f32();
-                e.start = r.i32();
-                e.duration = r.i32();
-                e.remaining = r.f32();
-                e.player = r.i32();
-                e.cost = r.f32();
-                if (!r.ok() || e.type >= types || e.player < 0 || e.player >= P) return false;
-            }
-        }
-        p.starbase_level = r.i32();
-        p.starbase_owner = r.i32();
-        if (!r.ok() || !player_ok(p.starbase_owner)) return false;
-        if (!get_handle(r, st, p.starbase) || !get_handles(r, st, p.structures) || !get_handles(r, st, p.surface)) return false;
-        uint32_t ninf = 0;
-        if (!r.count(ninf, 4)) return false;
-        p.influence.resize(ninf);
-        for (int32_t& id : p.influence) id = r.i32();
-        if (!get_u32s(r, p.orbit)) return false;  // fleet indices: checked once the fleets are read
-        p.sabotage_count = r.i32();
-        uint32_t nr = 0;
-        if (!r.count(nr, 13)) return false;
-        p.respawns.resize(nr);
-        for (RespawnEntry& e : p.respawns) {
-            e.due = r.i32();
-            e.type = r.u32();
-            e.owner = r.i32();
-            e.flag = r.u8();
-            if (!r.ok() || e.type >= types || !player_ok(e.owner)) return false;
-        }
-        uint32_t nb = 0;
-        if (!r.count(nb, 24)) return false;
-        p.built_objects.resize(nb);
-        for (PersistedBuiltObject& b : p.built_objects) {
-            b.type = r.u32();
-            b.x = r.f32();
-            b.y = r.f32();
-            b.z = r.f32();
-            b.base_level = r.i32();
-            b.owner = r.i32();
-            if (!r.ok() || b.type >= types || !player_ok(b.owner)) return false;
-        }
-        for (int32_t& phase : p.queue_phase) phase = r.i32();
+        for (const std::vector<BuildEntry>& q : p.queue)
+            for (const BuildEntry& e : q)
+                if (e.type >= types || e.player < 0 || e.player >= P) return false;
+        for (const RespawnEntry& e : p.respawns)
+            if (e.type >= types || !player_ok(e.owner)) return false;
+        for (const PersistedBuiltObject& b : p.built_objects)
+            if (b.type >= types || !player_ok(b.owner)) return false;
         for (const int32_t phase : p.queue_phase)
             if (p.is_planet ? phase < 1 || phase > econ::kFramesPerSecond : phase != 0) return false;
-        if (!r.ok()) return false;
     }
 
     uint32_t nf = 0;
     if (!r.count(nf, 1)) return false;
     std::vector<FleetState> fleets(nf);
     for (FleetState& f : fleets) {
-        f.alive = r.boolean();
-        if (!get_handle(r, st, f.object)) return false;
-        f.owner = r.i32();
-        uint32_t nc = 0;
-        if (!r.ok() || !player_ok(f.owner) || !r.count(nc, 5)) return false;
-        f.contents.assign(nc, ObjectHandle{});
-        f.carried.assign(nc, 0);
-        for (uint32_t i = 0; i < nc; ++i) {
-            if (!get_handle(r, st, f.contents[i])) return false;
-            f.carried[i] = r.u8();
-        }
-        f.planet = r.u32();
-        f.from = r.u32();
-        f.to = r.u32();
-        if (!get_u32s(r, f.path)) return false;
-        f.path_index = r.u32();
-        f.base_speed = r.f32();
-        f.hop_speed = r.f32();
-        f.position = get_vec3(r);
-        f.facing = get_vec3(r);
-        f.moving = r.boolean();
-        f.slot = static_cast<int8_t>(r.u8());
-        f.want_planet = r.u32();
-        f.want_slot = static_cast<int8_t>(r.u8());
-        if (!r.ok() || !planet_ok(f.planet) || !planet_ok(f.from) || !planet_ok(f.to) || !planet_ok(f.want_planet) ||
-            f.path_index > f.path.size() || f.slot < -1 || f.slot >= kOrbitSlots || f.want_slot < -1 || f.want_slot >= kOrbitSlots)
+        records::visit(rec, f);
+        if (!r.ok() || !player_ok(f.owner) || !planet_ok(f.planet) || !planet_ok(f.from) || !planet_ok(f.to) ||
+            !planet_ok(f.want_planet) || f.path_index > f.path.size() || f.slot < -1 || f.slot >= kOrbitSlots ||
+            f.want_slot < -1 || f.want_slot >= kOrbitSlots)
             return false;
         for (PlanetIndex hop : f.path)
             if (hop >= rows) return false;
@@ -748,20 +497,11 @@ bool GalacticSim::read(ByteReader& r) {
 
 namespace {
 
-void put_info(ByteWriter& w, const objects::ObjectStore& st, const ConflictInfo& c) {
-    w.u8(static_cast<uint8_t>(c.kind)).u32(c.planet).i32(c.attacker).i32(c.defender);
-    put_handles(w, st, c.units);
-    w.str(c.map);
-}
-
+bool valid_kind(ConflictKind k) { return k == ConflictKind::Land || k == ConflictKind::Space; }
 bool get_info(ByteReader& r, const objects::ObjectStore& st, ConflictInfo& c) {
-    const uint8_t kind = r.u8();
-    if (kind != static_cast<uint8_t>(ConflictKind::Land) && kind != static_cast<uint8_t>(ConflictKind::Space)) return false;
-    c.kind = static_cast<ConflictKind>(kind);
-    c.planet = r.u32();
-    c.attacker = r.i32();
-    c.defender = r.i32();
-    return r.ok() && get_handles(r, st, c.units) && get_str(r, c.map);
+    records::Reader rec(r, st);
+    records::visit(rec, c);
+    return r.ok() && valid_kind(c.kind);
 }
 
 void put_f64s(ByteWriter& w, const std::vector<double>& v) {
@@ -808,11 +548,12 @@ bool valid_state(int8_t s) {
 
 void ConflictManager::write(ByteWriter& w) const {
     const objects::ObjectStore& st = sim_->store();
+    records::Writer rec(w, st);  // REF4 t02: ConflictInfo / ConflictLogEntry from one list (galactic_records.hpp)
     w.u32(kConflictSaveVersion);
     w.u32(static_cast<uint32_t>(sim_->planets().size()));
     for (const std::vector<ConflictInfo>* q : {&space_q_, &land_q_}) {
         w.u32(static_cast<uint32_t>(q->size()));
-        for (const ConflictInfo& c : *q) put_info(w, st, c);
+        for (const ConflictInfo& c : *q) records::visit(rec, c);
     }
     w.u8(static_cast<uint8_t>(state_)).u8(static_cast<uint8_t>(active_)).u64(tick_).u64(timer_start_);
     w.boolean(force_).i32(retreating_).i32(pause_held_).boolean(has_choice_).u8(static_cast<uint8_t>(choice_));
@@ -849,7 +590,7 @@ void ConflictManager::write(ByteWriter& w) const {
     w.u32(a.draws);
 
     // Active battle request.
-    put_info(w, st, request_.info);
+    records::visit(rec, request_.info);
     w.str(request_.map).i32(request_.base_level);
     w.u32(static_cast<uint32_t>(request_.forces.size()));
     for (const BattleForces& f : request_.forces) {
@@ -866,11 +607,7 @@ void ConflictManager::write(ByteWriter& w) const {
     w.u32(static_cast<uint32_t>(planet_map_.size()));
     for (const std::string& m : planet_map_) w.str(m);
     w.u32(static_cast<uint32_t>(log_.size()));
-    for (const ConflictLogEntry& e : log_) {
-        w.u64(e.tick).i32(e.galactic_frame).u8(static_cast<uint8_t>(e.kind)).u32(e.planet).i32(e.attacker).i32(e.defender);
-        w.u8(e.how).i32(e.winner).i32(e.loser).i32(e.retreating).u32(e.attacker_losses).u32(e.defender_losses).u32(e.rng_draws);
-        w.str(e.map);
-    }
+    for (const ConflictLogEntry& e : log_) records::visit(rec, e);
 }
 
 bool ConflictManager::read(ByteReader& r) {
@@ -1009,23 +746,10 @@ bool ConflictManager::read(ByteReader& r) {
     uint32_t nlog = 0;
     if (!r.count(nlog, 54)) return false;
     std::vector<ConflictLogEntry> log(nlog);
+    records::Reader rec(r, st);
     for (ConflictLogEntry& e : log) {
-        e.tick = r.u64();
-        e.galactic_frame = r.i32();
-        const uint8_t kind = r.u8();
-        if (kind != static_cast<uint8_t>(ConflictKind::Land) && kind != static_cast<uint8_t>(ConflictKind::Space)) return false;
-        e.kind = static_cast<ConflictKind>(kind);
-        e.planet = r.u32();
-        e.attacker = r.i32();
-        e.defender = r.i32();
-        e.how = r.u8();
-        e.winner = r.i32();
-        e.loser = r.i32();
-        e.retreating = r.i32();
-        e.attacker_losses = r.u32();
-        e.defender_losses = r.u32();
-        e.rng_draws = r.u32();
-        if (!get_str(r, e.map)) return false;
+        records::visit(rec, e);
+        if (!r.ok() || !valid_kind(e.kind)) return false;
     }
     if (!r.ok() || !r.done()) return false;
 

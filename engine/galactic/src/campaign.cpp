@@ -1,5 +1,6 @@
 #include "alamo/galactic/campaign.hpp"
 #include "alamo/core/sim_crc.hpp"
+#include "galactic_records.hpp"
 
 #include <algorithm>
 #include <bit>
@@ -2282,120 +2283,22 @@ std::string_view galactic_event_name(GalacticEventKind kind) {
 // ---- CRC ----------------------------------------------------------------------------------------------------
 
 void GalacticSim::hash_state(StateHasher& h) const {
-    auto id_of = [this](ObjectHandle o) { return store_->exists(o) ? store_->id(o) : objects::kNoObjectId; };
     h.i32(frame_);
     h.i32(pause_);
     h.i32(last_cycle_frame_);
     h.i32(next_cycle_frame_);
     h.i32(cycle_counter_);
+    // REF4 t02: the records' CRC fields from the save's field lists (galactic_records.hpp), in the CRC's historical order.
+    records::Hasher rec(h, *store_, &fleets_);
     h.u32(static_cast<uint32_t>(players_.size()));
-    for (const PlayerState& p : players_) {
-        h.u32(p.faction);
-        h.boolean(p.human);
-        h.boolean(p.ai);
-        h.u32(p.difficulty);
-        h.f32(p.account.credits);
-        h.f32(p.account.cap);
-        h.i32(p.tech_level);
-        h.f32(p.tech_cost_mult);
-        h.boolean(p.cheat);
-    }
+    for (const PlayerState& p : players_) records::visit(rec, p);
     h.u32(static_cast<uint32_t>(planets_.size()));
-    for (const PlanetState& p : planets_) {
-        h.boolean(p.is_planet);
-        if (!p.is_planet) continue;
-        h.i32(id_of(p.object));
-        h.boolean(p.initialised);
-        h.i32(p.owner);
-        h.f32(p.control);
-        h.f32(p.target_control);
-        h.i32(p.leaning);
-        h.i32(p.base_value);
-        h.f32(p.black_market);
-        h.boolean(p.black_market_influences);
-        h.boolean(p.destroyed);
-        h.value(p.corruption);
-        h.i32(p.corrupting_player);
-        h.boolean(p.corruption_protected);
-        h.f32(p.piracy_pool);
-        h.i32(p.siphon_player);
-        h.f32(p.siphon_fraction);
-        h.i32(p.siphon_until);
-        h.f32(p.siphon_amount);
-        h.i32(p.halt_until);
-        h.boolean(p.min_income_set);
-        h.boolean(p.max_income_set);
-        h.f32(p.min_income);
-        h.f32(p.max_income);
-        // The two former PlanetState build bonus floats (always 0, now derived: production_bonus), hashed as 0 so the
-        // CRC stream keeps its layout.
-        h.f32(0.0f);
-        h.f32(0.0f);
-        h.boolean(p.hidden);
-        h.boolean(p.in_battle);
-        h.u32(static_cast<uint32_t>(p.income.size()));
-        for (const IncomeEntry& e : p.income) {
-            h.u8(e.kind);
-            h.f32(e.value);
-            h.i32(e.expiry);
-            if (e.ability != 0) {  // P4 sim: ability entries only (S3 / story entries hash as before)
-                h.u32(e.ability);
-                h.i32(e.source);
-                h.u32(e.tag);
-                h.i32(e.next_eval);
-            }
-        }
-        for (const auto& q : p.queue) {
-            h.u32(static_cast<uint32_t>(q.size()));
-            for (const BuildEntry& e : q) {
-                h.u32(e.type);
-                h.f32(e.build_time);
-                h.i32(e.start);
-                h.i32(e.duration);
-                h.f32(e.remaining);
-                h.i32(e.player);
-                h.f32(e.cost);
-            }
-        }
-        h.i32(p.starbase_level);
-        h.i32(p.starbase_owner);
-        h.i32(id_of(p.starbase));
-        h.u32(static_cast<uint32_t>(p.structures.size()));
-        for (ObjectHandle s : p.structures) h.i32(id_of(s));
-        h.u32(static_cast<uint32_t>(p.surface.size()));
-        for (ObjectHandle s : p.surface) h.i32(id_of(s));
-        h.u32(static_cast<uint32_t>(p.orbit.size()));
-        for (uint32_t f : p.orbit) h.i32(id_of(fleets_[f].object));
-    }
+    for (const PlanetState& p : planets_) records::visit(rec, p);  // a scenery row: its is_planet byte only
     uint32_t live = 0;
     for (const FleetState& f : fleets_) live += f.alive ? 1u : 0u;
     h.u32(live);
-    for (const FleetState& f : fleets_) {
-        if (!f.alive) continue;
-        h.i32(id_of(f.object));
-        h.i32(f.owner);
-        h.u32(static_cast<uint32_t>(f.contents.size()));
-        for (size_t i = 0; i < f.contents.size(); ++i) {
-            h.i32(id_of(f.contents[i]));
-            h.u8(f.carried[i]);
-        }
-        h.u32(f.planet);
-        h.u32(f.from);
-        h.u32(f.to);
-        h.u32(static_cast<uint32_t>(f.path.size()));
-        for (PlanetIndex p : f.path) h.u32(p);
-        h.u32(f.path_index);
-        h.f32(f.base_speed);
-        h.f32(f.hop_speed);
-        h.f32(f.position.x);
-        h.f32(f.position.y);
-        h.f32(f.position.z);
-        h.f32(f.facing.x);
-        h.f32(f.facing.y);
-        h.f32(f.facing.z);
-        h.boolean(f.moving);
-        if (f.story_autoresolve_lock) h.u8(0x95);  // mcx4 t20: hashed only once set
-    }
+    for (const FleetState& f : fleets_)
+        if (f.alive) records::visit(rec, f);
     if (!company_survivors_.empty()) {  // mcx4 t22: hashed only once a company lost members
         h.u32(0x43535631u);  // "CSV1"
         h.u32(static_cast<uint32_t>(company_survivors_.size()));

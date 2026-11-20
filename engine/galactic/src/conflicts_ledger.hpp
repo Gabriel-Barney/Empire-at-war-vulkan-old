@@ -5,7 +5,8 @@
 //   DERIVED(member, "why")   recomputed from saved state or scratch;
 //   CHECKED(member, "why")   not restored, but write() / read() / hash() read it.
 // tools/lint/check_battle_ledger.py (build_agent.cmd, ctest alamo_sim_battle_ledger_lint) checks it against
-// conflicts.hpp and the bodies of write / read / hash / register_crc in engine/galactic/src.
+// conflicts.hpp and the bodies of write / read / hash / register_crc in engine/galactic/src. The fields of a ConflictInfo
+// and a ConflictLogEntry are listed once, in galactic_records.hpp (save writer, reader and hash()).
 // Order: the declaration order in conflicts.hpp. Read by the lint only (not compiled).
 #pragma once
 
