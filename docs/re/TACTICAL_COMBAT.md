@@ -2099,6 +2099,13 @@ order, not nearest along the segment. The port should sort by segment fraction, 
      (3D distance), each with its own delay.
 8. Stop when the victim count reaches `Projectile_Blast_Area_Max_Victims`.
 
+> **Port (ref5 t01, 2026-11-20).** 0x4c7f70 has no unit-fire exception: the cap applies to every projectile (unit
+> weapons, hard points, death projectiles, land strikes); the port's 0 means no cap. FoC sets it only on
+> `Proj_Construction_Pod_Detonation` and `Proj_Exploding_Land_Barrel_Detonation` ("1.0", converter 0x6: 1 victim).
+> Every projectile type, the faction `Bombardment_Projectile` strikes included, is described by one builder
+> (`BattleCatalog::projectile_desc`), so a strike carries the same fields as the same type fired by a unit (trimmed
+> `Damage_Type`, `Max_Rate_Of_Turn`, detonation effects and particles).
+
 > Base-shield dome hits (which shots stop at the dome, absorbed particle, blast still reaching units inside) and the
 > ground vs lifetime detonation particle per path: `TRU1_A_RE_ANSWERS.md` A5, B1–B3 (2026-11-15).
 

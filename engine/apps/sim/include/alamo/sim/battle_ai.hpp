@@ -66,6 +66,9 @@ struct AiLaneDefaults {
     uint32_t k_ai = ai::tactical::kDefaultAiLaneLatency;
 };
 AiLaneDefaults& ai_lane_defaults();
+// ref5 t06: how many times AI lane code (think()) read the live battle through a BattleAi host answer, process-wide, and
+// the first such answer's name (null when none). Diagnostic: alamo_headless fails a lane run with a nonzero count.
+uint64_t ai_lane_live_reads(const char** first = nullptr);
 
 struct TacticalAiSetup {
     const ai::AiDefinitions* defs = nullptr;
@@ -142,6 +145,14 @@ public:
     void lane_sync() {}
     size_t lane_pending() const { return lane_batch_.size(); }
     uint32_t lane_mismatches() const { return lane_mismatch_; }  // applied with another result than predicted [diagnostic]
+    // ref5 t06 (host tests): captures the lane view now and runs `f` as lane code, so the host answers `f` asks for come from
+    // the view (what think() sees). Lane on only (TacticalAiSetup::ai_lane); otherwise `f` runs live.
+    void run_as_lane(const std::function<void()>& f) {
+        if (world_->ai_lane()) capture_lane_view();
+        lane_thinking_ = world_->ai_lane();
+        f();
+        lane_thinking_ = false;
+    }
     ai::tactical::TacticalAiWorld& world() { return *world_; }
     const ai::tactical::TacticalAiWorld& world() const { return *world_; }
     bool controls(int32_t player) const;
@@ -224,7 +235,8 @@ public:
     // a1g t04 follow-up - land TF.Reinforce drop validity: TacticalBattle::land_drop_valid (a1h t06: moved to the host so the
     // Reinforce command re-runs it) with this battle's mode. AI drops pass human = false (movers ignored, landing
     // transports block).
-    bool land_drop_ok(int32_t player, int32_t key, const ai::tactical::Vec3f& p) override { return land_drop_valid(player, key, p, false); }
+    // ref5 t06: with the lane on, view_land_drop_ok (the rest runs at the apply).
+    bool land_drop_ok(int32_t player, int32_t key, const ai::tactical::Vec3f& p) override;
     // q6 t19 (A1_READINGS §33.2.2): the units the last executed task-force Attack_Move on an object dropped because
     // CombatSystem::order_attack_issue refused them (cleared at every execute).
     std::vector<int32_t> attack_order_refused() override { return attack_refused_; }
@@ -361,6 +373,7 @@ private:
             uint8_t live = 0, movable = 0;     // alive and not retreated; movable
             uint8_t mv = 0, has_goal = 0, arrived = 0;  // slice 4e: the movement system has it; its UnitView
             float gx = 0.0f, gy = 0.0f;                 // the move goal
+            uint32_t mask = 0;                          // ref5 t06: MovementSystem::mask_of (mv only)
         };
         std::vector<Unit> units;
         struct Team {
@@ -400,8 +413,59 @@ private:
         // slice 4f: the perception's point test (force 1) - the fog running and FOW-active, the AI players' grids
         bool fog_live = false;
         std::vector<tactical::fog::FogGrid> fog_grids;  // fog_players order
+        // ref5 t06: the rest of what think() asked the live battle for.
+        // The active BASE_SHIELDs l1_base_shield_covers counts (combat's shield on; centre, radius squared), store order.
+        struct Shield {
+            float x = 0.0f, y = 0.0f, z = 0.0f, r2 = 0.0f;
+        };
+        std::vector<Shield> shields;
+        // The land passability grid's effective values (MovementSystem::grid), copied again only when its version moved;
+        // per battle unit the movement mask is Unit::mask. Empty in space.
+        bool grid_valid = false;
+        uint64_t grid_version = 0;
+        uint32_t grid_w = 0, grid_h = 0;
+        std::vector<uint32_t> grid_eff;
+        // The combat hard points the perception reads (w.hard_points): per combat unit (ascending id) its range in `hps`.
+        std::vector<std::pair<objects::ObjectId, std::pair<uint32_t, uint32_t>>> hp_index;
+        std::vector<ai::tactical::PerceptionHardPoint> hps;
+        // The station upgrade records (old, new), battle order (replaced_builder).
+        std::vector<std::pair<objects::ObjectId, objects::ObjectId>> upgrades;
+        // Skirmish production (tactical_builders / can_build_now) per AI player and candidate type, ascending (player, type).
+        struct Build {
+            int32_t player = -1, type = -1;
+            uint8_t can = 0;
+            std::vector<int32_t> builders;
+        };
+        std::vector<Build> builds;
+        // The reserve entries the drop tests look up (not deployed), parts_ order, with what the snapshot tests read.
+        struct Reserve {
+            objects::ObjectId key = objects::kNoObjectId;
+            int32_t owner = -1;
+            uint32_t type = 0;
+            float yaw = 0.0f;  // land: drop_yaw of its side
+        };
+        std::vector<Reserve> reserve;
+        bool box = false;  // land: the map's playable box
+        float box_min[2] = {0.0f, 0.0f}, box_max[2] = {0.0f, 0.0f};
     };
     LaneView view_;
+    // ref5 t06: lane code reads only view_. lane_thinking_ is set while think() (and, lane on, the start scripts) run; every
+    // live battle read of a host answer goes through lane_live_read, which counts it (ai_lane_live_reads; alamo_headless
+    // fails a lane run that had one) and asserts in debug builds. Scratch, never read by sim code.
+    bool lane_thinking_ = false;
+    void lane_live_read(const char* what) const;
+    void capture_lane_rest();  // the ref5 t06 part of capture_lane_view
+    bool view_line_clear(int32_t object_id, const ai::tactical::Vec3f& a, const ai::tactical::Vec3f& b) const;
+    bool view_point_fogged(int32_t player, float x, float y) const;
+    const LaneView::Reserve* view_reserve(int32_t player, int32_t key) const;
+    bool view_land_drop_ok(int32_t player, int32_t key, const ai::tactical::Vec3f& p) const;
+    bool view_space_drop_ok(int32_t player, int32_t key, const ai::tactical::Vec3f& p);
+    // ref5 t06: the AI's host writes (unit_released, unit_left_task_force) as batch commands with the lane on.
+    void queue_host_release(uint8_t op, int32_t player, int32_t object_id, uint8_t path);
+    void apply_host_release(const commands::Command& c);
+    void unit_released_live(int32_t player, int32_t object_id, ai::tactical::TacticalAiHost::UnitRelease path);
+    void unit_left_task_force_live(int32_t object_id);
+    bool lane_drop_valid(const commands::Command& c);  // a lane Reinforce's drop test at its apply
     // sp3 slice 4b: the ability / combat records the AI VMs' bindings read with the lane on (ObjectBridge::lane_abilities,
     // set at each capture and cleared by a load: before the first capture the bindings act live, on the critical lane).
     lua::LaneAbilityView lane_abilities_;
@@ -434,7 +498,9 @@ private:
     const LaneView::Unit* view_unit(objects::ObjectId id) const;
     std::vector<objects::ObjectId> view_team_units(uint8_t player, uint32_t wire) const;
     bool view_hostile(uint8_t player, int32_t owner) const;
-    bool lane_view() const { return view_.valid; }
+    // ref5 t06: answer from the view only inside lane code (think(), the lane start scripts); the critical lane (fill at
+    // publish, the batch's apply, a load's relink) reads the battle, which the capture left unchanged.
+    bool lane_view() const { return view_.valid && lane_thinking_; }
     struct LaneJob {
         bool pending = false;
         uint64_t frame = 0;   // global frame of the update

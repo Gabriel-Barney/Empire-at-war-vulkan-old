@@ -1370,7 +1370,17 @@ int main(int argc, char** argv) {
         else args.push_back(argv[i]);
     }
     if (profile_on || !profile_out.empty()) alamo::profile::start(65536);
-    const int rc = headless_main(static_cast<int>(args.size()), args.data());
+    int rc = headless_main(static_cast<int>(args.size()), args.data());
+#if defined(ALAMO_HEADLESS_HAVE_SIM) && defined(ALAMO_SIM_HAVE_TACTICAL_AI)
+    {  // ref5 t06: AI lane code must not read the live battle (BattleAi::lane_live_read counts every such host answer)
+        const char* first = nullptr;
+        if (const uint64_t n = alamo::sim::ai_lane_live_reads(&first); n > 0) {
+            std::fprintf(stderr, "alamo_headless: the AI lane read the live battle %llu times (first: %s)\n",
+                         static_cast<unsigned long long>(n), first ? first : "?");
+            if (rc == 0) rc = 3;
+        }
+    }
+#endif
     if (alamo::profile::enabled()) {
         alamo::profile::stop();
         const std::string text = alamo::profile::format_report(alamo::profile::build_report(alamo::profile::snapshot(), budget_ms));
