@@ -1,4 +1,5 @@
 #include "alamo/galactic/economy.hpp"
+#include "alamo/core/frames.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -50,13 +51,13 @@ namespace econ {
 
 int32_t fiscal_period_frames(float seconds) {
     const float f = 30.0f * seconds;
-    return static_cast<int32_t>(std::round(f));  // std::round: half away from zero
+    return frames_round(f);  // std::round: half away from zero
 }
 
 int32_t timer_frames(float seconds) {
     const float f = 30.0f * seconds;
     if (!(f > -2147483520.0f && f < 2147483520.0f)) return f > 0.0f ? std::numeric_limits<int32_t>::max() : 0;
-    return static_cast<int32_t>(f);  // truncates toward zero
+    return static_cast<int32_t>(f);  // truncates toward zero  // frame-cast-ok: range-guarded above
 }
 
 float timer_remaining_seconds(int32_t start, int32_t duration, int32_t now) {

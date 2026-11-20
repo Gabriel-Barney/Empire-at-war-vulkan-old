@@ -2,6 +2,7 @@
 // bridge, task forces, blocking statuses (see tactical_ai.hpp). [port] / [L] / [M] mark behaviour the RE docs
 // do not fix.
 #include "alamo/ai/tactical/tactical_ai.hpp"
+#include "alamo/core/frames.hpp"
 #include "alamo/core/profile.hpp"
 
 #include <algorithm>
@@ -2628,7 +2629,7 @@ void TacticalAiWorld::Impl::drain_requests(lua::LuaPlayerWorld& from, int32_t pl
         b.goal_type = g;
         b.target = slot;
         b.bonus = static_cast<float>(r.bonus);
-        b.deadline = now + static_cast<int32_t>(static_cast<float>(kAiFps) * static_cast<float>(r.duration < 0.0 ? 0.0 : r.duration));
+        b.deadline = now + frames_trunc(static_cast<float>(kAiFps) * static_cast<float>(r.duration < 0.0 ? 0.0 : r.duration));
         t->bonuses.push_back(b);
     }
     from.desire_bonuses.clear();
@@ -3600,7 +3601,7 @@ int32_t TacticalAiWorld::Impl::tf_reinforce(int32_t tf, const lua::AiArg& target
         const int32_t id = new_status(t->plan, tf, StatusKind::SpaceReinforce);
         StatusRec& s = statuses[id];
         s.dest = p;
-        s.timeout = max_wait >= 0.0 ? now + static_cast<int64_t>(static_cast<double>(kFramesPerSecond) * max_wait) : -1;
+        s.timeout = max_wait >= 0.0 ? now + frames_trunc(static_cast<double>(kFramesPerSecond) * max_wait) : -1;
         s.prevent = host.space_prevention_hit(t->player, p);
         s.ring = s.prevent ? 1000.0f : 0.0f;
         return id;
@@ -4275,7 +4276,7 @@ bool TacticalAiWorld::start(std::vector<std::string>* diagnostics) {
         p.ctx.budget.reset(w.defs.categories.size());
         GoalSystemConfig gcfg;
         // Slot 11: Land_ / Space_AI_Goal_Cycle_Sleep_Duration x FPS after a commit (Easy 15 s, §4.5).
-        gcfg.sleep_frames = static_cast<int32_t>(static_cast<float>(kAiFps) * sleep);
+        gcfg.sleep_frames = frames_trunc(static_cast<float>(kAiFps) * sleep);
         // A2g t06: AllowedTime with a PP = Goal::nominal_time (0x6c0450, tactical_nominal_time) x Build_Time_Delay_Tolerance,
         // as galactic (A2F_RE_READS §1.4 item 2) [H]. Tactical goals carry ETA 0 (accept_result) [H, A2H_T06_TACTICAL_ETA
         // §2.1], so the time tests (accept, Resolve time_ok: 0 < AllowedTime < ETA) never fail (§4); the value is hashed and
@@ -4460,7 +4461,7 @@ bool TacticalAiWorld::set_difficulty(int32_t player, int32_t difficulty) {
             p->contrast_mult = w.cfg.mode == TacticalMode::Land ? e.land_contrast : e.space_contrast;
         }
     p->build_time_mult = tactical_build_time_multiplier(w.cfg.difficulties, dname, w.cfg.mode);
-    p->ctx.goals.set_sleep_frames(static_cast<int32_t>(static_cast<float>(kAiFps) * sleep));
+    p->ctx.goals.set_sleep_frames(frames_trunc(static_cast<float>(kAiFps) * sleep));
     for (TacticalAiPlayerConfig& pc : w.cfg.players)
         if (pc.player == player) pc.difficulty = d;
     w.decide(player, [&] { return "difficulty " + std::to_string(d); });

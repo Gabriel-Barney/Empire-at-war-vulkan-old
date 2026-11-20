@@ -8,6 +8,7 @@
 #include <utility>
 
 #include "alamo/core/bytes.hpp"
+#include "alamo/core/frames.hpp"
 #include "alamo/core/sim_crc.hpp"
 #include "alamo/lua/lua_vm.hpp"
 #include "vm_internal.hpp"
@@ -16,9 +17,8 @@ namespace alamo::lua {
 
 uint32_t seconds_to_frames(double seconds) {
     if (!(seconds > 0.0)) return 0;  // also NaN
-    const double f = std::ceil(seconds * static_cast<double>(kSimFramesPerSecond));
-    if (f >= 2147483648.0) return 0x80000000u;
-    return static_cast<uint32_t>(f);
+    // ref4 t03: alamo/core/frames.hpp; out of int32 range the x86 0x80000000, read unsigned.
+    return static_cast<uint32_t>(frames_ceil(seconds * static_cast<double>(kSimFramesPerSecond)));
 }
 
 std::string_view op_name(PresentationOp op) {

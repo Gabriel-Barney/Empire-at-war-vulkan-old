@@ -19,6 +19,7 @@
 //     battle units go through change_owner();
 //   * a host without a garrison behaviour that dies kills its occupants (CombatSystem::kill_unit, no killer credit).
 #include "alamo/sim/tactical_battle.hpp"
+#include "alamo/core/frames.hpp"
 #include "alamo/core/sim_crc.hpp"
 
 #include "alamo/core/dmath.hpp"
@@ -67,7 +68,7 @@ void TacticalBattle::s4_init() {
     const float gc_secs = catalog_->capture_countdown(space_);  // REMAINING_GAPS §3.3: GameConstants when present
     // skai: L1_S4_REMAINING §4.2 start gate: the countdown is 0 in skirmish (a skirmish map battle: skirmish_map).
     const float secs = skirmish_map() ? 0.0f : gc_secs >= 0.0f ? gc_secs : space_ ? cfg_.space_capture_countdown : cfg_.land_capture_countdown;
-    captures_ = std::make_unique<tg::CapturePointSystem>(neutral, 4u, secs > 0.0f ? static_cast<uint32_t>(30.0f * secs + 0.5f) : 0u);
+    captures_ = std::make_unique<tg::CapturePointSystem>(neutral, 4u, secs > 0.0f ? static_cast<uint32_t>(frames_trunc(30.0f * secs + 0.5f)) : 0u);
     cashes_ = std::make_unique<tg::CashPointSystem>(30u);  // mcx4 t05
     cashes_->set_neutral_faction([this](int32_t o) { return bt_owner_neutral(o); });  // faction +0x108 Is_Neutral: no payout
     captures_->set_allied(allied);

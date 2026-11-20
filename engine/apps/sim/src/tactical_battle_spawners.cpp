@@ -2,6 +2,7 @@
 // tactical_battle.hpp "TRU1 t05 / t07". Serial code; synced draws in the order the original makes them, objects in
 // ascending id order.
 #include "tactical_battle_internal.hpp"
+#include "alamo/core/frames.hpp"
 
 namespace alamo::sim {
 
@@ -327,7 +328,7 @@ void TacticalBattle::sp_service(TacticalMode& mode, SimRng& rng, size_t index) {
             }
         }
     }
-    sp_spawners_[index].next = mf + static_cast<uint32_t>(30.0f * std::max(0.0f, types.get_float(t, "Spawned_Indigenous_Units_Delay_Seconds")));
+    sp_spawners_[index].next = mf + static_cast<uint32_t>(frames_trunc(30.0f * std::max(0.0f, types.get_float(t, "Spawned_Indigenous_Units_Delay_Seconds"))));
 }
 
 int32_t TacticalBattle::sp_corrupt_owner(objects::TypeIndex unit_type, int32_t owner) const {

@@ -1,8 +1,8 @@
-"""mcx5 t06: the limits conformance mods factions_80 and levels_10, and their G2 headless runs.
+"""mcx5 t06: the limits conformance mods factions_80 and levels_10, and their G2 headless runs; ref4 t03: huge_delay.
 
     python -I tools/conformance/limit_mods.py build --out DIR
     python -I tools/conformance/limit_mods.py run --exe ALAMO_HEADLESS [--exe2 ALAMO_HEADLESS] --out DIR
-                                                 [--mods factions_80,levels_10] [--runs space,land,galactic]
+                                                 [--mods factions_80,levels_10,huge_delay] [--runs space,land,galactic]
                                                  [--skirmish-ticks 3000] [--galactic-ticks 9000] [--game FOC_DIR]
 
 build writes the two mods under DIR/Mods:
@@ -12,6 +12,15 @@ build writes the two mods under DIR/Mods:
   Levels10    FoC's GameConstants.xml (from extracted/foc_data_text.zip; retail data is never committed) with
               MaximumPoliticalControl, MaximumStarbaseLevel, MaximumGroundbaseLevel and MaximumSpecialStructures set
               to 10.
+  HugeDelay   (ref4 t03) FoC's GameConstants.xml with the delays in HUGE_DELAY_TAGS set to 99999999999 seconds, so
+              seconds x 30 is far outside int32 at the sites that turn them into frame counts (the L1 bombing-run and
+              bombard services read theirs at the start of every land battle). The port converts them with the x86
+              range behaviour of alamo/core/frames.hpp (INT32_MIN), so the MSVC and clang CRC logs must match
+              (run --exe2); a plain float -> integer cast there is undefined (the class of the Age of Legends
+              Defense_Duration_In_Secs split, mod golden aol_space). The land_cp run (--runs land_cp: land skirmish
+              with --control-points) reaches the domination countdown, which starts at INT32_MIN here and must wrap
+              (dec_wrap); with a plain decrement, clang won on the first tick and MSVC never (review of ref4 t03).
+              The uint32 bombing-run sites happened to agree on both x64 compilers even before.
 run builds them into DIR, then runs alamo_headless on the FoC install (--game, default ALAMO_FOC_DATA) with
 MODPATH=<mod> for each mod: space skirmish (_MP_SPACE_GEONOSIS, AI Empire vs AI Rebel), land skirmish
 (_MP_LAND_UTAPAU), both --skirmish-ticks, and the galactic campaign (Heart of the Maw, economy, galactic AI, story,
@@ -36,10 +45,17 @@ ROOT = Path(__file__).resolve().parents[2]
 COMMITTED = ROOT / 'engine/apps/game/testdata/conformance/limits/Mods'
 FOC_TEXT = ROOT / 'extracted/foc_data_text.zip'
 LEVEL_TAGS = ('MaximumPoliticalControl', 'MaximumStarbaseLevel', 'MaximumGroundbaseLevel', 'MaximumSpecialStructures')
-MODS = {'factions_80': 'Factions80', 'levels_10': 'Levels10'}
+HUGE_DELAY_TAGS = ('Max_Bombing_Run_Interval_Seconds', 'Min_Bombing_Run_Interval_Seconds', 'Max_Bombard_Interval_Seconds',
+                   'Min_Bombard_Interval_Seconds', 'Space_Retreat_Allowed_Countdown_Seconds',
+                   'Land_Retreat_Allowed_Countdown_Seconds', 'Control_Point_Domination_Victory_Time_In_Secs')
+MODS = {'factions_80': 'Factions80', 'levels_10': 'Levels10', 'huge_delay': 'HugeDelay'}
 RUN_ARGS = {
     'space': ['--skirmish-ai', 'skirmish', '--map', '_MP_SPACE_GEONOSIS', '--ai', 'Empire,Rebel', '--fail-on-lua-errors'],
     'land': ['--skirmish-ai', 'skirmish', '--map', '_MP_LAND_UTAPAU', '--ai', 'Empire,Rebel', '--fail-on-lua-errors'],
+    # ref4 t03: the Capture Control Points game type, whose domination countdown starts from
+    # Control_Point_Domination_Victory_Time_In_Secs (huge_delay: INT32_MIN, then a wrapping decrement).
+    'land_cp': ['--skirmish-ai', 'skirmish', '--map', '_MP_LAND_UTAPAU', '--ai', 'Empire,Rebel', '--control-points',
+                '--fail-on-lua-errors'],
     'galactic': ['--economy', '--galactic-ai', '--story', '--scoring', '--object-scripts'],
 }
 
@@ -50,15 +66,17 @@ def build(out):
     if f80.exists():
         shutil.rmtree(f80)
     shutil.copytree(COMMITTED / 'Factions80', f80)
-    lv = mods / 'Levels10' / 'Data' / 'XML'
-    lv.mkdir(parents=True, exist_ok=True)
     with zipfile.ZipFile(FOC_TEXT) as z:
-        text = z.read('Data/XML/GAMECONSTANTS.XML').decode('latin-1')
-    for tag in LEVEL_TAGS:
-        text, n = re.subn(r'<' + tag + r'>[^<]*</' + tag + '>', f'<{tag}> 10 </{tag}>', text)
-        if n != 1:
-            raise SystemExit(f'limit_mods: {tag} found {n} times in FoC GameConstants.xml (expected 1)')
-    (lv / 'GameConstants.xml').write_bytes(text.encode('latin-1'))
+        stock = z.read('Data/XML/GAMECONSTANTS.XML').decode('latin-1')
+    for folder, tags, value in (('Levels10', LEVEL_TAGS, '10'), ('HugeDelay', HUGE_DELAY_TAGS, '99999999999')):
+        text = stock
+        for tag in tags:
+            text, n = re.subn(r'<' + tag + r'>[^<]*</' + tag + '>', f'<{tag}> {value} </{tag}>', text)
+            if n != 1:
+                raise SystemExit(f'limit_mods: {tag} found {n} times in FoC GameConstants.xml (expected 1)')
+        xml = mods / folder / 'Data' / 'XML'
+        xml.mkdir(parents=True, exist_ok=True)
+        (xml / 'GameConstants.xml').write_bytes(text.encode('latin-1'))
     return {name: mods / folder for name, folder in MODS.items()}
 
 
@@ -83,7 +101,7 @@ def main(argv):
     ap.add_argument('--exe')
     ap.add_argument('--exe2')
     ap.add_argument('--game', default=os.environ.get('ALAMO_FOC_DATA', ''))
-    ap.add_argument('--mods', default='factions_80,levels_10')
+    ap.add_argument('--mods', default='factions_80,levels_10,huge_delay')
     ap.add_argument('--runs', default='space,land,galactic')
     ap.add_argument('--skirmish-ticks', type=int, default=3000)
     ap.add_argument('--galactic-ticks', type=int, default=9000)

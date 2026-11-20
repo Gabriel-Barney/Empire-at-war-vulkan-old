@@ -210,7 +210,7 @@ inline constexpr float kDeathBlendSeconds = 0.5f;
 inline constexpr uint32_t kEngagedBaseFrames = 90;   // idle countdown = 90 + int [0, 30] (every service with a target)
 inline constexpr int32_t kEngagedRandomFrames = 30;
 
-// int(30 * seconds), 0 for negative / NaN.
+// int(30 * seconds) (alamo/core/frames.hpp frames_trunc: 2^31 out of int32 range), 0 for negative / NaN.
 uint64_t seconds_to_frames(float seconds);
 // Flinch type for a hit travelling along (dx, dy) on a victim facing (fx, fy) (2-D, z ignored). attacking: the
 // Attack_Flinch_* set. A zero direction or facing counts as a hit from the front.

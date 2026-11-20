@@ -1,5 +1,6 @@
 // movement_system: part 1 (bo3 t03 split; shared code in movement_system_internal.hpp).
 #include "movement_system_internal.hpp"
+#include "alamo/core/frames.hpp"
 
 namespace alamo::tactical::movement {
 
@@ -2208,7 +2209,7 @@ bool MovementSystem::mvm_contact(const Unit& a, const Unit& b) const {
     // Gates (MOVEMENT §5.3): garrison host either side; MovingVsMoving only between equal raised states
     if (pair_gated(a, b) || raised(a) != raised(b)) return false;
     const float fps_t = 30.0f * cfg_.constants.moving_vs_moving_look_ahead_time;
-    int32_t frames = static_cast<int32_t>(fps_t);
+    int32_t frames = frames_trunc(fps_t);
     if ((crushes(a, b) && scatters(b)) || (crushes(b, a) && scatters(a))) frames += 45;
     std::vector<V2> sa, sb;
     const auto track = [this](const Unit& u, std::vector<V2>& scratch) {

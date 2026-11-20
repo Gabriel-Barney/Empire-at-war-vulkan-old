@@ -308,7 +308,8 @@ if(_alamo_sim)
     set_tests_properties(alamo_headless_skirmish_ai_geonosis PROPERTIES TIMEOUT 1200)
     alamo_label_slow(alamo_headless_skirmish_ai_geonosis)
     # mcx5 t06: the limits conformance mods factions_80 (80 factions / players, the stock ones at 72..79) and levels_10
-    # (GameConstants maxima 10) at G2 (engine/apps/game/testdata/conformance/limits/README.md): space and land skirmish
+    # (GameConstants maxima 10) at G2 (engine/apps/game/testdata/conformance/limits/README.md), and ref4 t03's huge_delay
+    # (GameConstants delays of 99999999999 s, far outside int32 frames; MSVC and clang must agree): space and land skirmish
     # 3000 ticks, galactic 9000 ticks, one ctest entry per worker count (0 writes the CRC log, 4 compares). The mods are
     # written at configure time (levels_10's GameConstants comes from extracted/foc_data_text.zip); the runs skip without
     # ALAMO_FOC_DATA. MSVC / clang: tools/conformance/limit_mods.py run --exe <msvc> --exe2 <clang>.
@@ -321,12 +322,18 @@ if(_alamo_sim)
             "space|--skirmish-ai^skirmish^--map^_MP_SPACE_GEONOSIS^--ai^Empire,Rebel^--fail-on-lua-errors^--ticks^3000"
             "land|--skirmish-ai^skirmish^--map^_MP_LAND_UTAPAU^--ai^Empire,Rebel^--fail-on-lua-errors^--ticks^3000"
             "galactic|--economy^--galactic-ai^--story^--scoring^--object-scripts^--ticks^9000")
-        foreach(_lim_mod factions_80 levels_10)
+        foreach(_lim_mod factions_80 levels_10 huge_delay)
           set(_lim_dir ${_lim_out}/Mods/Factions80)
+          set(_lim_mod_runs ${_lim_runs})
           if(_lim_mod STREQUAL "levels_10")
             set(_lim_dir ${_lim_out}/Mods/Levels10)
+          elseif(_lim_mod STREQUAL "huge_delay")  # ref4 t03: delays of 99999999999 s (alamo/core/frames.hpp range rule)
+            set(_lim_dir ${_lim_out}/Mods/HugeDelay)
+            # Control points: the domination countdown arms near frame 3900 on Utapau and starts at INT32_MIN here.
+            list(APPEND _lim_mod_runs
+                 "land_cp|--skirmish-ai^skirmish^--map^_MP_LAND_UTAPAU^--ai^Empire,Rebel^--control-points^--fail-on-lua-errors^--ticks^6000")
           endif()
-          foreach(_lim_run IN LISTS _lim_runs)
+          foreach(_lim_run IN LISTS _lim_mod_runs)
             string(REPLACE "|" ";" _lim_kv "${_lim_run}")
             list(GET _lim_kv 0 _lim_kind)
             list(GET _lim_kv 1 _lim_args)

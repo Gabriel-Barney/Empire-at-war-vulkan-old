@@ -2,6 +2,7 @@
 // free stores (see galactic_ai.hpp). PotentialPlan: galactic_pp.cpp; build tasks + market: galactic_build.cpp.
 // [port] / [L] marks behaviour the RE docs do not fix.
 #include "alamo/ai/galactic_ai.hpp"
+#include "alamo/core/frames.hpp"
 #include "alamo/core/sim_crc.hpp"
 
 #include <cassert>
@@ -1175,7 +1176,7 @@ int32_t GalacticAiWorld::Impl::give_desire_bonus(int32_t script, int32_t player,
     b.goal_type = g;
     b.target = p == kInvalidPlanet ? -1 : static_cast<int32_t>(p);
     b.bonus = static_cast<float>(bonus);
-    b.deadline = now + static_cast<int32_t>(static_cast<float>(kAiFps) * static_cast<float>(seconds < 0.0 ? 0.0 : seconds));
+    b.deadline = now + frames_trunc(static_cast<float>(kAiFps) * static_cast<float>(seconds < 0.0 ? 0.0 : seconds));
     b.status = new_status(script, -1, StatusKind::DesireBonus);
     t->bonuses.push_back(b);
     return b.status;
@@ -1194,7 +1195,7 @@ void GalacticAiWorld::Impl::drain_world_requests(lua::LuaPlayerWorld& w, int32_t
         b.goal_type = g;
         b.target = p == kInvalidPlanet ? -1 : static_cast<int32_t>(p);
         b.bonus = static_cast<float>(r.bonus);
-        b.deadline = now + static_cast<int32_t>(static_cast<float>(kAiFps) * static_cast<float>(r.duration < 0.0 ? 0.0 : r.duration));
+        b.deadline = now + frames_trunc(static_cast<float>(kAiFps) * static_cast<float>(r.duration < 0.0 ? 0.0 : r.duration));
         t->bonuses.push_back(b);
     }
     w.desire_bonuses.clear();
@@ -2606,7 +2607,7 @@ std::unique_ptr<PlayerAi> GalacticAiWorld::Impl::make_player(int32_t player, con
     p.ctx.templates.init(w.defs, w.library, std::move(templates));
     p.ctx.budget.reset(w.defs.categories.size());
     GoalSystemConfig gcfg;
-    gcfg.sleep_frames = static_cast<int32_t>(static_cast<float>(kAiFps) * sleep);
+    gcfg.sleep_frames = frames_trunc(static_cast<float>(kAiFps) * sleep);
     gcfg.extra_goals_per_category = type->goal_set_extension_size;  // AIPlayerType +0xE8 (0x721b60) [H]
     gcfg.nominal_allowed_time = true;  // A2f t09: AllowedTime = 0x6c0450(PP) x tolerance (A2F_RE_READS §1.4 item 2) [H]
     gcfg.retail_cadence = true;        // a2m r2 (A2M_R2_RE_A §2.1): seeded first quota, slice ends at the quota
@@ -2745,7 +2746,7 @@ bool GalacticAiWorld::set_difficulty(int32_t player, int32_t difficulty) {
             p->contrast_mult = e.galactic_contrast;
             sleep = e.galactic_goal_sleep;
         }
-    p->ctx.goals.set_sleep_frames(static_cast<int32_t>(static_cast<float>(kAiFps) * sleep));
+    p->ctx.goals.set_sleep_frames(frames_trunc(static_cast<float>(kAiFps) * sleep));
     for (GalacticAiPlayerConfig& pc : w.cfg.players)
         if (pc.player == player) pc.difficulty = d;
     w.decide(player, "difficulty " + std::to_string(d));
