@@ -1037,7 +1037,7 @@
 {"GameConstants", "MaximumSpecialStructuresLand", 0x5, LedgerState::RetailUnused, "docs/re/MCX4_RE_ANSWERS_GALACTIC.md Q2.1 [H]", 1, 1},
 {"GameConstants", "MaximumSpecialStructuresSpace", 0x5, LedgerState::RetailUnused, "docs/re/MCX4_RE_ANSWERS_GALACTIC.md Q2.1 [H]", 1, 1},
 {"GameConstants", "MaximumFleetMovementDistance", 0x8, LedgerState::Consumed, "docs/re/A2K_T02_RE_ANSWERS.md", 3, 1},
-{"GameConstants", "ShipNameTextFiles", 0x36, LedgerState::Stored, "docs/re/MCX4_T14_RE_ANSWERS.md", 1, 1},
+{"GameConstants", "ShipNameTextFiles", 0x36, LedgerState::Consumed, "docs/re/MCX4_T14_RE_ANSWERS.md", 1, 1},
 {"GameConstants", "TradeRouteMovementFactor", 0x8, LedgerState::Verified, "docs/re/BKG3_RE_ANSWERS.md", 3, 1},
 {"GameConstants", "GMC_InitialPitchAngleDegrees", 0x8, LedgerState::Consumed, "docs/re/P1_CAMERA_INPUT.md", 1, 1},
 {"GameConstants", "GMC_ZoomedPitchAngleDegrees", 0x8, LedgerState::Consumed, "docs/re/P1_CAMERA_INPUT.md", 1, 1},

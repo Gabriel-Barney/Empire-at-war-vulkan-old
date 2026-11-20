@@ -265,6 +265,20 @@ bool GameSession::start(std::vector<std::string>* diag, const commands::CommandR
     cfg.object_scripts = d.files != nullptr;
     host_ = std::make_unique<sim::SimHost>(d.types, *js_, cfg);
     if (cfg.object_scripts) host_->set_object_script_files(d.files.get());
+    // ref5 t04 (MCX8_BINDINGS_OBJECTS §"Ship names"): GameConstants ShipNameTextFiles, read through the session's files;
+    // the attract demo names nothing.
+    if (const auto ship_lists = d.db.constants().get("ShipNameTextFiles"); ship_lists && d.files && !spec_.attract) {
+        auto names = std::make_unique<sim::ShipNames>();
+        const FileProvider* fp = d.files.get();
+        names->load(*ship_lists, d.types,
+                    [fp](const std::string& name) -> std::optional<std::vector<uint8_t>> {
+                        std::vector<uint8_t> bytes;
+                        if (!fp->read(name, bytes)) return std::nullopt;
+                        return bytes;
+                    },
+                    diag);
+        host_->set_ship_names(std::move(names));
+    }
     if (replay) host_->replay_from(replay);
     // q6 t06: the GameScoring script, re-created by every new session before the players and plots (GAME_SCORING.md).
     if (const auto scoring = d.db.constants().get("Game_Scoring_Script_Name"))

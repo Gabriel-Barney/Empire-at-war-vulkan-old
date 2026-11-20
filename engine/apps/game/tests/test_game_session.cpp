@@ -49,6 +49,7 @@
 #include "alamo/sim/save_session.hpp"
 #include "alamo/sim/tactical_battle.hpp"
 #include "alamo/vfs/vfs.hpp"
+#include "alamo/sim/ship_names.hpp"
 #include "alamo/test/support.hpp"
 #include "alamo/test/galactic_dummies.hpp"
 
@@ -328,6 +329,21 @@ bool live_run(const game::GameData& data, const game::SessionSpec& spec, command
     for (int i = 0; i < 5; ++i) s.tick();
     t += 5;
     CHECK(s.order_stats().attacks == 1);
+    // ref5 t04 (MCX8_BINDINGS_OBJECTS §"Ship names"): the shipped lists load (EaW GameData\Data through the fallback)
+    // and the battle's ships carry their galactic objects' names.
+    const sim::ShipNames* names = s.host().ship_names();
+    CHECK(!data.db.constants().get("ShipNameTextFiles") || (names && names->list_count() > 0));  // synthetic data: none
+    if (names) {
+        const objects::ObjectStore& tac = s.host().modes().top_tactical()->primary();
+        size_t named = 0, copied = 0;
+        for (const objects::ObjectHandle h : tac.all_objects()) {
+            if (names->name(tac.id(h)).empty()) continue;
+            ++named;
+            const objects::ObjectId p = tac.parent_mode_id(h);
+            if (p != objects::kNoObjectId && names->name(p) == names->name(tac.id(h))) ++copied;
+        }
+        std::printf("ship names: %zu lists, %zu named tactical objects, %zu with their galactic name\n", names->list_count(), named, copied);
+    }
     if (s.battle()) CHECK(s.battle()->combat().current_target(static_cast<tactical::combat::ObjectId>(mine[0])) ==
                           static_cast<tactical::combat::ObjectId>(enemy));
     CHECK(s.submit(commands::ev::select({mine[0]})).ok());
@@ -1601,6 +1617,64 @@ void attract_demo_real_test() {
     const CrcDivergence d = first_divergence(a, b);
     std::printf("attract controller (real data) replay (0 vs 2 workers): %s\n", d.message.c_str());
     CHECK(!d.diverged && a.records.size() == b.records.size());
+}
+
+// ref5 t04 (docs/re/MCX8_BINDINGS_OBJECTS.md §"Ship names") on real data (ALAMO_FOC_DATA, else skipped): the shipped
+// ShipNameTextFiles lists load (12 files, EaW GameData\Data through the fallback), the skirmish battle's capital ships get
+// quoted names, and the attract demo names nothing.
+void ship_names_real_test() {
+    const char* foc = std::getenv("ALAMO_FOC_DATA");
+    if (!foc || !*foc) {
+        std::printf("ship names (real data): ALAMO_FOC_DATA not set: skipped\n");
+        return;
+    }
+    game::GameData data;
+    std::string err;
+    if (!game::load_game_data(foc, {}, data, &err)) {
+        std::printf("ship names (real data): load failed: %s\n", err.c_str());
+        CHECK(false);
+        return;
+    }
+    game::SessionSpec spec;
+    spec.kind = game::SessionKind::Skirmish;
+    spec.seed = 1;
+    spec.skirmish.human_faction = "Rebel";
+    spec.skirmish.ai_faction = "Empire";
+    spec.skirmish_map = "Demo_Attract_Kamino";
+    spec.battle_max_frames = 600;
+    for (const bool attract : {false, true}) {
+        spec.attract = attract;
+        jobs::JobSystem js(jobs::JobSystemConfig{2});
+        game::GameSession s(data, js, spec);
+        CHECK(s.start());
+        if (!s.started()) continue;
+        if (attract) {
+            CHECK(s.host().ship_names() == nullptr);
+            continue;
+        }
+        const sim::ShipNames* names = s.host().ship_names();
+        CHECK(names && names->list_count() == 12);
+        uint64_t t = 0;
+        while (t < 600 && !s.battle()) {
+            s.tick();
+            ++t;
+        }
+        for (int i = 0; i < 3; ++i) s.tick();
+        const sim::TacticalMode* tm = s.host().modes().top_tactical();
+        CHECK(tm != nullptr);
+        if (!names || !tm) continue;
+        size_t named = 0;
+        std::string example;
+        for (const objects::ObjectHandle h : tm->primary().all_objects()) {
+            const std::string_view n = names->name(tm->primary().id(h));
+            if (n.empty()) continue;
+            CHECK(n.size() > 2 && n.front() == '"' && n.back() == '"');
+            if (named++ == 0) example = std::string(n) + " (" + std::string(tm->primary().object_types().raw().types().name[tm->primary().type(h)]) + ")";
+        }
+        std::printf("ship names (real data): %zu lists, %zu named objects in the battle, e.g. %s\n", names->list_count(), named,
+                    example.c_str());
+        CHECK(named > 0);
+    }
 }
 
 // The same camera on the real demo session (ALAMO_FOC_DATA, Demo_Attract_Kamino as the game starts it): a virtual camera (30 Hz,
@@ -3187,6 +3261,7 @@ int main() {
         attract_camera_pure_test();
         attract_rec_test();
         attract_camera_session_test();
+        ship_names_real_test();  // ref5 t04
         attract_demo_real_test();
         // N1 / t09: saved games and GameSession save / load.
         save_files_test();
