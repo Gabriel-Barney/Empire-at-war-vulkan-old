@@ -421,9 +421,10 @@ inline void test_landing_drop(bool timed, uint32_t destroy_at = 0) {
             // (the landing's Land / Takeoff clip); skm2 t02: version 17 (skirmish sides 2..7); cmb1 t01 / t06: version 18
             // (land formation records, the attack blocks' last-observed point); cmb2 t03: version 19 (the attack blocks'
             // plan retry frame); ref2 t01: version 20 (BOMBARD_DELAY, map hints, marker names, pad levels); aitac t05:
-            // version 21 (space reinforcement arrivals): 19, 20 and 22 are refused.
+            // version 21 (space reinforcement arrivals); tru2 t01: version 22 (INDIGENOUS_UNIT list and spawner homes):
+            // 20, 21 and 23 are refused.
             std::vector<uint8_t> stale(w.bytes().begin(), w.bytes().end());
-            for (const uint32_t v : {19u, 20u, 22u}) {
+            for (const uint32_t v : {20u, 21u, 23u}) {
                 for (size_t k = 0; k < 4; ++k) stale[k] = static_cast<uint8_t>(v >> (8 * k));
                 ByteReader rs(stale);
                 CHECK(!b->read_part(TacticalBattle::SavePart::State, rs));

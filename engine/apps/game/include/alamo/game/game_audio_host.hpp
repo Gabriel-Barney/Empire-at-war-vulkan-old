@@ -92,6 +92,42 @@ struct GameAudioStats {
     uint64_t ability_lines = 0;                                                    // mcx4 t13 batch R
 };
 
+// trl2 t08 (AUDIO.md §9.5, MCX4_T10_RE_ANSWERS §3): the fire sounds of shots held by Projectile_Appearance_Delay_Frames.
+// A new projectile whose spawn (appearance) frame lies after the current frame plays nothing at the shot: offer() keeps it
+// and returns true. take_due(now) hands every kept shot whose appearance frame is <= now to `fn` (fire order) and drops
+// it; the caller plays it at the projectile's position then, if the projectile remains.
+class DelayedFireSounds {
+public:
+    struct Shot {
+        uint32_t serial = 0, frame = 0;
+        tactical::combat::ObjectId shooter = tactical::combat::kNoObject;
+        int32_t hardpoint = -1;
+        // the sounds resolved at the shot (retail keeps the sound in the projectile's pack, +0xb0), so they play even
+        // when the shooter is gone by the appearance frame
+        std::string hardpoint_fire, shooter_fire;
+    };
+    bool offer(const Shot& s, uint32_t now) {
+        if (s.frame <= now) return false;
+        shots_.push_back(s);
+        return true;
+    }
+    template <class Fn>
+    void take_due(uint32_t now, Fn&& fn) {
+        size_t keep = 0;
+        for (size_t i = 0; i < shots_.size(); ++i) {
+            const Shot s = shots_[i];
+            if (s.frame > now) shots_[keep++] = s;
+            else fn(s);
+        }
+        shots_.resize(keep);
+    }
+    size_t size() const { return shots_.size(); }
+    void clear() { shots_.clear(); }
+
+private:
+    std::vector<Shot> shots_;
+};
+
 class GameAudioHost {
 public:
     GameAudioHost();
@@ -613,6 +649,7 @@ private:
     MusicScene scene_ = MusicScene::None;
     uint32_t last_serial_ = 0;
     bool have_serial_ = false;
+    DelayedFireSounds delayed_shots_;  // trl2 t08
     int32_t retreating_player_ = -1;  // TacticalBattle::retreating_player() at the last battle_tick
     bool modal_ = false, gui_only_ = false, attract_ = false;  // OI host: flags last applied
     bool app_active_ = true;                                   // aud2 t04: set_app_active

@@ -202,9 +202,15 @@ type CRC (4), live (5), max (6), remaining (7).
 
 ### 2.4 Can-spawn (0x593350), all must hold [H unless tagged]
 1. Not suppressed by the in-game cinematic camera (0x140b27a10 active and global 0x140b27d90 = 0) unless the
-   type has `Spawn_Garrison_On_Load`. [M names]
-2. Campaign battle on a planet with corruption type 5 (`Corruption_Bribery`): only owners whose faction has
-   `Benefits_From_Corruption` (+0x10B) spawn.
+   type has `Spawn_Garrison_On_Load`. [M names] **trl2 t06 (2026-11-20) [H read, M consequence]: dead in retail** -
+   0x140b27d90 is the controller's int +0x380; its only writers are the static initialiser (−1) and
+   `End_Cinematic_Mode` 0x2cbb80 (reset to −1); no other direct reference in `.text`, so "= 0" never holds and the
+   gate never suppresses. The port leaves it unset.
+2. Campaign battle on a planet with corruption type 5 (`Corruption_Bribery`): nothing spawns unless the faction of
+   **the battle planet's owner** (the planet object's +0x58, through the player list) has `Benefits_From_Corruption`
+   (+0x10B) — trl2 t06 re-read of 0x593350 [H]: the faction read is the planet owner's, not the spawner owner's, so
+   the gate holds every spawner of the battle alike. A planet without an owning player would read through a null
+   faction (not reachable in practice) [port: no block].
 3. The spawner's locomotor does not report the hyperspace byte (locomotor pack +0x260; hyperspace arrival /
    departure) [M meaning].
 4. Unit ability **DEFEND (1) is not active** (power to shields stops launches).
@@ -236,7 +242,8 @@ type CRC (4), live (5), max (6), remaining (7).
 **Spawn position (space)** (0x594dc0):
 - bay = synced `Get_Int(0, bays − 1)` (no draw with one bay); P0 = bay bone world position (hardpoint bone
   +0x2C, else +0x38; zero if the bone is missing); D = bay bone X axis × `Fighter_Bay_Flyout_Distance`;
-  P1 = P0 + D.
+  P1 = P0 + D. [port] trl2 t06: the attachment bone's bind-pose position and X axis from the model (HardpointDesc
+  attach frame) turned by the carrier's yaw; without a model frame the carrier's forward axis.
 - **Squadron type** (has `Squadron_Units`): each member created at **P0**, owned by player +0x60, facing
   along P0 → P1, with initial velocity = normalize(P1 − P0) × member max speed (locomotor velocity);
   then the squadron container is built (team helper 0x2a5a60, REMAINING_GAPS); flag +0x3A2 |= 2 (spawned);

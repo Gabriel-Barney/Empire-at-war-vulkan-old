@@ -735,7 +735,13 @@ hardpoint's `Allow_Opportunity_Fire_When_Idle` flag decides. The same cutoff is 
 Projectile fields (type): `Projectile_Ion_Stun_On_Detonation` +0xab, `_Duration` +0x4cc,
 `_Speed_Reduction_Percent` +0x4d0, `_Shot_Rate_Reduction_Percent` +0x4d4, `_Stack_Duration` +0xac,
 `_Radius` +0x4d8. Applied on a direct hit (from `Process_Hit` 0x4cb280) and, when the radius > 0, to victims in
-radius at detonation (0x4cbbb0). Per victim (0x62b920):
+radius at detonation (0x4cbbb0). **tru2 t04 reading (2026-11-20) [H]:** `_Radius` (+0x4d8) is only a path switch.
+The object hit (Process_Hit 0x4cb280) stuns the hit victim when it is exactly 0, and otherwise (≠ 0, negative included)
+runs 0x4cbbb0; the ground hit (0x4cb070) runs 0x4cbbb0 when it is > 0. 0x4cbbb0 gathers every object of each enemy
+player of the projectile's owner within `Projectile_Stun_Radius` (+0x1e90) of the projectile, and does nothing unless
+that radius is > 0 and `Projectile_Stun_Duration_Frames` (+0x1e8c) ≠ 0 (the land stun's fields; FoC's two area ion
+projectiles carry equal values: Krayt bombardment 300 / 300, Rebel bombardment 70 / 70). No other reader of +0x4d8 was
+found in the two detonation paths. Per victim (0x62b920):
 1. frames = int(FPS × duration); nothing if ≤ 0 or the victim's locomotor is busy.
 2. End frame (behaviour +0x30): without stacking, or when the current end is already past, end := now + frames;
    with `Stack_Duration`, end += frames and the modifier duration becomes (end − now + 1)/FPS.

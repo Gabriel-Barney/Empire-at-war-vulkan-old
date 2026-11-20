@@ -99,6 +99,10 @@ const char* kTypes = R"(<T>
   <Spawned_Indigenous_Units_Quantity>3</Spawned_Indigenous_Units_Quantity><Spawn_Indigenous_Units_In_Packs>No</Spawn_Indigenous_Units_In_Packs>
   <Spawn_Indigenous_Units_Radius>90.0f</Spawn_Indigenous_Units_Radius><Spawn_Indigenous_Units_Chance>0.5f</Spawn_Indigenous_Units_Chance>
   <Max_Distance_From_Spawner>150</Max_Distance_From_Spawner></GroundStructure>
+ <GroundInfantry Name="T_Ewok_Restless"><Variant_Of_Existing_Type>T_Ewok</Variant_Of_Existing_Type>
+  <Can_Indigenous_Unit_Stop>False</Can_Indigenous_Unit_Stop></GroundInfantry>
+ <GroundStructure Name="T_Restless_Hut"><Variant_Of_Existing_Type>T_Hut</Variant_Of_Existing_Type>
+  <Spawned_Indigenous_Units_Type>T_Ewok_Restless</Spawned_Indigenous_Units_Type><Spawn_Indigenous_Units_Chance>100.0</Spawn_Indigenous_Units_Chance></GroundStructure>
  <GroundStructure Name="T_Pack_Hut"><Variant_Of_Existing_Type>T_Hut</Variant_Of_Existing_Type>
   <Spawned_Indigenous_Units_Type>T_Ewok</Spawned_Indigenous_Units_Type><Spawn_Indigenous_Units_In_Packs>Yes</Spawn_Indigenous_Units_In_Packs>
   <Spawned_Indigenous_Pack_Type>T_Ewok_Pack</Spawned_Indigenous_Pack_Type><Spawn_Indigenous_Units_Chance>100.0</Spawn_Indigenous_Units_Chance></GroundStructure>
@@ -216,7 +220,7 @@ terrain::MapData space_map(bool with_marker) {
     return m;
 }
 
-terrain::MapData land_map(const Data& d, int32_t extra_huts = 0) {
+terrain::MapData land_map(const Data& d, int32_t extra_huts = 0, bool restless = false) {
     terrain::MapData m;
     m.terrain.present = true;
     m.terrain.width = m.terrain.height = 63;
@@ -235,6 +239,7 @@ terrain::MapData land_map(const Data& d, int32_t extra_huts = 0) {
     hut("T_Hut", 800.0f, 400.0f);
     hut("T_Pack_Hut", 600.0f, 900.0f);
     for (int32_t i = 0; i < extra_huts; ++i) hut("T_Hut", 200.0f + 100.0f * static_cast<float>(i), 1400.0f);
+    if (restless) hut("T_Restless_Hut", 1200.0f, 900.0f);  // tru2 t01
     return m;
 }
 
@@ -476,13 +481,19 @@ struct LandRun {
     // the Underworld, T_Ewok_B (Is_Indigenous_Unit_Corruptible False) by the hut's owner; variant 5: a Kidnapping planet,
     // every unit kept
     uint32_t corrupt_converted = 0, corrupt_kept = 0, corrupt_wrong = 0;
+    // tru2 t01 (INDIGENOUS_UNIT wander): move starts (a still unit that moves) of the active T_Hut's units and, variant 6,
+    // of the T_Restless_Hut's (Can_Indigenous_Unit_Stop False); the farthest any of them got from its hut (sampled each
+    // frame); unit-frames sampled per group
+    uint32_t moves = 0, restless_moves = 0, unit_frames = 0, restless_unit_frames = 0;
+    float max_home_dist = 0.0f;
 };
 
 // variant 0: the TRU1 run; 1: SET_SPAWN "T_HUT" 1.0 at frame 5 through the battle host's story reward (both T_Hut on;
 // "t_hut" matches nothing); 2: a SET_PLANET_SPAWN entry (battle planet, "T_HUT", 0.0) in the story gates before the battle
 // (both T_Hut off at the first scan); 3: eight T_Hut more, at frame 5 SET_SPAWN 0.3 (3 of 10 on, 7 off) then 1.0 (every one on:
 // N = on + off, STORY_REWARDS_GALACTIC §1.13), and SET_HEALTH / DISABLE_SPECIAL_STRUCTURE / FORCE_RETREAT through
-// CampaignBattles::story_tactical_reward. Variants stop at frame 20.
+// CampaignBattles::story_tactical_reward. Variants stop at frame 20; 4 and 5 at 400; 6 (tru2 t01: a T_Restless_Hut more) runs
+// as 0.
 LandRun run_land(const Data& d, int32_t workers, int variant = 0) {
     LandRun out;
     jobs::JobSystem js(jobs::JobSystemConfig{workers});
@@ -505,7 +516,7 @@ LandRun run_land(const Data& d, int32_t workers, int variant = 0) {
     CampaignBattles battles(host, d.crules, *d.catalog,
                             [dp, variant](const std::string& name, terrain::MapData& m) {
                                 if (name != "T_Land_B") return false;
-                                m = land_map(*dp, variant == 3 ? 8 : 0);
+                                m = land_map(*dp, variant == 3 ? 8 : 0, variant == 6);
                                 return true;
                             },
                             opt);
@@ -530,8 +541,11 @@ LandRun run_land(const Data& d, int32_t workers, int variant = 0) {
     CHECK(!uf.empty());
     if (!uf.empty()) CHECK(gs->move_fleet(1, uf[0], 1) == commands::RejectReason::None);
     bool invaded = false;
-    const uint32_t hut = type_of(d, "T_Hut"), pack_hut = type_of(d, "T_Pack_Hut");
+    const uint32_t hut = type_of(d, "T_Hut"), pack_hut = type_of(d, "T_Pack_Hut"), restless_hut = type_of(d, "T_Restless_Hut");
     std::vector<objects::ObjectId> pack_members;
+    std::vector<objects::ObjectId> seen_units;                 // near_hut is checked where a unit was placed
+    std::vector<std::pair<objects::ObjectId, Vec3>> last_pos;  // tru2 t01: the previous frame's position
+    std::vector<objects::ObjectId> moving_units;               // moved since the previous frame
     bool pack_killed = false;
     for (uint64_t t = 0; t < 4000; ++t) {
         host.tick_once();
@@ -610,7 +624,10 @@ LandRun run_land(const Data& d, int32_t workers, int variant = 0) {
                     for (const objects::ObjectId id : sp) {
                         const objects::ObjectHandle uh = st.find(id);
                         const Vec3 p = st.position(uh), q = st.position(sh);
-                        if (std::fabs(p.x - q.x) > 91.0f || std::fabs(p.y - q.y) > 91.0f) out.near_hut = false;
+                        if (std::find(seen_units.begin(), seen_units.end(), id) == seen_units.end()) {
+                            seen_units.push_back(id);
+                            if (std::fabs(p.x - q.x) > 91.0f || std::fabs(p.y - q.y) > 91.0f) out.near_hut = false;
+                        }
                         out.adopted = out.adopted || b->combat().has_unit(id);
                     }
                     if (f > 400 && f < 900 && sp.size() != 3 && out.kill_frame == 0) out.kept_three = false;
@@ -623,6 +640,29 @@ LandRun run_land(const Data& d, int32_t workers, int variant = 0) {
                         out.refill_frame = f;
                         out.refill_delay_ok = f - out.kill_frame <= 60 + 30 && f - out.kill_frame >= 1;
                     }
+                }
+            }
+            if ((ty == hut && b->indigenous_spawner_state(i) == 1) || ty == restless_hut) {  // tru2 t01
+                const bool restless = ty == restless_hut;
+                const Vec3 q = st.position(sh);
+                for (const objects::ObjectId id : sp) {
+                    const Vec3 p = st.position(st.find(id));
+                    out.max_home_dist = std::max(out.max_home_dist, std::sqrt((p.x - q.x) * (p.x - q.x) + (p.y - q.y) * (p.y - q.y)));
+                    ++(restless ? out.restless_unit_frames : out.unit_frames);
+                    auto lp = std::find_if(last_pos.begin(), last_pos.end(), [id](const auto& e) { return e.first == id; });
+                    if (lp == last_pos.end()) {
+                        last_pos.emplace_back(id, p);
+                        continue;
+                    }
+                    const bool moved = lp->second.x != p.x || lp->second.y != p.y;
+                    auto mv = std::find(moving_units.begin(), moving_units.end(), id);
+                    if (moved && mv == moving_units.end()) {
+                        moving_units.push_back(id);
+                        ++(restless ? out.restless_moves : out.moves);
+                    } else if (!moved && mv != moving_units.end()) {
+                        moving_units.erase(mv);
+                    }
+                    lp->second = p;
                 }
             }
             if (ty == pack_hut) {
@@ -642,7 +682,7 @@ LandRun run_land(const Data& d, int32_t workers, int variant = 0) {
         out.active = active;
         out.decided = decided;
         if (f == 1000) out.saved = state_round_trip(*b);  // live spawners with spawned units: save / load
-        if (f > 1600 || (variant != 0 && variant < 4 && f >= 20) || (variant >= 4 && f >= 400)) break;
+        if (f > 1600 || (variant != 0 && variant < 4 && f >= 20) || ((variant == 4 || variant == 5) && f >= 400)) break;
     }
     out.crc = host.crc_log();
     return out;
@@ -685,6 +725,21 @@ void test_land(const Data& d) {
     CHECK(c4.fought && c4.corrupt_converted + c4.corrupt_kept == 3 && c4.corrupt_converted > 0 && c4.corrupt_wrong == 0);
     const LandRun c5 = run_land(d, 0, 5);  // another corruption type: every unit stays with the hut's owner
     CHECK(c5.fought && c5.corrupt_kept == 3 && c5.corrupt_converted == 0 && c5.corrupt_wrong == 0);
+    // tru2 t01 (INDIGENOUS_UNIT wander 0x621d80, MCX4_T11_T12_RE_ANSWERS "Max_Distance_From_Spawner"): idle spawned units
+    // wander; the target is a point within Max_Distance_From_Spawner (150) of the hut, a step outside [50, 400] is redrawn
+    // inside it, so no unit gets farther than 150 + 400 from its hut. Can_Indigenous_Unit_Stop (default true) keeps the unit
+    // put on 90 % of the services: the restless type (False) starts many more moves per unit-frame.
+    const LandRun r6 = run_land(d, 0, 6), r6w = run_land(d, 4, 6);
+    const double stay_rate = a.unit_frames ? static_cast<double>(a.moves) * 1000.0 / a.unit_frames : 0.0;
+    const double restless_rate =
+        r6.restless_unit_frames ? static_cast<double>(r6.restless_moves) * 1000.0 / r6.restless_unit_frames : 0.0;
+    std::printf("  tru2 wander: T_Hut units %u move starts in %u unit-frames (%.2f per 1000), restless %u in %u (%.2f per 1000), "
+                "farthest from a hut %.1f\n",
+                a.moves, a.unit_frames, stay_rate, r6.restless_moves, r6.restless_unit_frames, restless_rate, r6.max_home_dist);
+    CHECK(a.moves > 0 && r6.restless_moves > 0);
+    CHECK(restless_rate > 3.0 * stay_rate);
+    CHECK(a.max_home_dist <= 550.0f && r6.max_home_dist <= 550.0f);
+    CHECK(!first_divergence(r6.crc, r6w.crc).diverged);
 }
 
 }  // namespace

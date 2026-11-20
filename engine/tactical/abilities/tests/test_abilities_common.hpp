@@ -866,6 +866,7 @@ void test_mcx4_spawn_ability();  // mcx4 t06 (test_mcx4.cpp)
 void test_mcx4_redirect_chance_modifiers();  // mcx4 t10 (test_mcx4.cpp)
 void test_mcx4_opportunity_flags();         // mcx4 t10 (test_mcx4.cpp)
 void test_mcx4_tac2();                      // mcx4 t23 and lane mcx4-tac2 rows (test_mcx4.cpp)
+void test_trl2_quake_gates_and_ramp();      // trl2 t03 (test_trl2.cpp)
 
 }  // namespace
 using namespace bo3split;

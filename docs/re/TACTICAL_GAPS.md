@@ -457,6 +457,28 @@ Damage_Percentage +0x188, Damage_Interval_In_Secs +0x18c) [H]
   _DAT_140b15ad8; state 2 does `Take_Damage(kind 3, D)` every interval, timed in float seconds from
   DAT_140b0a320 / FPS [M: mode or global frame — **probe**: does it pause with the game]. Remove → animation
   0x27. Telekinesis starts recharge 13; Earthquake's recharge is not started here.
+- **trl2 t03 reading (2026-11-20, decompile + disassembly) [H]:**
+  - The ramp constants are GameConstants fields: the GameConstants object is the static at 0x140b15800 (its
+    constructor 0x2c4370 runs from the static initialiser 0x173e0), so _DAT_140b15ad8 = GC +0x2d8
+    `Earthquake_Transition_Time` (FoC 2.0 s) and _DAT_140b15ac4 = GC +0x2c4 `Telekinesis_Transition_Time` (FoC 0.75 s)
+    (MCX4_T15_RE_ANSWERS "GameConstants.Earthquake_Transition_Time family"). No direct write exists: the XML loader
+    fills the object.
+  - Begin (state := 1, ramp := 0, start := now as frame / FPS in float); 0x633700 (Telekinesis: 0x63fa30) stores D
+    (+0x40), the interval (+0x44) and the source (+0x4c); the next damage time (+0x48) starts at 0.
+  - State 1 service: ramp = (now − start) / Transition_Time; at ramp ≥ 1 — or not a number: the `maxss` / `comiss`
+    pair takes the ≥ 1 branch for a NaN — state := 2, start := now, and **when D > 0 the next damage time := now**.
+    No damage in state 1, so the first hit lands on the first state-2 service (the service after the ramp ends), then
+    every Damage_Interval_In_Secs (next += interval) while next ≤ now and next ≠ 0.
+  - "Already affected" = the target behaviour's state is 1 or 2 (0x6331b0 / 0x63efa0; state 3, the ramp-out after a
+    removal, is free). Earthquake tests it in its accepts 0x6f7510 (also: enemy, filter, EARTHQUAKE_TARGET slot byte
+    obj +0x363 ≠ −1, the hero-clash pairing, a model); Telekinesis's accepts 0x6fe400 needs TELEKINESIS_TARGET (obj
+    +0x362 ≠ −1; else a "rejected as a target" warning), not dead (+0x3a0 & 0x40), type +0x41, enemy, filter, pairing,
+    model, and its apply 0x6fe1b0 tests "already affected" after the remove-previous step.
+  - Port (trl2 t03): the state lives on the user's effect (an applied effect of the class aimed at the target is
+    "affected"; Earthquake's accepts counts the user's own effect too - a repeat order on the target it already quakes is
+    refused and the quake goes on - while Telekinesis's apply test runs after the own effect was removed); the
+    target-behaviour service runs at the
+    special's update (every FPS / 10 frames) [port].
 
 **2.3.5 Grenade_Attack** (Activation_Min/Max +0x1a0/+0x1a4, Requires_Direct_Player_Command +0x1a8,
 Grenade_Type +0x1b0, Toss_Anim +0x1c0, Spawn_Frame +0x1c4, Spawn_Bone +0x1c8, Explode_Timer +0x1e8) [H]

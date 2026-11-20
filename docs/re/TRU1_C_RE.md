@@ -59,7 +59,12 @@ Reads the home / leash written above: an idle indigenous unit (no target, idle a
 synced float(−D, D), y = home.y + synced float(−√(D² − dx²) [M], +…), z = home.z when it has a home and D > 0;
 otherwise a random point of the map rectangle (2 synced floats); the step length is clamped to a min / max pair
 (globals 0x140a442c8.., another pair while burning) by one more synced float; then a group move there. Burning units
-take `Burning_Damage_Per_Second` / FPS per service. **Not ported by TRU1** (separate behaviour; filed as a task).
+take `Burning_Damage_Per_Second` / FPS per service. Full rule: MCX4_T11_T12_RE_ANSWERS "Max_Distance_From_Spawner".
+**Ported by tru2 t01** (`tactical_battle_spawners.cpp` sp_wander): interval 30, 1 while burning (vf +0x28 0x621840;
+the base service sets the next due frame from the interval cached at the previous service, then re-caches it); the
+stay-put draw counts only once the frame is past that cached interval; the step draw is float(min, max) [H, the
+disassembly keeps xmm1 = min, xmm2 = max at the call]; the map rectangle is centre ± half extent (mode vf +0x1f8).
+[port] the coordinator-busy test 0x39b000 is not modelled; without the animation service a unit counts as idle.
 
 ### 1.5 Indigenous_Spawn_Destruction_Reward (GameConstants +0x11e34, vanilla 500) [H]
 Read only by the **tactical sandbox objectives** builder (0x32bd10, strings `Sandbox_Objective_*`): for a spawner

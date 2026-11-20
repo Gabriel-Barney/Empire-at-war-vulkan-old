@@ -57,6 +57,10 @@ struct AbilityConfig {
     float force_ability_disable_time = 0.0f;    // Force_Ability_Disable_Time
     float ion_storm_shield_disable_time = 5.0f; // Ion_Storm_Shield_Disable_Time
     int32_t max_remote_bombs_per_player = 20;   // mcx4: Max_Remote_Bombs_Per_Player (GC +0x12138; FoC 20)
+    // trl2 t03 (TACTICAL_GAPS §2.3.4): the EARTHQUAKE_TARGET / TELEKINESIS_TARGET ramp-in time in seconds, GameConstants
+    // Earthquake_Transition_Time (+0x2d8, FoC 2.0) / Telekinesis_Transition_Time (+0x2c4, FoC 0.75); no damage before it.
+    float earthquake_transition_time = 2.0f;
+    float telekinesis_transition_time = 0.75f;
     float stealth_detection_time = 0.0f;        // GameConstants +0x12094 (not in vanilla XML) [L]
     float stealth_fire_fade = 0.3f;             // break on firing (0x3a06a0)
     uint64_t corvette_category = 0;             // CategoryMask bit of "Corvette" (tractor x2 rule)
@@ -75,7 +79,7 @@ enum class AbilityEventKind : uint8_t {
     // split_from_formation, else the adopt) when no other share of the counter (script, landing) holds the unit.
     Immobilised,
     Released,        // ... 1 -> 0
-    InterdictOn,     // story event Interdict_Activated
+    InterdictOn,     // radar map event Interdict_Activated (TRU1_GRAVITY_FIELD 1.2; radar entry: rad1 t06)
     InterdictOff,
     StealthOn,
     StealthBroken,
@@ -123,7 +127,7 @@ enum class AbilityEventKind : uint8_t {
     // owner's position) with `target` as the goal object, keeping the attack order.
     Lured,
     // TRU1 t03 (docs/re/TRU1_GRAVITY_FIELD.md), presentation only: generator `id` came under base power (`value` 1: the
-    // local player's SFXEvent_HUD_Gravity_Control_Generator_On, story event Interdict_Activated) or lost it (`value` 0:
+    // local player's SFXEvent_HUD_Gravity_Control_Generator_On, radar map event Interdict_Activated) or lost it (`value` 0:
     // ..._Off); unit `target` entered (`value` 1: attach the generator type's Gravity_Control_Field_Effect) or left (`value`
     // 0: remove it) generator `id`'s field.
     GravityFieldPower,
@@ -287,6 +291,9 @@ struct AbilityHost {
     // Battlefield_Modifier list +0x1f8 (TacticalBattle::fog_add_reveal_multiplier / fog_remove_reveal_modifier).
     std::function<void(int32_t player, int32_t category, uint64_t source, float multiplier)> fow_reveal_add;
     std::function<void(int32_t player, uint64_t source)> fow_reveal_remove;
+    // tru3 t05 (Garrison_Upgrade_Ability apply 0x6ffc60 / remove 0x6ffe30): append `types` (list order) to `player`'s
+    // skirmish garrison list (add), or erase the first occurrence of each (remove). Unset: no effect.
+    std::function<void(int32_t player, const std::vector<int32_t>& types, bool add)> garrison_types;
     // ---- REMAINING_GAPS §5 ----
     // §5.1: the first occupant of `vehicle`'s container list (obj +0xf8 -> list +0x20), kNoObject when empty. Unset:
     // no occupant (EJECT_VEHICLE_THIEF does nothing).
@@ -1079,6 +1086,10 @@ private:
     int32_t anim_type_of(std::string_view anim_name) const;
     bool anim_busy(const Obj& o, uint32_t frame) const;  // 0x39a350
     bool class_state(const Obj& o, SpecialClass cls) const;  // a special of that class is applied on the owner
+    // trl2 t03 (TACTICAL_GAPS §2.3.4): `target`'s EARTHQUAKE_TARGET / TELEKINESIS_TARGET state is 1 or 2 - an applied
+    // effect of that class from any user other than `except` holds it (Earthquake's accepts: kNoObject; Telekinesis's
+    // apply: the user, whose own effect was removed just before).
+    bool target_affected(ObjectId target, SpecialClass cls, ObjectId except) const;
     bool class_has(const Obj& o, SpecialClass cls) const;    // the owner lists a special of that class
     bool locked(const Obj& o) const;  // 0x39ad40: this system's share or the host's (script lock, forced move)
     // mcx4 (§15): the member that acts for Hack / Repair (Team_Member_With_Ability), else `o` itself.

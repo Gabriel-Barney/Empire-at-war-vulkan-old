@@ -534,6 +534,8 @@ struct SubObjectsTag {
     X(Float, Spawned_Indigenous_Units_Delay_Seconds, 0.0f)                                                            \
     X(Bool, Is_Indigenous_Unit_Corruptible, true)                                                                     \
     X(Float, Spawn_Indigenous_Units_Radius, 0.0f)                                                                     \
+    X(Bool, Can_Indigenous_Unit_Stop, true)                                                                           \
+    X(Int, Max_Distance_From_Spawner, 0)                                                                              \
     X(Bool, Control_Point_Domination_Condition_Relevant, false)                                                       \
     X(Bool, HQ_Win_Condition_Relevant, false)                                                                         \
     X(Float, Collision_Box_Modifier, 0.0f)                                                                            \

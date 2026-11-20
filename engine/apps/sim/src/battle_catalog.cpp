@@ -99,6 +99,8 @@ BattleCatalog::BattleCatalog(const objects::GameObjectTypes& types, const FilePr
         force_ability_disable_ = constants->get_float("Force_Ability_Disable_Time", force_ability_disable_);
         ion_storm_shield_disable_ = constants->get_float("Ion_Storm_Shield_Disable_Time", ion_storm_shield_disable_);
         max_remote_bombs_ = constants->get_int("Max_Remote_Bombs_Per_Player", max_remote_bombs_);  // mcx4 (PLACE_REMOTE_BOMB gate)
+        earthquake_transition_ = constants->get_float("Earthquake_Transition_Time", earthquake_transition_);    // trl2 t03
+        telekinesis_transition_ = constants->get_float("Telekinesis_Transition_Time", telekinesis_transition_);
         tc::apply_game_constants(combat_config_, *constants);  // OI tactical (TACTICAL_GAPS 3.2 / 3.3)
         movement_constants_ = tactical::movement::MovementConstants::from_game_constants(*constants);  // mcx4 t11
         walk_animation_cutoff_ = constants->get_float("WalkAnimationCutoff", walk_animation_cutoff_);
@@ -170,6 +172,8 @@ ta::AbilityConfig BattleCatalog::ability_config(bool space, bool skirmish) const
     c.force_ability_disable_time = force_ability_disable_;
     c.ion_storm_shield_disable_time = ion_storm_shield_disable_;
     c.max_remote_bombs_per_player = max_remote_bombs_;
+    c.earthquake_transition_time = earthquake_transition_;
+    c.telekinesis_transition_time = telekinesis_transition_;
     const auto corvette = types_->enums().get(objects::EnumId::GameObjectCategory).lookup("Corvette");
     c.corvette_category = corvette ? static_cast<uint64_t>(*corvette) : 0;
     return c;
@@ -832,6 +836,9 @@ void BattleCatalog::s9_unit_fields(uint32_t t, tc::UnitDesc& u, BuildState& s) c
     }
     u.tactical_respawn_secs = ty.get(t, objects::tags::Tactical_Respawn_Time_In_Secs);
     u.stunnable = ty.has_behavior(t, objects::BehaviorSet::Union, objects::behavior_type_id("STUNNABLE"));
+    // trl2 t03 (TACTICAL_GAPS §2.3.4): Earthquake_Attack / Force_Telekinesis targets need these behaviours
+    u.earthquake_target = ty.has_behavior(t, objects::BehaviorSet::Union, objects::behavior_type_id("EARTHQUAKE_TARGET"));
+    u.telekinesis_target = ty.has_behavior(t, objects::BehaviorSet::Union, objects::behavior_type_id("TELEKINESIS_TARGET"));
     u.shield_requires_base_power = ty.get(t, objects::tags::Shield_Requires_Base_Power);
     {  // tru1 t02 (docs/re/TRU1_A_RE_ANSWERS.md A1 / A2): base shields; Shield_Requires_Base_Power defaults to true here
         static const objects::BehaviorTypeId kBaseShield = objects::behavior_type_id("BASE_SHIELD");

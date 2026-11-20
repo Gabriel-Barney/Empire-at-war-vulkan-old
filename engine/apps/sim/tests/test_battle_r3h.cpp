@@ -259,6 +259,115 @@ void test_force_sight_no_end() {
 #endif
 }
 
+// ---- tru3 t06: Pad_Sell at a skirmish start without pre-build ----
+#ifdef ALAMO_SIM_HAVE_ANIM
+std::string pad_patch(std::string t) {
+    // An Empire / Underworld build pad whose Multiplayer row lists an under-construction turret (the pre-placed type the
+    // port reads), the turret it builds.
+    const size_t end = t.find("</S10>");
+    if (end != std::string::npos)
+        t.insert(end, " <SpecialStructure Name=\"R3H_Pad\"><Behavior>TACTICAL_BUILD_OBJECTS</Behavior>"
+                      "<Tactical_Buildable_Objects_Multiplayer>Empire, R3H_UC_Turret, Underworld, R3H_UC_Turret</Tactical_Buildable_Objects_Multiplayer>"
+                      "</SpecialStructure>\n"
+                      " <SpecialStructure Name=\"R3H_UC_Turret\"><Behavior>TACTICAL_UNDER_CONSTRUCTION</Behavior><Tactical_Health>100</Tactical_Health>"
+                      "<Tactical_Build_Time_Seconds>2</Tactical_Build_Time_Seconds><Tactical_Buildable_Constructed>R3H_Turret</Tactical_Buildable_Constructed>"
+                      "</SpecialStructure>\n"
+                      " <SpecialStructure Name=\"R3H_Turret\"><Tactical_Health>500</Tactical_Health></SpecialStructure>\n");
+    return t;
+}
+
+// One land skirmish map battle with the pre-built-bases option `prebuild`: the pad's AnimWorld row type and contents
+// after the first tick.
+void pad_start(bool prebuild, int32_t& type, bool& built) {
+    type = -2;
+    built = false;
+#ifdef ALAMO_SIM_HAVE_ANIM
+    g_temp_prefix = prebuild ? "alamo_sim_r3h_tests_pad_pre" : "alamo_sim_r3h_tests_pad";
+    g_types_patch = pad_patch;
+    auto d = make_data();
+    g_types_patch = nullptr;
+    const objects::TypeIndex pad_t = d->types.resolve_name("R3H_Pad");
+    CHECK(pad_t != objects::kNone);
+    const auto model = synth_model("R3H_PAD", {{anim::kAnimIdle, 30u}, {116, 20u}, {117, 20u}});
+    SimAnimation animation(d->types, *d->files);
+    animation.set_model(pad_t, objects::ModeKind::Land, model.get());
+    jobs::JobSystem js(jobs::JobSystemConfig{0});
+    SimConfig cfg;
+    cfg.seed = 2026;
+    cfg.players = 4;
+    SimHost host(d->types, js, cfg);
+    galactic::GalacticSim* gs = host.start_galactic(d->rules, make_setup(*d, true));
+    CHECK(gs != nullptr);
+    if (!gs) return;
+    CampaignBattleOptions opt;
+    opt.battle.max_frames = 0;
+    opt.battle.skirmish = true;
+    opt.battle.skirmish_map = true;
+    opt.battle.skirmish_options.set = true;
+    opt.battle.skirmish_options.prebuilt_base = prebuild;
+    animation.attach(host, true);
+    opt.animation = &animation;
+    const uint32_t empire = d->rules.find_faction("Empire");
+    CampaignBattles battles(host, d->crules, *d->catalog,
+                            [empire](const std::string& name, terrain::MapData& m) {
+                                if (name != "S10_Land_B") return false;
+                                m = land_map();
+                                terrain::ObjectPlacement p;
+                                p.type_crc = name_crc("R3H_Pad");
+                                p.owner = empire;  // the faction index -> player 0, a skirmish slot
+                                p.position[0] = -1500.0f;
+                                p.position[1] = -1500.0f;
+                                m.objects.push_back(p);
+                                return true;
+                            },
+                            opt);
+    CHECK(battles.attach(nullptr));
+    galactic::BattleRequest r;
+    r.info.kind = galactic::ConflictKind::Land;
+    r.info.planet = 1;
+    r.info.defender = 0;
+    r.info.attacker = 1;
+    r.info.map = r.map = "S10_Land_B";
+    CHECK(battles.start_map_battle(std::move(r)));
+    for (uint64_t t = 0; t < 60; ++t) {
+        host.tick_once();
+        const TacticalBattle* b = battles.battle();
+        TacticalMode* tm = host.tactical();
+        if (!b || !tm || b->frame() < 1) continue;
+        const objects::ObjectStore& st = tm->primary();
+        const anim::AnimWorld* w = animation.find_world(*tm);
+        for (const objects::ObjectHandle h : st.all_objects())
+            if (st.active(h) && st.type(h) == pad_t) {
+                type = w && w->contains(st.id(h)) ? w->current_type(st.id(h)) : -1;
+                built = b->pad_contents(st.id(h)) != objects::kNoObjectId;
+            }
+        break;
+    }
+    animation.detach(host);
+#else
+    (void)prebuild;
+#endif
+}
+#endif
+
+void test_pad_sell_start() {
+    // tru3 t06 (SKIRMISH_SETUP 2.6, pad vf13 0x42df80 [H]): a skirmish whose pre-built-bases option is off plays Pad_Sell
+    // (117) on each empty pad that holds a pre-placed type, from the first tick (the pad's row exists from then on); with
+    // the option on the pad builds its structure instead and plays nothing.
+#ifdef ALAMO_SIM_HAVE_ANIM
+    int32_t type = 0;
+    bool built = false;
+    pad_start(false, type, built);
+    std::printf("  tru3 pad at a start without pre-build: row type %d, built %d\n", type, built ? 1 : 0);
+    CHECK(type == 117 && !built);
+    pad_start(true, type, built);
+    std::printf("  tru3 pad at a pre-built start: row type %d, built %d\n", type, built ? 1 : 0);
+    CHECK(type != 117 && built);
+#else
+    std::printf("  tru3 pad sell: skipped (no engine/anim)\n");
+#endif
+}
+
 }  // namespace
 
 int main() {
@@ -268,6 +377,7 @@ int main() {
     test_force_sight_death(true);
     test_force_sight_death(false);
     test_force_sight_no_end();
+    test_pad_sell_start();  // tru3 t06
     if (g_fail) {
         std::printf("alamo_sim_r3h_tests: %d failure(s)\n", g_fail);
         return 1;

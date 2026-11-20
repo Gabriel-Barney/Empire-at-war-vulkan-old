@@ -290,6 +290,7 @@ private:
     float engines_disabled_speed_ = 0.4f;
     float nebula_ability_disable_ = 5.0f, force_ability_disable_ = 0.0f, ion_storm_shield_disable_ = 5.0f;
     int32_t max_remote_bombs_ = 20;  // mcx4: GameConstants Max_Remote_Bombs_Per_Player (FoC 20)
+    float earthquake_transition_ = 2.0f, telekinesis_transition_ = 0.75f;  // trl2 t03: GameConstants *_Transition_Time
     tactical::combat::CombatConfig combat_config_;  // OI tactical
     TransitionConstants transition_;                // battle host
     const FileProvider* files_ = nullptr;           // battle host: model reads

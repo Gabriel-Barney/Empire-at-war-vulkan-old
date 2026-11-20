@@ -836,10 +836,13 @@ void GameAudioHost::battle_tick(const sim::TacticalBattle& battle, const objects
     }
     // aud1 t04 (AUDIO.md §9.5): a new projectile's fire sound, 3D at the projectile's spawn position (fog test applies):
     // a hardpoint shot plays the hardpoint type's Fire_SFXEvent, else the parent's SFXEvent_Fire; a unit weapon shot the
-    // shooter's SFXEvent_Fire. [port] Projectile_Appearance_Delay_Frames is not modelled (the projectile appears at once),
-    // so the sound plays with the shot. The hardpoint comes from this tick's ShotEvents by projectile serial.
+    // shooter's SFXEvent_Fire. The hardpoint comes from this tick's ShotEvents by projectile serial.
+    // trl2 t08 (MCX4_T10_RE_ANSWERS §3, TACTICAL_COMBAT §2 step 11): a shot held by Projectile_Appearance_Delay_Frames
+    // (spawn_frame after this frame) plays nothing at the shot; its sound plays on the frame equal to its appearance
+    // frame, at the projectile's position then (still the muzzle: it is held there), if the projectile and shooter remain.
     uint32_t max_serial = last_serial_;
     const auto shots = cs.shot_events();
+    const uint32_t now = battle.frame();
     for (size_t i = 0; i < cs.projectile_count(); ++i) {
         const tactical::combat::ProjectileView v = cs.projectile(i);
         if (have_serial_ && v.serial <= last_serial_) continue;
@@ -852,12 +855,23 @@ void GameAudioHost::battle_tick(const sim::TacticalBattle& battle, const objects
                     hp = e.hardpoint;
                     break;
                 }
-            weapon_fired(static_cast<uint64_t>(v.shooter), hardpoint_fire_sfx(types, cs, hp), sounds(types, store.type(sh)).fire, v3(v.pos));
+            const std::string& hp_fire = hardpoint_fire_sfx(types, cs, hp);
+            const std::string_view own_fire = sounds(types, store.type(sh)).fire;
+            if (!delayed_shots_.offer({v.serial, v.spawn_frame, v.shooter, hp, hp_fire, std::string(own_fire)}, now))
+                weapon_fired(static_cast<uint64_t>(v.shooter), hp_fire, own_fire, v3(v.pos));
         }
         combat = combat || v.owner == local_player;
     }
     last_serial_ = max_serial;
     have_serial_ = true;
+    delayed_shots_.take_due(now, [&](const DelayedFireSounds::Shot& d) {
+        for (size_t i = 0; i < cs.projectile_count(); ++i) {
+            const tactical::combat::ProjectileView v = cs.projectile(i);
+            if (v.serial != d.serial) continue;
+            if (v.alive) weapon_fired(static_cast<uint64_t>(d.shooter), d.hardpoint_fire, d.shooter_fire, v3(v.pos));
+            break;
+        }
+    });
     tsw_audio(tsw_cues(battle.special_weapon_events(), store), types);  // refix t06
     cue_lines(battle, store, types, local_player);                         // mcx4 t13 batch A
     object_events(battle, store, types, player_factions_);  // aud1 t05: abilities, hyperspace, shields (AUDIO.md §9.6)
@@ -1648,6 +1662,7 @@ std::string_view GameAudioHost::production_tag(Production kind) {
 // Shared by both builds (cu9 t09): the same bookkeeping with and without engine/audio (nothing reads it without).
 void GameAudioHost::battle_reset() {
     last_serial_ = 0;
+    delayed_shots_.clear();   // trl2 t08
     hardpoint_fire_.clear();  // aud1 t04: hardpoint indices are per battle
     victory_seen_ = false;    // mcx4 t13 batch D
     last_retreater_ = -1;     // mcx4 t13 batch E

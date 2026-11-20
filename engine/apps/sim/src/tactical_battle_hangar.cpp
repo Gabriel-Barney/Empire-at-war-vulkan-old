@@ -212,8 +212,29 @@ void TacticalBattle::hg_setup(TacticalMode& mode) {
         facing = tactical::Vec3{f.x, f.y, 0.0f};
         return true;
     };
-    // [port] unset: cinematic camera (no tactical cinematics gate yet), corruption / planet restrictions, bay bones (the
-    // hangar's fallback: the hardpoint attachment offset with the carrier facing).
+    // trl2 t06 (STATION_HANGARS_SOUND §2.4 items 2 and 7, read 2026-11-20 from 0x593350 / 0x594600):
+    // item 2 - a campaign battle at a planet whose corruption is Corruption_Bribery (5): nothing launches unless the
+    // battle planet's OWNER's faction has Benefits_From_Corruption (the planet object's +0x58, not the spawner's owner).
+    // [port] a planet without an owning player does not block (retail reads through a null faction there).
+    // item 7 - a spawn type the battle planet's type restricts (Planet_Restricted_Unit_Categories / _Types, 0x373490).
+    // Item 1 (cinematic camera) stays unset: its second condition, controller int +0x380 (0x140b27d90) == 0, never holds
+    // in retail (static init -1, End_Cinematic_Mode 0x2cbb80 resets it to -1, no other writer), so the gate is dead.
+    // Bay bones: the hangar's own bind-pose frame of the attachment bone (HardpointDesc attach_x), no host hook.
+    if (!cfg_.skirmish && req_.info.planet < galaxy_->planets().size() && galaxy_->planets()[req_.info.planet].is_planet) {
+        const PlanetIndex bp = req_.info.planet;
+        h.corruption_blocked = [this, bp](int32_t) {
+            constexpr int8_t kCorruptionBribery = 5;
+            const galactic::PlanetState& ps = galaxy_->planets()[bp];
+            if (ps.corruption != kCorruptionBribery) return false;
+            const int32_t po = ps.owner;
+            if (po < 0 || static_cast<size_t>(po) >= galaxy_->players().size()) return false;
+            const uint32_t f = galaxy_->players()[static_cast<size_t>(po)].faction;
+            return f < galaxy_->rules().factions.size() && !galaxy_->rules().factions[f].benefits_from_corruption;
+        };
+        h.planet_restricted = [this, bp](int32_t type) {
+            return type >= 0 && galaxy_->planet_restricts(bp, static_cast<uint32_t>(type));
+        };
+    }
     hangars_->set_host(std::move(h));
     contents_ = std::make_unique<th::ContentsSystem>();
     production_ = std::make_unique<th::TacticalProduction>();

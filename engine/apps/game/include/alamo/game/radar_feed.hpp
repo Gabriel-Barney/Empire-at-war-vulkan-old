@@ -14,8 +14,9 @@
 //                          Transition_Radar_Event has no traced call site (not played).
 //   RadarFeed::blips       Lua Add_Radar_Blip(object, name) / Remove_Radar_Blip(name): persistent named markers that follow
 //                          the object ([port] visual: gold ring; the original's blip art is not traced).
-// Not fed (no spec): the base-under-attack radar ping (AUDIO.md names no event), Interdict_Activated (a story event; the
-// same-named RadarMap event has no traced trigger), Default_Beacon_Placement (multiplayer beacons, out of scope),
+// Not fed (no spec): the base-under-attack radar ping (AUDIO.md names no event), Interdict_Activated (tru3 t01: a radar
+// map event at the generator, raised by its power-on 0x61c700 -> 0x355ca0; rad1 t06), Default_Beacon_Placement
+// (multiplayer beacons, out of scope),
 // Galactic_Build_Complete_Planet_Ping (galactic radar).
 // Needs engine/ui's alamo_ui_hud (ALAMO_GAME_HAVE_CONTROLS).
 #pragma once

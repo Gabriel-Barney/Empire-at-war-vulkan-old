@@ -31,7 +31,8 @@ target_link_libraries(alamo_tactical_abilities PUBLIC alamo_tactical_combat alam
 # CRC log is identical for 1/4/N threads and matches the golden on every compiler, a per-tick
 # allocation count, FoC data checks (ALAMO_FOC_DATA). Regenerate: --write-golden <file>.
 add_executable(alamo_tactical_abilities_tests tests/test_abilities.cpp tests/test_abilities_part1.cpp tests/test_abilities_part2.cpp
-               tests/test_tru1.cpp tests/test_r3h.cpp tests/test_mcx4.cpp)
+               tests/test_tru1.cpp tests/test_r3h.cpp tests/test_mcx4.cpp
+               tests/test_trl2.cpp)  # trl2 t03
 target_link_libraries(alamo_tactical_abilities_tests PRIVATE alamo_tactical_abilities alamo_data alamo_test_support)
 # FoC data through the VFS (Data\XML lives in Config.meg in the shipped game).
 if(TARGET alamo_vfs)

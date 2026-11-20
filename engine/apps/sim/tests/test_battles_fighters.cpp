@@ -1237,6 +1237,54 @@ void test_hangar_streams() {
     g_temp_prefix = prefix;
 }
 
+namespace {
+// trl2 t06: the distinct S10_TIE ids seen in the first 1500 ticks of the carrier battle at planet 1 (S10_B, owned by the
+// Empire player 0), with the battle planet's corruption set to `corruption` (-1 none) before the battle.
+uint32_t carrier_fighters_seen(int8_t corruption) {
+    FighterBattle fb;
+    std::vector<objects::ObjectId> seen;
+    if (!start_fighter_battle(fb, false, true)) return 0;
+    if (corruption >= 0) fb.gs->set_corruption(1, corruption, 1);
+    const auto tie = static_cast<objects::TypeIndex>(type_of(*fb.d, "S10_TIE"));
+    for (uint64_t t = 0; t < 1500; ++t) {
+        fb.host->tick_once();
+        TacticalMode* tm = fb.host->tactical();
+        if (!fb.battles->battle() || !tm) continue;
+        const objects::ObjectStore& st = tm->primary();
+        for (const objects::ObjectHandle h : st.all_objects())
+            if (st.alive(h) && st.type(h) == tie && std::find(seen.begin(), seen.end(), st.id(h)) == seen.end()) seen.push_back(st.id(h));
+    }
+    return static_cast<uint32_t>(seen.size());
+}
+std::string restrict_tie_squadron_on_b(std::string t) {
+    const std::string a = "<Space_Tactical_Map>S10_Space_B</Space_Tactical_Map>";
+    const size_t p = t.find(a);
+    if (p != std::string::npos) t.insert(p, "<Planet_Restricted_Unit_Types>S10_TIE_Squadron</Planet_Restricted_Unit_Types>");
+    return t;
+}
+}  // namespace
+
+// trl2 t06 (STATION_HANGARS_SOUND §2.4 items 2 and 7): a campaign space battle at a Corruption_Bribery planet whose owner's
+// faction (Empire) lacks Benefits_From_Corruption launches nothing; another corruption type does not stop launches; a
+// battle planet whose type restricts the spawn type launches nothing of it.
+void test_hangar_planet_gates() {
+    const uint32_t base = carrier_fighters_seen(-1);
+    const uint32_t bribery = carrier_fighters_seen(5);  // Corruption_Bribery
+    const uint32_t piracy = carrier_fighters_seen(1);   // Corruption_Piracy
+    const char* prefix = g_temp_prefix;
+    g_types_patch = restrict_tie_squadron_on_b;
+    g_temp_prefix = "alamo_sim_battle_fighter_tests_trl2";
+    const uint32_t restricted = carrier_fighters_seen(-1);
+    g_types_patch = nullptr;
+    g_temp_prefix = prefix;
+    std::printf("  hangar planet gates: S10_TIE seen - plain %u, bribery %u, piracy %u, restricted %u\n", base, bribery, piracy,
+                restricted);
+    CHECK(base > 3);         // the fleet's own squadron (3 fighters) plus launches
+    CHECK(bribery == 3);     // the owner's faction does not benefit: no launch
+    CHECK(piracy == base);   // only Corruption_Bribery gates
+    CHECK(restricted == 3);  // S10_B restricts S10_TIE_Squadron
+}
+
 int main(int argc, char** argv) {
     std::setvbuf(stdout, nullptr, _IONBF, 0);
     g_temp_prefix = "alamo_sim_battle_fighter_tests";
@@ -1262,6 +1310,8 @@ int main(int argc, char** argv) {
     test_compose_squadron_union();
     std::printf("SP5 t03: hangar services on counter-based streams (flag off / on, worker counts)\n");
     test_hangar_streams();
+    std::printf("trl2 t06: hangar gates of the battle planet (Corruption_Bribery owner faction, Planet_Restricted_Unit_Types)\n");
+    test_hangar_planet_gates();
     if (g_fail) {
         std::printf("%d check(s) FAILED\n", g_fail);
         return 1;

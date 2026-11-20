@@ -43,8 +43,10 @@ Every 60 frames (base service 0x4c2f70 reschedules first):
 3. When the new state differs from pack +0x48:
    - the **local** player's faction plays `SFXEvent_HUD_Gravity_Control_Generator_On` (faction +0x24b8) or `..._Off`
      (+0x24c8) when set (presentation);
-   - turning on raises the story event **`Interdict_Activated`** with the generator as its object; turning off calls a
-     story-side cleanup (0x358630) only when obj +0x200 is set [M: what that is].
+   - turning on raises the **radar map event `Interdict_Activated`** at the generator (0x355ca0 on the radar map object
+     0x140b2bcb0: the name upper-cased and CRC'd, the event placed at the object); turning off, when the generator holds
+     a radar event (obj +0x200), removes that event (0x358630) [H, tru3 t01 2026-11-20, read from `re_reference/`]. It is
+     not a Lua story event: nothing else consumes it. Its radar entry is roadmap rad1 t06.
 4. Pack +0x48 := the new state.
 
 ### 1.3 Apply 0x61bec0 [H]
@@ -109,8 +111,8 @@ within R, else one whose bounding box overlaps the circle. Stops at the result c
   by `TacticalBattle` to `AbilitySystem::in_gravity_field`), so every Deploy(true) route is refused: DEPLOY on,
   auto-deploy, damage deploy, hover lowering.
 - [port] Only in land modes (`AbilityConfig::mode`).
-- [port] Presentation leaves as events: `GravityFieldPower` (HUD SFX on / off, `Interdict_Activated`) and `GravitySlow`
-  (effect on / off per unit); nothing consumes them yet (backlog).
+- [port] Presentation leaves as events: `GravityFieldPower` (HUD SFX on / off, the `Interdict_Activated` radar event:
+  rad1 t06) and `GravitySlow` (effect on / off per unit).
 
 ---
 

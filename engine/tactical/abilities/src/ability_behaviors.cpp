@@ -421,8 +421,8 @@ void AbilitySystem::modifier_entries(const Obj& src, uint32_t desc, const Specia
                                                         e.crc == s.name_crc;
                                              }),
                               player_entries_.end());
-        if (s.base_shield_upgrade)  // tru1 t02: every entry of this source
-            for (int32_t p = 0; p < np; ++p) combat_->remove_base_shield_upgrade(p, src.id);
+        if (s.base_shield_upgrade)  // tru1 t02 / tru3 t03: every entry of this source and this ability
+            for (int32_t p = 0; p < np; ++p) combat_->remove_base_shield_upgrade(p, src.id, s.name_crc);
         gate_entries(src, s, false);
         return;
     }
@@ -440,7 +440,7 @@ void AbilitySystem::modifier_entries(const Obj& src, uint32_t desc, const Specia
         put(PlayerList::StealthDuration, s.stealth_duration_multiplier);
         put(PlayerList::CaptureTime, s.capture_time_multiplier);
         put(PlayerList::ReinforcementDeploy, s.reinforcement_deploy_multiplier);
-        if (s.base_shield_upgrade) combat_->add_base_shield_upgrade(p, src.id);  // tru1 t02 (A1 step 6)
+        if (s.base_shield_upgrade) combat_->add_base_shield_upgrade(p, src.id, s.name_crc);  // tru1 t02 / tru3 t03 (A1 step 6)
     }
     gate_entries(src, s, true);
 }
@@ -573,6 +573,12 @@ void AbilitySystem::aura_on(Obj& src, SpecialState& sp, uint32_t frame) {
                 if (p == src.owner || (s.apply_to_all_allies && friendly(src.owner, p)))
                     source_entries_.push_back(SourceEntry{p, src.id, s.name_crc, 2});
             break;
+        case SpecialClass::GarrisonUpgrade:  // tru3 t05: apply 0x6ffc60, only in a skirmish (0x6ffdb0)
+            // The owner, or with Apply_To_All_Allies (+0x178) every player allied with it (0x2823e0, relation 0), index order.
+            if (cfg_.skirmish && host_.garrison_types)
+                for (int32_t p = 0; p < np; ++p)
+                    if (p == src.owner || (s.apply_to_all_allies && friendly(src.owner, p))) host_.garrison_types(p, s.garrison_types, true);
+            break;
         case SpecialClass::RetreatPrevention:  // the interdict list of the enemy players [M]
             for (int32_t p = 0; p < np; ++p)
                 if (enemy(src.owner, p)) source_entries_.push_back(SourceEntry{p, src.id, s.name_crc, 1});
@@ -620,6 +626,11 @@ void AbilitySystem::aura_off(Obj& src, SpecialState& sp, uint32_t frame) {
         case SpecialClass::EnableAbility:
             for (int32_t p = 0; p < np; ++p)
                 if (p == src.owner || (s.apply_to_all_allies && friendly(src.owner, p))) set_special_enabled(p, s.ability_name_crc, false);
+            break;
+        case SpecialClass::GarrisonUpgrade:  // tru3 t05: remove 0x6ffe30, the same players (allies as they are now)
+            if (cfg_.skirmish && host_.garrison_types)
+                for (int32_t p = 0; p < np; ++p)
+                    if (p == src.owner || (s.apply_to_all_allies && friendly(src.owner, p))) host_.garrison_types(p, s.garrison_types, false);
             break;
         default: break;
     }

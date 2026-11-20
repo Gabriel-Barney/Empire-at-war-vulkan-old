@@ -170,6 +170,8 @@ void parse_class_fields(const data::XmlNode& e, SpecialAbilityDesc& s, const Abi
     s.capture_time_multiplier = f_or(e, "Capture_Point_Time_Multiplier", 1.0f);
     s.reinforcement_deploy_multiplier = f_or(e, "Reinforcement_Deploy_Time_Multiplier", 1.0f);
     s.base_shield_upgrade = b_or(e, "Base_Shield_Upgrade", false);  // tru1 t02
+    for (const int32_t t : type_list(list_text(e, "Additional_Garrison_Units"), r))  // tru3 t05
+        if (t >= 0) s.garrison_types.push_back(t);
     s.enable_bombing_runs = b_or(e, "Enable_Bombing_Runs", false);
     s.enable_bombardment = b_or(e, "Enable_Planetary_Bombardment", false);
     s.enable_special_weapons = b_or(e, "Enable_Special_Weapons", false);

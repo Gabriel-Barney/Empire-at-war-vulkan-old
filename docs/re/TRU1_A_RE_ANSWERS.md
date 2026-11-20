@@ -69,7 +69,11 @@ Ghidra names set in this pass: `BaseShield_Evaluate_State` 0x56bb00, `BaseShield
 6. **upgraded** = the AND-fold of the player's +0x1b0 bool list (empty → false), then raised to player +0x1c0 when
    player +0x1c2 is set, and lowered to player +0x1c1 when player +0x1c3 is set. The list is filled by
    `Battlefield_Modifier_Ability` entries with `Base_Shield_Upgrade` (ability +0x190): apply 0x6f02c0, remove
-   0x6f13b0 (0x1403a5920 erases the entry), for every player the modifier reaches [H]. Shipped holders:
+   0x6f13b0 (0x1403a5920 erases the entry), for every player the modifier reaches [H]. tru3 t03 (2026-11-20, read
+   from `re_reference/`) [H]: an entry's key is (source object id and type, CRC of the ability's name), built by
+   0x48e1e0 -> 0x4ad4c0 and compared by 0x4ad550; the apply appends one node per call without a duplicate test, the
+   remove 0x3a5920 deletes every node whose key matches (same source and same ability), so two `Base_Shield_Upgrade`
+   abilities on one object are two keys. Every value is true, so "upgraded" = the list is not empty. Shipped holders:
    `EL_/RL_Enhanced_Base_Shield_Upgrade[_NoPre]`. Writers of the +0x1c0..+0x1c3 clamps were not traced [M: none
    in shipped content].
 7. When **on** is false: off stamp (pack +0x10) := current frame. This happens at **every** service whose result
@@ -245,9 +249,12 @@ re-created). The end-of-frame state is the same as staying inside; only presenta
 - **Who it applies to [H]:** only AFFECTED_BY_SHIELD units, only while they straddle the wall of an active shield
   that is hostile to them. Not the shield's own side, not units standing well inside, not units without the
   behaviour.
-- Edge case [M]: if a shield is removed from the global list (death) while a unit is stored in it and other
-  hostile active shields remain, the id stays until the shield's signal 0x28 arrives or the unit's next leave
-  path; the factor applies until then.
+- Edge case [H] (tru3 t04, 2026-11-20, read from `re_reference/`): the generator's death (`Die` 0x39bdb0) takes it off
+  the global list at once (0x5031a0). When other hostile shields remain (all active and not straddled) or only friendly
+  ones, no leave path runs, so the id stays until the shield's signal 0x28: `Remove_Object` 0x2a6a00 raises it first
+  thing when the store flush at the end of the frame's object update unlinks the dead object (OBJECT_RUNTIME §2.2),
+  and the handler 0x5026e0 leaves (0x502ce0). The factor applies until then. An empty list leaves at the next
+  service (step 1).
 - No synced draw.
 
 ---
@@ -401,5 +408,6 @@ Type fields: `Projectile_Ground_Detonation_Particle` tag +0x1a48 (resolved objec
 - Whether the dome mesh test is two-sided (enemy shots fired from **inside** stopped on the way out) [L]; a probe
   would settle it (an enemy AT-ST inside an active shield firing at a target outside).
 - Exact dome shape of the small shield and the mobile shield models (A5) [L: same proportions].
-- Meaning of signal 0x28 (taken as "object removed") and of 0x39ade0 ("is moving") [M].
+- Meaning of 0x39ade0 ("is moving") [M]. Signal 0x28 is "object removed" [H, tru3 t04: raised only by
+  `Remove_Object` 0x2a6a00].
 - Writers of the upgrade clamps (player +0x1c0..+0x1c3) not traced [M: none in shipped content].

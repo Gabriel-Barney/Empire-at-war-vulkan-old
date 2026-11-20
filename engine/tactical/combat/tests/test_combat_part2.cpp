@@ -540,7 +540,7 @@ void test_save_rejects() {
     bad = saved;
     put_u32_at(bad, 0, 99);
     CHECK(rejected(bad));
-    for (const uint32_t v : {17u, 19u}) {  // only the current version (18: r1b t10 hardpoint turret pose) is read (cu6)
+    for (const uint32_t v : {18u, 20u}) {  // only the current version (19: tru3 t03 Base_Shield_Upgrade key) is read (cu6)
         bad = saved;
         put_u32_at(bad, 0, v);
         CHECK(rejected(bad));
@@ -754,7 +754,7 @@ void test_stickiness_override() {
         std::vector<size_t> at;
         for (size_t i = 0; i + 4 <= img.size(); ++i)
             if (std::memcmp(&img[i], pat, 4) == 0) at.push_back(i);
-        CHECK(at.size() == 1u && img[0] == 18u);
+        CHECK(at.size() == 1u && img[0] == 19u);
         if (at.size() == 1u) {
             img.erase(img.begin() + static_cast<std::ptrdiff_t>(at[0]), img.begin() + static_cast<std::ptrdiff_t>(at[0]) + 4);
             img[0] = 13;

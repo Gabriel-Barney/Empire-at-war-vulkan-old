@@ -257,6 +257,93 @@ void test_base_shield_straddle() {
     CHECK_F(s.w.sys->take_damage(r, s.w.frame).after_multipliers, 100.0f);
 }
 
+void test_base_shield_upgrade_keys() {
+    // tru3 t03 (TRU1_A A1 step 6, apply 0x6f02c0 / remove 0x6f13b0 [H]): entries are keyed by (source object, ability
+    // name CRC); the add appends without a duplicate test and the remove deletes every entry with its key. Two
+    // Base_Shield_Upgrade abilities on one source are two keys: removing one leaves the player upgraded.
+    ShieldWorld s;
+    const uint32_t a = name_crc("EL_Enhanced_Base_Shield_Upgrade"), b = name_crc("EL_Enhanced_Base_Shield_Upgrade_NoPre");
+    s.w.sys->add_base_shield_upgrade(0, 77, a);
+    s.w.sys->add_base_shield_upgrade(0, 77, b);
+    CHECK(s.w.sys->base_shield_upgraded(0) && !s.w.sys->base_shield_upgraded(1));
+    s.w.sys->remove_base_shield_upgrade(0, 77, a);
+    CHECK(s.w.sys->base_shield_upgraded(0));  // the other ability of the same source is still there
+    s.w.sys->remove_base_shield_upgrade(1, 77, b);  // another player's key: nothing
+    CHECK(s.w.sys->base_shield_upgraded(0));
+    s.w.sys->remove_base_shield_upgrade(0, 77, b);
+    CHECK(!s.w.sys->base_shield_upgraded(0));
+    // the same key twice: one remove deletes both
+    s.w.sys->add_base_shield_upgrade(0, 77, a);
+    s.w.sys->add_base_shield_upgrade(0, 77, a);
+    s.w.sys->add_base_shield_upgrade(0, 78, a);
+    s.w.sys->remove_base_shield_upgrade(0, 77, a);
+    CHECK(s.w.sys->base_shield_upgraded(0));  // source 78's entry stays
+    s.w.sys->remove_base_shield_upgrade(0, 78, a);
+    CHECK(!s.w.sys->base_shield_upgraded(0));
+    // the key round-trips through a save (combat save 19) and is hashed
+    s.w.sys->add_base_shield_upgrade(0, 77, a);
+    ShieldWorld t;
+    t.w.sys->add_base_shield_upgrade(0, 77, b);
+    StateHasher hs, ht;
+    s.w.sys->hash_extended(hs);
+    t.w.sys->hash_extended(ht);
+    CHECK(hs.digest() != ht.digest());
+    const std::vector<uint8_t> saved = combat_bytes(*s.w.sys);
+    ShieldWorld u;
+    ByteReader rd(saved);
+    CHECK(u.w.sys->read(rd));
+    u.w.sys->remove_base_shield_upgrade(0, 77, b);
+    CHECK(u.w.sys->base_shield_upgraded(0));
+    u.w.sys->remove_base_shield_upgrade(0, 77, a);
+    CHECK(!u.w.sys->base_shield_upgraded(0));
+}
+
+void test_base_shield_straddle_until_removal() {
+    // tru3 t04 (TRU1_A A3 edge case, A2 service 0x502f70, Remove_Object 0x2a6a00 signal 0x28 [H]): the generator's death
+    // takes it off the shield list at once, but a unit that stores it keeps x Vulnerability until the object is
+    // removed (the flush at the end of the tick), as long as the list is not empty and nothing else clears it.
+    // `kill_at` < 0: no kill, returns the tick (after the launch) whose damage events hit unit 2; else gen 1 dies just
+    // before that tick and the return is the hit's damage (in the tick that also removes gen 1).
+    auto run = [](bool second_shield, int kill_at) -> float {
+        ShieldWorld s;
+        s.w.add(2, s.walker, 1, Vec3{500, 0, 0});  // on gen 1's wall
+        if (second_shield) s.w.add(7, s.gen, 0, Vec3{5000, 0, 0});  // another active hostile shield, far away
+        s.ticks(1);
+        CHECK(s.on() && s.in(2));
+        ProjectileLaunch l;  // player 0 shoots unit 2 from close by
+        l.shooter = 1;
+        l.owner = 0;
+        l.projectile = s.slug;
+        l.from = Vec3{700, 0, 0};
+        l.target = 2;
+        l.damage = 50.0f;
+        CHECK(s.w.sys->launch_projectile(l, s.w.frame));
+        for (int i = 0; i < 30; ++i) {
+            if (i == kill_at) {
+                DamageRequest k;  // gen 1 dies between ticks; it is removed at the next tick's flush
+                k.victim = 1;
+                k.amount = 5000.0f;
+                k.kind = kKindDebug;
+                s.w.sys->take_damage(k, s.w.frame);
+                CHECK(s.in(2));
+            }
+            s.w.tick();
+            for (const DamageEvent& e : s.w.sys->damage_events())
+                if (e.victim == 2) {
+                    if (kill_at < 0) return static_cast<float>(i);
+                    CHECK(!s.in(2) && s.w.sys->base_shield_straddled(2) == kNoObject);  // signal 0x28 at the removal
+                    return e.after_multipliers;
+                }
+        }
+        CHECK(false);
+        return -1.0f;
+    };
+    const int hit_tick = static_cast<int>(run(true, -1));
+    CHECK(hit_tick >= 0 && run(false, -1) == static_cast<float>(hit_tick));
+    CHECK_F(run(true, hit_tick), 100.0f);  // stored until the removal: x 2 in the tick of the removal
+    CHECK_F(run(false, hit_tick), 50.0f);  // empty shield list: the service leaves at once (step 1)
+}
+
 void test_base_shield_dome() {
     // tru1 t02 (A4 / A5): an enemy shot with Projectile_Does_Shield_Damage that crosses an active dome stops there and
     // hits the generator with the dome's name: Take_Damage step 15a absorbs everything (absorbed particle, the generator
@@ -422,6 +509,8 @@ void test_ion_stun_water_kill() {
     shot.ion_stun = true;
     shot.ion_stun_radius = 100.0f;
     shot.ion_stun_duration = 5.0f;
+    shot.stun_radius = 100.0f;  // trl2 t04: the area stun's radius and gate
+    shot.stun_frames = 300;
     {
         DetonationWorld d(GameMode::Land, shot, Vec3{142, 30, 0}, true);
         bool found = false;
@@ -442,6 +531,35 @@ void test_ion_stun_water_kill() {
     }
 }
 
+void test_ion_stun_area_gate() {
+    // trl2 t04 (ABILITIES_HARDPOINTS §4.4, 0x4cb070 / 0x4cb280 / 0x4cbbb0): Projectile_Ion_Stun_Radius only switches the
+    // area stun on; its victims are gathered with Projectile_Stun_Radius, and only when Projectile_Stun_Duration_Frames
+    // != 0. Unit 2 sits about 30 from the ground hit.
+    auto stunned = [](float ion_radius, float stun_radius, int32_t stun_frames) {
+        ProjectileDesc shot;
+        shot.max_speed = 10.0f;
+        shot.damage = 10.0f;
+        shot.max_flight_distance = 200.0f;
+        shot.ion_stun = true;
+        shot.ion_stun_duration = 5.0f;
+        shot.ion_stun_radius = ion_radius;
+        shot.stun_radius = stun_radius;
+        shot.stun_frames = stun_frames;
+        DetonationWorld d(GameMode::Land, shot, Vec3{142, 30, 0});
+        bool found = false;
+        (void)d.run(found);
+        CHECK(found);
+        return d.w.sys->ion_stunned(2, d.w.frame);
+    };
+    CHECK(stunned(100.0f, 100.0f, 300));
+    CHECK(stunned(10.0f, 100.0f, 300));   // the gather radius is Projectile_Stun_Radius, not the ion radius
+    CHECK(!stunned(100.0f, 10.0f, 300));
+    CHECK(!stunned(100.0f, 100.0f, 0));   // no Projectile_Stun_Duration_Frames: no area stun
+    CHECK(!stunned(100.0f, 0.0f, 300));   // no Projectile_Stun_Radius
+    CHECK(!stunned(0.0f, 100.0f, 300));   // a ground hit with no ion radius: no area stun (and no hit victim)
+    CHECK(!stunned(-1.0f, 100.0f, 300));  // a ground hit needs the ion radius > 0
+}
+
 void test_ground_detonation_particle() {
     // tru1 t08 (TRU1_A_RE_ANSWERS B1): a land ground / water hit (0x4cb070) reports `ground` - the host spawns
     // Projectile_Ground_Detonation_Particle; every expiry (distance, lifetime, path end, commanded) does not - the
@@ -457,6 +575,8 @@ void test_ground_detonation_particle() {
     shot.ion_stun = true;
     shot.ion_stun_radius = 100.0f;
     shot.ion_stun_duration = 5.0f;
+    shot.stun_radius = 100.0f;  // trl2 t04: the area stun's radius and gate
+    shot.stun_frames = 300;
     {  // land: the ramp at x 140..160 stops it at x 144 -> ground; ion stun yes, weaken no
         DetonationWorld d(GameMode::Land, shot, Vec3{142, 30, 0});
         bool found = false;

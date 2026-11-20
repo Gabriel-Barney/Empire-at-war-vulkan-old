@@ -137,10 +137,10 @@ Notes on the longer rows:
      (synced float(cx − hx, cx + hx), synced float(cy − hy, cy + hy), 0) over the map rectangle.
   5. d = |point − position| (3-D). The step bounds are the .data constants (max, min) = (400, 50), or (150, 60) while
      burning (0x140a442c8 / cc, 0x140a442d0 / d4, read from the exe). If d > max or d < min: t = one more synced float
-     [M: between the two bounds; the arguments were not kept by the decompiler], point = position + (point −
-     position) × t / d.
+     between the two bounds, float(min, max) [H, tru2 t01 2026-11-20: the disassembly keeps xmm1 = min, xmm2 = max at
+     the call], point = position + (point − position) × t / d.
   6. A group move there (0x6218f0).
-  Not ported: the port has no INDIGENOUS_UNIT service (TRU1_C_RE §1.4).
+  Ported by tru2 t01 (TRU1_C_RE §1.4).
 
 **Round 3 (lane mcx4-tac2, 2026-11-18, ReVa scripts; method in `MCX4_T10_RE_ANSWERS.md` §1 Round 3).**
 - **`Formation_Priority` (+0x654) [H]: never read, no effect in retail.**

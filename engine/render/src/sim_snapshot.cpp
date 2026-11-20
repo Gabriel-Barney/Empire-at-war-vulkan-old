@@ -689,7 +689,14 @@ void apply_battle_projectiles(const sim::TacticalBattle& battle, SimSnapshot& sn
     for (size_t i = 0; i < descs.size(); ++i) types[i] = table.find(descs[i].name);
     std::vector<tactical::combat::ProjectileView> views;
     views.reserve(combat.projectile_count());
-    for (size_t i = 0; i < combat.projectile_count(); ++i) views.push_back(combat.projectile(i));
+    // trl2 t08 (MCX4_T10_RE_ANSWERS §3): a shot held by Projectile_Appearance_Delay_Frames (spawn frame after this one) is
+    // hidden until it appears (0x39d6a0 on the new projectile [M: hides the model]).
+    const uint32_t now = battle.frame();
+    for (size_t i = 0; i < combat.projectile_count(); ++i) {
+        const tactical::combat::ProjectileView v = combat.projectile(i);
+        if (v.spawn_frame > now) continue;
+        views.push_back(v);
+    }
     set_snapshot_projectiles(snap, views, types);
 }
 

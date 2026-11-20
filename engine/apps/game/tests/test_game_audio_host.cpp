@@ -156,6 +156,28 @@ void test_missing_credits_event() {
     CHECK(cur(h) == "Gal_Rebel" && h.stats().movie_restores == 0);
 }
 
+// trl2 t08 (AUDIO.md §9.5, MCX4_T10_RE_ANSWERS §3): a shot held by Projectile_Appearance_Delay_Frames plays no fire sound at
+// the shot; its sound is handed out on the frame it appears (or at the first battle tick after it), in fire order.
+void test_delayed_fire_sounds() {
+    DelayedFireSounds q;
+    CHECK(!q.offer({1, 100, 7, -1, "", ""}, 100));  // appears this frame: plays now
+    CHECK(q.offer({2, 104, 7, 3, "", ""}, 100));    // 4-frame delay
+    CHECK(q.offer({3, 102, 8, -1, "", ""}, 100));
+    std::vector<uint32_t> got;
+    auto take = [&](uint32_t now) { q.take_due(now, [&](const DelayedFireSounds::Shot& s) { got.push_back(s.serial); }); };
+    take(101);
+    CHECK(got.empty() && q.size() == 2);
+    take(102);
+    CHECK(got.size() == 1 && got[0] == 3 && q.size() == 1);
+    take(110);  // a late tick still hands it out once
+    CHECK(got.size() == 2 && got[1] == 2 && q.size() == 0);
+    take(111);
+    CHECK(got.size() == 2);
+    q.offer({4, 200, 9, -1, "", ""}, 150);
+    q.clear();  // battle_reset
+    CHECK(q.size() == 0);
+}
+
 // aud4 b0286 (AUDIO.md §2.3): the first super-weapon report of a battle re-picks the ambient music with the
 // _Super_Weapon variant; later reports only set the flag; battle_reset starts a new battle's first report.
 void test_super_weapon_music() {
@@ -1309,6 +1331,7 @@ void test_presentation_events_ref2() {
 }  // namespace
 
 int main() {
+    test_delayed_fire_sounds();  // trl2 t08
     test_object_sfx_t05();
     test_inactive();
     test_control_point_lines();
