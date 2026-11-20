@@ -1,5 +1,4 @@
 // movement_system: part 2 (bo3 t03 split; shared code in movement_system_internal.hpp).
-#include <cstdlib>  // DBGTMP
 #include "movement_system_internal.hpp"
 
 namespace alamo::tactical::movement {
@@ -1037,7 +1036,7 @@ bool MovementSystem::path_around(const CollisionObject& c, Unit& u, const Unit* 
         u.around_frame = frame;
         done = true;
         return kRejoinTaken;
-    }, flag ? o : nullptr, std::getenv("MOV2_NOTRK") ? nullptr : &trk);  // DBGTMP  // mov2 t08: + the tracker; s78o (b0065): a flag-1 call's obstacle is the goal-spot filter's forced object
+    }, flag ? o : nullptr, &trk);  // mov2 t08: + the tracker; s78o (b0065): a flag-1 call's obstacle is the goal-spot filter's forced object
     if (searched && !probe) ++stats_.dynamic_repaths;
     return done;
 }

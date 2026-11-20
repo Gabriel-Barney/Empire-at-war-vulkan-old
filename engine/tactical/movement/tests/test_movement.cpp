@@ -1838,22 +1838,6 @@ static uint32_t run_land(MovementSystem& sys, uint32_t first, uint32_t max_frame
             s0 = sys.stats();
         }
         sys.tick(f, rng, pf);
-        if (std::getenv("MOV2_TRACE")) {  // DBGTMP
-            static const int32_t lo = std::atoi(std::getenv("MOV2_TRACE"));
-            if (static_cast<int32_t>(f) >= lo && static_cast<int32_t>(f) < lo + 400) {
-                for (const ObjectId id : {13, 14, 22}) {
-                    const UnitView v = sys.view(id);
-                    std::printf("T%u u%d pos %.1f %.1f spd %.3f yaw %.1f goal %d push %d\n", f, id, static_cast<double>(v.pos.x),
-                                static_cast<double>(v.pos.y), static_cast<double>(v.speed), static_cast<double>(v.yaw), v.has_goal ? 1 : 0,
-                                v.pushed ? 1 : 0);
-                }
-                for (const CollisionObject& c : sys.collisions().list())
-                    if (c.a == 13 || c.a == 14 || c.a == 22 || c.b == 13 || c.b == 14 || c.b == 22)
-                        std::printf("T%u rec seq %u kind %d a %d b %d st %d m %d va %.3f vb %.3f na %d nb %d redec %u\n", f, c.seq,
-                                    static_cast<int>(c.kind), c.a, c.b, static_cast<int>(c.state), static_cast<int>(c.master),
-                                    static_cast<double>(c.speed_a), static_cast<double>(c.speed_b), c.now_a ? 1 : 0, c.now_b ? 1 : 0, c.redecide);
-            }
-        }
         if (stops) terrain_stops_after(sys, *stops, f, s0);
         bool any = false;
         for (ObjectId id : sys.unit_ids()) {
@@ -1994,8 +1978,10 @@ static void test_land_group() {
     // corners and the retail tick order every unit arrives, all 36 near the destination, at frame 1955; no terrain stop
     // (3 records, 3 detours); before mov1: 8402 frames, 2 terrain stops of unit 1.
     // mov2 t04 (2026-11-17, the corner pass reads the tracker flags taken before the last walk): 2025 frames, all 36 near
-    // the destination, 9 terrain records and 9 detours, no stop.
-    CHECK(ground && frames == 2025 && arrived == 36 && jammed == 0 && cycle);
+    // the destination, 9 terrain records and 9 detours, no stop. mov2 (2026-11-20, MSVC): with the rejoin tracker (t08)
+    // alone unit 16 was stopped by a failed detour (1977 frames); with the members walking copies of the formation path
+    // (t01), the 3-D recruitment (t03) and the rest of mov2: 2179 frames, all 36 near, 9 records / 9 detours, no stop.
+    CHECK(ground && frames == 2179 && arrived == 36 && jammed == 0 && cycle);
     CHECK(near == 36 && stops == 0);
     CHECK(st.terrain_records == 9 && st.terrain_detours == 9);
     CHECK(tlog.stops.empty() && far_ids.empty());
@@ -3548,7 +3534,7 @@ static CrcLog space_crc_run(const ParallelFor& pf) {
 // path (11 accepted goals); MovingVsMoving answers follow the role slots.
 // s78n t26.2 (MOVEMENT §3.5.2 A / B): the speed controller (End Move T = a, 0x15 restarts), the start turn in place.
 // s78n t26 closing review (FIGHTER_FLYING §7.5 item 4): formation mates side-step by their footprint overlap.
-static constexpr uint64_t kGoldenLand = 0x06244c22001b99e8ull;  // mov2 t04: tracker snapshot before the walk; mov1: Starved count, tie-break extent, terrain corners, +0x28c, overtake rank, step 10, SvS kept, tick order; sp6: tree-hash layout (movement / combat / objects hashes); bkm1: lane fallback / stop point, shield-free class, recruitment, stored z, secondary facing; s78p: formation path and lanes; s78n t26 review round 2 (mixed formations, range rank); closing review; t26.4 the move step C; t26.3 the corner pass
+static constexpr uint64_t kGoldenLand = 0x82917414be268681ull;  // mov2 t01 / t03 / t08 / t09: formation path copies, 3-D recruitment, rejoin tracker, squad re-order at speed; mov2 t04: tracker snapshot before the walk; mov1: Starved count, tie-break extent, terrain corners, +0x28c, overtake rank, step 10, SvS kept, tick order; sp6: tree-hash layout (movement / combat / objects hashes); bkm1: lane fallback / stop point, shield-free class, recruitment, stored z, secondary facing; s78p: formation path and lanes; s78n t26 review round 2 (mixed formations, range rank); closing review; t26.4 the move step C; t26.3 the corner pass
 static constexpr uint64_t kGoldenSpace = 0x8fc952146335d9dbull;  // sp6: tree-hash layout (movement / combat / objects hashes)
 
 static void test_determinism() {
@@ -3633,7 +3619,6 @@ static void test_real_data() {
     std::vector<NotArrived> not_arrived;  // bkm2 t02 (b0041)
     uint32_t all_stops = 0, stopped_units = 0;  // terrain stops observed per unit (TerrainStopLog), every map
     for (const std::string& path : maps) {
-        if (std::getenv("MOV2_MAP") && path.find(std::getenv("MOV2_MAP")) == std::string::npos) continue;  // DBGTMP
         std::vector<uint8_t> bytes;
         terrain::MapData map;
         if (!fs->read(path, bytes) || !terrain::parse_ted(bytes, map)) continue;
@@ -3695,15 +3680,6 @@ static void test_real_data() {
             SimRng tick_rng(1);
             TerrainStopLog tlog;
             run_land(sys, 0, 12000, tick_rng, serial_for, ground, nullptr, nullptr, &tlog);
-            if (std::getenv("MOV2_MAP")) {  // DBGTMP
-                for (const CollisionObject& c : sys.collisions().list())
-                    if (c.a == 13 || c.a == 14 || c.a == 22 || c.b == 13 || c.b == 14 || c.b == 22)
-                        std::printf("DBG rec kind %d a %d b %d state %d master %d\n", static_cast<int>(c.kind), c.a, c.b, static_cast<int>(c.state), static_cast<int>(c.master));
-                for (const ObjectId id : {13, 14, 22}) {
-                    const UnitView v = sys.view(id);
-                    std::printf("DBG unit %d pos %.1f %.1f speed %.3f yaw %.1f\n", id, static_cast<double>(v.pos.x), static_cast<double>(v.pos.y), static_cast<double>(v.speed), static_cast<double>(v.yaw));
-                }
-            }
             if (!ground) ++off_ground;
             uint32_t arrived = 0;
             for (const auto& [id, goal] : goals) {
@@ -3889,14 +3865,23 @@ static void test_real_data() {
     // why these three swing into the clearance (and whether retail does) is not settled (b0041's replay / RE part is open).
     std::printf("real maps: %u units stopped by a failed TerrainCollision detour (%u stop(s) of %u unit(s) observed per unit)\n",
                 land_stopped, all_stops, stopped_units);
-    // mov1 (2026-11-17): with the BKR1 / BKR2 rules and the retail tick order 2 of 3240 stop by a failed TerrainCollision
-    // detour (EM08_SITH_TOMBS unit 13, _LAND_PLANET_SALEUCAMI_INTIMIDATION unit 17); mov2 t08 (the previous window's
-    // tracker for rejoin goals 2 - 11) re-measures them
-    CHECK(group_arrived == group_units && land_units - land_arrived == 2u && land_stopped == 2u && all_stops == 2u && stopped_units == 2u);
-    CHECK(not_arrived.size() == 2);
-    if (not_arrived.size() == 2) {
-        CHECK(not_arrived[0].map == "EM08_SITH_TOMBS.TED" && not_arrived[0].id == 13 && not_arrived[0].kind == "f");
-        CHECK(not_arrived[1].map == "_LAND_PLANET_SALEUCAMI_INTIMIDATION.TED" && not_arrived[1].id == 17 && not_arrived[1].kind == "f");
+    // mov1 (2026-11-17): with the BKR1 / BKR2 rules and the retail tick order 2 of 3240 stopped by a failed TerrainCollision
+    // detour (EM08_SITH_TOMBS unit 13, _LAND_PLANET_SALEUCAMI_INTIMIDATION unit 17). mov2 t08 / t11 (2026-11-20, MSVC; the
+    // previous window's tracker for rejoin goals 2 - 11, docs/re/MOV2_T05_TERRAIN_STOPS.md [H]): EM08 13 arrives; Saleucami
+    // 14 and 17 stop by the ring rule (a failed kind-3 detour); and TM05_IMPERIAL_POLICY 13 / 14 / 22 stand in a static
+    // MovingVsMoving ring for the rest of the run (14 held on its Path Around hold line for 22, 22 creeping at the closing
+    // speed toward the standing 13 with Min_Speed 0, 13 a state-6 follower of the standing 14). MOV2_RE_QUESTIONS Q4 [H per
+    // step]: retail has no breaker for such a ring (no timer or counter in states 1 / 6, no re-decide stamp without a path
+    // push, starvation only from states 2 / 14), so retail holds too; the port keeps it (MOVEMENT §5.4.6 "A static ring
+    // whose links are not all hold lines").
+    CHECK(group_arrived == group_units && land_units - land_arrived == 5u && land_stopped == 2u && all_stops == 2u && stopped_units == 2u);
+    CHECK(not_arrived.size() == 5);
+    if (not_arrived.size() == 5) {
+        for (size_t i = 0; i < 3; ++i)
+            CHECK(not_arrived[i].map == "TM05_IMPERIAL_POLICY.TED" && not_arrived[i].kind == "-");
+        CHECK(not_arrived[0].id == 13 && not_arrived[1].id == 14 && not_arrived[2].id == 22);
+        CHECK(not_arrived[3].map == "_LAND_PLANET_SALEUCAMI_INTIMIDATION.TED" && not_arrived[3].id == 14 && not_arrived[3].kind == "f");
+        CHECK(not_arrived[4].map == "_LAND_PLANET_SALEUCAMI_INTIMIDATION.TED" && not_arrived[4].id == 17 && not_arrived[4].kind == "f");
     }
     CHECK(space_arrived == space_units && space_hits == 0);
 }
@@ -4244,12 +4229,6 @@ void test_land_tail_stages() {
 
 int main() {
     std::setvbuf(stdout, nullptr, _IONBF, 0);  // unbuffered: a crash keeps the log
-#ifdef MOVEMENT_REAL_DATA
-    if (std::getenv("MOV2_ONLY")) {  // DBGTMP
-        test_real_data();
-        return g_fail ? 1 : 0;
-    }
-#endif
     test_heap();
     test_classes();
     test_grid();
