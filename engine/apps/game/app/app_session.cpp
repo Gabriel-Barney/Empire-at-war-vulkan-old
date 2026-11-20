@@ -6,7 +6,7 @@
 namespace alamo_game_app {
 
 void App::show_menu_after_intro() {
-    screen_ = Screen::Menu;
+    flow_.on(ScreenEvent::MainMenu);
     open_main_menu();
 }
 
@@ -87,7 +87,7 @@ bool App::start_attract_map() {
     return false;
 }
 
-// 0x22bf0: the demo game ends; the dialogs, the menu music and screen_ are the caller's.
+// 0x22bf0: the demo game ends; the dialogs, the menu music and screen() are the caller's.
 void App::stop_attract() {
     attract_.stop();
     if (demo_session()) end_session();
@@ -308,7 +308,7 @@ void App::lua_presentation() {
         ui::gui_script_calls(*log, calls);
         if (calls.size() < gui_calls_seen_) gui_calls_seen_ = 0;
         if (calls.size() > gui_calls_seen_) {
-            ui::HudButtons& buttons = screen_ == Screen::Battle ? ui_.tactical_hud.buttons() : ui_.galactic_hud.buttons();
+            ui::HudButtons& buttons = screen() == Screen::Battle ? ui_.tactical_hud.buttons() : ui_.galactic_hud.buttons();
             std::vector<std::string> errs;
             gui_calls_applied_ += ui::apply_gui_scripts(std::span<const ui::GuiScriptCall>(calls).subspan(gui_calls_seen_), ui_.components,
                                                         buttons, &ui_.text, now_s_, &errs);
@@ -520,9 +520,9 @@ void App::story_ui_step() {
     // STY1 t03: retail raises "click" first thing on every left or right press in the HUD handler (there is no "right_click")
     if (input_.button(ui::Button::Left).pressed || input_.button(ui::Button::Right).pressed) story_ui_.generic("click");
     // STY1 t03: 0x3a310 raises drag_select after a box selection that caught at least one object
-    if (screen_ == Screen::Battle && input_.button(ui::Button::Left).drag_ended && !orders_.selection().empty()) story_ui_.generic("drag_select");
-    if (screen_ == Screen::Battle && story_ui_.battle()) story_ui_.observe_battle(orders_.selection());  // battle-store ids
-    if (screen_ == Screen::Galactic) {
+    if (screen() == Screen::Battle && input_.button(ui::Button::Left).drag_ended && !orders_.selection().empty()) story_ui_.generic("drag_select");
+    if (screen() == Screen::Battle && story_ui_.battle()) story_ui_.observe_battle(orders_.selection());  // battle-store ids
+    if (screen() == Screen::Galactic) {
         StoryUiView v;
         const galactic::GalacticSim* g = session_->galaxy();
         for (const uint32_t id : orders_.selection()) {
@@ -696,7 +696,7 @@ void App::session_started(const std::vector<std::string>& diag) {
     last_submit_frame_ = 0;
     hotkeys_.set_paused(false);  // OI host: a new session starts unpaused (the Pause hotkey's first press pauses)
     if (spec.attract) {  // OI host: the demo runs behind the main menu - the menu, its faction and backdrop stay
-        screen_ = Screen::Menu;
+        flow_.on(ScreenEvent::MainMenu);
         std::printf("session: attract demo %s\n", spec.skirmish_map.c_str());
         for (const std::string& d : diag) std::printf("  session: %s\n", d.c_str());
         return;
@@ -713,10 +713,10 @@ void App::session_started(const std::vector<std::string>& diag) {
     if (const galactic::GalacticSim* g = session_->galaxy()) gview_.attach(*g, local_player());
     gview_.capture(session_->host());
     if (spec.kind == SessionKind::Campaign) {
-        screen_ = Screen::Galactic;
+        flow_.on(ScreenEvent::CampaignStarted);
         audio_.music(MusicScene::Galactic, local_faction());
     } else {
-        screen_ = Screen::SessionLoad;  // the hidden skirmish galaxy runs until the battle is pushed
+        flow_.on(ScreenEvent::SkirmishStarted);  // the hidden skirmish galaxy runs until the battle is pushed
         // QA t11: on screen before the push's blocking load; ui5 t10: not for a save taken in the battle, which comes back
         // through begin_battle(true) with the Mission dialog (UI.md §5.1, retail 0x8dc40 clears the skirmish flag).
         if (!(session_->loaded() && session_->in_battle())) open_battle_load(kInvalidPlanet, !spec.skirmish.land);
@@ -810,11 +810,11 @@ void App::begin_battle(bool from_save) {
     if (ui_.load.is_open()) load_intro_frames_ = 1;
     else if (!open_battle_load(planet, space, story_mission)) notes_.push_back("load screen dialog missing");
     if (ui_.load.is_open()) {
-        screen_ = Screen::BattleLoad;
+        flow_.on(ScreenEvent::BattleLoading);
         battle_view_pending_ = true;
     } else {
         start_battle_view();
-        screen_ = Screen::Battle;
+        flow_.on(ScreenEvent::BattleShown);
         audio_.music(MusicScene::Battle, local_faction(), space, battle_terrain());
     }
     std::printf("battle %" PRIu64 ": %s map %s at tick %" PRIu64 "\n", battles_seen_, space ? "space" : "land",
@@ -829,8 +829,7 @@ void App::start_battle_view() {
         std::fprintf(stderr, "battle view: %s\n", err.c_str());
         notes_.push_back("battle view failed: " + err);
         if (ui_.load.is_open()) ui_.load.close();  // its progress would never fill
-        if (screen_ == Screen::BattleLoad) {
-            screen_ = Screen::Battle;
+        if (flow_.on(ScreenEvent::LoadScreenDone)) {
             audio_.music(MusicScene::Battle, local_faction(), bview_.space(), battle_terrain());
         }
     }
@@ -881,7 +880,7 @@ void App::end_battle() {
     if (ui_.load.is_open()) ui_.load.close();
     orders_.set_selection({});
     queues_.clear();
-    if (demo_session()) return;  // OI host: no battle-end screen; the attract controller moves on (screen_ stays Menu)
+    if (demo_session()) return;  // OI host: no battle-end screen; the attract controller moves on (screen() stays Menu)
     // story t13 (BT §2.9.6): the battle end took the dialog-skip flag 0x140b305ed of a LINK_TACTICAL record: the dialog
     // callback 0x87770 returns without the battle-summary dialog. [M] It also sets the galactic mode's battle-end-closed flag
     // (+0x188, STORY.md §4.1 step 6): GENERIC battle_end_closed now, as a closed screen would raise it.
@@ -891,14 +890,14 @@ void App::end_battle() {
         story_ui_.generic("battle_end_closed");
         ++linked_dialog_skips_;
         std::printf("battle end: story link, no battle-summary dialog\n");
-        screen_ = Screen::Galactic;
+        flow_.on(ScreenEvent::BattleOver);
         gview_.capture(session_->host());
         audio_.music(MusicScene::Galactic, local_faction());
         return;
     }
     show_battle_end();  // IDD_BATTLE_END_DIALOG; ticks wait for Continue (presentation-only hold)
     if (session_ && session_->spec().kind == SessionKind::Skirmish) {
-        screen_ = Screen::Menu;  // the battle-end screen's Continue goes back to the main menu
+        flow_.on(ScreenEvent::MainMenu);  // the battle-end screen's Continue goes back to the main menu
         ui_.front.set_in_game(false);
         if (!battle_end_open_) {
             skirmish_ended_ = true;
@@ -907,7 +906,7 @@ void App::end_battle() {
         }
         return;
     }
-    screen_ = Screen::Galactic;
+    flow_.on(ScreenEvent::BattleOver);
     gview_.capture(session_->host());
     audio_.music(MusicScene::Galactic, local_faction());
 }

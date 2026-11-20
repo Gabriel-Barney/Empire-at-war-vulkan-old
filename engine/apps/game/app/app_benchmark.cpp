@@ -185,9 +185,9 @@ void App::bench_autopilot() {
         std::printf("benchmark: %s\n", line.c_str());
         bench_.autopilot.push_back(line);
     };
-    if (screen_ == Screen::BattleLoad && ui_.load.is_open() && ui_.load.ready() && !battle_view_pending_ && load_intro_frames_ == 0) {
+    if (screen() == Screen::BattleLoad && ui_.load.is_open() && ui_.load.ready() && !battle_view_pending_ && load_intro_frames_ == 0) {
         ui_.load.close();  // as the Begin button (frame(): LoadScreenEvent::Begin)
-        screen_ = Screen::Battle;
+        flow_.on(ScreenEvent::LoadScreenDone);
         audio_.music(MusicScene::Battle, local_faction(), bview_.space(), battle_terrain());
         note("load screen: Begin");
     }
@@ -230,11 +230,11 @@ void App::bench_frame_end() {
     using P = BenchState::Phase;
     BenchState& b = bench_;
     if (b.phase == P::Done) return;
-    if (!session_ || screen_ == Screen::Menu || screen_ == Screen::Quit || campaign_over_) {
-        bench_fail(!session_ ? "no session" : campaign_over_ ? "the campaign ended" : "the session ended (screen " + std::string(screen_name(screen_)) + ")");
+    if (!session_ || screen() == Screen::Menu || screen() == Screen::Quit || campaign_over_) {
+        bench_fail(!session_ ? "no session" : campaign_over_ ? "the campaign ended" : "the session ended (screen " + std::string(screen_name(screen())) + ")");
         return;
     }
-    const bool gameplay = (screen_ == Screen::Galactic || screen_ == Screen::Battle) && !ui_.load.is_open() && !battle_view_pending_ &&
+    const bool gameplay = (screen() == Screen::Galactic || screen() == Screen::Battle) && !ui_.load.is_open() && !battle_view_pending_ &&
                           load_intro_frames_ == 0 && !paused_ && !battle_end_open_ && !story_summary_open_ && !ui_.gui.has_focus();
     const bool settled = gameplay && b.drawn && present_settled() && !b.tick_missed;
     if (b.phase == P::Loading || b.phase == P::Settling) {
@@ -251,7 +251,7 @@ void App::bench_frame_end() {
             b.t_start = b.t_progress = Clock::now();
             b.load_ms = ms_since(b.t_load);
             std::printf("benchmark: measuring from tick %" PRIu64 " (%s) after %" PRIu64 " warm-up frames, %.1f s\n", b.start_tick,
-                        screen_name(screen_), b.warmup_frames, ms_since(b.t_load) / 1000.0);
+                        screen_name(screen()), b.warmup_frames, ms_since(b.t_load) / 1000.0);
         } else if (ms_since(b.t_load) > kSettleLimitMs) {
             bench_fail("the presentation did not settle within 300 s");
         }
@@ -328,7 +328,7 @@ int App::bench_finish() {
     r.sim_ms = frame_time_stats(b.sim_ms);
     r.load_ms = b.load_ms;  // bm3
     bench_hitches(b.frame_ms, r);
-    r.screen = screen_name(screen_);
+    r.screen = screen_name(screen());
     r.autopilot = b.autopilot;
     if (session_) {
         session_->host().capture_crc_now();  // sp2: the end tick on demand (checkpoint cadence)

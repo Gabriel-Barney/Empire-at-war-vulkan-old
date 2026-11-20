@@ -15,16 +15,30 @@ void App::load_game_options() {
     if (!load_options_profile(options_path_, p)) return;
     std::printf("options: %s\n", options_path_.c_str());
     audio_opts_ = p.audio;
-    audio_.set_volumes(audio_opts_.master, audio_opts_.sfx, audio_opts_.speech, audio_opts_.music);
     gameplay_ = p.gameplay;
     camera_ = p.camera;
     tactical_fov_set_ = p.tactical_fov_set;
     skirmish_profile_ = p.skirmish;
+    if (!p.keys.empty()) ui_.hotkeys.load(p.keys);
+    apply_audio_page();
+    apply_camera_page();  // also the key bindings (hotkeys + queue modifier)
+    apply_gameplay_options();
+}
+
+// ref6 t04: the apply hook of each options page (options_pages.hpp), called on the dialog's Accept and after a profile load.
+void App::apply_audio_page() { audio_.set_volumes(audio_opts_.master, audio_opts_.sfx, audio_opts_.speech, audio_opts_.music); }
+
+void App::apply_camera_page() {
+    // The tactical FOV replaces TacticalCameras.xml's only once the player moved it off the default (tactical_fov_set_).
     gview_.camera().set_fov_deg(camera_.galactic_fov_deg);
     bview_.camera().set_fov_override(tactical_fov_set_ ? camera_.tactical_fov_deg : 0.0f);
-    if (!p.keys.empty()) ui_.hotkeys.load(p.keys);
-    sync_control_bindings(ui_.hotkeys, camera_, ui_.bindings);
-    apply_gameplay_options();
+    sync_control_bindings(ui_.hotkeys, camera_, ui_.bindings);  // OI host: hotkeys + queue modifier
+}
+
+void App::apply_gameplay_page() {
+    apply_tooltip_config();    // HUD_GAPS §2.2: IDC_DELAY_TOOLTIPS -> Long_Encyclopedia_Delay
+    apply_camera_tuning();     // P1_CAMERA_INPUT.md §3.1 mouse / scroll options
+    apply_gameplay_options();  // ui1 t02: alternate mouse, game speeds
 }
 
 void App::save_game_options() {
@@ -156,7 +170,7 @@ void App::space_weapon_toggle() {
 // runs and the main menu comes back when it ends or is clicked away. CreditsText_<LANGUAGE>.DAT of the loaded text
 // language, else ENGLISH.
 void App::show_credits() {
-    if (screen_ != Screen::Menu || !data_.files) return;
+    if (screen() != Screen::Menu || !data_.files) return;
     std::vector<uint8_t> bytes;
     const std::string lang = ui_.text.language.empty() ? std::string("ENGLISH") : ui_.text.language;
     if (!data_.files->read(ui::credits_path(lang), bytes) && !data_.files->read(ui::credits_path("ENGLISH"), bytes)) {

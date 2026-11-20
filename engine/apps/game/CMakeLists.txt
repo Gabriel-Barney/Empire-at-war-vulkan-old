@@ -185,6 +185,11 @@ target_link_libraries(alamo_game_battle_fx_tests PRIVATE alamo_core alamo_game_c
 add_test(NAME alamo_game_battle_fx_tests COMMAND alamo_game_battle_fx_tests)
 set_tests_properties(alamo_game_battle_fx_tests PROPERTIES TIMEOUT 120)
 
+# ref6 t05: the screen rule table (app/screen_flow.hpp) without a window or a GPU.
+add_executable(alamo_game_screen_flow_tests tests/test_screen_flow.cpp app/screen_flow.cpp)
+target_link_libraries(alamo_game_screen_flow_tests PRIVATE alamo_core alamo_engine_flags alamo_test_support)
+add_test(NAME alamo_game_screen_flow_tests COMMAND alamo_game_screen_flow_tests)
+
 # Q5 mod diagnostics (mod_check.hpp): alamo_mod_check --game DIR [MODPATH=..] reports what the port makes of a mod's data.
 # The test runs it on a fake install with a mod folder (new / replaced files, a broken script, a campaign without planets)
 # in its own temp folder; with ALAMO_FOC_DATA also the shipped data (no errors).
@@ -302,7 +307,8 @@ function(alamo_game_add_exe)
   set(_dir ${CMAKE_CURRENT_FUNCTION_LIST_DIR})
   add_executable(alamo_game ${_dir}/app/game_main.cpp ${_dir}/app/app_session.cpp ${_dir}/app/app_input.cpp ${_dir}/app/app_tactical_keys.cpp ${_dir}/app/app_screens.cpp
                            ${_dir}/app/app_hud.cpp ${_dir}/app/app_frame.cpp ${_dir}/app/app_cinematic.cpp ${_dir}/app/app_script.cpp ${_dir}/app/app_script_saveload.cpp ${_dir}/app/app_benchmark.cpp ${_dir}/app/app_bench_scenario.cpp ${_dir}/app/game_render.cpp ${_dir}/app/game_ui.cpp ${_dir}/app/game_movies.cpp ${_dir}/app/frame_overlay.cpp ${_dir}/app/app_story_present.cpp ${_dir}/app/app_story_camera.cpp ${_dir}/app/app_text_crawl.cpp
-                           ${_dir}/app/game_info.cpp ${_dir}/app/game_display.cpp ${_dir}/app/app_mods.cpp ${_dir}/app/app_options.cpp)
+                           ${_dir}/app/game_info.cpp ${_dir}/app/game_display.cpp ${_dir}/app/app_mods.cpp ${_dir}/app/app_options.cpp
+                           ${_dir}/app/options_pages.cpp ${_dir}/app/screen_flow.cpp ${_dir}/app/app_probe.cpp)
   # alamo_core first: tools/formats' inline ByteReader vs core's (LNK2005, see alamo_render_app).
   target_link_libraries(alamo_game PRIVATE alamo_core alamo_game_core alamo_render_galactic alamo_render_sim alamo_ui_draw alamo_ui_hud
                                            alamo_ui_rhi alamo_engine_flags alamo_crash)
@@ -345,8 +351,8 @@ function(alamo_game_add_exe)
   add_test(NAME alamo_game_bench_stale_scene COMMAND alamo_game_benchmark_tests --stale-exe $<TARGET_FILE:alamo_game>)
   set_tests_properties(alamo_game_bench_stale_scene PROPERTIES TIMEOUT 120)
   # [port] video options helpers (game_display.cpp): mode list text, selection, options file, detail options mapping.
-  add_executable(alamo_game_display_tests ${_dir}/tests/test_game_display.cpp ${_dir}/app/game_display.cpp)
-  target_link_libraries(alamo_game_display_tests PRIVATE alamo_core alamo_render_sim alamo_ui_hud alamo_engine_flags alamo_test_support)
+  add_executable(alamo_game_display_tests ${_dir}/tests/test_game_display.cpp ${_dir}/app/game_display.cpp ${_dir}/app/options_pages.cpp)
+  target_link_libraries(alamo_game_display_tests PRIVATE alamo_core alamo_game_core alamo_render_sim alamo_ui_hud alamo_engine_flags alamo_test_support)
   if(WIN32)
     target_link_libraries(alamo_game_display_tests PRIVATE user32)
   endif()
