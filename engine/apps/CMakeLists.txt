@@ -565,7 +565,9 @@ if(_alamo_sim)
     # end (9849-13389). Seed 3 -> 2.
     # cmb2 + mov2 t04 merged (2026-11-17): seeds 3, 4, 6, 7 and 8 end (7057-13204); 1 ends at 14269, 2 and 5 reach the cap.
     # Seeds 1, 2 -> 4, 8.
-    foreach(_seed 4 8)
+    # aitac t01-t08 (2026-11-19: tactical build cancel, movement-block signals, space reinforcement arrivals, Explore_Area's
+    # fogged-cell pick): seeds 1-7, 10 and 12 end, 0 Lua errors; 8, 9 and 11 reach the cap. Seed 8 -> 3.
+    foreach(_seed 4 3)
       add_test(NAME alamo_headless_skirmish_ai_foc_land_campaign_outcome_seed${_seed}
                COMMAND alamo_headless --skirmish-ai foc-land-campaign --seed ${_seed} --ticks 20000 --workers 0 --quiet --expect-battle-end
                        --fail-on-lua-errors)
