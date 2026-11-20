@@ -38,6 +38,8 @@
 #include <array>
 #include <cassert>
 #include <span>
+#include <string>
+#include <type_traits>
 
 #include "ai_save_io.hpp"
 #include "galactic_ai_impl.hpp"
@@ -62,8 +64,53 @@ constexpr uint32_t kWorldVersion = 10;
 constexpr uint32_t kResolverVersion = 4;
 constexpr uint32_t kResolverVersionNoEnumValue = 3;
 
+// REF4 t02: ByteWriter's calls into a StateHasher, so a write list is also a CRC list (GalacticSimTokenResolver).
+class HashWriter {
+public:
+    explicit HashWriter(StateHasher& h) : h_(h) {}
+    HashWriter& u8(uint8_t v) {
+        h_.u8(v);
+        return *this;
+    }
+    HashWriter& u32(uint32_t v) {
+        h_.u32(v);
+        return *this;
+    }
+    HashWriter& i32(int32_t v) {
+        h_.i32(v);
+        return *this;
+    }
+    HashWriter& u64(uint64_t v) {
+        h_.u64(v);
+        return *this;
+    }
+    HashWriter& f64(double v) {
+        h_.f64(v);
+        return *this;
+    }
+    HashWriter& boolean(bool v) {
+        h_.boolean(v);
+        return *this;
+    }
+    HashWriter& str(const std::string& v) {
+        h_.str(v);
+        return *this;
+    }
+
+private:
+    StateHasher& h_;
+};
+template <class W>
+constexpr bool kHashing = std::is_same_v<W, HashWriter>;
+// A field written by the save and left out of the CRC (the lint reads save_only's arguments as saved, not hashed).
+template <class W>
+void save_only(W& w, uint64_t v) {
+    if constexpr (!kHashing<W>) w.u64(v);
+}
+
 // ---- perception parameters (a leaf cache entry's bindings copy) ----
-void put_param(ByteWriter& w, const Param& p) {
+template <class W>
+void put_param(W& w, const Param& p) {
     w.str(p.name);
     w.u8(static_cast<uint8_t>(p.value.kind));
     w.f64(p.value.number);
@@ -320,8 +367,19 @@ bool valid_planet_or_none(PlanetIndex p, size_t planets) { return p == kInvalidP
 
 // ================================================================ GalacticSimTokenResolver
 
+// REF4 t02: write() and hash() walk one list (visit_saved); before, the resolver (its leaf cache included) had no CRC.
 void GalacticSimTokenResolver::write(ByteWriter& w) const {
     w.u32(kResolverVersion);
+    visit_saved(w);
+}
+
+void GalacticSimTokenResolver::hash(StateHasher& h) const {
+    HashWriter hw(h);
+    visit_saved(hw);
+}
+
+template <class W>
+void GalacticSimTokenResolver::visit_saved(W& w) const {
     w.i32(frame_);
     w.u32(static_cast<uint32_t>(stamp_space_.size()));
     for (const auto* v : {&stamp_space_, &stamp_ground_, &stamp_conversion_, &stamp_corruption_, &last_owner_})
@@ -340,7 +398,7 @@ void GalacticSimTokenResolver::write(ByteWriter& w) const {
         w.u32(static_cast<uint32_t>(e.params.size()));
         for (const Param& p : e.params) put_param(w, p);
     }
-    w.u64(hits_);
+    save_only(w, hits_);  // a statistic (cache_hits)
     // version 2 (q6 t03)
     w.i32(logic_frame_);
     for (const std::vector<int32_t>& s : player_stamps_) {

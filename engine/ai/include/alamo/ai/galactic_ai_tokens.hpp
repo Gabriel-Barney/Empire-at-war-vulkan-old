@@ -47,6 +47,7 @@
 namespace alamo {
 class ByteReader;
 class ByteWriter;
+class StateHasher;
 }  // namespace alamo
 namespace alamo::galactic {
 class GalacticSim;
@@ -370,6 +371,9 @@ public:
     // A load is a restore: it raises no visibility signal (the original refreshes every object at a load) [port].
     void write(ByteWriter& w) const;
     bool read(ByteReader& r);
+    // REF4 t02: the CRC of the saved state (GalacticAiWorld::hash adds it last): the fields write() saves after the version,
+    // through the same list (visit_saved), the hit counter left out.
+    void hash(StateHasher& h) const;
 
     // One token node's cache entry key (§9.9): the node = (leaf, inst, self), the entry = the parameter set.
     struct CacheKey {
@@ -403,6 +407,8 @@ public:
 
 private:
     friend struct Impl;
+    template <class W>
+    void visit_saved(W& w) const;  // galactic_ai_save.cpp
     void build_neighbours();  // planet evaluator neighbour lists (0x661da0)
     const galactic::GalacticSim* sim_;
     std::span<const GalacticAiTypeInfo> types_;

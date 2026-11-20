@@ -390,6 +390,10 @@ TABLE = [
     Entry("BattleAi", ENG + "apps/sim/include/alamo/sim/battle_ai.hpp",
           ENG + "apps/sim/src/battle_ai_ledger.hpp", [ENG + "apps/sim/src/battle_ai.cpp"],
           save=["write", "visit_saved"], read=["read"], hash_fns=["hash", "visit_saved"]),
+    Entry("GalacticSimTokenResolver", ENG + "ai/include/alamo/ai/galactic_ai_tokens.hpp",
+          ENG + "ai/src/galactic_ai_tokens_ledger.hpp",
+          [ENG + "ai/src/galactic_ai_save.cpp", ENG + "ai/src/galactic_ai_tokens.cpp"],
+          save=["write", "visit_saved"], read=["read"], hash_fns=["hash", "visit_saved"]),
 ]
 
 
