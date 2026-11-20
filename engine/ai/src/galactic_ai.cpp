@@ -3254,6 +3254,11 @@ std::vector<GalacticAiTypeInfo> make_galactic_ai_type_info(const objects::GameOb
     }
     // Starting_Spawned_Units_Tech_0..5: (type, count) lists, repeated tags appended (the hangar / tactical reading).
     // mcx8 t07: Potential_Indigenous_Power has the same converter (code 0x46, OBJECT_TYPES §3): (type, power) entries.
+    static constexpr const objects::ListTag* kStartingTech[] = {
+        &objects::tags::Starting_Spawned_Units_Tech_0, &objects::tags::Starting_Spawned_Units_Tech_1,
+        &objects::tags::Starting_Spawned_Units_Tech_2, &objects::tags::Starting_Spawned_Units_Tech_3,
+        &objects::tags::Starting_Spawned_Units_Tech_4, &objects::tags::Starting_Spawned_Units_Tech_5};
+    static_assert(std::size(kStartingTech) == kSpawnTechSlots);
     const auto type_count_list = [&types, &out](objects::TypeIndex ti, const objects::ListTag& tag, std::vector<SpawnMember>& dst) {
         const std::span<const std::string_view> toks = types.get(ti, tag);
         for (size_t i = 0; i < toks.size(); ++i) {
@@ -3276,7 +3281,7 @@ std::vector<GalacticAiTypeInfo> make_galactic_ai_type_info(const objects::GameOb
     for (size_t t = 0; t < out.size(); ++t) {
         const auto ti = static_cast<objects::TypeIndex>(t);
         for (size_t n = 0; n < kSpawnTechSlots; ++n)
-            type_count_list(ti, *objects::tags::kStartingSpawnedUnitsTech[n], out[t].spawn_tech[n]);
+            type_count_list(ti, *kStartingTech[n], out[t].spawn_tech[n]);
         type_count_list(ti, objects::tags::Potential_Indigenous_Power, out[t].indigenous_power);
     }
     fill_category_masks(out, &types.enums().get(objects::EnumId::GameObjectCategory));  // q6 t03: the loaded enum

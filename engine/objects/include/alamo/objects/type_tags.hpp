@@ -587,13 +587,6 @@ namespace tags {
 #define ALAMO_TYPE_TAG_DECL(kind, name, def) ALAMO_TYPE_TAG_DECL_##kind(name, def)
 ALAMO_TYPE_TAGS(ALAMO_TYPE_TAG_DECL)
 #undef ALAMO_TYPE_TAG_DECL
-// Starting / Reserve_Spawned_Units_Tech_0..5, indexed by tech slot (hangar spawners, galactic AI spawn facts).
-inline constexpr const ListTag* kStartingSpawnedUnitsTech[] = {
-    &Starting_Spawned_Units_Tech_0, &Starting_Spawned_Units_Tech_1, &Starting_Spawned_Units_Tech_2,
-    &Starting_Spawned_Units_Tech_3, &Starting_Spawned_Units_Tech_4, &Starting_Spawned_Units_Tech_5};
-inline constexpr const ListTag* kReserveSpawnedUnitsTech[] = {
-    &Reserve_Spawned_Units_Tech_0, &Reserve_Spawned_Units_Tech_1, &Reserve_Spawned_Units_Tech_2,
-    &Reserve_Spawned_Units_Tech_3, &Reserve_Spawned_Units_Tech_4, &Reserve_Spawned_Units_Tech_5};
 }  // namespace tags
 
 }  // namespace alamo::objects
