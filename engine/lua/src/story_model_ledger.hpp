@@ -5,7 +5,9 @@
 //   DERIVED(member, "why")   recomputed from saved state, scratch, or presentation records;
 //   CHECKED(member, "why")   not restored, but write() / read() read it.
 // tools/lint/check_battle_ledger.py (build_agent.cmd, ctest alamo_sim_battle_ledger_lint) checks it against
-// story_model.hpp and the bodies of write / read / hash in story_model.cpp.
+// story_model.hpp and the bodies of write / read / hash in story_model.cpp. write() and hash() walk the same record lists
+// (story_model.cpp, namespace story_records: the event states, the flag / objective / blip / highlight / AI flag tables,
+// the fired log).
 // Order: the declaration order in story_model.hpp. Read by the lint only (not compiled).
 #pragma once
 
