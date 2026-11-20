@@ -100,15 +100,32 @@ std::vector<std::vector<uint32_t>> split_into_formations(std::span<const Formati
         // s78n t25.2: the attack solo rule (MOVEMENT §4.2 item 6). bkm1 t04 (§4.2 step 2 item 7 test 3 [H]): a short-range
         // seed recruits only units of its own exact type (corrects the s78n t25 fix, which recruited nobody)
         if (s.grouping != kGroupingSolo && !s.solo_attack) {
+            // mov2 t03 (§4.2 step 2 item 7 "Seed side" / tests 1, 7 [H]): the joined-teams list starts with the seed's team
+            std::vector<ObjectId> joined;
+            if (s.team >= 0) joined.push_back(s.team);
+            const bool seed_team = s.team_member || s.team >= 0;
             bool grew = true;
             while (grew) {
                 grew = false;
                 for (size_t i = 0; i < remaining.size();) {
                     const uint32_t cand = remaining[i];
                     const FormationMember& o = m[cand];
+                    const auto recruit = [&] {
+                        f.push_back(cand);
+                        if (o.team >= 0 && std::find(joined.begin(), joined.end(), o.team) == joined.end())
+                            joined.push_back(o.team);
+                        remaining.erase(remaining.begin() + static_cast<std::ptrdiff_t>(i));
+                        grew = true;
+                        i = 0;  // bkm1 t04 (§4.2 step 2 item 7 "Scan" [H]): after every recruit the scan restarts
+                    };
+                    // mov2 t03 (test 1 [H]): a candidate on a joined team joins at once, no further test
+                    if (o.team >= 0 && std::find(joined.begin(), joined.end(), o.team) != joined.end()) {
+                        recruit();
+                        continue;
+                    }
                     // mcx4 t11 (BKR2_RE_ANSWERS Q8 [H]): test 3's team clause - a seed with a parent team (a squad member)
                     // recruits nobody while ShouldInfantryTeamsSplitAcrossFormations is set (FoC: true)
-                    bool ok = (!s.team_member || !k.should_infantry_teams_split_across_formations) &&
+                    bool ok = (!seed_team || !k.should_infantry_teams_split_across_formations) &&
                               (!s.short_range_attack || o.type_name == s.type_name);
                     if (!ok) {
                         ++i;
@@ -118,6 +135,8 @@ std::vector<std::vector<uint32_t>> split_into_formations(std::span<const Formati
                     else if (s.grouping == kGroupingSameOrder) ok = o.grouping == kGroupingSameOrder && o.order == s.order;
                     else ok = false;  // an unknown grouping (a mod's typo) recruits nobody
                     if (ok && compatible) ok = compatible(seed, cand);
+                    // mov2 t03 (test 7 [H]): a candidate with a team needs a seed with one
+                    if (ok && (o.team_member || o.team >= 0)) ok = seed_team;
                     if (ok && double_click_speed_ratio > 0.0f && o.max_speed != 0.0f) {  // 0x80 speed band (0x43c1b0)
                         const float hi = std::max(o.max_speed, s.max_speed), lo = std::min(o.max_speed, s.max_speed);
                         ok = lo > 0.0f && !(hi / lo > double_click_speed_ratio);
@@ -130,27 +149,20 @@ std::vector<std::vector<uint32_t>> split_into_formations(std::span<const Formati
                     if (ok) {
                         const float rd = (o.collision_class == 5 && !o.team_member) ? k.infantry_formation_recruitment_distance
                                                                                       : k.vehicle_formation_recruitment_distance;
+                        // mov2 t03 (test 11 [H]): d_min = the 3-D distance to the nearest current member (the first at
+                        // the least distance)
                         float nearest = 3.0e38f;
-                        uint32_t nm = f.front();
                         for (uint32_t mm : f) {
-                            const float d = length_sq(m[mm].pos - o.pos);
-                            if (d < nearest) {
-                                nearest = d;
-                                nm = mm;
-                            }
+                            const float dz = m[mm].z - o.z;
+                            const float d = length_sq(m[mm].pos - o.pos) + dz * dz;
+                            if (d < nearest) nearest = d;
                         }
                         ok = nearest <= rd * rd;
-                        // s78n t26 review round 2 (§4.2 step 2 item 4 [H]): a straight line or a path <= 1.4 x the distance
-                        if (ok && reach) ok = reach(nm, cand);
+                        // test 12 [H]: the line candidate -> seed, or a path <= 1.4 x d_min
+                        if (ok && reach) ok = reach(seed, cand, std::sqrt(nearest));
                     }
-                    if (ok) {
-                        f.push_back(cand);
-                        remaining.erase(remaining.begin() + static_cast<std::ptrdiff_t>(i));
-                        grew = true;
-                        i = 0;  // bkm1 t04 (§4.2 step 2 item 7 "Scan" [H]): after every recruit the scan restarts
-                    } else {
-                        ++i;
-                    }
+                    if (ok) recruit();
+                    else ++i;
                 }
             }
         }

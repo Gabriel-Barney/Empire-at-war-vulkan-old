@@ -1857,7 +1857,9 @@ void test_rejections() {
     CHECK(rejects(u.sys, bad));
     put_u32(bad, 0, 35);  // 35: before the mcx4 t11 bomber lookahead / bike lateral fields (36)
     CHECK(rejects(u.sys, bad));
-    put_u32(bad, 0, 37);
+    put_u32(bad, 0, 36);  // 36: before mov2 t01's member slot (Unit::mslot / slot_g / slot_on) (37)
+    CHECK(rejects(u.sys, bad));
+    put_u32(bad, 0, 38);
     CHECK(rejects(u.sys, bad));
     bad = good;
     bad[4] = static_cast<uint8_t>(bad[4] ^ 3);  // mode

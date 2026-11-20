@@ -1450,6 +1450,8 @@ void test_t20_early_arrival() {
         }
         CHECK(lane.size() == 2 && side.size() == 2);
         bool placed = false;
+        V2 end0[5];  // mov2 t01: each member's path end after the plan (the formation path's end W: every member walks a copy)
+        bool have0 = false;
         uint32_t f = 1;
         for (; f < 2500 && sys.stats().early_arrivals == 0; ++f) {
             // mov1 t04 (BKR1 Q5 [H]): a destination counts as blocked only once the mover's approximation byte +0x28c (rebuilt
@@ -1459,30 +1461,33 @@ void test_t20_early_arrival() {
                 placed = true;
             }
             sys.tick(f, rng, serial_for);
+            if (!have0) {
+                have0 = true;
+                for (ObjectId i = 0; i < 5; ++i) {
+                    have0 = have0 && !sys.land_path(10 + i).empty();
+                    if (have0) end0[i] = sys.land_path(10 + i).back();
+                }
+            }
         }
-        CHECK(placed && sys.stats().early_arrivals == 1);
+        CHECK(placed && have0 && sys.stats().early_arrivals == 1);
         // the leader's stop point is 30 before the standing unit: every cut path lost 33 from its end (s78n t20 batch 1:
-        // 0x54e780 keeps total - 33 measured from the path's first point, the index untouched) - the member one row back
-        // had more than that left and walks on; the member two rows back had less: its record is left on its last
-        // waypoint (it is past the new end's line), so it is finished - arrived, braking where it is; the two beside the
-        // lane keep their paths. s78p (b0049): the members walk their lanes (one formation path, each lane started at the
-        // foot of the member's position), so both lane members still have more than 33 left when the leader stops and
-        // both walk on.
-        bool cut = near(distance(sys.land_path(10 + lead).back(), goal[lead]), 33.0f, 1e-2f);
+        // 0x54e780 keeps total - 33 measured from the path's first point, the index untouched); the two beside the lane keep
+        // their paths. mov2 t01 (MOVEMENT §4.3.3 item 1 [H]): every member walks a copy of the formation path, so a cut
+        // path ends 33 before W's end, and a member's stop line lies its depth before that new end: both lane members still
+        // have more than that left when the leader stops and walk on (before mov2 t01, on their lanes, the member two rows
+        // back had less and was finished)
+        bool cut = near(distance(sys.land_path(10 + lead).back(), end0[lead]), 33.0f, 1e-2f);
         uint32_t exact = 0, walking = 0, finished = 0;
         for (int i : lane) {
             const V2 end = sys.land_path(10 + i).back();
-            if (near(distance(end, goal[i]), 33.0f, 1e-2f)) ++exact;
+            if (near(distance(end, end0[i]), 33.0f, 1e-2f)) ++exact;
             const UnitView v = sys.view(10 + i);
             if (v.has_goal) ++walking;
             else if (v.arrived && !v.pushed) ++finished;
         }
         bool kept = true;
-        for (int i : side) kept = kept && sys.land_path(10 + i).back() == goal[i];
-        // mov1 t04: the blocker comes inside the leader's +0x28c look-ahead (60 out), so the cut is made with the members
-        // closer to their ends than before: the member one row back walks on, the one two rows back has less than 33 left
-        // and is finished (as before s78p)
-        CHECK(cut && exact == 2 && walking == 1 && finished == 1 && kept);
+        for (int i : side) kept = kept && sys.land_path(10 + i).back() == end0[i];
+        CHECK(cut && exact == 2 && walking == 2 && finished == 0 && kept);
         std::printf("t20 early arrival: formation - leader cut 33, lane members cut 33: %u (walking on %u, finished %u), side lanes kept %d "
                     "[cut %d, cuts %u, frame %u, leader %.2f from its goal, path end %.2f, re-paths %u, pushes %u, unit 30 moved %.2f]\n",
                     exact, walking, finished, kept ? 1 : 0, cut ? 1 : 0, sys.stats().early_arrivals, f,

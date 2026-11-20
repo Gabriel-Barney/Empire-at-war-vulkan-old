@@ -2319,6 +2319,16 @@ void MovementSystem::tick_land(uint32_t frame, SimRng& rng, const ParallelFor& p
             x.formation = u.formation_speed;
             x.forced = u.forced;
         }
+        // mov2 t01 (MOVEMENT §4.3.3 items 1 - 3 [H]): u.m is the order path here (a pushed record is swapped in after); when
+        // it is the formation path's copy, its end shift rides with it (the walked record, or the started path below a
+        // collision-owned one) and, walked itself, its slot shape steers the lane term
+        if (slot_walk(u)) {
+            x.end_shift = u.mslot.end_shift;
+            if (order_rec) {
+                x.slot_walk = true;
+                x.slot = u.mslot.shape();
+            }
+        }
     };
     // The walk of one unit that is no squad member / container (the parallel pass; s78n t26.2: also the serial start-turn
     // pass below, for a start turn that ends in Start Move). Writes only units_[i] and res[i].

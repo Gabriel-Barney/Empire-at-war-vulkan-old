@@ -9,9 +9,9 @@
 //   (Standard recruits Standard; SameOrder needs SameOrder with an equal FormationOrder), the
 //   `compatible` callback agrees (the host's tests: same locomotor kind, the seed and the candidate both
 //   zone-connected to the destination) and the candidate is within the recruitment distance (60 infantry not in a
-//   team, else 100) of the nearest member, which the `reach` callback (nearest member, candidate) then tests: a
-//   straight passable line, or a path <= 1.4 x the distance (s78n t26 review round 2, MOVEMENT §4.2 step 2 item 4
-//   [H]; the nearest member: the first at the least distance). Movement masks need not agree: a formation's class is
+//   team, else 100) of the nearest member (3-D, mov2 t03), which the `reach` callback (seed, candidate, d_min) then
+//   tests: a straight passable line candidate -> seed, or a path <= 1.4 x d_min (MOVEMENT §4.2 step 2 item 7 test 12
+//   [H]). Teams: a candidate on a team already in the formation joins at once (test 1). Movement masks need not agree: a formation's class is
 //   the 0x4779e0 class of the members' mask intersection (MovementSystem), so infantry and vehicles share formations.
 //   With `double_click_speed_ratio` > 0 (order flag 0x80, P1_DOUBLE_CLICK_MOVE.md §4.2) a candidate with a non-zero
 //   max speed s_c is also rejected when max(s_c, s_seed) / min(s_c, s_seed) > the ratio (DoubleClickMoveMaxSpeedRatio;
@@ -58,6 +58,11 @@ struct FormationMember {
     int32_t order = 0;               // FormationOrder
     int32_t collision_class = -1;
     bool team_member = false;
+    // mov2 t03 (MOVEMENT §4.2 step 2 item 7 [H]): the height (the recruitment distance d_min is 3-D) and the parent team
+    // (-1: none; Unit::team). A seed's team goes on a joined-teams list; a candidate on a listed team joins at once (test
+    // 1), a candidate with a team needs a seed with one (test 7), and a joining candidate's team is listed.
+    float z = 0.0f;
+    ObjectId team = -1;
     // s78n t25.2 (MOVEMENT §4.2 item 6): an attack order's solo seed (in max range, melee, or within r + E_r +
     // Solo_Attack_Range of the target) recruits nobody, as a Solo seed
     bool solo_attack = false;
@@ -76,8 +81,10 @@ std::vector<std::vector<uint32_t>> kmeans_buckets(std::span<const FormationMembe
                                                   uint32_t max_iterations = 16);
 
 using CompatibleFn = std::function<bool(uint32_t seed, uint32_t candidate)>;
-// (nearest current member, candidate): the line / path test of §4.2 step 2 item 4 (unset: passes)
-using ReachFn = std::function<bool(uint32_t member, uint32_t candidate)>;
+// mov2 t03 (§4.2 step 2 item 7 test 12 [H]): (seed, candidate, d_min = the 3-D distance from the candidate to the nearest
+// current member): the terrain line from the candidate to the seed, or a path candidate -> seed <= 1.4 x d_min (unset:
+// passes)
+using ReachFn = std::function<bool(uint32_t seed, uint32_t candidate, float d_min)>;
 std::vector<std::vector<uint32_t>> split_into_formations(std::span<const FormationMember> m, std::span<const uint32_t> bucket,
                                                          const MovementConstants& k, const CompatibleFn& compatible = {},
                                                          float double_click_speed_ratio = 0.0f, const ReachFn& reach = {});

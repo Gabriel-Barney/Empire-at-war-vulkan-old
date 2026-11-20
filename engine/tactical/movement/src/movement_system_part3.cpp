@@ -265,6 +265,27 @@ void MovementSystem::hash_units(StateHasher& h) const {
                 bh.f32(u.lane_d);
                 if (u.lane_z != 0.0f) bh.f32(u.lane_z);  // bkm1 t06
             }
+            if (!u.lane.empty() || u.slot_on) {  // mov2 t01: the slot shape the plan / the walk reads
+                bh.u8(0x1B);
+                bh.boolean(u.slot_on);
+                bh.f32(u.mslot.left);
+                bh.u32(static_cast<uint32_t>(u.mslot.shift.size()));
+                for (size_t k = 0; k < u.mslot.shift.size(); ++k) {
+                    bh.f32(u.mslot.shift[k]);
+                    bh.u32(k < u.mslot.entry.size() ? u.mslot.entry[k] : 0u);
+                }
+                bh.u32(static_cast<uint32_t>(u.mslot.entry_left.size()));
+                for (const float e : u.mslot.entry_left) bh.f32(e);
+                bh.f32(u.mslot.depth);
+                bh.f32(u.mslot.rot_full);
+                bh.f32(u.mslot.rot_start);
+                bh.f32(u.mslot.rot_rate);
+                bh.f32(u.mslot.end_shift);
+                bh.f32(u.mslot.stop.x);
+                bh.f32(u.mslot.stop.y);
+                bh.f32(u.slot_g.x);
+                bh.f32(u.slot_g.y);
+            }
             if (u.lp.secondary) {  // bkm1 t08 (land only): the secondary yaw of a UseSecondaryFacing unit
                 bh.u8(0xED);
                 bh.f32(u.m.yaw2);

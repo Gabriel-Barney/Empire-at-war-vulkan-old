@@ -772,25 +772,31 @@ void MovementSystem::set_lanes(const std::vector<uint32_t>& idx, const LandForm&
         const Slot& s = f.slots[n];
         Unit& x = units_[idx[s.member]];
         if (is_air(x) || x.forced || !x.has_goal || (s.member < kept.size() && kept[s.member])) continue;
-        std::vector<float> el(packs.size(), 0.0f);
-        for (size_t e = 1; e < packs.size(); ++e) el[e] = packs[e][n];
-        LaneShape sh;
-        sh.left = -s.lateral;
-        sh.shift = sq.shift;
-        sh.entry = sq.entry;
-        sh.entry_left = el;
+        MemberSlot ms;
+        ms.left = -s.lateral;
+        ms.shift = sq.shift;
+        ms.entry = sq.entry;
+        ms.entry_left.assign(packs.size(), 0.0f);
+        for (size_t e = 1; e < packs.size(); ++e) ms.entry_left[e] = packs[e][n];
         if (ff.on()) {  // mcx4 t11: the slot offset (depth, lateral) turns by r(s)
-            sh.depth = -(s.back - b0);
-            sh.rot_full = ff.full;
-            sh.rot_start = ff.start;
-            sh.rot_rate = ff.rate;
+            ms.depth = -(s.back - b0);
+            ms.rot_full = ff.full;
+            ms.rot_start = ff.start;
+            ms.rot_rate = ff.rate;
         }
         // bkm1 t02 (b0096, MOVEMENT §4.3.3 item 2): the depth behind the front row (retail's front row is depth 0, the
-        // port's layout centres its rows)
-        x.lane = member_lane(grid_, fpath, sh, s.back - b0, x.lp.mask, x.m.pos);
+        // port's layout centres its rows). mov2 t01 (§4.3.3 items 1 - 3 [H]): the member walks a copy of the formation path,
+        // steered to its slot lateral, its end lines moved by +0x68; it stops at lane_end
+        const LaneShape sh = ms.shape();
+        ms.end_shift = lane_end_shift(fpath, sh, s.back - b0);
+        ms.stop = lane_end(fpath, sh, s.back - b0);
+        x.goal = ms.stop;  // its stop point (MOVEMENT §4.3.3; an attack member: around the cut end)
+        x.lane.assign(fpath.begin(), fpath.end());
+        x.mslot = std::move(ms);
+        x.slot_g = fpath.back();
+        x.slot_on = false;  // the plan takes the path
         x.lane_d = d;
-        x.lane_z = fz;  // [port] the lane's end is G's lateral offset: it keeps G's height
-        x.goal = x.lane.back();  // bkm1 t02: its stop point (MOVEMENT §4.3.3; an attack member: around the cut end)
+        x.lane_z = fz;  // [port] G's stored height (a slot-leg path) stays on the copy's last point
         x.self_goal = x.goal;
         if (x.d.locomotor != LocomotorKind::Default) x.sm.dest = x.goal;
         ++stats_.lanes_set;

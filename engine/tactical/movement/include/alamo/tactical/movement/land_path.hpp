@@ -184,10 +184,9 @@ float path_length(std::span<const V2> points);
 // min(int(s_i / 30), rows - 1), s_i = the 2-D arc length to i; lateral offset L0 = LaneShape::offset(s_i) (+ = toward
 // (-n.y, n.x), retail's sign); point = origin + L (-n.y, n.x); while the point fails the unit's `mask` (0x50e0c0, the
 // cell test) L -= L0 / 5, and once |L| <= |L0 / 5| L = 0 (the origin). z = 0 for every point (the port's paths are 2-D).
-// An empty grid (unit tests without terrain) passes every point. s78p [port]: with a squeeze, inside a segment whose
-// straight lane line fails the class (line_passable), a point is also placed at each row (arc 30 k) whose offset differs
-// from a neighbouring row's - retail's member takes the row's offset as it walks, so a squeeze in the middle of a long
-// segment narrows the lane there too.
+// An empty grid (unit tests without terrain) passes every point. mov2 t01 (MOVEMENT §4.3.3 items 1 / 7 [H]): the lane is
+// only the corner pass's input (formation_lane); the member walks the formation path and the lane term steers it to its
+// slot lateral (WalkExtras::slot), so there is no segment test and no point per squeeze row.
 struct LaneShape {
     float left = 0.0f;                  // the slot's lateral offset (+ = left; a port Slot's lateral is to the right: -lateral)
     std::span<const float> shift;       // the corridor squeeze's per-row shift F +0xb0[k].+4 (+ = left; empty: no squeeze)
@@ -205,28 +204,29 @@ struct LaneShape {
     float rotation_at(float s) const;
     float lateral_at(float s) const;
 };
+// mov2 t01 (MOVEMENT §4.3.3 items 1 - 2 [H]): a formation member's slot shape as the member keeps it while it walks the
+// formation path (Unit::slot; LaneShape's spans point into it: shape()). end_shift = the order record's +0x68,
+// cos psi D - sin psi L at the end (lane_end's along-path term; -back without a final facing).
+struct MemberSlot {
+    float left = 0.0f;
+    std::vector<float> shift;
+    std::vector<uint32_t> entry;
+    std::vector<float> entry_left;
+    float depth = 0.0f;
+    float rot_full = 0.0f, rot_start = 0.0f, rot_rate = 0.0f;
+    float end_shift = 0.0f;
+    V2 stop;  // the member's stop point lane_end (its goal when the order set it)
+    LaneShape shape() const;
+};
+float lane_end_shift(std::span<const V2> fpath, const LaneShape& shape, float back);
 V2 lane_dir(std::span<const V2> fpath, size_t i);
 std::vector<V2> formation_lane(const PassabilityGrid& grid, std::span<const V2> fpath, const LaneShape& shape, uint32_t mask);
-// s78p (b0049) [port]: the member's path on its lane - its start (lane_start from the last lane point it has passed), then
-// the lane points whose waypoint it has not passed yet (the leading points with dot(pos - lane[i], lane_dir(i)) >= 0 are
-// skipped: retail steps a waypoint whose line the unit has crossed) and whose rest length on the formation path (2-D)
-// exceeds the member's depth `back` (a point behind the previous one across its own line is skipped: it would turn the
-// member back), then the end point lane_end. bkm1 t01 (b0095): a segment that fails `mask` (line_passable) falls back onto
-// the formation path (its far point to its origin, then backwards), never moving the end. Retail keeps the formation path
-// as the unit's path, steers it onto its lane with the lane term and shifts the waypoint lines within |+0x68| of the end
-// along their segments (MOVEMENT §4.3.3); the port walks the lane itself, and its end is the member's goal.
-std::vector<V2> member_lane(const PassabilityGrid& grid, std::span<const V2> fpath, const LaneShape& shape, float back,
-                            uint32_t mask, V2 pos);
 // bkm1 t02 (b0096, MOVEMENT §4.3.3 items 2 - 5 [H]): where a formation member stops - the last waypoint G moved along the
 // last segment's direction d1 by -back (back >= 0: the member's depth behind the front row, which stops on G) and across
 // it by the shape's L at arc length total - back: G - d1 back + (-d1.y, d1.x) L. Not along the path's arc, not pulled in,
-// not snapped to a cell, not reserved. [port] the final-facing rotation psi (0x411980) is not modelled (psi = 0).
+// not snapped to a cell, not reserved. mcx4 t11: with the final-facing rotation psi (0x411980) the along term is
+// lane_end_shift (cos psi D - sin psi L) and the lateral is the rotated slot lateral at that arc position.
 V2 lane_end(std::span<const V2> fpath, const LaneShape& shape, float back);
-// s78p (b0049) [port]: the start of a lane path for a unit at `pos` - path[0] := the foot of pos on the line path[0] ->
-// path[1] when that foot lies before path[1], else pos. A member off its lane then walks the lane's direction and the lane
-// term (0x41dbb0, error / 30) pulls it onto the line, as retail's member converges on its slot offset from the formation
-// path; a member already past the lane's first point toward its end walks straight to it.
-void lane_start(std::vector<V2>& path, V2 pos);
 // Nearest passable cell (to `p`) with the given component, ring search up to max_rings; ties: the
 // first in (ring, y, x) scan order. False if none.
 bool snap_to_component(const PassabilityGrid& grid, const RegionMap& regions, V2 p, uint32_t mask, int32_t component,

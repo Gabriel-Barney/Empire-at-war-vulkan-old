@@ -20,6 +20,7 @@
 #include <span>
 #include <vector>
 
+#include "alamo/tactical/movement/land_path.hpp"
 #include "alamo/tactical/movement/passability.hpp"
 
 namespace alamo::tactical::movement {
@@ -238,6 +239,13 @@ struct WalkExtras {
     const WalkTransition* wt = nullptr;  // s78n t26 closing review: Walk_Transition clip data (null / !on: none)
     // mcx4 t11 (MOVEMENT §4.4, 0x41dbb0): FormationMinimumSideError (GC +0x14cc) / FormationMaximumSideError (+0x14d0)
     float side_error_min = 0.1f, side_error_max = 30.0f;
+    // mov2 t01 (MOVEMENT §4.3.3 items 1 - 3 [H]): slot_walk = the top record is a formation member's copy of the formation
+    // path; `slot` its slot shape (the lane term's side target LaneShape::lateral_at(s) at its arc position s on the path,
+    // added to the jiggle's side) and `end_shift` the order record's +0x68 (the waypoint lines within |end_shift| of the
+    // end move along their segments). end_shift is also read for the started order path `below` (0 when that is no copy).
+    bool slot_walk = false;
+    LaneShape slot;
+    float end_shift = 0.0f;
     // mcx4 t11 (MCX4_T11_T12_RE_ANSWERS §B2, BIKE move step 0x63abe0): a bike's sideways speed L (pack +0x1fc, in / out;
     // null: not a bike) and its LateralAcceleration. At C.7 L steps toward the steering vector's left component
     // (bike_lateral_step) and the travel direction is bike_travel_dir(yaw, L).

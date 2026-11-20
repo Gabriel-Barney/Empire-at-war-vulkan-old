@@ -883,6 +883,109 @@ void test_t23_state2_self_read() {
     }
 }
 
+
+// mov2 t03 (MOVEMENT §4.2 step 2 item 7 [H], 0x43c1b0): the recruitment distance d_min is 3-D; a candidate on a team that
+// already joined the formation joins at once (test 1); a candidate with a team needs a seed with one (test 7); test 12's
+// line / path runs candidate -> seed with the 1.4 x d_min budget.
+void test_mov2_recruitment() {
+    MovementConstants k;
+    k.should_infantry_teams_split_across_formations = false;
+    std::vector<FormationMember> m(2);
+    for (uint32_t i = 0; i < 2; ++i) {
+        m[i].id = static_cast<ObjectId>(i + 1);
+        m[i].max_speed = 1.0f;
+        m[i].type_name = "Rebel_Infantry";
+        m[i].collision_class = 5;
+    }
+    m[1].pos = {50.0f, 0.0f};  // 2-D 50 <= 60
+    const uint32_t bucket[] = {0, 1};
+    CHECK(split_into_formations(m, bucket, k).size() == 1);
+    m[1].z = 40.0f;  // 3-D sqrt(50^2 + 40^2) = 64 > 60: the candidate seeds its own formation
+    CHECK(split_into_formations(m, bucket, k).size() == 2);
+    // test 1: the same team joins at once - past the distance, and past the FoC split clause of test 3
+    m[0].team = 7;
+    m[1].team = 7;
+    m[1].pos = {500.0f, 0.0f};
+    const MovementConstants foc;
+    CHECK(foc.should_infantry_teams_split_across_formations);
+    CHECK(split_into_formations(m, bucket, foc).size() == 1);
+    // test 7: a candidate with a team and a seed without one
+    m[0].team = -1;
+    m[1].team = 8;
+    m[1].pos = {10.0f, 0.0f};
+    m[1].z = 0.0f;
+    CHECK(split_into_formations(m, bucket, k).size() == 2);
+    m[1].team = -1;
+    // test 12: the reach callback gets (seed, candidate, d_min)
+    std::vector<FormationMember> r(3, m[0]);
+    for (uint32_t i = 0; i < 3; ++i) r[i].id = static_cast<ObjectId>(i + 1);
+    r[0].pos = {0.0f, 0.0f};
+    r[1].pos = {30.0f, 0.0f};
+    r[2].pos = {50.0f, 0.0f};
+    const uint32_t b3[] = {0, 1, 2};
+    std::vector<float> dmins;
+    std::vector<uint32_t> seeds;
+    const auto reach = [&](uint32_t sd, uint32_t, float d) {
+        seeds.push_back(sd);
+        dmins.push_back(d);
+        return true;
+    };
+    CHECK(split_into_formations(r, b3, k, {}, 0.0f, reach).size() == 1);
+    // the seed nearest the centroid (26.7, 0) is r[1]; r[0] (d_min 30) then r[2] (nearest member r[1]: 20)
+    CHECK(seeds.size() == 2 && seeds[0] == 1 && seeds[1] == 1);
+    CHECK(dmins.size() == 2 && dmins[0] == 30.0f && dmins[1] == 20.0f);
+}
+
+
+// mov2 t01 (MOVEMENT §4.3.3 items 1 - 4 [H]): the members of a land formation walk copies of one formation path (shared
+// waypoints, not lanes); the lane term steers each onto its slot lateral, and each stops on the last waypoint line moved by
+// its end shift: at its slot point (the goal the order gave it), with no search of its own.
+void test_mov2_formation_path() {
+    ::alamo::test::section("mov2_formation_path");
+    MovementSystem sys{MovementConfig{}};
+    land_system(sys, 100);
+    const ObjectId ids[] = {1, 2, 3};
+    for (ObjectId i : ids) CHECK(sys.add_unit(unit(i, cell_center(15, 48 + 2 * i), 2, 1.0f, 6.0f)));
+    SimRng rng(77);
+    MoveOrder o;
+    o.units = {1, 2, 3};
+    o.destination = cell_center(80, 50);
+    sys.move(o, rng, 1);
+    uint32_t f = 1;
+    bool planned = false;
+    for (; f < 200 && !planned; ++f) {
+        sys.tick(f, rng, serial_for);
+        planned = !sys.land_path(1).empty() && !sys.land_path(2).empty() && !sys.land_path(3).empty();
+    }
+    CHECK(planned);
+    CHECK(sys.view(1).form_id != 0 && sys.view(2).form_id == sys.view(1).form_id && sys.view(3).form_id == sys.view(1).form_id);
+    // one formation path: every member's path has the same points (a copy of W), not its own lane
+    const std::vector<V2> w(sys.land_path(1).begin(), sys.land_path(1).end());
+    bool shared = true;
+    for (ObjectId i : ids) {
+        const std::span<const V2> p = sys.land_path(i);
+        shared = shared && p.size() == w.size() && std::equal(p.begin(), p.end(), w.begin());
+    }
+    CHECK(shared && w.size() >= 2);
+    // the goals differ (each member's slot point) and none is W's end
+    const V2 g1 = sys.view(1).goal, g2 = sys.view(2).goal, g3 = sys.view(3).goal;
+    CHECK(!(g1 == g2) && !(g2 == g3) && !(g1 == g3));
+    for (; f < 1500; ++f) {
+        sys.tick(f, rng, serial_for);
+        if (sys.view(1).arrived && sys.view(2).arrived && sys.view(3).arrived) break;
+    }
+    float worst = 0.0f;
+    for (ObjectId i : ids) {
+        const UnitView v = sys.view(i);
+        CHECK(v.arrived && !v.has_goal);
+        worst = std::max(worst, distance(v.pos, v.goal));
+    }
+    std::printf("mov2 t01 formation path: %zu shared waypoints, all arrived by frame %u, worst %.2f from the slot point\n", w.size(), f,
+                static_cast<double>(worst));
+    // stopped within the End Move coast of each slot point (the lane term's dead band 0.1 sideways, the coast along)
+    CHECK(worst < 8.0f);
+}
+
 }  // namespace
 
 // ---------------------------------------------------------------- s78n t24 (RE f8afef8d): the role slots
@@ -1086,5 +1189,7 @@ int main() {
     test_mov1_overtake_rank();
     test_mov1_step10_attack();
     test_mov2_tracker_snapshot();
+    test_mov2_recruitment();
+    test_mov2_formation_path();
     return ::alamo::test::report("alamo_tactical_movement_b3_tests");
 }

@@ -861,6 +861,15 @@ WalkResult MovementSystem::team_walk(Unit& u, uint32_t frame) const {
     x.side_error_max = cfg_.constants.formation_maximum_side_error;
     x.formation_path = form;
     if (form) x.jiggle = u.jiggle;
+    // mov2 t01 (MOVEMENT §4.3.3 items 1 - 3 [H]): a container walking its formation path's copy steers to its slot lateral
+    // and stops on the shifted end line; the copy under a pushed record keeps its end shift for the walk below
+    if (order_rec && slot_walk(u)) {
+        x.slot_walk = true;
+        x.slot = u.mslot.shape();
+        x.end_shift = u.mslot.end_shift;
+    } else if (top_push && u.slot_on && u.push_path.size() >= 2 && u.push_path.back() == u.slot_g) {
+        x.end_shift = u.mslot.end_shift;
+    }
     if (order_rec && u.formation_speed < 3.0e38f) x.formation = u.formation_speed;
     x.cap_now = u.coll_now;
     x.forced = order_rec && u.forced;
