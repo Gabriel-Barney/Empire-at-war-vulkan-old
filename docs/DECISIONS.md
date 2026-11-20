@@ -354,7 +354,10 @@ waits on Gabriel. It stays generated, read-only, one copy, no sign-in, opening f
   prototypes on live data, local branch `claude/prototype-roadmap-page`): a cockpit first screen (gate cards across the top,
   ranking left, today / started groups / waiting-on-you right, timeline, burn-down, parity and conflict matrices below);
   clicking a gate opens its drill-down (dependency graph with the critical path, its blocking tasks, the ranking within it).
-  Rejected: a gate-rail page and a single-column "today" feed.
+  The existing interactive stage flowchart stays on the first screen, between the gate cards and the ranking, and carries
+  the new information (critical-path boxes outlined, started groups marked, a clicked gate's boxes highlighted) rather
+  than moving behind a tab. Rejected: a gate-rail page, a single-column "today" feed, and the flowchart as the gate
+  drill-down only.
 - **Milestone gates.** Four gates, each defined by a gate group; a gate's members are the gate group's `after` chain
   (followed through), not a hand-kept list: **M1 FoC parity** (`q4`, its exit test), **M2 Playable + Full QA**
   (`qafull`, its exit test; replaces the "Playable single player" exclude-list milestone), **M3 Mod system** (`mcx9` and
