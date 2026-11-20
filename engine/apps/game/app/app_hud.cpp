@@ -230,7 +230,7 @@ bool App::local_benefits_from_corruption(const galactic::GalacticSim& g) const {
 bool App::planet_map_allowed(bool& foreign) const {
     foreign = false;
     const galactic::GalacticSim* g = galaxy();
-    if (!g || screen_ != Screen::Galactic || selected_planet_ == 0) return false;
+    if (!g || screen() != Screen::Galactic || selected_planet_ == 0) return false;
     const PlanetIndex row = planet_index(*g, selected_planet_);
     if (row == kInvalidPlanet || !g->surface_accessible(row)) return false;
     const int32_t me = local_player();
@@ -587,7 +587,7 @@ void App::end_load_intro_frame() {
         if (load_intro_frames_ == 0) std::printf("load screen: %u frames presented before the blocking load\n", load_intro_shown_);
         return;
     }
-    if (screen_ == Screen::Galactic && ui_.load.is_open() && session_ && !session_->in_battle() &&
+    if (screen() == Screen::Galactic && ui_.load.is_open() && session_ && !session_->in_battle() &&
         session_->host().frame() > load_open_tick_ + kLoadIntroMaxTicks) {
         ui_.load.close();
         audio_.music(MusicScene::Galactic, local_faction());

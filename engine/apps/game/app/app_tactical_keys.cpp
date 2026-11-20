@@ -179,7 +179,7 @@ void App::fill_wings(ui::TacticalHudFrame& hf) {
 // A wing button / F2 / F3: select the wing (`add`: the selection plus the wing); a second press of the same wing within
 // 0.4 s [port], or `centre_only`, centres the camera on the wing's members.
 void App::select_wing(size_t wing, bool add, bool centre_only) {
-    if (screen_ != Screen::Battle || !bview_.active() || wing >= wings_.size() || wings_[wing].ids.empty()) return;
+    if (screen() != Screen::Battle || !bview_.active() || wing >= wings_.size() || wings_[wing].ids.empty()) return;
     const std::vector<uint32_t>& members = wings_[wing].ids;
     const bool again = wing_last_ == static_cast<int32_t>(wing) && now_s_ - wing_last_s_ <= 0.4;
     wing_last_ = static_cast<int32_t>(wing);
@@ -280,7 +280,7 @@ void App::tactical_hotkeys(const std::vector<ui::HotkeyEvent>& hk, std::vector<c
 
 // Command-bar buttons with no HudAction kind of their own (HudAction::Kind::Button by name). True = handled.
 bool App::tactical_button(const ui::HudAction& a) {
-    if (screen_ != Screen::Battle) return false;
+    if (screen() != Screen::Battle) return false;
     const std::string& n = a.name;
     if (ascii_iequals(n, "c_button00")) {  // t01 attack: the next right click attacks (an object) / attack-moves (ground)
         orders_.arm_move_toggle(ui::MoveToggle::Attack);

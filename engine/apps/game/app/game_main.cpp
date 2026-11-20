@@ -441,7 +441,7 @@ bool App::init() {
     if (opt_.frame_overlay) overlay_.set_shown(true, opt_.profile);
     if (!opt_.smoke.empty()) make_script();
     if (bench_active()) return bench_start();  // BM2a: straight into the save, no intro or menus
-    if (!opt_.movies.empty() && next_movie()) screen_ = Screen::Movie;
+    if (!opt_.movies.empty() && next_movie()) flow_.on(ScreenEvent::IntroMovies);
     else show_menu_after_intro();
     return true;
 }
@@ -451,14 +451,14 @@ bool App::init() {
 // ------------------------------------------------------------------------------------------------ run
 int App::run() {
     if (!init()) return 1;
-    while (screen_ != Screen::Quit && win_.pump()) {
+    while (screen() != Screen::Quit && win_.pump()) {
         frame();
         update_display_rate(false);
         limiter_.wait();  // [port: Gabriel] frame rate cap (live play only)
         if (opt_.frames >= 0 && static_cast<long>(frames_) >= opt_.frames) break;
         if (!script_.empty() && script_step_ >= script_.size()) break;
         if (bench_active() && bench_done()) break;
-        if (script_.empty() && screen_ == Screen::Menu && !ui_.gui.top() && input_.key_pressed(ui::vk::kEscape)) break;
+        if (script_.empty() && screen() == Screen::Menu && !ui_.gui.top() && input_.key_pressed(ui::vk::kEscape)) break;
     }
     if (profile::enabled()) {
         profile::stop();  // the CRC check's replays below are not part of the run

@@ -7,10 +7,12 @@
 #include <filesystem>
 #include <fstream>
 #include <span>
+#include <sstream>
 #include <string>
 #include <vector>
 
 #include "../app/game_display.hpp"
+#include "../app/options_pages.hpp"
 #include "alamo/render/renderer.hpp"
 #include "alamo/test/support.hpp"
 
@@ -431,6 +433,62 @@ void options_round_trip() {
     CHECK(game::game_speed_index(0) == 0 && game::game_speed_index(50) == 2 && game::game_speed_index(100) == 4 &&
           game::game_speed_index(62) == 2 && game::game_speed_index(63) == 3 && game::game_speed_index(-5) == 0);
 }
+
+// ref6 t04: each options page reads and writes its own keys (options_pages.hpp); the setup pages convert an accepted
+// dialog and leave a dialog that was never accepted at the session's defaults.
+void options_pages() {
+    std::ostringstream out;
+    ui::GameplaySettings g;
+    g.difficulty = 2;
+    g.alternate_mouse = true;
+    game::GameplayPage::save(out, g);
+    CHECK(out.str() ==
+          "game_speed=50\nstrategic_speed=50\nscroll_speed=33\ndifficulty=2\nask_autoresolve=1\ndelay_tooltips=0\n"
+          "absolute_scroll=1\nalternate_mouse=1\nright_button_scroll=0\nboth_buttons_rotate=0\nsimplified_colors=0\n"
+          "abilities_autofire=0\n");
+    std::istringstream in("# comment\n difficulty = 9 \nalternate_mouse=on\ngame_speed=\nvolume_sfx=2.5\nsubtitles=0\n"
+                          "galactic_fov=200\ntactical_fov=\nqueue_mods=258\nkey.Pause=80\nkey.Empty=\nskirmish_colour=12\n");
+    const game::OptionsKeys k = game::OptionsKeys::parse(in);
+    ui::GameplaySettings g2;
+    game::GameplayPage::load(k, g2);
+    CHECK(g2.difficulty == 2 && g2.alternate_mouse && g2.game_speed == 50);  // clamped; an empty value keeps the default
+    ui::AudioVolumes a;
+    game::AudioPage::load(k, a);
+    CHECK(a.sfx == 1.0f && !a.subtitles && a.master == 1.0f);
+    game::CameraPage::Settings cam;
+    game::CameraPage::load(k, cam);
+    CHECK(cam.camera.galactic_fov_deg == ui::kGalacticFovMaxDeg && cam.camera.tactical_fov_deg == 55.0f &&
+          cam.camera.queue_mods == 2 && !cam.tactical_fov_set);
+    ui::HotkeyProfile keys;
+    game::KeysPage::load(k, keys);
+    CHECK(keys.size() == 1 && keys["Pause"] == 80);
+    ui::SkirmishProfile slot;
+    game::SkirmishSlotPage::load(k, slot);
+    CHECK(slot.colour == 8 && slot.faction.empty());
+    std::ostringstream none;
+    game::SkirmishSlotPage::save(none, ui::SkirmishProfile{});
+    CHECK(none.str().empty());  // never stored: no lines
+
+    ui::GameOptionsSetup go;
+    go.credits = 9000;
+    CHECK(!game::CampaignOptionsPage::session_options(go).set && game::CampaignOptionsPage::session_options(go).credits == 6000);
+    go.set = true;
+    go.start_tech = 2;
+    go.max_tech = 4;
+    go.auto_resolve = ui::kAutoResolveNever;
+    go.random_events = true;
+    const game::CampaignOptions co = game::CampaignOptionsPage::session_options(go);
+    CHECK(co.set && co.credits == 9000 && co.start_tech == 2 && co.max_tech == 4 && co.auto_resolve == ui::kAutoResolveNever &&
+          co.random_events);
+    ui::SkirmishOptionsSetup so;
+    so.credits = -5;
+    so.win_condition = 0x1ff;
+    so.heroes = false;
+    CHECK(game::SkirmishOptionsPage::battle_options(so) == sim::BattleConfig::SkirmishOptions{});
+    so.set = true;
+    const sim::BattleConfig::SkirmishOptions bo = game::SkirmishOptionsPage::battle_options(so);
+    CHECK(bo.set && bo.credits == 0 && bo.win_condition == 0xff && !bo.heroes && bo.starting_units && bo.prebuilt_base);
+}
 }  // namespace
 
 int main() {
@@ -438,6 +496,7 @@ int main() {
     collapse_rates();
     real_modes();
     profile_round_trip();
+    options_pages();
     profile_resolution_confirmation();
     detail_options();
     detail_mappings();

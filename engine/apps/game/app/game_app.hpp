@@ -49,6 +49,8 @@
 #include "alamo/render/galactic/galactic_session.hpp"
 #include "alamo/render/png.hpp"
 #include "alamo/sim/tactical_battle.hpp"
+#include "app_probe.hpp"
+#include "screen_flow.hpp"
 #include "alamo/data/xml.hpp"
 #include "alamo/galactic/victory.hpp"     // Int-verify: campaign end
 #include "alamo/sim/campaign_battles.hpp"  // Int-final: corruption command
@@ -185,24 +187,11 @@ inline int usage() {
     return 2;
 }
 
-enum class Screen : uint8_t { Menu, SessionLoad, Galactic, BattleLoad, Battle, Quit, Movie };
 // [port] Audio event log entries the live game keeps (audio::AudioConfig::log_limit): the last 2048-4096 events, about 0.6 MB.
 constexpr size_t kGameAudioLogLimit = 4096;
 constexpr uint16_t kVkF11 = 0x7A;  // OPT1 t07: frame-time overlay toggle (not in the default hotkey table)
 constexpr int32_t kLoadIntroMaxFrames = 30;  // QA t11: the most frames the sim waits for the load screen's textures
 constexpr uint64_t kLoadIntroMaxTicks = 30;  // sim ticks a Fight answer may take to push its battle
-inline const char* screen_name(Screen s) {
-    switch (s) {
-        case Screen::Movie: return "movie";
-        case Screen::Menu: return "menu";
-        case Screen::SessionLoad: return "session-load";
-        case Screen::Galactic: return "galactic";
-        case Screen::BattleLoad: return "battle-load";
-        case Screen::Battle: return "battle";
-        case Screen::Quit: return "quit";
-    }
-    return "?";
-}
 
 class App;
 // One scripted step: fills the frame's input (or leaves it idle) and returns true when done. Steps run in order.
@@ -212,7 +201,7 @@ struct ScriptStep {
     uint32_t timeout_frames = 3600;
 };
 
-class App {
+class App final : public AppProbe {
 public:
     explicit App(Options o) : opt_(std::move(o)) {}
     int run();
@@ -277,7 +266,17 @@ public:
     }
     void movie_step();
     void lua_presentation();
-    Screen screen_ = Screen::Menu;
+    // ref6 t05: the screen, changed only through flow_.on(ScreenEvent) (screen_flow.hpp: the rule table).
+    ScreenFlow flow_;
+    Screen screen() const { return flow_.screen(); }
+    // ref6 t05: AppProbe, the smoke script's view of the running game (app_probe.hpp, app_probe.cpp).
+    bool in_battle() const override;
+    bool unit_moves(objects::ObjectId id) const override;
+    bool unit_fights(objects::ObjectId id) const override;
+    bool hostile(int32_t a, int32_t b) const override;
+    std::vector<ProbeUnit> battle_units() const override;
+    const sim::BattleStats* battle_stats() const override;
+    void menu_action(const ui::MenuAction& action) override;
     ui::InputState input_;
     ui::InputRouter router_;
     ui::RoutedInput routed_;
@@ -386,6 +385,10 @@ public:
     void load_game_options();
     void save_game_options();
     void apply_gameplay_options();  // alternate mouse, game speeds
+    // ref6 t04: one apply hook per options page (options_pages.hpp): dialog Accept and profile load both call it.
+    void apply_audio_page();     // volumes
+    void apply_camera_page();    // FOVs, key bindings and the queue modifier
+    void apply_gameplay_page();  // tooltips, camera tuning, gameplay options
     void queue_default_autofire(std::vector<commands::EventData>& cmds);
     bool map_shell_open_ = false;  // HUD_GAPS §4.2: map_shell shown (advanced planet map)
     bool planet_map_open_ = false;  // GALACTIC_DIALOGS §4: the FoC planet map (organiser's advanced_planetary button)
@@ -774,7 +777,7 @@ public:
     struct DemoCamStats {
         uint32_t frames = 0, target_nose_on = 0, run = 0, longest_run = 0, hulls = 0, hulls_nose_on = 0;
     } demo_stats_;
-    // OI host: the attract demo session runs behind the main menu (screen_ stays Menu; its battle world is drawn under the
+    // OI host: the attract demo session runs behind the main menu (screen() stays Menu; its battle world is drawn under the
     // menu dialogs without the tactical HUD).
     bool demo_session() const { return session_ != nullptr && session_->spec().attract; }
     void audio_flags();

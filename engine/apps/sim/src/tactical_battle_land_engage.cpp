@@ -120,37 +120,23 @@ uint8_t TacticalBattle::land_chase(const objects::ObjectStore& store, const Land
         const Unit* x = id != objects::kNoObjectId ? unit_in(units_, id) : nullptr;
         return x && x->alive && !x->retreated && store.alive(x->h) ? x : nullptr;
     };
-    FighterChaseInputs ci;
-    ci.formation = true;
-    ci.flags = r.flags;  // Rr and the attack-move branch read blocks[0]
-    ci.moving = v.has_goal;
-    ci.last_guard = (r.flags & mv::kMoveFlagGuardMove) != 0 && r.pushed == objects::kNoObjectId;
-    ci.single_position = !ci.moving && r.pushed == objects::kNoObjectId && r.goal_object == objects::kNoObjectId;
+    // ref5 t08: the land adapter of the one chase-input builder (tactical_battle_chase.cpp)
+    ChaseOrder o;
+    o.first_flags = o.flags = r.flags;  // Rr and the attack-move branch read blocks[0]
+    o.moving = v.has_goal;
+    o.live_push = r.pushed != objects::kNoObjectId;
+    o.goal_object = r.goal_object != objects::kNoObjectId;
+    // order_goal_live stays false: BKR1 Q8 / FIGHTER_FLYING §4.10 A read the block objects only; the fighter adapter's
+    // combat order goal is the space port's stand-in for an attack order's object (land records carry it in goal_object).
     // a guarded TEAM container: its own mover, its first live member's position
     const Unit* guarded = (r.flags & mv::kMoveFlagGuardMove) != 0 ? land_goal_unit(store, r.goal_object) : nullptr;
-    const objects::ObjectId gm = guarded && movement_->has_unit(r.goal_object) ? r.goal_object : guarded ? guarded->id : objects::kNoObjectId;
-    if (gm != objects::kNoObjectId && movement_->has_unit(gm)) {
-        const mv::UnitView gv = movement_->view(gm);
-        ci.guarded_moving = gv.has_goal && gv.speed > 0.0f;
-    }
-    ci.unit = Vec3{v.pos.x, v.pos.y, 0.0f};
-    ci.goal = Vec3{v.goal.x, v.goal.y, 0.0f};
-    if (const Unit* go = land_goal_unit(store, r.goal_object)) ci.goal = store.position(go->h);
-    ci.attack_range = range;
-    const uint32_t ty = land_type_of(r.mover);
-    if (ty < fchase_have_.size() && fchase_have_[ty]) {
-        ci.guard_range = fchase_cache_[ty][0];
-        ci.idle_range = fchase_cache_[ty][1];
-        ci.attack_move_range = fchase_cache_[ty][2];
-        ci.extension = fchase_cache_[ty][3];
-    } else if (ty < catalog_->types().size()) {
-        const objects::GameObjectTypes& types = catalog_->types();
-        const auto ti = static_cast<objects::TypeIndex>(ty);
-        ci.guard_range = types.get_float(ti, "Guard_Chase_Range");
-        ci.idle_range = types.get_float(ti, "Idle_Chase_Range");
-        ci.attack_move_range = types.get_float(ti, "Attack_Move_Response_Range");
-        ci.extension = types.get_float(ti, "Autonomous_Move_Extension_Vs_Attacker");
-    }
+    o.guarded_mover = guarded && movement_->has_unit(r.goal_object) ? r.goal_object : guarded ? guarded->id : objects::kNoObjectId;
+    o.unit = Vec3{v.pos.x, v.pos.y, 0.0f};
+    o.goal = Vec3{v.goal.x, v.goal.y, 0.0f};
+    if (const Unit* go = land_goal_unit(store, r.goal_object)) o.goal = store.position(go->h);
+    o.range_type = land_type_of(r.mover);
+    o.attack_range = range;
+    FighterChaseInputs ci = chase_inputs(o);
     if (cand == objects::kNoObjectId) {
         ci.candidate = ci.goal;
     } else {
@@ -170,15 +156,7 @@ uint8_t TacticalBattle::land_chase(const objects::ObjectStore& store, const Land
         }
         ci.candidate = store.position(c->h);
     }
-    const uint8_t res = fighter_chase_test(ci);
-    if (res != 0) {
-        rr = (ci.flags & mv::kMoveFlagGuardMove) != 0    ? ci.guard_range
-             : (ci.flags & mv::kMoveFlagAttackMove) != 0 ? ci.attack_move_range
-                                                         : ci.idle_range;
-        if (rr < 0.0f) rr = 0.0f;
-        if (ci.candidate_attacker) rr += ci.extension;
-    }
-    return res;
+    return chase_answer(ci, rr);
 }
 
 uint8_t TacticalBattle::land_scan_range(const objects::ObjectStore& store, objects::ObjectId unit, objects::ObjectId cand, float range,
@@ -204,22 +182,10 @@ void TacticalBattle::land_engage_service(TacticalMode& mode, SimRng& rng) {
     });
     // derived per tick (serial): the order lock of the members (0x39ad40; Push 0x41fd30 refuses any locked member) and the
     // chase ranges of each record's type (read by the parallel scan)
-    const objects::GameObjectTypes& types = catalog_->types();
-    if (fchase_have_.size() != types.size()) {
-        fchase_have_.assign(types.size(), 0);
-        fchase_cache_.assign(types.size(), {});
-    }
     for (LandFormationRecord& r : lformations_) {
         r.locked = false;
         for (const objects::ObjectId id : land_mover_units(r.mover)) r.locked = r.locked || movement_locked(id);
-        const uint32_t ty = land_type_of(r.mover);
-        if (ty < types.size() && !fchase_have_[ty]) {
-            const auto ti = static_cast<objects::TypeIndex>(ty);
-            fchase_cache_[ty] = {types.get_float(ti, "Guard_Chase_Range"), types.get_float(ti, "Idle_Chase_Range"),
-                                 types.get_float(ti, "Attack_Move_Response_Range"),
-                                 types.get_float(ti, "Autonomous_Move_Extension_Vs_Attacker")};
-            fchase_have_[ty] = 1;
-        }
+        chase_ranges_fill(land_type_of(r.mover));
     }
     // cmb1 t03 (Get_Scan_Range 0x566f50 on land, BKR1 Q8 [H]): the TARGETING owner o (a land team container, else the unit)
     // asks the formation (kUnitScanQuery, land_scan_range) when it has one and is not deployed; else R (steps 1 / 2). [port]
@@ -280,11 +246,9 @@ void TacticalBattle::land_engage_service(TacticalMode& mode, SimRng& rng) {
                 // Rr + the attack range, as fighter_chase_test). A hidden object -> false.
                 const uint32_t ty = land_type_of(r.mover);
                 const bool am = (r.flags & mv::kMoveFlagAttackMove) != 0;
-                float rr = 0.0f, ext = 0.0f;
-                if (ty < fchase_have_.size() && fchase_have_[ty]) {
-                    rr = am ? fchase_cache_[ty][2] : (r.flags & mv::kMoveFlagGuardMove) != 0 ? fchase_cache_[ty][0] : fchase_cache_[ty][1];
-                    ext = fchase_cache_[ty][3];
-                }
+                const std::array<float, 4> cr = chase_ranges(ty);  // filled above for the record's type
+                float rr = am ? cr[2] : (r.flags & mv::kMoveFlagGuardMove) != 0 ? cr[0] : cr[1];
+                const float ext = cr[3];
                 if (rr < 0.0f) rr = 0.0f;
                 const Unit* go = land_goal_unit(st, r.goal_object);
                 Vec3 anchor = am ? Vec3{v.pos.x, v.pos.y, 0.0f} : go ? st.position(go->h) : r.goal;
