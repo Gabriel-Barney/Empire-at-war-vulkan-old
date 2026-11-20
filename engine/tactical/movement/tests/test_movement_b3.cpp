@@ -1083,6 +1083,56 @@ void test_mov2_head_on_pairs() {
     }
 }
 
+
+// mov2 t09 (MOVEMENT §3.5.2 G correction, MOV2_RE_QUESTIONS Q1 [H]): 0x410170 aligns a new path when |delta| <= R or
+// |delta| <= CE (type Close_Enough_Angle_For_Move_Start, else GameConstants CloseEnoughAngleForMoveStart = 180), with
+// waypoint 0's fraction > 0 - so a T4B (no type CE) re-ordered at cruise 90 / 180 degrees off keeps 0x13 and turns on
+// the move, as retail did in 5 of 6 re-orders; a type with CE 30 (the AT-AT) coasts to a stop and turns in place.
+void test_mov2_reorder_at_speed() {
+    ::alamo::test::section("mov2_reorder_at_speed");
+    const auto run = [](float turn_deg, float ce, bool& kept, bool& coasted) {
+        MovementSystem sys{MovementConfig{}};
+        land_system(sys, 120);
+        const V2 at = cell_center(30, 60);
+        UnitDesc d = vehicle(1, at, 0, 20.0f * 0.85f, 22.0f * 0.85f, 0.7f);
+        d.accel = d.decel = 0.05f;
+        d.turn_rate = d.alt_turn_rate = 6.0f;
+        d.close_enough_angle = ce;
+        CHECK(sys.add_unit(d));
+        SimRng rng(909);
+        MoveOrder o;
+        o.units = {1};
+        o.destination = at + V2{1200.0f, 0.0f};
+        sys.move(o, rng, 1);
+        uint32_t f = 1;
+        for (; f < 400 && !(sys.view(1).speed >= sys.view(1).max_speed && sys.view(1).pos.x > at.x + 200.0f); ++f)
+            sys.tick(f, rng, serial_for);
+        const V2 p = sys.view(1).pos;
+        const float r = turn_deg * 0.017453292f;
+        MoveOrder b;
+        b.units = {1};
+        b.destination = p + V2{400.0f * std::cos(r), 400.0f * std::sin(r)};
+        sys.move(b, rng, f);
+        kept = true;
+        coasted = false;
+        for (uint32_t n = 0; n < 60; ++n, ++f) {
+            sys.tick(f, rng, serial_for);
+            const UnitView v = sys.view(1);
+            kept = kept && v.walk_state == LocoState::WalkMoving && v.speed > 0.0f;
+            coasted = coasted || v.walk_state == LocoState::WalkEndMove || v.speed == 0.0f;
+        }
+    };
+    for (const float a : {90.0f, 180.0f}) {
+        bool kept = false, coasted = false;
+        run(a, 0.0f, kept, coasted);
+        std::printf("mov2 t09 T4B re-order %.0f deg at cruise: kept 0x13 %d, braked %d\n", static_cast<double>(a), kept ? 1 : 0,
+                    coasted ? 1 : 0);
+        CHECK(kept && !coasted);
+        run(a, 30.0f, kept, coasted);  // a type CE of 30 (AT_AT_Walker): not aligned, the coast and the turn in place
+        CHECK(!kept && coasted);
+    }
+}
+
 }  // namespace
 
 // ---------------------------------------------------------------- s78n t24 (RE f8afef8d): the role slots
@@ -1289,5 +1339,6 @@ int main() {
     test_mov2_recruitment();
     test_mov2_formation_path();
     test_mov2_head_on_pairs();
+    test_mov2_reorder_at_speed();
     return ::alamo::test::report("alamo_tactical_movement_b3_tests");
 }
