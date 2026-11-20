@@ -121,7 +121,8 @@ public:
                std::vector<std::string>* diagnostics = nullptr, AnimTypeLookup anim_types = nullptr);
 
     // Before build() (a default-constructed table, as the synthetic test worlds pass) this is an empty database, so a
-    // type lookup answers "none" instead of dereferencing null (tst2 t01, b0137).
+    // type-name lookup answers "none" instead of dereferencing null (tst2 t01, b0137). The per-type reads that take a
+    // TypeIndex still need t < size() (0 here).
     const ObjectTypeDatabase& raw() const { return raw_ ? *raw_ : empty_raw(); }
     size_t size() const { return state_.size(); }
     const TypeLoadStats& stats() const { return stats_; }
