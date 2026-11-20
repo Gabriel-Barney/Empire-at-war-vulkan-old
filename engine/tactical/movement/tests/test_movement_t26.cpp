@@ -1364,39 +1364,32 @@ void test_t26_container_step() {
         ++gap;
     }
     CHECK(planned() && gap >= 1 && gap_ok);
-    // the tick of the plan: the coast's first step (v - a; a braking container does not wait for stragglers)
+    // mov2 t09 (MOVEMENT §3.5.2 G "Retail measurement", 0x410170's TEAM rule [H]): the tick of the plan sets the new path
+    // aligned (waypoint 0's fraction > 0) - the container walks on in 0x13 at speed and turns on the move toward its new
+    // path, no coast (before mov2 t09: the coast at a to 0x15 and the turn in place)
     const UnitView k0 = sys.view(100);
-    CHECK(k0.team_coast && near(k0.speed, v0 - 0.1f, 1e-4f) && k0.walk_state == LocoState::WalkEndMove);
-    const float yaw0 = k0.yaw, y0 = k0.pos.y;
-    float px = k0.pos.x, pv = k0.speed;
-    bool falls = true;
-    uint32_t coast = 1;
-    ++g;
-    for (uint32_t end = g + 40; g < end; ++g) {
-        step(g);
-        const UnitView k = sys.view(100);
-        if (k.speed == 0.0f) {
-            ++g;
-            break;
-        }
-        // B.8 with T = a: v -= min(a, v - a) (the last step down to a itself)
-        falls = falls && near(pv - k.speed, std::min(0.1f, pv - 0.1f), 1e-4f) && k.yaw == yaw0 && k.pos.y == y0 && k.pos.x > px && k.team_coast;
-        px = k.pos.x;
-        pv = k.speed;
-        ++coast;
-    }
-    const UnitView ks = sys.view(100);
-    std::printf("t26.5 new order behind a squad: %u tick(s) on the old path, coast %u ticks, stopped at x %.3f\n", gap, coast,
-                static_cast<double>(ks.pos.x));
-    CHECK(falls && ks.speed == 0.0f && ks.pos.x == px && !ks.team_coast && coast >= 18);
-    bool turned = false, arrived = false;
+    CHECK(!k0.team_coast && k0.walk_state == LocoState::WalkMoving && k0.speed > 1.9f);
+    const float yaw0 = k0.yaw;
+    bool cruise = true, turned = false, arrived = false, coasted = false;
+    uint32_t turn_ticks = 0;
+    float vlow = k0.speed;
     for (uint32_t end = g + 600; g < end && !arrived; ++g) {
         step(g);
         const UnitView k = sys.view(100);
-        turned = turned || (k.speed == 0.0f && k.yaw != yaw0);
+        coasted = coasted || k.team_coast;
+        if (!turned) {
+            cruise = cruise && k.walk_state == LocoState::WalkMoving && k.speed > 0.0f;
+            vlow = std::min(vlow, k.speed);
+            ++turn_ticks;
+        }
+        turned = turned || std::fabs(wrap_deg(k.yaw - yaw0)) > 170.0f;
         arrived = k.arrived;
     }
-    CHECK(turned && arrived && distance(sys.view(100).pos, back) < 5.0f);
+    std::printf("t26.5 new order behind a squad: %u tick(s) on the old path, turned at speed in %u ticks (lowest speed %.3f), arrived %.3f from the "
+                "goal\n",
+                gap, turn_ticks, static_cast<double>(vlow), static_cast<double>(distance(sys.view(100).pos, back)));
+    CHECK(cruise);
+    CHECK(turned && !coasted && arrived && distance(sys.view(100).pos, back) < 5.0f);
 }
 
 // Save inside End Move with a coast: the loaded copy hashes equal and goes on identically.

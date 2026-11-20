@@ -117,33 +117,29 @@ void test_land_squad_speed_order() {
         CHECK(near(sys.view(100).speed, vmax, 1e-5f));  // not taken at once
         for (ObjectId id = 1; id <= 9; ++id) CHECK(sys.team_start_delay(id) == 0);  // no start delays (the squad moves)
         CHECK(rng.draws() == draws0);
-        const float x0 = sys.view(100).pos.x, yaw0 = sys.view(100).yaw;
-        // s78n t26.5 (MOVEMENT §3.5.2 G, FIGHTER_FLYING §7.7 item 5): the coast starts at the path set - the old path stays on
-        // top of the stack until the plan (this tick's plan pass, before the walk)
-        bool steps = !sys.view(100).team_coast;
-        for (uint32_t k = 1; k <= 15; ++k, ++f) {  // 15 frames of the rate while it coasts straight on
-            sys.tick(f, rng, serial_for);
-            steps = steps && near(sys.view(100).speed, vmax - a * static_cast<float>(k), 2e-5f) && sys.view(100).yaw == yaw0 &&
-                    sys.view(100).team_coast;
-        }
-        // s78n t18 review: exactly as the path-end braking - the float sum left a hair more than the rate, so one more
-        // step of the rate itself follows (t18_brake_steps = 16), then 0x15 zeroes the speed with no step
-        CHECK(t18_brake_steps(vmax, a) == 16);
-        sys.tick(f++, rng, serial_for);
-        steps = steps && near(sys.view(100).speed, a, 1e-5f) && sys.view(100).team_coast;
-        const float coast = sys.view(100).pos.x - x0;
-        sys.tick(f++, rng, serial_for);  // 0x15: the speed (<= the rate) is zeroed, no step
-        CHECK(!sys.view(100).team_coast);
-        CHECK(steps && coast > 121.0f * a - 0.01f && coast < 121.0f * a + 0.01f);
-        CHECK(sys.view(100).speed == 0.0f && sys.view(100).pos.x - x0 == coast);
-        bool turned = false, arrived = false;
+        const float yaw0 = sys.view(100).yaw;
+        // mov2 t09 (MOVEMENT §3.5.2 G "Retail measurement" and the 0x410170 read [H]): a squad container is aligned at the
+        // path set whatever the angle (its TEAM behaviour), so the 180-degree re-order is walked at full speed in 0x13 and
+        // turned on the move - no coast, no stop (retail 12 / 12 re-orders); before mov2 t09 it coasted to 0x15 and turned
+        // in place
+        bool cruise = true, turned = false, arrived = false, coasted = false;
+        float vlow = vmax;
         for (uint32_t n = 0; n < 900 && !arrived; ++n, ++f) {
             sys.tick(f, rng, serial_for);
             const UnitView k = sys.view(100);
-            turned = turned || (k.speed == 0.0f && k.yaw != yaw0);  // the start turn of the new path, from speed 0
+            coasted = coasted || k.team_coast;
+            if (!turned) {
+                cruise = cruise && k.speed > 0.0f && k.walk_state == LocoState::WalkMoving;
+                vlow = std::min(vlow, k.speed);
+            }
+            turned = turned || std::fabs(wrap_deg(k.yaw - yaw0)) > 170.0f;
             arrived = k.arrived;
         }
-        CHECK(turned && arrived && length(sys.view(100).pos - at) <= 8.0f * a + 1e-3f);
+        CHECK(cruise);
+        const float left = length(sys.view(100).pos - at);
+        std::printf("land squad speed order: re-order turned %d coasted %d arrived %d, %.3f from the goal\n", turned ? 1 : 0,
+                    coasted ? 1 : 0, arrived ? 1 : 0, static_cast<double>(left));
+        CHECK(turned && !coasted && arrived && left <= vmax);  // within one frame's step of the goal
         // Stop at cruise: zero at once
         MoveOrder again;
         again.units = {1};
@@ -154,7 +150,8 @@ void test_land_squad_speed_order() {
         const ObjectId one[1] = {1};
         sys.stop(one);
         CHECK(sys.view(100).speed == 0.0f && !sys.view(100).has_goal);
-        std::printf("land squad speed order: new order while moving - coasted %.3f, then turned and arrived\n", static_cast<double>(coast));
+        std::printf("land squad speed order: new order while moving - turned at speed (lowest %.3f of %.3f), arrived\n",
+                    static_cast<double>(vlow), static_cast<double>(vmax));
     }
     {  // a final facing more than 10 degrees off: turned to in place before the arrival
         MovementSystem sys{MovementConfig{}};

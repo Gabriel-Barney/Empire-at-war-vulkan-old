@@ -1980,7 +1980,10 @@ int main() {
             t18.build(v);
             bool repulsion = false, around = false, rising = false, lowering = false;
             uint32_t rep_at = 0, around_at = 0, coast_first = 0, coast_last = 0;
+            bool coasted = false;
+            float yaw_prev = 0.0f;
             for (uint32_t f = 0; f < t18.frames; ++f) {
+                yaw_prev = v.sys.view(100).yaw;
                 step(t18, v, f, serial_for);
                 for (const CollisionObject& c : v.sys.collisions().list()) {
                     if (c.state == CollisionState::Repulsion && !repulsion) {
@@ -1992,27 +1995,25 @@ int main() {
                         around_at = f;
                     }
                 }
-                if (v.sys.view(100).team_coast) {  // s78n t18 review: the braking coast after the new order of frame 230
+                // mov2 t09 (MOVEMENT §3.5.2 G, 0x410170's TEAM rule [H]): the new order of frame 230 is walked at speed and
+                // turned on the move (before mov2 t09: a braking coast) - the first run of turning frames after it
+                coasted = coasted || (f >= 230 && v.sys.view(100).team_coast);
+                const bool turning = f >= 230 && v.sys.view(100).speed > 0.0f && v.sys.view(100).yaw != yaw_prev;
+                if (turning && (coast_first == 0 || coast_last == f)) {
                     if (coast_first == 0) coast_first = f + 1;
                     coast_last = f + 1;
-                    CHECK(v.sys.view(100).speed > 0.0f && v.sys.view(100).has_goal);
+                    CHECK(v.sys.view(100).has_goal);
                 }
                 rising = rising || v.sys.hover_state(74) == 2;
                 lowering = lowering || v.sys.hover_state(74) == 3;
             }
             CHECK(repulsion && around && rising && lowering);
             CHECK(v.sys.team_member_parked(4) && !v.sys.has_unit(4));
-            // s78n t18 review: the coast is really there (from the order of frame 230 for several frames), and the saves
+            // the turn at speed is really there (from the order of frame 230 for several frames, no coast), and the saves
             // below land in it - at its first frame, in its middle and at its last frame
-            CHECK(coast_first == 231 && coast_last >= coast_first + 4);
-            std::printf("land squad t18 saves: coast frames %u..%u\n", coast_first, coast_last);
-            for (const uint32_t at : {coast_first, (coast_first + coast_last) / 2, coast_last}) {
-                World c(t18.cfg);
-                t18.build(c);
-                for (uint32_t f = 0; f < at; ++f) step(t18, c, f, serial_for);
-                CHECK(c.sys.view(100).team_coast);  // the state the save holds
-                check_resume(t18, at, 0);
-            }
+            CHECK(!coasted && coast_first >= 231 && coast_first <= 233 && coast_last >= coast_first + 4);
+            std::printf("land squad t18 saves: turn at speed frames %u..%u\n", coast_first, coast_last);
+            for (const uint32_t at : {coast_first, (coast_first + coast_last) / 2, coast_last}) check_resume(t18, at, 0);
             for (uint32_t at : {rep_at + 2u, around_at + 2u, 100u, 151u, 201u, coast_last + 1u, 301u, 325u, 400u}) check_resume(t18, at, 0);
             check_resume(t18, (coast_first + coast_last) / 2, 29);
         }

@@ -2119,13 +2119,23 @@ void MovementSystem::plan_deploy_cap(Unit& u, uint32_t frame, float d) {
 // 0x14 is affected: a standing one starts its path at its walk's 0x16 either way (then start rule A). A moving unit that is
 // not aligned coasts in End Move (C.1 / C.4), stops at 0x15 and starts the path from 0x16. [port] A squad container keeps
 // its own path_started (team_walk); the Walk byte is set for it and for every non-Walk locomotor. s78n t26.5 (FIGHTER_FLYING
-// §7.7 item 5, MOVEMENT §3.5.2 G / E): a squad container's new path is never started at the path set (0x5ad140 has no
-// aligned test) - a moving one brakes at its rate in End Move along its facing (Unit::coast), a standing one starts it
-// from 0x16.
+// §7.7 item 5, MOVEMENT §3.5.2 G / E): a standing squad container starts its new path from 0x16. mov2 t09: a moving one is
+// aligned by 0x410170's TEAM rule when waypoint 0's fraction is > 0 (it walks on in its state); otherwise it brakes at its
+// rate in End Move along its facing (Unit::coast).
 void MovementSystem::set_path_started(Unit& u) const {
     LandMotion& m = u.m;
     m.started = true;
     if (u.d.team_container) {
+        // mov2 t09 (MOVEMENT §3.5.2 G "Retail measurement", the 0x410170 read [H]): an object with a TEAM behaviour (obj
+        // +0x348, a squad container) is aligned at once when its new path's waypoint 0 fraction is > 0, whatever the
+        // angle - a container re-ordered while marching keeps its state and speed (0x13 at full speed) and turns on the
+        // move (retail 12 / 12); only one with waypoint 0 at fraction 0 coasts to a stop and starts from 0x16
+        const bool moving = m.speed > 0.0f && (m.state == LocoState::WalkMoving || m.state == LocoState::WalkEndMove);
+        if (moving && !m.path.empty() && wp_frac(m, 0) > 0.0f) {
+            u.path_started = true;
+            u.coast = false;
+            return;
+        }
         u.path_started = false;
         u.coast = m.speed > 0.0f;
         if (!u.coast) m.state = LocoState::WalkStopped;
