@@ -35,7 +35,18 @@ add_library(alamo_game_core STATIC
   src/story_camera.cpp
   src/script_cinematics.cpp
   src/save_games.cpp
-  src/mod_check.cpp
+  src/mod_check.cpp           # ref3 t04: check_mod_data; one file per check family (mod_check_detail.hpp)
+  src/mod_check_files.cpp
+  src/mod_check_content.cpp
+  src/mod_check_xml_tags.cpp
+  src/mod_check_shaders.cpp
+  src/mod_check_lua.cpp
+  src/mod_check_honour_gaps.cpp
+  src/mod_check_story.cpp
+  src/mod_check_tokens.cpp
+  src/mod_check_grade.cpp
+  src/mod_report_text.cpp
+  src/mod_report_json.cpp     # every JSON document alamo_mod_check writes, one writer
   src/asset_audit.cpp
   src/mod_picker.cpp
   src/mod_conflicts.cpp
@@ -310,6 +321,11 @@ function(alamo_game_add_exe)
   if(COMMAND alamo_render_copy_xess)
     alamo_render_copy_xess(alamo_game)  # [port] XeSS upscaling runtime (libxess.dll)
   endif()
+  # ref3 t05: the flag list the Command Center reads (alamo_game --list-flags --json) == its recorded test copy.
+  add_test(NAME alamo_game_list_flags
+           COMMAND ${CMAKE_COMMAND} -DGAME=$<TARGET_FILE:alamo_game> -DEXPECTED=${PROJECT_SOURCE_DIR}/launcher/src/testdata/game_flags.json
+                   -DOUT=${CMAKE_CURRENT_BINARY_DIR}/game_flags.json -P ${_dir}/list_flags_check.cmake)
+  set_tests_properties(alamo_game_list_flags PROPERTIES TIMEOUT 60)
   # bm2d t01: a scenario whose save does not load is "scenario changed, not comparable", exit 3 (needs a window and a GPU, data-free).
   add_test(NAME alamo_game_bench_stale_scene COMMAND alamo_game_benchmark_tests --stale-exe $<TARGET_FILE:alamo_game>)
   set_tests_properties(alamo_game_bench_stale_scene PROPERTIES TIMEOUT 120)

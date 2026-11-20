@@ -673,7 +673,10 @@ fn check_extra_args(input: &Input, out: &mut Vec<Finding>) {
     if input.extra_args.trim().is_empty() {
         return;
     }
-    let issues = launch::extra_arg_issues(&input.extra_args);
+    extra_arg_findings(launch::check_extra_args(input.game_exe.as_deref(), &input.extra_args), out);
+}
+
+fn extra_arg_findings(issues: Vec<launch::ArgIssue>, out: &mut Vec<Finding>) {
     if issues.is_empty() {
         out.push(Finding::ok("Extra arguments look right", "Every flag in the extra arguments is one the game knows."));
     }
@@ -1034,17 +1037,22 @@ mod tests {
     fn extra_arguments_and_saves() {
         let s = Scratch::new();
         let mut input = s.healthy();
-        input.extra_args = "--no-intro --windowed AI_DEBUG=1 --audio loud --seed".into();
+        // The flags come from the game (alamo_game.exe --list-flags); here its recorded list.
+        let flags = launch::test_flags();
         let mut out = Vec::new();
-        check_extra_args(&input, &mut out);
+        extra_arg_findings(launch::extra_arg_issues("--no-intro --windowed AI_DEBUG=1 --audio loud --seed", &flags), &mut out);
         let w = titles(&out, Severity::Warning);
         assert_eq!(w.len(), 3, "{out:?}");
         assert!(out[0].detail.contains("--windowed"), "{}", out[0].detail);
         assert!(out[0].detail.contains("code 2"), "{}", out[0].detail);
-        input.extra_args = "--attract AI_DEBUG=1".into();
+        out.clear();
+        extra_arg_findings(launch::extra_arg_issues("--attract AI_DEBUG=1", &flags), &mut out);
+        assert_eq!(titles(&out, Severity::Ok).len(), 1);
+        // The healthy setup's alamo_game.exe is no real game: the extra arguments are not checked, and the report says so.
+        input.extra_args = "--attract".into();
         out.clear();
         check_extra_args(&input, &mut out);
-        assert_eq!(titles(&out, Severity::Ok).len(), 1);
+        assert_eq!(titles(&out, Severity::Warning), ["The extra arguments weren't checked"], "{out:?}");
 
         // A save folder that doesn't exist yet is fine as long as it can be made.
         input.saves_dir = Some(s.0.join("saves/profile-9/deeper"));

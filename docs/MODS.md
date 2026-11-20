@@ -172,7 +172,10 @@ reads the same data and starts the same list:
   row per folder); `conflicts.rs` runs `--conflicts` for the active profile and adds only definition counts through
   `unitdb.rs`, whose own XML / MEG readers stay for the Units page (`docs/DECISIONS.md`, "Unified mod system
   refactor"). Tests read recorded JSON (`launcher/src/testdata/mod_catalog.json`, `mod_conflicts.json`: the
-  conformance stacks install).
+  conformance stacks install). The extra-arguments check of a profile asks the configured `alamo_game.exe` for its
+  flags (`--list-flags --json`, `alamo.game_flags`, §5.1.1; ref3 t05), kept until the exe changes; with no game to ask
+  it says the arguments were not checked. Its test copy `launcher/src/testdata/game_flags.json` is kept equal to the
+  exe's output by the ctest `alamo_game_list_flags`.
 
 ### 3.2 File resolution order
 
@@ -566,6 +569,25 @@ compiled). Before t22 the cross-reference found `Planet_Deathstar`
 run errors: Thrawn's Revenge 3 and Fall of the Republic 4 are all unused-script leads (0 left as warnings); 3622043265
 keeps 2 (`InstantAction_*_Tech.lua`, named by `Templates_Instant_Action.xml`, `require("eawx-std/class")` which that copy
 does not ship) and has 3 leads.
+
+### 5.1.1 Every JSON document the tools write (ref3, 2026-11-19)
+
+One writer makes every JSON document of `alamo_mod_check` (`engine/apps/game/src/mod_report_json.cpp`: one `Json`
+writer, two-space indent, keys in the order listed, every list complete); each document starts with `schema` and
+`version`, and the rule above holds for all of them (a key is never removed or changed in meaning without raising
+`version`). `alamo_game` writes its own flag list.
+
+| Schema | Version | Written by | Read by | Keys |
+|---|---|---|---|---|
+| `alamo.mod_report` | 5 | `alamo_mod_check [--resolve] --json` | corpus runner (`tools/modcorpus`), Command Center (`stack.rs`) | §5.1 |
+| `alamo.mod_list` | 1 | `alamo_mod_check --list-mods` | corpus runner (discovery) | `mod_check.hpp` `format_mod_list_json` |
+| `alamo.mod_catalog` | 1 | `alamo_mod_check --list` | Command Center (`catalog.rs`) | `mod_check.hpp` `format_mod_catalog_json` |
+| `alamo.mod_conflicts` | 1 | `alamo_mod_check --conflicts` | Command Center (`conflicts.rs`) | `mod_conflicts.hpp` |
+| `alamo.game_flags` | 1 | `alamo_game --list-flags --json` | Command Center (`launch.rs`: the extra-arguments check) | `game_main.cpp` `print_flag_list`: `flags` [{`flag`, `value` (bool: the next argument is its value), `one_of` [string] (the values it accepts, `[]` = any), `positive` (bool: a whole number above 0)}], the table `kGameFlags` the argument loop dispatches through |
+
+The check itself is split by family behind `check_mod_data` (`src/mod_check_detail.hpp` lists the files: files,
+content, XML tags, shaders, Lua, honour gaps, story, token coverage, grade); the split changed no byte of any document
+on the installed mods (ref3 t04).
 
 ### 5.2 The mod picker in the game (modc t08)
 
