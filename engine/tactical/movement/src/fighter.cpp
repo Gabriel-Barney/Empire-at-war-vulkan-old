@@ -297,10 +297,10 @@ FighterParams fighter_params_from_type(const objects::GameObjectTypes& t, uint32
 
 FighterChaseRanges fighter_chase_ranges_from_type(const objects::GameObjectTypes& t, uint32_t ti) {
     FighterChaseRanges c;
-    c.guard = t.get_float(ti, "Guard_Chase_Range");
-    c.idle = t.get_float(ti, "Idle_Chase_Range");
-    c.attack_move = t.get_float(ti, "Attack_Move_Response_Range");
-    c.extension = t.get_float(ti, "Autonomous_Move_Extension_Vs_Attacker");
+    c.guard = t.get(ti, objects::tags::Guard_Chase_Range);
+    c.idle = t.get(ti, objects::tags::Idle_Chase_Range);
+    c.attack_move = t.get(ti, objects::tags::Attack_Move_Response_Range);
+    c.extension = t.get(ti, objects::tags::Autonomous_Move_Extension_Vs_Attacker);
     return c;
 }
 

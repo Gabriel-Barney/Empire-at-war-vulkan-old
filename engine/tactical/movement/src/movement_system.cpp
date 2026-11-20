@@ -251,7 +251,7 @@ bool MovementSystem::compose_space(const PendingComposition& pc, uint32_t frame,
         finish(seed, r);
         if (seed.role != 0) continue;  // a ship with a role: one formation per ship
         // cu8l t03 (CU8K_T03_T08_T09_RE §3 item 1): a locked seed (0x39ad40) recruits nobody; candidates are not tested.
-        if (locked_ && locked_(seed.key)) continue;
+        if (eng_->movement_locked(seed.key)) continue;
         // Role 0 (fighters, squadron containers, objects without a layer): recruit in candidate order. [port] every space
         // locomotor is kind 2.
         // s78n t10: |cc - cs| between the box centres; the reach term keeps D = |goal - seed position|.
@@ -716,11 +716,11 @@ void MovementSystem::move_land(const MoveOrder& order, const std::vector<uint32_
         f.max_speed = loco_max_speed(u);  // 0x41b2a0 reads vf74: S7 t14, the jetpack's alternate while airborne-kind
         if (u.d.team_container && u.team_cap < kInf) f.max_speed = u.team_cap;  // s78n t03: a container walks at the team speed
         // s78n t26 review round 2 (MOVEMENT §4.3 correction [H]): the layout's rank key, the attack range 0x3749d0
-        f.attack_range = attack_range_fn_ ? attack_range_fn_(u.d.id) : 0.0f;
+        f.attack_range = eng_->attack_range(u.d.id);
         // bkm1 t04 (b0036, MOVEMENT §4.2 step 2 item 7 test 9 [H]): E = 0x4f6e40 (a move: the attack range; an attack
         // order: the entry's engage, set below), K = min(E, Targeting_Min_Attack_Distance), 0 under a guard block
         f.engage = f.attack_range;
-        f.min_engage = min_attack_fn_ ? min_attack_fn_(u.d.id) : 0.0f;
+        f.min_engage = eng_->min_attack_distance(u.d.id);
         f.radius = u.d.radius;
         f.spacing = u.d.formation_spacing;
         f.hero = u.d.hero;
@@ -1462,7 +1462,7 @@ void MovementSystem::move_space(const MoveOrder& order, const std::vector<uint32
         f.max_speed = u.lp.max_speed;
         // bkm1 t05 (b0037, MOVEMENT §4.3 item 1 with the s78n t19 correction [H]): 0x41a080 ranks by the attack range
         // 0x3749d0 in space too (the speed key was a [port] stand-in)
-        f.attack_range = attack_range_fn_ ? attack_range_fn_(u.d.id) : 0.0f;
+        f.attack_range = eng_->attack_range(u.d.id);
         f.radius = u.d.radius;
         f.spacing = u.d.formation_spacing;
         f.hero = u.d.hero;

@@ -106,19 +106,111 @@ Port: matches.
 - Reads the wide string at the object's SelectionDataPack (obj +0xB0, ctor 0x55be30) +0x40 and converts it to UTF-8.
   When the converted string is longer than 2 characters, its **first and last characters are dropped**.
 - That string is the object's own **ship name**: the only writer found (0x3c2440, run once per object from a
-  behaviour service 0x3c2310) copies the parent-mode object's name, or takes a random name for the type from
-  TheShipNamesManager (GameConstants `ShipNameTextFiles`, e.g. Star_Destroyer, Calamari_Cruiser; none in multiplayer,
-  0x4e5b30). The galaxy tooltip helper 0x371a50 shows this name, else the type's display text.
+  behaviour service 0x3c2310) copies the parent-mode object's name, or takes a name for the type from
+  TheShipNamesManager (GameConstants `ShipNameTextFiles`, e.g. Star_Destroyer, Calamari_Cruiser; 0x4e5b30). The galaxy
+  tooltip helper 0x371a50 shows this name, else the type's display text. Rules: "Ship names" below.
 - An object without a ship name, or a dead wrapper: returns the **empty string** "" (not nil). It never returns the
   type name.
 
-Port: differs: the port returns the object's type name. Retail returns the ship name ("" for nearly every object).
-Change: return the object's ship name when the port has one (a typed name from the `ShipNameTextFiles` lists, first
-and last character removed when longer than 2), else ""; a dead wrapper also returns "". Scripts that want the type
-name call `Get_Type().Get_Name()` (the vanilla scripts do).
+### Ship names (ref5 t04; re-analyst on retail StarWarsG.exe, RVAs from image base 0x140000000)
 
-Port status (ref5 t04): the binding is written as above and reads ObjectBridge::ship_name; no host sets that hook yet, so
-it returns "" for every object. The questions that settle the name source are in `REF5_T04_RE_QUESTIONS.md`.
+Correction: an earlier version of this page said names are not given "in multiplayer". The pick returns nothing only
+while the main-menu attract demo runs (GameModeManager +0x1e4, global 0x140b155c4: set 0x22f10, cleared 0x22bf0 and by
+Start_Game 0x28e890). There is no multiplayer or game-type test: skirmish, campaign and multiplayer units all get
+names. [H]
+
+**Who gets a name, and when** [H rule, M timing]
+- The one writer is the SELECTABLE behaviour's service (SelectBehaviorClass 0x3c2310). On the object's first service,
+  when its selection data's "assigned" flag (SelectionDataPack +0x60) is 0, it sets the flag to 1 and then tries once to
+  name the object (0x3c2440). The flag is set before the attempt, so an object that gets no name never tries again.
+- Only objects with the SELECTABLE behaviour are named. The key is the object's own type (obj +0x298): no base type,
+  variant or company type is consulted (the shipped lists name each variant separately).
+- No category, owner, faction or mode test: galactic and tactical objects alike.
+- An object is named at the first SELECTABLE service in its own mode's serviced loop. Objects created during a store
+  update are first serviced the next frame [M]. Only the active (top) mode's store is serviced, so galactic objects are
+  not named while a battle is on top [M].
+
+**Parent-mode copy** [H logic]
+- When the object has a parent-mode object id (obj +0x54 ≠ 0x3fffff), the writer looks that id up in the parent
+  mode's store (the next entry of the mode stack below the object's own mode, 0x28aa00; store lookup 0x2aca60). When
+  the parent object exists, has selection data and a non-empty name, the name is copied as stored (quotes and any
+  numeral included), with no pick and no cursor move.
+- Otherwise (no parent id, no parent mode, parent gone, no selection data, empty name) the object picks a name for its
+  own type as below.
+- One-way and once, at the tactical object's first service. A galactic object picks on its first galactic service, so a
+  fleet ship keeps its galactic name in battle when the galactic object was serviced before the battle. [L] edge: a
+  galactic object taken into battle before its first galactic service gives its tactical copy a picked name, and gets
+  another one itself later.
+
+**The pick** (0x4e5b30, manager singleton 0x140a16de0, getter 0x28a6f0) [H]
+1. During the attract demo: no name.
+2. The first pick after a reset shuffles every list (flag manager +0x60): a uniform Fisher-Yates shuffle
+   (std::shuffle 0x4e5240) on a Mersenne twister seeded with the current synced game random state (0x140a13e24), read
+   only, never advanced. A list shared by several types is shuffled once per type naming it (the distribution is the
+   same).
+3. A type with no list, or an empty list: no name.
+4. Each list has a cursor (+0x48) and a wrap count (+0x4c), both starting at 0. The pick takes the entry at the cursor
+   and advances it: names are drawn without replacement. Types whose file names are equal (case-insensitive) share one
+   list and one cursor (vanilla: Generic_Star_Destroyer, Star_Destroyer and Star_Destroyer_Tractor_Fighters share
+   Star_Destroyer.txt; the two Victory types share Victory_Destroyer.txt). Names in use are not tracked.
+5. Taking the last entry sets the cursor back to 0 and adds 1 to the wrap count, without a new shuffle. The suffix uses
+   the wrap count as it was before that update: above 0, the name gets a space and that count as a Roman numeral (first
+   pass "Avenger", second pass "Avenger I", third "Avenger II"). Standard subtractive numerals, up to 3999.
+6. Start_Game (0x28e890) always resets the manager (0x4e67d0): the shuffled flag is cleared and every cursor and wrap
+   count goes back to 0; the order is kept and is shuffled again at the next pick. Start_Game runs for a new campaign, a
+   skirmish and every tactical battle entered from the galaxy (BATTLE_TRANSITIONS §2.1 step 3), so names can repeat
+   within one campaign. The files are not read again.
+
+**Stored text and saves** [H]
+- The pick returns '"' + name + (wrap count > 0 ? ' ' + numeral : '') + '"', for example `"Allecto"` or
+  `"Allecto I"`; 0x3c2440 stores that at SelectionDataPack +0x40, and Get_Name drops the first and last character. The
+  text is literal, not localised.
+- UI helper 0x371a50 (called from the text builder 0x2f15d0) returns the quoted name when there is one, else the type's
+  display text [where it is shown: L].
+- The object save (SelectionDataPack save 0x55bfe0 / load 0x55bf50) keeps the name (micro-chunk 2) and the assigned
+  flag (micro-chunk 3): a loaded object keeps its name and never picks again.
+- The manager is saved with the GameModeManager (save 0x28c900 chunk 4, 0x4e69a0; load 0x28b080 case 4, 0x4e64e0,
+  fix-up 0x4e5140): the type map, and each list once (0x4e6810) with its file name, cursor, name count, wrap count and
+  the names in their current shuffled order. After a load the lists come from the save. The shuffled flag is not saved;
+  whether the first pick after a load shuffles again is not traced [L].
+
+**The file reader** [H line rules, M path]
+- Read once per process when the manager is created (ctor 0x4e59a0 → 0x4e6b20), on the first Start_Game or the first
+  name assignment.
+- GameConstants `ShipNameTextFiles` (GameConstants +0x119a8, parser code 0x36 in 0x51a280): tokens split at space,
+  comma, tab and newline, read as (type, file) pairs, so file names have no spaces. An unpaired last token logs "Missing
+  string value mapping type %s in type, string list %s" and is dropped.
+- The type names are resolved after the types load (0x378dd0 → 0x4c4ec0): "None" in any case means no type; otherwise
+  an upper-cased CRC lookup (0x407e00), i.e. a case-insensitive exact type-name match. An unknown name never matches.
+- Pairs are handled in order. When an earlier pair loaded a file with an equal name (case-insensitive, as written, no
+  path normalisation) the type maps to that same list. Otherwise the file is opened with the name as written (for
+  example Data\Star_Destroyer.txt) through the normal file resolution (mod paths, loose files, MEG, EaW fallback) [M
+  exact order]. The same type twice: the later pair wins. The shipped files are in EaW GameData\Data\*.txt (none in
+  corruption\Data).
+- Format: UTF-16LE read in wide mode (0x213f70); line reader 0x213f30 → 0x2141f0 with a 4096-byte buffer. The first
+  code unit of the file is skipped unconditionally (a BOM is assumed: a file without one loses its first character, an
+  8-bit file is misread). LF ends a line; CR and NUL are dropped anywhere in a line; nothing else is trimmed (leading
+  and trailing spaces and tabs stay, inner spaces stay); a last line without LF is kept; empty lines are skipped.
+- A list is made only at its file's first non-empty line: a missing or empty file gives no list, so its types get no
+  name, with no error.
+- Shipped: 12 files, UTF-16LE with BOM FF FE, CRLF, 15-20 names each, some blank lines, no duplicates, alphabetical.
+
+What only the running game shows ([M] / [L] above, no probe kit planned): a fleet Star Destroyer's Get_Name equal in a
+galactic script and in its space battle; names repeating after one battle; more than 19 Star Destroyers giving
+"Name I"; where the quoted name shows in the UI.
+
+Parity tiers: everything above is tier 1 except the random generator and the draw order, which are the port's own
+(seeded from deterministic game state without drawing from the synced stream).
+
+Port (ref5 t04): `sim::ShipNames` (engine/apps/sim/include/alamo/sim/ship_names.hpp) is set up by the game session from
+GameConstants `ShipNameTextFiles` (not in the attract demo) and serviced by `SimHost` after each top-mode update: every
+not-yet-assigned SELECTABLE object of the top mode's primary store, in store order, gets its name, copied from the
+parent-mode object when that one has a name. Start_Game (`SimHost::start_game`) resets the cursors; a new session also
+forgets the names. The names, the assigned flags and the lists (order, cursor, wrap count, shuffled flag) are saved as
+the host chunk "ship_names". [port] The shuffle is the port's own Fisher-Yates on a small generator seeded from the
+synced random state (read, not drawn); objects created during a tick are named after that tick's mode update, not the
+next frame. Every Lua object bridge (galactic story, tactical story, object scripts, tactical AI) answers
+`ObjectBridge::ship_name` from it.
 
 ## GameObjectWrapper.Is_Category (0x57b7e0) [H]
 

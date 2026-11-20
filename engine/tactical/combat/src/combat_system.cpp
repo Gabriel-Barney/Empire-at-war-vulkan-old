@@ -1422,7 +1422,7 @@ bool CombatSystem::candidate_ok(const Unit& a, const Unit& t, float range) const
     // != 0 (the formation's response range).
     const auto responds = [&] {
         float rr = 0.0f;
-        return (a.flags & kUnitScanQuery) && scan_range_ && scan_range_(a.id, t.id, range, rr) != 0;
+        return (a.flags & kUnitScanQuery) && eng_->has_scan_range() && eng_->scan_range(a.id, t.id, range, rr) != 0;
     };
     if (!in_max && !head_target && !responds()) return false;
     if (!head_target && min_range_hit(t, ap, ad.min_attack_distance)) return false;
@@ -1478,9 +1478,9 @@ void CombatSystem::gather(uint32_t index, QueryContext& ctx) {
     // formation does not answer scans R only with a TURRET slot, else 0 (step 4) - and a cube <= 0 scans nothing, so a
     // still-valid current target is kept (the keep / switch step finds no other) and an invalid one is dropped.
     float half = range;
-    if ((u.flags & kUnitScanQuery) && scan_range_) {
+    if ((u.flags & kUnitScanQuery) && eng_->has_scan_range()) {
         float rr = 0.0f;
-        if (scan_range_(u.id, kNoObject, range, rr) != 0) {
+        if (eng_->scan_range(u.id, kNoObject, range, rr) != 0) {
             if (rr > 0.0f) half = range + rr;
         } else if (cfg_.mode == GameMode::Land) {
             half = desc_of(u).turret ? range : 0.0f;
@@ -1983,7 +1983,7 @@ CanHit CombatSystem::can_hit_point(ObjectId attacker, Vec3 from, Vec3 point, flo
 }
 
 CanHit CombatSystem::fire_line_to(const Unit& src, Vec3 from, Vec3 b) const {
-    if (cfg_.mode == GameMode::Land && shield_sides_) {
+    if (cfg_.mode == GameMode::Land && eng_->has_shield_sides()) {
         // 0x3b5ad0's projectile gate: every projectile the attacker would fire (its WEAPON projectile and its live weapon
         // hard points') must do shield damage for the shields to count
         bool shield_damage = true;
@@ -1997,7 +1997,7 @@ CanHit CombatSystem::fire_line_to(const Unit& src, Vec3 from, Vec3 b) const {
         }
         Vec3 a = from;
         a.z = a.z + ud.ranged_target_z_adjust;
-        if (shield_sides_(a, b, shield_damage)) return CanHit::LineBlocked;
+        if (eng_->opposite_shield_sides(a, b, shield_damage)) return CanHit::LineBlocked;
     }
     return CanHit::Yes;
 }

@@ -1,4 +1,5 @@
 // Part 2 of test_combat (bo3 t03: split by position; see test_combat_common.hpp).
+#include "alamo/test/engagement_fns.hpp"
 #include "test_combat_common.hpp"
 
 namespace bo3split {
@@ -2288,7 +2289,7 @@ void test_scan_range_query() {
         t.w.add(2, t.capital, 1, Vec3{1500, 0, 0});  // beyond R, inside R + Rr (1800)
         t.w.add(3, t.capital, 1, Vec3{0, 2500, 0});  // outside the cube
         std::vector<ObjectId> asked;
-        t.w.sys->set_scan_range_query([&](ObjectId u, ObjectId c, float range, float& rr) -> uint8_t {
+        alamo::test::engagement_of(*t.w.sys).scan_range_fn = ([&](ObjectId u, ObjectId c, float range, float& rr) -> uint8_t {
             CHECK(u == 1 && range == 1000.0f);
             asked.push_back(c);
             rr = 800.0f;
@@ -2306,7 +2307,7 @@ void test_scan_range_query() {
         t.w.add(1, t.attacker, 0, Vec3{0, 0, 0});
         t.w.add(2, t.capital, 1, Vec3{1500, 0, 0});
         std::vector<ObjectId> asked;
-        t.w.sys->set_scan_range_query([&](ObjectId, ObjectId c, float, float& rr) -> uint8_t {
+        alamo::test::engagement_of(*t.w.sys).scan_range_fn = ([&](ObjectId, ObjectId c, float, float& rr) -> uint8_t {
             asked.push_back(c);
             rr = 800.0f;
             return 0;

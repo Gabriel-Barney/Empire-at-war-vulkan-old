@@ -134,6 +134,7 @@
 #include <utility>
 #include <vector>
 
+#include "alamo/tactical/engagement.hpp"
 #include "alamo/core/bytes.hpp"
 #include "alamo/core/parallel.hpp"
 #include "alamo/core/sim_crc_fwd.hpp"
@@ -439,17 +440,15 @@ public:
     // trim and no "every member can fire" stop. Transient (host setup): not saved, not hashed. bkt1 t06 (b0079, item 7):
     // g / gz = the line of fire's end point before T's Ranged_Target_Z_Adjust - the plan's goal G in the fire trim, the
     // target point C in the "every member can fire" gate; gz is the order's C height (attack.cz).
-    using FireTestFn = std::function<bool(ObjectId mover, V2 p, ObjectId target, bool los_only, V2 g, float gz)>;
-    void set_fire_test(FireTestFn fn) { fire_test_ = std::move(fn); }
+    // ref6 t02: asked through EngagementQueries::has_fire_test / can_fire_from (set_engagement).
     // s78n t26 review round 2 (MOVEMENT §4.3 correction [H]): a unit's attack range 0x3749d0, the rank key of the land
     // formation layout (0x41a080; a squad container: its first live member's, as the attack order's lead). Called from
     // move() only (serial). Unset: 0 for every unit (ranks by type name, then id). Transient (host setup): not saved.
-    using AttackRangeFn = std::function<float(ObjectId unit)>;
-    void set_attack_range_query(AttackRangeFn fn) { attack_range_fn_ = std::move(fn); }
+    // ref6 t02: EngagementQueries::attack_range.
     // bkm1 t04 (b0036, MOVEMENT §4.2 step 2 item 7 test 9): a unit's Targeting_Min_Attack_Distance (type +0x504; a squad
     // container: its first live member's), for the recruitment's engagement compatibility. Called from move() only
     // (serial). Unset: 0 for every unit (the test always passes). Transient (host setup): not saved.
-    void set_min_attack_distance_query(AttackRangeFn fn) { min_attack_fn_ = std::move(fn); }
+    // ref6 t02: EngagementQueries::min_attack_distance.
     // cu8i t02 (CU8G_T02_ENV_PICK_RE §7 / §8 item 7): FormationClass ctor 0x40d0d0, one synced int(1, FPS), for a
     // formation the host creates outside move() (the Load_Map-tail GOM post-load pass, TacticalBattle); and whether a unit
     // already has a coordinator ([port]: an order or a formation; unknown ids have none).
@@ -509,8 +508,7 @@ public:
     // +0x3a8 > 0), asked by the space composition 0x5d58f0 for a seed candidate (key = a squadron's container id, else the
     // unit id): a locked seed still gets its own formation (one draw) but recruits nobody; candidates are not tested. The
     // host keeps the counts (the start fleet's hyperspace arrival). Unset: nothing is locked. Not saved (host state).
-    using LockedFn = std::function<bool(ObjectId key)>;
-    void set_locked_fn(LockedFn fn) { locked_ = std::move(fn); }
+    // ref6 t02: EngagementQueries::movement_locked.
     // s78n t10 (TACTICAL_COMBAT §5.4.6 port spec item 4, SPACE_AVOIDANCE §3.1): the space composition 0x5d58f0 tests the
     // world AABB 0x3982b0 of the seed and of each candidate - the model's collision bound through the object's yaw and
     // Scale_Factor (avoid_place; no model: [P, P + 0.1]), for a squadron container the union of its fighters' boxes [M:
@@ -523,8 +521,12 @@ public:
     // OI tactical (crush, §5.5): owner changes (Change_Owner) and the relation test (player +0x370 table == 1 [M];
     // default: different non-negative players are hostile). The test is called from the serial crush pass only.
     bool set_owner(ObjectId id, int32_t owner);
-    using HostileFn = std::function<bool(int32_t a, int32_t b)>;
-    void set_hostility(HostileFn fn) { hostile_ = std::move(fn); }
+    // ref6 t02: the relation test is EngagementQueries::hostile. The engagement questions movement asks the battle host
+    // (hostility, attack ranges, the fire test, the turret aim point, the movement lock) come from one interface the host
+    // implements once and also hands to combat; null = the defaults of a world without a host (no_engagement). The object
+    // must outlive the system. Transient (host setup): not saved, not hashed.
+    void set_engagement(const tactical::EngagementQueries* q) { eng_ = q ? q : &tactical::no_engagement(); }
+    const tactical::EngagementQueries& engagement() const { return *eng_; }
     std::span<const CrushEvent> crush_events() const { return crush_; }  // this tick (land)
     // s78n t20 batch 1 (MOVEMENT §5.4.5 item 2): the death-clone obstacles a collision push killed this tick (land; the
     // push 0x6859a0's first test, 0x391310(b, 1)), in the order of the pushes, each once. The host kills them by the
@@ -643,8 +645,7 @@ public:
     // no delay) every frame they wait.
     // Aim point of the turret this frame (the unit's current target; 0x632050 aims at it): true + world position, false =
     // not aiming. Unset: never aims.
-    using TurretAimFn = std::function<bool(ObjectId id, float& x, float& y, float& z)>;
-    void set_turret_aim_fn(TurretAimFn fn) { turret_aim_ = std::move(fn); }
+    // ref6 t02: EngagementQueries::turret_aim.
     // Test override of the at-rest test (0x386170) for every unit; unset: the turret model above.
     using TurretRestFn = std::function<bool(ObjectId id)>;
     void set_turret_rest_fn(TurretRestFn fn) { turret_rest_ = std::move(fn); }
@@ -1072,7 +1073,7 @@ public:
 
     // ---- N1 stage 2 save / load (contract: alamo/core/save_file.hpp; src/movement_save.cpp) ----
     // The loader builds the battle the same way first: MovementSystem(same MovementConfig), set_grid(grid_from_map) +
-    // the same map stamps, the same space / air boxes and static entries, every hook (set_height_fn, set_hostility,
+    // the same map stamps, the same space / air boxes and static entries, every hook (set_height_fn, set_engagement,
     // set_threat_fn, set_anim_length_fn, set_flying_hooks, set_fighter_avoid_fn, set_fighter_formation_hooks,
     // set_scatters_fn); then read() replaces ALL mutable state, so no host call is needed after it (no relink:
     // cross-references are object ids, hooks are not touched). One host input is not saved: set_pair_gate (a unit's
@@ -1584,7 +1585,7 @@ private:
     // REF2 t07: the land commit stage - the walk results applied (pushed-path pops, the 0x15 arrival, TerrainCollision
     // reports, the walk counters), then conform and the tree update; serial, ascending index
     void land_commit(uint32_t frame, const std::vector<WalkResult>& res);
-    bool hostile(int32_t a, int32_t b) const { return hostile_ ? hostile_(a, b) : (a >= 0 && b >= 0 && a != b); }
+    bool hostile(int32_t a, int32_t b) const { return eng_->hostile(a, b); }
     // §5.5 victim rule: hostile, and (squashable by a supercrusher and the crusher is one) or squashable.
     // s78n t23 step 0 (t21 review item 7): an object without a locomotor (a death-clone obstacle) neither crushes nor is
     // crushed (a crusher's push kills it instead, §5.4.5 item 2).
@@ -1871,9 +1872,8 @@ private:
     CollisionLayer coll_;  // S7: persistent land collision objects (hashed)
     MovementStats stats_;
     std::vector<ObjectId> attack_failed_;  // cmb2 t03: transient, see attack_plan_failed
-    HostileFn hostile_;              // OI tactical
+    const tactical::EngagementQueries* eng_ = &tactical::no_engagement();  // ref6 t02 (host)
     ScattersFn scatters_;            // s78n t14 part B: Scatters_From_Crushers by owner (host; not saved)
-    LockedFn locked_;                // cu8l t03: the space composition's seed lock (host)
     ModelBoundFn model_bound_;       // s78n t10: the space composition's world boxes (host; not saved)
     std::vector<CrushEvent> crush_;  // OI tactical: this tick
     std::vector<ObjectId> push_kills_;  // s78n t20 batch 1: this tick (saved, hashed while any)
@@ -1917,9 +1917,6 @@ private:
     bool deferred_compose_ = false;           // cu8j t01: the host runs coordinator_update (not saved: host setup)
     uint32_t form_serial_ = 0;                // s78n t20: the last Unit::form_id given (saved, version 18)
     uint32_t coord_serial_ = 0;               // mov1 t05: the last Unit::coord_id given (saved, version 34)
-    FireTestFn fire_test_;                    // s78n t25.2 (not saved: host setup)
-    AttackRangeFn attack_range_fn_;           // s78n t26 review round 2 (not saved: host setup)
-    AttackRangeFn min_attack_fn_;             // bkm1 t04 (not saved: host setup)
     FighterFormationHooks fhooks_;          // s78f t02 (not saved: the loader re-sets them)
     FlyingHooks fly_hooks_;  // FIGHTER_FLYING §6
     // S8 t11
@@ -1927,7 +1924,6 @@ private:
     UndeployBlockFn undeploy_block_;
     DeployBlockFn deploy_block_;  // TRU1 t03
     TurretRestFn turret_rest_;
-    TurretAimFn turret_aim_;
     std::vector<DeployEvent> devents_;  // since the last take_deploy_events()
     std::vector<std::pair<ObjectId, ObjectId>> exit_arrivals_;  // s78n t26.1: since the last take_exit_arrivals()
     std::vector<TurnClipEvent> tevents_;  // s78l t02: since the last take_turn_clip_events()

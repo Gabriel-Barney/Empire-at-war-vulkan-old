@@ -15,7 +15,7 @@ UnitDesc unit_desc_from_type(const objects::GameObjectTypes& t, uint32_t ti) {
     d.decel = t.get_float(ti, "OverrideDeceleration");
     d.hover_height = t.get_float(ti, "Hover_Height");  // s78n t18
     {  // trn1 t03 (MOVEMENT §3.6): x Scale_Factor (type +0x658)
-        const float sc = t.get_float(ti, "Scale_Factor") > 0.0f ? t.get_float(ti, "Scale_Factor") : 1.0f;
+        const float sc = t.scale_factor(ti);
         d.overall_length = t.get_float(ti, "Overall_Length") * sc;
         d.overall_width = t.get_float(ti, "Overall_Width") * sc;
     }
@@ -29,7 +29,7 @@ UnitDesc unit_desc_from_type(const objects::GameObjectTypes& t, uint32_t ti) {
     d.collision_class = t.get_enum(ti, "UnitCollisionClass");
     d.formation_spacing = t.get_float(ti, "FormationSpacing");
     d.hero = (t.get_mask(ti, "CategoryMask") & 0x6400000u) != 0;  // LandHero | SpaceHero | NonCombatHero
-    d.type_name = std::string(t.raw().types().name[ti]);
+    d.type_name = std::string(t.name(ti));
     d.grouping = t.get_string(ti, "FormationGrouping").empty() ? 2 : t.get_enum(ti, "FormationGrouping");
     d.formation_order = t.get_int(ti, "FormationOrder");
     // s78n t14 (FIGHTER_FLYING §7.2): ContainerArrangement (None -1 when unset)
@@ -72,7 +72,7 @@ UnitDesc unit_desc_from_type(const objects::GameObjectTypes& t, uint32_t ti) {
     // Movement_Animation_Speed (unset: the type defaults 1.0 / 0.25)
     d.walk_transition = t.get_bool(ti, "Walk_Transition");
     {
-        const float sc = t.get_float(ti, "Scale_Factor") > 0.0f ? t.get_float(ti, "Scale_Factor") : 1.0f;
+        const float sc = t.scale_factor(ti);
         const float mas = t.value(ti, objects::find_type_field("Movement_Animation_Speed")) != nullptr
                               ? t.get_float(ti, "Movement_Animation_Speed")
                               : 0.25f;
@@ -121,11 +121,11 @@ UnitDesc unit_desc_from_type(const objects::GameObjectTypes& t, uint32_t ti) {
     d.supercrusher = t.get_bool(ti, "Is_Supercrusher");
     d.squashable = t.get_bool(ti, "Is_Squashable");
     d.squashable_by_supercrusher = t.get_bool(ti, "Is_Squashable_By_Supercrusher");
-    const float scale = t.get_float(ti, "Scale_Factor") > 0.0f ? t.get_float(ti, "Scale_Factor") : 1.0f;
-    d.hard_x = t.get_float(ti, "Custom_Hard_XExtent") * scale;
-    d.hard_y = t.get_float(ti, "Custom_Hard_YExtent") * scale;
-    d.hard_x_deployed = t.get_float(ti, "Custom_Hard_XExtent_Deployed") * scale;  // s78n t23
-    d.hard_y_deployed = t.get_float(ti, "Custom_Hard_YExtent_Deployed") * scale;
+    const float scale = t.scale_factor(ti);
+    d.hard_x = t.get(ti, objects::tags::Custom_Hard_XExtent) * scale;
+    d.hard_y = t.get(ti, objects::tags::Custom_Hard_YExtent) * scale;
+    d.hard_x_deployed = t.get(ti, objects::tags::Custom_Hard_XExtent_Deployed) * scale;  // s78n t23
+    d.hard_y_deployed = t.get(ti, objects::tags::Custom_Hard_YExtent_Deployed) * scale;
     d.box_expansion = t.get_float(ti, "MovementBoxExpansionFactor");  // s78n t20
     const float soft = t.get_float(ti, "Custom_Soft_Footprint_Radius");
     if (soft > 0.0f) {

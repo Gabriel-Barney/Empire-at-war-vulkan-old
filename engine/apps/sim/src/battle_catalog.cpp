@@ -280,7 +280,7 @@ tc::ProjectileDesc BattleCatalog::projectile_desc(uint32_t t, bool full) const {
     const objects::GameObjectTypes& ty = *types_;
     tc::ProjectileDesc p;
     if (t >= ty.size()) return p;
-    p.name = std::string(ty.raw().types().name[t]);
+    p.name = std::string(ty.name(t));
     p.max_speed = ty.columns().max_speed[t];
     p.damage = ty.get_float(t, "Projectile_Damage");
     p.damage_type = damage_.damage_index(ascii_trim(ty.get_string(t, "Damage_Type")));
@@ -545,7 +545,7 @@ int32_t BattleCatalog::hardpoint(std::string_view name, BuildState& s) const {
 tc::UnitDesc BattleCatalog::unit_desc(uint32_t t, BuildState& s) const {
     const objects::GameObjectTypes& ty = *types_;
     tc::UnitDesc u;
-    u.name = std::string(ty.raw().types().name[t]);
+    u.name = std::string(ty.name(t));
     u.object_type = static_cast<int32_t>(t);
     u.tactical_health = ty.columns().tactical_health[t];
     u.shield_points = ty.columns().shield_points[t];
@@ -564,12 +564,12 @@ tc::UnitDesc BattleCatalog::unit_desc(uint32_t t, BuildState& s) const {
     // --- OI tactical: targeting slots 44 / 45 (TACTICAL_GAPS 3.1) ---
     u.min_attack_distance = ty.get_float(t, "Targeting_Min_Attack_Distance");
     {
-        const float sc = ty.get_float(t, "Scale_Factor") > 0.0f ? ty.get_float(t, "Scale_Factor") : 1.0f;
-        u.hard_x_extent = ty.get_float(t, "Custom_Hard_XExtent") * sc;
-        u.hard_y_extent = ty.get_float(t, "Custom_Hard_YExtent") * sc;
+        const float sc = ty.scale_factor(t);
+        u.hard_x_extent = ty.get(t, objects::tags::Custom_Hard_XExtent) * sc;
+        u.hard_y_extent = ty.get(t, objects::tags::Custom_Hard_YExtent) * sc;
         // s78n t11 (TACTICAL_COMBAT §5.4.6 item 3): the deployed range extents (MPTL / MAL_Rocket_Vehicle set only Y 24).
-        u.hard_x_extent_deployed = ty.get_float(t, "Custom_Hard_XExtent_Deployed") * sc;
-        u.hard_y_extent_deployed = ty.get_float(t, "Custom_Hard_YExtent_Deployed") * sc;
+        u.hard_x_extent_deployed = ty.get(t, objects::tags::Custom_Hard_XExtent_Deployed) * sc;
+        u.hard_y_extent_deployed = ty.get(t, objects::tags::Custom_Hard_YExtent_Deployed) * sc;
         // s78n t08f (TACTICAL_COMBAT §5.4.5, 0x371e70 / 0x372040; replaces A1j t04's |model bbox max.x / max.y|): the model
         // fallback of the slot 43 / 46 extents is the half size h of the collision bound of the mode's model (ModelClass vf
         // +0x58 = avoid_model's bound_h: collision-enabled meshes' 0x402 boxes through the bind pose, (1, 1, 1) without one;
@@ -767,9 +767,9 @@ void BattleCatalog::s9_unit_fields(uint32_t t, tc::UnitDesc& u, BuildState& s) c
     u.energy_refresh_rate = ty.get_float(t, "Energy_Refresh_Rate");
     u.requires_base_power = ty.get_bool(t, "Requires_Base_Power");
     u.passive_missile_shield_radius = ty.get_float(t, "Passive_Missile_Shield_Radius");
-    // S8 t04 (LOB_SOLVER §1.1): type +0x4dc, constructor default 6.0 when the tag is absent.
-    u.ranged_target_z_adjust =
-        ty.get_string(t, "Ranged_Target_Z_Adjust").empty() ? 6.0f : ty.get_float(t, "Ranged_Target_Z_Adjust");
+    // S8 t04 (LOB_SOLVER §1.1): type +0x4dc, constructor default 6.0 when the tag is absent (ref6 t01: the handle's
+    // default, kDefaults).
+    u.ranged_target_z_adjust = ty.get(t, objects::tags::Ranged_Target_Z_Adjust);
     u.converted_die_time = ty.get_float(t, "Converted_To_Enemy_Die_Time_Seconds");
     // s78n t05 (TACTICAL_COMBAT §3.5, 0x395c10 steps 3-5): the convert victim test's type half.
     u.proximity_mine = ty.has_behavior(t, objects::BehaviorSet::Union, objects::behavior_type_id("PROXIMITY_MINE"));
@@ -831,15 +831,15 @@ void BattleCatalog::s9_unit_fields(uint32_t t, tc::UnitDesc& u, BuildState& s) c
     }
     u.tactical_respawn_secs = ty.get_float(t, "Tactical_Respawn_Time_In_Secs");
     u.stunnable = ty.has_behavior(t, objects::BehaviorSet::Union, objects::behavior_type_id("STUNNABLE"));
-    u.shield_requires_base_power = ty.get_bool(t, "Shield_Requires_Base_Power");
+    u.shield_requires_base_power = ty.get(t, objects::tags::Shield_Requires_Base_Power);
     {  // tru1 t02 (docs/re/TRU1_A_RE_ANSWERS.md A1 / A2): base shields; Shield_Requires_Base_Power defaults to true here
         static const objects::BehaviorTypeId kBaseShield = objects::behavior_type_id("BASE_SHIELD");
         static const objects::BehaviorTypeId kAffected = objects::behavior_type_id("AFFECTED_BY_SHIELD");
         u.base_shield_radius = ty.get_float(t, "Base_Shield_Radius");
         u.base_shield = ty.has_behavior(t, objects::BehaviorSet::Union, kBaseShield) && u.base_shield_radius > 0.0f;
         u.base_shield_always_off = ty.get_bool(t, "Base_Shield_Always_Off");
-        if (!ascii_trim(ty.get_string(t, "Shield_Requires_Base_Power")).empty())
-            u.base_shield_requires_power = ty.get_bool(t, "Shield_Requires_Base_Power");
+        // ref6 t01: the tag's one default is true (kDefaults), so the old "set in XML" test was always true
+        u.base_shield_requires_power = u.shield_requires_base_power;
         u.affected_by_shield = ty.has_behavior(t, objects::BehaviorSet::Union, kAffected);
     }
     // HUD_GAPS §1.4: behaviour DUMMY_STAR_BASE = can repair hard points (the HUD repair cursor; can_repair_hardpoints).
@@ -888,7 +888,7 @@ bool BattleCatalog::field_node(uint32_t f, data::XmlNode& out) const {
 ta::AbilityObjectDesc BattleCatalog::ability_desc(uint32_t t, BuildState& s) const {
     const objects::GameObjectTypes& ty = *types_;
     ta::AbilityObjectDesc d;
-    d.name = std::string(ty.raw().types().name[t]);
+    d.name = std::string(ty.name(t));
     d.name_crc = name_crc(d.name);
     d.object_type = static_cast<int32_t>(t);
     d.category_mask = ty.get_mask(t, "CategoryMask");

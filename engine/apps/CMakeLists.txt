@@ -17,6 +17,7 @@ if(TARGET alamo_objects AND TARGET alamo_commands AND TARGET alamo_tactical AND 
     sim/src/pacing.cpp
     sim/src/game_modes.cpp
     sim/src/sim_host.cpp
+    sim/src/ship_names.cpp
     sim/src/sim_host_save.cpp   # N1 save / load (owner: n1-host)
     sim/src/save_session.cpp    # N1 session descriptor + data fingerprints
     sim/src/map_spawn.cpp
@@ -77,6 +78,7 @@ if(TARGET alamo_objects AND TARGET alamo_commands AND TARGET alamo_tactical AND 
       sim/src/tactical_battle_retreat.cpp    # TRU1 t06: space retreat jump-out flight (TRU1_C_RE §2)
       sim/src/tactical_battle_land_engage.cpp  # cmb1 t01 / t03: land formation records, Auto_Engage, scan range (BKR1 Q2 / Q8)
       sim/src/tactical_battle_chase.cpp  # ref5 t08: one chase-input builder (land formations and fighters)
+      sim/src/tactical_battle_engagement.cpp  # ref6 t02: the battle's EngagementQueries (movement and combat)
       sim/src/tactical_battle_spawners.cpp   # TRU1 t05 / t07: indigenous spawners, debris (TRU1_C_RE §1 / §3)
       sim/src/fleet_groups.cpp               # [port] fleet groups, phase 1 (docs/DECISIONS.md)
       sim/src/battle_object_bridge.cpp       # ref2 t04: the battle lifecycle hooks of every battle VM's ObjectBridge
@@ -221,6 +223,10 @@ if(TARGET alamo_objects AND TARGET alamo_commands AND TARGET alamo_tactical AND 
   target_link_libraries(alamo_sim_story_rewards_tests PRIVATE alamo_sim alamo_vfs alamo_test_support)
   add_test(NAME alamo_sim_story_rewards_tests COMMAND alamo_sim_story_rewards_tests)
   set_tests_properties(alamo_sim_story_rewards_tests PROPERTIES TIMEOUT 600)
+  # ref5 t04: ship names (sim/include/alamo/sim/ship_names.hpp), no game data.
+  add_executable(alamo_sim_ship_names_tests sim/tests/test_ship_names.cpp)
+  target_link_libraries(alamo_sim_ship_names_tests PRIVATE alamo_sim alamo_test_support)
+  add_test(NAME alamo_sim_ship_names_tests COMMAND alamo_sim_ship_names_tests)
   # BM1: the benchmark scenario manifest, tick statistics, comparison rule and result JSON (no game data).
   add_executable(alamo_sim_bench_tests sim/tests/test_bench.cpp)
   target_link_libraries(alamo_sim_bench_tests PRIVATE alamo_sim alamo_test_support)

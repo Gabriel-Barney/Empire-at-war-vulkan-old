@@ -573,11 +573,12 @@ bool MovementSystem::attack_plan(const MoveOrder& order, const std::vector<uint3
     const bool guard = order.attack.guard;
     std::vector<ObjectId> ids;
     for (const uint32_t m : f.members) ids.push_back(units_[idx[m]].d.id);
-    if (fire_test_ && !guard && !order.attack.unseen) {
+    if (eng_->has_fire_test() && !guard && !order.attack.unseen) {
         bool all = true;
         for (const uint32_t m : f.members) {
             const Unit& x = units_[idx[m]];
-            if (!fire_test_(x.d.id, x.m.pos, target, false, order.attack.c, order.attack.cz)) {
+            if (!eng_->can_fire_from(x.d.id, x.m.pos.x, x.m.pos.y, target, false, order.attack.c.x, order.attack.c.y,
+                                     order.attack.cz)) {
                 all = false;
                 break;
             }
@@ -661,7 +662,7 @@ bool MovementSystem::attack_plan(const MoveOrder& order, const std::vector<uint3
     for (const Slot& s : f.slots) b0 = std::min(b0, s.back);
     std::vector<V2> uncut;  // the path before the fire trim's cut (empty: no trim)
     float goal_s = 0.0f;
-    if (order.attack.trim && fire_test_) {
+    if (order.attack.trim && eng_->has_fire_test()) {
         std::vector<TrimMember> tm;
         // s78o (b0071): a member without TARGETING (the host's LandAttackUnit::targeting) is not tested. bkm1 t02 (review):
         // each at its depth behind the front row (b0), as its lane end (set_lanes) - the point tested is where it stops
@@ -679,7 +680,7 @@ bool MovementSystem::attack_plan(const MoveOrder& order, const std::vector<uint3
         const float keep = fire_trim(path, tm, obstacle, guard_range, [&](const TrimMember& m, V2 p) {
             // guard (item 7): within the guard range of T (2-D) and the line of fire clear; else the fire test
             if (guard && distance(p, c) > guard_range) return false;
-            return fire_test_(units_[idx[m.member]].d.id, p, target, guard, g, order.attack.cz);  // bkt1 t06: to G
+            return eng_->can_fire_from(units_[idx[m.member]].d.id, p.x, p.y, target, guard, g.x, g.y, order.attack.cz);  // to G
         });
         // the member goals are the slot points the trim tested: on the uncut path at arc length keep (at keep 0 the cut
         // path is its first node alone and has no direction; the uncut one extends backwards along its first segment)

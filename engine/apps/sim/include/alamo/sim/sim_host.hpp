@@ -71,6 +71,7 @@
 #include "alamo/sim/object_scripts.hpp"
 #include "alamo/sim/pacing.hpp"
 #include "alamo/sim/save_session.hpp"
+#include "alamo/sim/ship_names.hpp"
 #include "alamo/sim/story_session.hpp"
 #ifdef ALAMO_SIM_HAVE_STORY
 #include "alamo/lua/lua_vm.hpp"           // q6 t06: the GameScoring script VM
@@ -225,6 +226,15 @@ public:
     ObjectScriptHost* object_scripts() { return object_scripts_.get(); }
     const ObjectScriptHost* object_scripts() const { return object_scripts_.get(); }
     void set_object_script_files(const FileProvider* files);
+    // ref5 t04: ship names (ship_names.hpp; MCX8_BINDINGS_OBJECTS §"Ship names"). set_ship_names installs the lists the
+    // game session read (never for the attract demo: no names there) and the "ship_names" save chunk; the host names
+    // the top mode's SELECTABLE objects after each T5 update and resets the cursors at every Start_Game. ship_name_of
+    // is what every Lua object bridge's ship_name answers ("" without names).
+    void set_ship_names(std::unique_ptr<ShipNames> names);
+    const ShipNames* ship_names() const { return ship_names_.get(); }
+    std::string_view ship_name_of(const objects::ObjectStore& store, objects::ObjectHandle h) const {
+        return ship_names_ && store.exists(h) ? ship_names_->name(store.id(h)) : std::string_view();
+    }
     // The player world object scripts of a tactical store without a story session use (the galactic sim's players);
     // null before start_galactic, without object scripts or without the players family.
     lua::LuaPlayerWorld* object_script_players() { return object_players_.get(); }
@@ -524,6 +534,7 @@ private:
     // before the host whose VMs point to it.
     std::shared_ptr<lua::LuaPlayerWorld> object_players_;
     std::unique_ptr<ObjectScriptHost> object_scripts_;
+    std::unique_ptr<ShipNames> ship_names_;  // ref5 t04
 };
 
 }  // namespace alamo::sim

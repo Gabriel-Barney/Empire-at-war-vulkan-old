@@ -1,5 +1,6 @@
 // Part 2 of test_movement_gaps (bo3 t03: split by position; see test_movement_gaps_common.hpp).
 #include "test_movement_gaps_common.hpp"
+#include "alamo/test/engagement_fns.hpp"
 
 void test_forced_path() {
     // A wall across x = 15 (the whole height): a normal move stops at the nearest reachable spot on the near side; a
@@ -1244,13 +1245,13 @@ void test_turret() {
     });
     bool aim = false;
     const V2 p1 = sys.view(1).pos;
-    sys.set_turret_aim_fn([&](ObjectId id, float& x, float& y, float& z) {
+    alamo::test::engagement_of(sys).turret_aim_fn = [&](int32_t id, alamo::tactical::Vec3& at) {
         if (id != 1 || !aim) return false;
-        x = p1.x;
-        y = p1.y + 100.0f;  // 90 degrees left of the body (yaw 0)
-        z = 0.0f;
+        at.x = p1.x;
+        at.y = p1.y + 100.0f;  // 90 degrees left of the body (yaw 0)
+        at.z = 0.0f;
         return true;
-    });
+    };
     SimRng rng(3);
     uint32_t f = 0;
     auto run_to = [&](uint32_t end) {

@@ -11,6 +11,7 @@
 #include <utility>
 #include <vector>
 
+#include "alamo/test/engagement_fns.hpp"
 #include "alamo/core/sim_crc.hpp"
 #include "alamo/core/sim_rng.hpp"
 #include "alamo/tactical/movement/attack_approach.hpp"
@@ -423,7 +424,7 @@ MoveOrder attack_order(std::vector<ObjectId> ids, ObjectId target, V2 c, float t
 }
 
 void geometric_fire(MovementSystem& sys, V2 c, float engage) {
-    sys.set_fire_test([c, engage](ObjectId, V2 p, ObjectId, bool, V2, float) { return distance(p, c) <= engage; });
+    alamo::test::set_fire_test<V2>(alamo::test::engagement_of(sys), [c, engage](ObjectId, V2 p, ObjectId, bool, V2, float) { return distance(p, c) <= engage; });
 }
 
 // §4.3.2 item 9, the unit case: one attacker at the origin, a unit with half extents 5 standing at (1000, 0), engage
@@ -907,7 +908,7 @@ void test_scene_guard() {
         bool los_only_always = true;
         uint32_t asked = 0;
         bool to_g = true;  // bkt1 t06 (b0079): the trim's line of fire ends at the plan's goal G (a guard block: G = C)
-        sys.set_fire_test([&](ObjectId, V2, ObjectId, bool los_only, V2 g, float) {
+        alamo::test::set_fire_test<V2>(alamo::test::engagement_of(sys), [&](ObjectId, V2, ObjectId, bool los_only, V2 g, float) {
             los_only_always = los_only_always && los_only;
             to_g = to_g && close2(g, c, 0.01f);
             ++asked;
@@ -941,7 +942,7 @@ void test_scene_guard() {
         scene_system(sys);
         CHECK(sys.add_unit(attacker(10, kO)));
         CHECK(sys.add_unit(attacker(900, kO + V2{400.0f, 0.0f}, 5.0f)));
-        sys.set_fire_test([](ObjectId, V2 p, ObjectId, bool, V2, float) { return p.x - kO.x > 305.0f; });
+        alamo::test::set_fire_test<V2>(alamo::test::engagement_of(sys), [](ObjectId, V2 p, ObjectId, bool, V2, float) { return p.x - kO.x > 305.0f; });
         MoveOrder o = attack_order({10}, 900, kO + V2{400.0f, 0.0f}, 5.0f, 150.0f);
         o.attack.guard = true;
         o.attack.units[0].range = 250.0f;
@@ -958,7 +959,7 @@ void test_scene_guard() {
         CHECK(sys.add_unit(attacker(10, kO)));
         CHECK(sys.add_unit(attacker(900, kO + V2{400.0f, 0.0f}, 5.0f)));
         uint32_t asked = 0;
-        sys.set_fire_test([&asked](ObjectId, V2, ObjectId, bool, V2, float) {
+        alamo::test::set_fire_test<V2>(alamo::test::engagement_of(sys), [&asked](ObjectId, V2, ObjectId, bool, V2, float) {
             ++asked;
             return true;
         });
@@ -1026,7 +1027,7 @@ void test_scene_guard_formation() {
     CHECK(sys.add_unit(attacker(10, kO + V2{0.0f, -25.0f})));
     CHECK(sys.add_unit(attacker(11, kO + V2{0.0f, 25.0f})));
     CHECK(sys.add_unit(attacker(900, kO + V2{100.0f, 0.0f}, 5.0f)));
-    sys.set_fire_test([](ObjectId, V2, ObjectId, bool, V2, float) { return true; });
+    alamo::test::set_fire_test<V2>(alamo::test::engagement_of(sys), [](ObjectId, V2, ObjectId, bool, V2, float) { return true; });
     MoveOrder o = attack_order({10, 11}, 900, kO + V2{100.0f, 0.0f}, 5.0f, 150.0f);
     o.flags = kMoveFlagGuardMove;
     o.attack.guard = true;
@@ -1054,7 +1055,7 @@ void test_scene_guard_trim_start() {
         scene_system(sys);
         CHECK(sys.add_unit(attacker(10, kO)));
         CHECK(sys.add_unit(attacker(900, kO + V2{400.0f, 0.0f}, 5.0f)));
-        sys.set_fire_test([](ObjectId, V2, ObjectId, bool, V2, float) { return false; });
+        alamo::test::set_fire_test<V2>(alamo::test::engagement_of(sys), [](ObjectId, V2, ObjectId, bool, V2, float) { return false; });
         MoveOrder o = attack_order({10}, 900, kO + V2{400.0f, 0.0f}, 5.0f, 150.0f);
         o.flags = kMoveFlagGuardMove;
         o.attack.guard = true;

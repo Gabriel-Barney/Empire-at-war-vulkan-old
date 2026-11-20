@@ -1558,6 +1558,11 @@ void CampaignBattles::story_bridge_begin(SimHost& host, GameMode& mode) {
         TacticalMode* tm = host_->tactical();
         return (battle_ && tm && tm->primary().exists(o)) ? battle_->team_company_type(tm->primary().id(o)) : objects::kNone;
     };
+    // ref5 t04: Get_Name (the host's ship names, MCX8_BINDINGS_OBJECTS §"Ship names").
+    b.ship_name = [this](objects::ObjectHandle o) {
+        const TacticalMode* tm = host_->tactical();
+        return tm ? host_->ship_name_of(tm->primary(), o) : std::string_view();
+    };
     // q6 t28 (TERRAIN_WATER_POST 1.6): Find_Hint / Get_Hint see the map objects' .ted hint names.
     b.map_hint = [this](objects::ObjectHandle o) {
         TacticalMode* tm = host_->tactical();

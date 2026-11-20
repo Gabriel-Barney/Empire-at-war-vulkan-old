@@ -59,6 +59,7 @@
 #include "alamo/objects/enums.hpp"
 #include "alamo/objects/object_types.hpp"
 #include "alamo/objects/type_fields.hpp"
+#include "alamo/objects/type_tags.hpp"
 
 namespace alamo::objects {
 
@@ -143,6 +144,19 @@ public:
     std::array<float, 4> get_vec(TypeIndex t, std::string_view tag) const;
     std::span<const std::string_view> get_list(TypeIndex t, std::string_view tag) const;
     std::span<const FieldIndex> get_sub_objects(TypeIndex t, std::string_view tag) const;
+    // ref6 t01: typed reads through the handles of alamo/objects/type_tags.hpp (engine code outside objects uses these;
+    // tools/lint/check_tag_reads.py), the type's name and a sub-object list.
+    float get(TypeIndex t, const FloatTag& k) const { return get_float(t, k.tag); }
+    int32_t get(TypeIndex t, const IntTag& k) const { return get_int(t, k.tag); }
+    bool get(TypeIndex t, const BoolTag& k) const { return get_bool(t, k.tag); }
+    std::string_view get(TypeIndex t, const TextTag& k) const { return get_string(t, k.tag); }
+    std::span<const FieldIndex> sub_objects(TypeIndex t, const SubObjectsTag& k) const { return get_sub_objects(t, k.tag); }
+    std::string_view name(TypeIndex t) const { return t < size() ? raw().types().name[t] : std::string_view{}; }
+    // Scale_Factor, 1 when it is not > 0 (the guard every extent / footprint reader applies).
+    float scale_factor(TypeIndex t) const {
+        const float s = get(t, tags::Scale_Factor);
+        return s > 0.0f ? s : 1.0f;
+    }
     // Lazy references (Â§4.5): "None" / unknown -> kNone, else the first definition.
     TypeIndex get_type_ref(TypeIndex t, std::string_view tag) const;
     std::vector<TypeIndex> get_type_refs(TypeIndex t, std::string_view tag) const;

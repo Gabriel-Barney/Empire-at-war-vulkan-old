@@ -909,14 +909,8 @@ void test_story_battle(const Data& d) {
                 a.log == b.log ? "yes" : "NO");
     CHECK(a.lua.empty() && a.activations > 0);
     // ref5 t04: no Full binding reads a hook the real story / object-script / AI bridges leave unset.
-    // Pending: ship names wait for docs/re/REF5_T04_RE_QUESTIONS.md (the only allowed entry; remove it with the wiring).
-    size_t unexpected = 0;
-    for (const std::string& u : a.unwired) {
-        const bool pending = u == "GameObjectWrapper.Get_Name reads ObjectBridge.ship_name";
-        std::printf("  unwired%s: %s\n", pending ? " (pending ref5 t04 RE answer)" : "", u.c_str());
-        unexpected += pending ? 0u : 1u;
-    }
-    CHECK(a.hooks_checked && unexpected == 0);
+    for (const std::string& u : a.unwired) std::printf("  unwired: %s\n", u.c_str());
+    CHECK(a.hooks_checked && a.unwired.empty());
     // L1/S4 wave 2b feeds: movement transitions (UNIT_ARRIVED / FULL_STOP) and reserve deployments (REINFORCE).
     auto count = [&a](const char* k) {
         size_t n = 0;

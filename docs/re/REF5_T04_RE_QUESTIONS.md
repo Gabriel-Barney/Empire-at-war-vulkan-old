@@ -23,4 +23,5 @@ Answer into `docs/re/MCX8_BINDINGS_OBJECTS.md` (a "Ship names" section under Get
    save game (SelectionDataPack save)?
 5. **The file reader** (0x4e6b20): line splitting, blank lines, BOM, trimming.
 
-Port guess until answered: none in code (ship_name stays unwired; GameObjectWrapper.Get_Name returns "").
+Answered 2026-11-20 (re-analyst): `MCX8_BINDINGS_OBJECTS.md` §"Ship names". The "none in multiplayer" reading was wrong:
+only the attract demo gives no name.

@@ -315,7 +315,7 @@ bool TacticalBattle::clearance_info(objects::ObjectId id, mv::ClearanceInfo& out
             ci.box_lo_z = am->bound_c.z;
             ci.box_hi_z = am->bound_h.z;
         }
-        ci.half = mv::clearance_half_extents(types.get_float(t, "Custom_Hard_XExtent"), types.get_float(t, "Custom_Hard_YExtent"),
+        ci.half = mv::clearance_half_extents(types.get(t, objects::tags::Custom_Hard_XExtent), types.get(t, objects::tags::Custom_Hard_YExtent),
                                              ci.scale_factor, am != nullptr || named, am ? am->bound_h.x : 0.0f,
                                              am ? am->bound_h.y : 0.0f);
         clr_types_[t] = ci;
@@ -460,16 +460,17 @@ void TacticalBattle::setup(TacticalMode& mode, terrain::MapData map, SimRng& rng
     // cu8j t01 (MOVEMENT §4.6.2): the movement coordinator update runs at the end of the tick (TacticalBattle::tick), after
     // the object services, as retail's common tick step 10; the movement tick does not run it.
     movement_->set_deferred_composition(true);
-    // OI tactical: crush hostility = the combat relation (player +0x370 table, MOVEMENT.md 5.5).
-    movement_->set_hostility([this](int32_t a, int32_t b) { return combat_ && combat_->is_enemy(a, b); });
+    // ref6 t02: the engagement questions movement asks (crush hostility = the combat relation, MOVEMENT.md 5.5; attack
+    // ranges; the land fire test; the turret aim point; the arrival lock) come from the battle's one EngagementQueries
+    // (tactical_battle_engagement.cpp), also handed to combat below.
+    engagement_.mode = &mode;
+    movement_->set_engagement(&engagement_);
     // s78n t14 part B (FIGHTER_FLYING §7.1, 0x5c8890): Scatters_From_Crushers of the owner's faction ([port] false for an
     // owner without a galactic player).
     movement_->set_scatters_fn([this](int32_t owner) {
         if (!galaxy_ || !rules_ || owner < 0 || static_cast<size_t>(owner) >= galaxy_->players().size()) return false;
         return rules_->faction(galaxy_->players()[static_cast<size_t>(owner)].faction).scatters_from_crushers;
     });
-    // cu8l t03 (CU8K_T03_T08_T09_RE §1.10 rule 1): the movement lock of the start fleet's hyperspace arrival (arrivals_).
-    movement_->set_locked_fn([this](mv::ObjectId key) { return arrival_locked(key); });
     // s78n t10 (TACTICAL_COMBAT §5.4.6 port spec item 4): the space composition's candidate boxes are the world AABB
     // 0x3982b0 - the Space_Model_Name collision bound through the unit's yaw and Scale_Factor (as avoid_snapshot builds
     // the avoidance members); a type without a space model name has no model (the 0.1 box at the position). [port] no
@@ -485,18 +486,6 @@ void TacticalBattle::setup(TacticalMode& mode, terrain::MapData map, SimRng& rng
             model = catalog_->avoid_model(u->type, true);
             return model != nullptr;
         });
-    // S8 t24 (MOVEMENT §3.2 "Turret recentre around deploy"): a Deploys unit's TURRET aims at its live current combat
-    // target (0x632050 [inferred: whenever the unit has one]); the raw position, no z adjust [inferred].
-    movement_->set_turret_aim_fn([this](objects::ObjectId id, float& x, float& y, float& z) {
-        if (!combat_ || !combat_->has_unit(id)) return false;
-        const tc::ObjectId t = combat_->current_target(id);
-        if (t == tc::kNoObject || !combat_->has_unit(t) || !combat_->alive(t)) return false;
-        const auto p = combat_->position(t);
-        x = p.x;
-        y = p.y;
-        z = p.z;
-        return true;
-    });
 #ifdef ALAMO_SIM_HAVE_ANIM
     // REMAINING_GAPS §4.3-4.7: special-locomotor anim lengths = the model's clip (variant 0) in sim frames (30 / s).
     movement_->set_anim_length_fn([this](objects::ObjectId id, int32_t type) -> uint32_t {
@@ -671,64 +660,7 @@ void TacticalBattle::setup(TacticalMode& mode, terrain::MapData map, SimRng& rng
             return tc::PreciseOutcome::Miss;
         });
     }
-    {  // S8 t17 (FIGHTER_FLYING §4.10 A): the scan cube R + Rr of fighters with a formation (kUnitScanQuery); cmb1 t03 (BKR1
-       // Q8 [H]): on land the units and squad containers with a land formation record (land_scan_range)
-        const TacticalMode* tm = &mode;
-        combat_->set_scan_range_query([this, tm](tc::ObjectId u, tc::ObjectId c, float range, float& rr) {
-            return space_ ? fighter_scan_range(tm->primary(), u, c, range, rr) : land_scan_range(tm->primary(), u, c, range, rr);
-        });
-    }
-    if (!space_)  // s78n t20 (FIGHTER_FLYING §4.11 E, 0x40edd0): can_hit's land line-of-fire term 0x3b5ad0 (L1_S4_REMAINING §1.2)
-        combat_->set_shield_sides_query([this](tactical::Vec3 a, tactical::Vec3 b, bool shield_damage) {
-            return opposite_sides_of_shield(sv(a), sv(b), -1, true, shield_damage);
-        });
-    if (movement_) {
-        // s78n t26 review round 2 (MOVEMENT §4.3 correction [H]): the formation layout's rank key, Get attack range
-        // 0x3749d0 (the value land_attack_order reads); a squad container through its first live member. bkm1 t05
-        // (b0037): space formations rank by it too
-        movement_->set_attack_range_query([this](mv::ObjectId id) {
-            const objects::ObjectId unit = attack_lead(id);
-            return unit != objects::kNoObjectId && combat_->has_unit(unit) ? combat_->attack_range(unit) : 0.0f;
-        });
-    }
-    if (!space_ && movement_) {
-        // s78n t25.3 (MOVEMENT §4.3.2 items 6 / 7, 0x40edd0 / 0x410e90; TACTICAL_COMBAT §2.8 B 4): the movement's fire
-        // test - can the mover hit the target from p: slots 43 / 46 and the line of fire from p at the ground height
-        // (CombatSystem::can_hit_from; a squad container through its first live member). Yes or NoTarget (nothing
-        // tested) = it can fire. s78n t25.4: los_only (a guard block's trim, item 7: the movement tests the guard range)
-        // answers the line of fire alone (CombatSystem::line_of_fire_from).
-        movement_->set_fire_test([this](mv::ObjectId mover, mv::V2 p, mv::ObjectId target, bool los_only, mv::V2 g, float gz) {
-            const objects::ObjectId unit = attack_lead(mover);
-            if (unit == objects::kNoObjectId || !combat_->has_unit(unit)) return true;
-            tactical::Vec3 from = combat_->can_hit_origin(unit);
-            from.x = p.x;
-            from.y = p.y;
-            // bkt1 t06 (b0079, MOVEMENT §4.3.2 item 7 / 0x40f7c0): from p at the terrain height, or the water height for a
-            // Water-capable class (the mover's movement mask has the Water bit) where the water lies above; to G at its
-            // height (the movement's goal point); CombatSystem raises both by their Ranged_Target_Z_Adjust
-            from.z = map_.terrain.sample_height(p.x, p.y);
-            if ((movement_->mask_of(mover) & mv::kPassWater) != 0u && map_.terrain.header.water_type != terrain::WaterType::None)
-                from.z = std::max(from.z, map_.terrain.header.water_height);
-            const tactical::Vec3 to{g.x, g.y, gz};
-            // cmb2 t06 (BKT1_ATTACK_RE §3.2 / §3.3 item 4 [H]): an object that is not a combat unit (a story marker) is
-            // tested by geometry against G
-            const tc::CanHit c = !combat_->has_unit(target) ? combat_->can_hit_point(unit, from, to, 0.0f)
-                                 : los_only                 ? combat_->line_of_fire_from(unit, from, target, &to)
-                                                            : combat_->can_hit_from(unit, from, target, &to);
-            return c == tc::CanHit::Yes || c == tc::CanHit::NoTarget;
-        });
-        // s78n t26 review round 2 (MOVEMENT §4.3 correction [H]): the formation layout's rank key, Get attack range
-        // 0x3749d0 (the value land_attack_order reads); a squad container through its first live member
-        movement_->set_attack_range_query([this](mv::ObjectId id) {
-            const objects::ObjectId unit = attack_lead(id);
-            return unit != objects::kNoObjectId && combat_->has_unit(unit) ? combat_->attack_range(unit) : 0.0f;
-        });
-        // bkm1 t04 (MOVEMENT §4.2 step 2 item 7 test 9): Targeting_Min_Attack_Distance for the recruitment's engagement test
-        movement_->set_min_attack_distance_query([this](mv::ObjectId id) {
-            const objects::ObjectId unit = attack_lead(id);
-            return unit != objects::kNoObjectId && combat_->has_unit(unit) ? combat_->min_attack_distance(unit) : 0.0f;
-        });
-    }
+    combat_->set_engagement(&engagement_);  // ref6 t02: the scan-range query and the land shield-sides test
     combat_->bind_rng(&rng);  // Take_Damage listeners called outside the tick (host damage) draw here
     hg_setup(mode);           // hangars: SPAWN_SQUADRON descriptors and the HangarSystem (before any unit exists)
     oi_install(mode, rng);    // OI abilities: AbilityHost hooks, the abilities' RNG, repair credit hooks
@@ -1428,7 +1360,7 @@ void snap_move_point(const objects::ObjectStore& st, const BattleCatalog& cat, c
         const objects::TypeIndex t = st.type(h);
         if (t >= types.size() || types.value(t, kSnapField) == nullptr || !types.get_bool(t, "Snap_Movement_Orders_To_Center"))
             continue;
-        const float sc = types.get_float(t, "Scale_Factor") > 0.0f ? types.get_float(t, "Scale_Factor") : 1.0f;
+        const float sc = types.scale_factor(t);
         float r = types.get_float(t, "Custom_Soft_Footprint_Radius");
         if (!(r > 0.0f)) r = types.get_float(t, "Space_Obstacle_Radius");
         if (!(r > 0.0f)) {

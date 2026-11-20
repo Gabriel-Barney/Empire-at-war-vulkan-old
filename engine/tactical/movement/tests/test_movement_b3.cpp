@@ -7,6 +7,7 @@
 #include <cstdio>
 #include <vector>
 
+#include "alamo/test/engagement_fns.hpp"
 #include "alamo/core/bytes.hpp"
 #include "alamo/core/sim_crc.hpp"
 #include "alamo/core/sim_rng.hpp"
@@ -656,7 +657,7 @@ void test_t23_same_formation() {
         MovementSystem sys{MovementConfig{}};
         land_system(sys, 120);
         const V2 base = cell_center(30, 60);
-        sys.set_attack_range_query([](ObjectId id) { return id == 2 ? 80.0f : 100.0f; });  // the rear one ranks in front
+        alamo::test::engagement_of(sys).attack_range_fn = ([](ObjectId id) { return id == 2 ? 80.0f : 100.0f; });  // the rear one ranks in front
         UnitDesc a = inf ? unit(1, base + V2{40.0f, 0.0f}, 2, 1.0f, 6.0f) : vehicle(1, base + V2{40.0f, 0.0f}, 0);
         UnitDesc b = inf ? unit(2, base, 2, 0.8f, 6.0f) : vehicle(2, base, 0, 10.0f, 6.0f, 0.8f);
         CHECK(sys.add_unit(a) && sys.add_unit(b));
@@ -747,7 +748,7 @@ void test_t23_starvation() {
         const V2 at = cell_center(30, 60);
         // s78n t26 review round 2 (MOVEMENT §4.3 "Correction, s78n t19" [H]): rows rank by attack range (shortest in front), no longer by max speed: the slow front one
         // keeps the front row with the shorter range
-        sys.set_attack_range_query([](ObjectId id) { return id == 1 ? 80.0f : 100.0f; });
+        alamo::test::engagement_of(sys).attack_range_fn = ([](ObjectId id) { return id == 1 ? 80.0f : 100.0f; });
         UnitDesc front = vehicle(1, at, 0, 10.0f, with_detour ? 24.0f : 6.0f, 0.8f);
         if (with_detour) front.collision_class = kUccGiantVehicle;  // a Giant never overtakes (0x683260)
         CHECK(sys.add_unit(front));

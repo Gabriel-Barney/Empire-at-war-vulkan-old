@@ -1,4 +1,5 @@
 // Part 3 of test_movement_gaps (bo3 t03: split by position; see test_movement_gaps_common.hpp).
+#include "alamo/test/engagement_fns.hpp"
 #include "test_movement_gaps_common.hpp"
 
 // s78n t18 item 3 (FIGHTER_FLYING §7.7 items 3 - 6): the squad container's speed step order and arrival.
@@ -1417,7 +1418,7 @@ void test_t20_early_arrival() {
         MovementSystem sys{MovementConfig{}};
         land_system(sys, 100);
         const float speeds[5] = {0.5f, 0.6f, 0.7f, 0.7f, 0.7f};
-        sys.set_attack_range_query([&speeds](ObjectId id) { return id >= 10 && id < 15 ? 100.0f * speeds[id - 10] : 0.0f; });
+        alamo::test::engagement_of(sys).attack_range_fn = ([&speeds](ObjectId id) { return id >= 10 && id < 15 ? 100.0f * speeds[id - 10] : 0.0f; });
         const V2 starts[5] = {cell_center(16, 20), cell_center(12, 20), cell_center(12, 17), cell_center(12, 22), cell_center(12, 25)};
         for (ObjectId i = 0; i < 5; ++i) {
             UnitDesc d = t20_vehicle(10 + i, starts[i], 1, 10.0f, 6.0f, speeds[i]);

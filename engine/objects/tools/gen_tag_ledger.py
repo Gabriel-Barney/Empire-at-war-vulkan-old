@@ -8,7 +8,8 @@ engine/objects/src/field_schema_table.inc; class = the row's segment owner), wit
             the campaign's raw list) but no engine code reads it
   consumed  engine code reads it: a string literal naming the tag in engine source outside the descriptor tables,
             tests, tools and the load report (every typed read goes through an accessor taking the tag name:
-            GameObjectTypes::get_*(t, "Tag"), GameConstants::get*("Tag"), XmlNode::child*("Tag"), CampaignDef::raw_value),
+            GameObjectTypes::get_*(t, "Tag"), GameConstants::get*("Tag"), XmlNode::child*("Tag"), CampaignDef::raw_value) or
+            a typed handle named in code (objects::tags::Tag, alamo/objects/type_tags.hpp; ref6 t01),
             a name the code builds from such literals ("Corruption_" + n + "_Type": built_tag_reads),
             or an annotation "// ledger: consumes <Class>.<Tag>" next to an indirect read (a column filled from the
             tag, a struct member set by a loader)
@@ -328,6 +329,7 @@ EXCLUDED_FILES = {
     "engine/apps/game/src/mod_check.cpp",
 }
 SOURCE_EXT = (".cpp", ".hpp", ".h", ".inc")
+TAG_HANDLE = re.compile(r"(?<![A-Za-z0-9_])tags::([A-Za-z0-9_]+)")  # ref6 t01: typed handle reads
 ANNOTATION = re.compile(r"ledger:\s*(consumes|verifies)\s+([A-Za-z0-9_]+)\.([A-Za-z0-9_\-\.]+)")
 ROW = re.compile(r'\{"([^"]+)", (0x[0-9a-fA-F]+), (0x[0-9a-fA-F]+), "([^"]*)", (\d+)')
 
@@ -493,6 +495,11 @@ def find_consumers(rows, exact_only=frozenset(), sources=None):
             for _, s in lits:
                 for cls in literal_classes(by_tag.get(s.lower(), ()), text):
                     consumers.setdefault((cls, s.lower()), set()).add(r)
+            # ref6 t01: a typed handle read (objects::tags::Name, alamo/objects/type_tags.hpp) in code names the tag too
+            code = "\n".join(line for i, line in enumerate(text.split("\n"), 1) if i in code_lines)
+            for m in TAG_HANDLE.finditer(re.sub(r"//[^\n]*", "", code)):
+                for cls in literal_classes(by_tag.get(m.group(1).lower(), ()), text):
+                    consumers.setdefault((cls, m.group(1).lower()), set()).add(r)
             for tag in built_tag_reads(concat, by_tag):
                 for cls in literal_classes(by_tag[tag], text):
                     if (cls, tag) not in exact_only:
