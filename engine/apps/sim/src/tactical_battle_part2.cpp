@@ -2063,6 +2063,15 @@ void TacticalBattle::feed_collision_info(const objects::ObjectStore& store) {
 // SP5 (per-index writes): on land every unit writes only its own movement entry from const reads, so the units run in
 // parallel; space keeps the serial loop (feed_fighter_target updates the host's formation records).
 void TacticalBattle::feed_attack_targets(const objects::ObjectStore& store) {
+    if (space_ && movement_) {
+        // ref5 t08: the chase ranges of each fighter formation's type, filled serially before the combat tick, so the
+        // parallel scan (fighter_scan_range) reads the cache instead of the tag lookups (the same values either way).
+        for (const FighterFormationRecord& r : fformations_) {
+            const mv::FighterSquad* sq = fighter_squad_c(r.key);
+            const Unit* leader = unit_by_id(sq && !sq->members.empty() ? sq->members.front() : r.key);
+            if (leader) chase_ranges_fill(fighter_chase_type(*leader, sq != nullptr));
+        }
+    }
     const auto body = [&](uint32_t b, uint32_t e) {
         for (uint32_t i = b; i < e; ++i) {
             const Unit& u = units_[i];
@@ -2300,19 +2309,6 @@ objects::ObjectId TacticalBattle::fighter_key(const Unit& u) const {
     return u.id;
 }
 
-objects::ObjectId TacticalBattle::fighter_goal_key(objects::ObjectId id) {
-    const Unit* x = id != objects::kNoObjectId ? unit_by_id(id) : nullptr;
-    if (x && x->container < containers_.size() && movement_->fighter_squad(containers_[x->container].id)) return containers_[x->container].id;
-    return id;
-}
-
-bool TacticalBattle::fighter_goal_live(objects::ObjectId key, const objects::ObjectStore& store) {
-    if (key == objects::kNoObjectId) return false;
-    if (const mv::FighterSquad* s = movement_->fighter_squad(key)) return !s->members.empty();
-    const Unit* x = unit_by_id(key);
-    return x && x->alive && !x->retreated && store.alive(x->h) && combat_->has_unit(x->id);
-}
-
 // A move / attack order replaces the formation of every fighter squadron it names (one record per squadron).
 void TacticalBattle::fighter_order(std::span<const objects::ObjectId> ids, uint8_t flags, Vec3 goal, objects::ObjectId goal_object) {
     if (!space_) {  // cmb1 t01 / t03: the land formation records (LandFormationRecord) take the same order paths
@@ -2430,65 +2426,11 @@ objects::ObjectId TacticalBattle::fighter_push(const Unit& leader, objects::Obje
             }
         }
     }
-    const mv::UnitView lv = movement_->view(leader.id);
-    const objects::ObjectId last_push = top_pushed();
-    const bool live_push = last_push != objects::kNoObjectId;  // a live pushed auto block is the last block
-    const FighterOrderView ov = fighter_order_view(*r);           // s78f review: the movement stack's order block
-    FighterChaseInputs ci;
-    ci.formation = true;
-    ci.flags = ov.first_flags;  // Rr and the attack-move branch read the first block
-    ci.moving = lv.has_goal && !lv.arrived;
-    ci.last_guard = (ov.flags & mv::kMoveFlagGuardMove) != 0 && !live_push;
-    ci.single_position = !ci.moving && !live_push && ov.goal_object == objects::kNoObjectId && !fighter_goal_live(order_goal, store);
-    ci.candidate_is_goal = tk == order_goal || tk == fighter_goal_key(ov.goal_object) || (live_push && tk == last_push);
-    // Rule 3: the guarded object (a guard block's object) and whether c attacks it or the squadron.
-    const Unit* guarded = (ov.flags & mv::kMoveFlagGuardMove) != 0 && ov.goal_object != objects::kNoObjectId ? unit_by_id(ov.goal_object) : nullptr;
-    if (guarded && (!guarded->alive || guarded->retreated || !store.alive(guarded->h))) guarded = nullptr;
-    if (guarded && movement_->has_unit(guarded->id)) {
-        const mv::UnitView gv = movement_->view(guarded->id);
-        ci.guarded_moving = gv.has_goal && gv.speed > 0.0f;
-    }
-    {
-        std::vector<objects::ObjectId> attackers;  // c, or every member of c's squadron
-        if (const mv::FighterSquad* cs = movement_->fighter_squad(tk)) attackers.assign(cs->members.begin(), cs->members.end());
-        else attackers.push_back(t);
-        for (const objects::ObjectId a : attackers) {
-            if (!combat_->has_unit(a)) continue;
-            const objects::ObjectId at = combat_->current_target(a);
-            if (at == objects::kNoObjectId) continue;
-            if ((guarded && at == guarded->id) || std::find(members.begin(), members.end(), at) != members.end()) ci.candidate_attacker = true;
-        }
-    }
-    ci.unit = store.position(leader.h);
-    // Rr: the squadron type's (a fighter without one: its own type's); cached per type.
-    const objects::GameObjectTypes& types = catalog_->types();
-    uint32_t ty = leader.type;
-    if (sq && leader.container < containers_.size() && containers_[leader.container].squad_type < types.size())
-        ty = containers_[leader.container].squad_type;
-    if (ty < types.size()) {
-        if (fchase_have_.size() != types.size()) {
-            fchase_have_.assign(types.size(), 0);
-            fchase_cache_.assign(types.size(), {});
-        }
-        if (!fchase_have_[ty]) {
-            const auto ti = static_cast<objects::TypeIndex>(ty);
-            fchase_cache_[ty] = {types.get_float(ti, "Guard_Chase_Range"), types.get_float(ti, "Idle_Chase_Range"),
-                                 types.get_float(ti, "Attack_Move_Response_Range"),
-                                 types.get_float(ti, "Autonomous_Move_Extension_Vs_Attacker")};
-            fchase_have_[ty] = 1;
-        }
-        ci.guard_range = fchase_cache_[ty][0];
-        ci.idle_range = fchase_cache_[ty][1];
-        ci.attack_move_range = fchase_cache_[ty][2];
-        ci.extension = fchase_cache_[ty][3];
-    }
-    ci.attack_range = combat_->attack_range(leader.id);
-    ci.goal = ov.goal;
-    if (const Unit* go = ov.goal_object != objects::kNoObjectId ? unit_by_id(ov.goal_object) : nullptr;
-        go && go->alive && !go->retreated && store.alive(go->h))
-        ci.goal = store.position(go->h);  // an object block: the slot goal follows the object
-    const Unit* tu = unit_by_id(t);
-    ci.candidate = store.position(tu->h);
+    // ref5 t08: the one chase-input builder (tactical_battle_chase.cpp), the squadron's inputs for the auto target t.
+    chase_ranges_fill(fighter_chase_type(leader, sq != nullptr));
+    const FighterChaseFacts chase = fighter_chase_order(*r, leader, members, store, combat_->attack_range(leader.id));
+    FighterChaseInputs ci = chase_inputs(chase.order);
+    fighter_chase_candidate(chase, t, tk, store.position(unit_by_id(t)->h), ci);
     if (fighter_chase_test(ci) != 0) movement_->fighter_push(key, tk);  // 0x41cf70: the auto attack block {kind 3, t, +0x5d = 1}
     return newest();
 }
