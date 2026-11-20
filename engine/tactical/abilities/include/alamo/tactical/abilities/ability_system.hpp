@@ -75,7 +75,7 @@ enum class AbilityEventKind : uint8_t {
     // split_from_formation, else the adopt) when no other share of the counter (script, landing) holds the unit.
     Immobilised,
     Released,        // ... 1 -> 0
-    InterdictOn,     // story event Interdict_Activated
+    InterdictOn,     // radar map event Interdict_Activated (TRU1_GRAVITY_FIELD 1.2; radar entry: rad1 t06)
     InterdictOff,
     StealthOn,
     StealthBroken,
@@ -123,7 +123,7 @@ enum class AbilityEventKind : uint8_t {
     // owner's position) with `target` as the goal object, keeping the attack order.
     Lured,
     // TRU1 t03 (docs/re/TRU1_GRAVITY_FIELD.md), presentation only: generator `id` came under base power (`value` 1: the
-    // local player's SFXEvent_HUD_Gravity_Control_Generator_On, story event Interdict_Activated) or lost it (`value` 0:
+    // local player's SFXEvent_HUD_Gravity_Control_Generator_On, radar map event Interdict_Activated) or lost it (`value` 0:
     // ..._Off); unit `target` entered (`value` 1: attach the generator type's Gravity_Control_Field_Effect) or left (`value`
     // 0: remove it) generator `id`'s field.
     GravityFieldPower,
