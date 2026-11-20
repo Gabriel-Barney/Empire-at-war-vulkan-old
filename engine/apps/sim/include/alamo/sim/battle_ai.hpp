@@ -348,8 +348,8 @@ private:
     // order; hashed and saved with the lane on.
     std::vector<commands::Command> lane_batch_;
     // sp3 t02: the TacticalAiHost answers think() reads, captured on the critical lane at each AI slot (capture_lane_view,
-    // before TacticalAiWorld::publish) with the lane on; the overrides answer from it while `valid` (a load clears it: the
-    // relink's fill reads the battle). Per player: index = player id.
+    // before TacticalAiWorld::publish) with the lane on; the facts' snapshot functions and the lane hooks read it while
+    // `valid` (a load clears it: the relink's fill reads the battle). Per player: index = player id.
     // ref5 t07: the per-player answers (pool, can_reinforce, population, drop frame), the movement locks, the timed landings
     // and the skirmish production are BattleFacts tables now (facts_, captured from the same rules).
     struct LaneView {

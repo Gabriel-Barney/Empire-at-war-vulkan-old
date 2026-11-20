@@ -496,7 +496,7 @@ How P5 is built; status and open items are on the roadmap (group `sp5`), checks 
   `_foc_land_ai_lane` worker-count checks, the two lane save checks). `think()` still runs inline (t03).
 - One facts object for both lanes (ref5 t07, 2026-11-20; `engine/ai/tactical/include/alamo/ai/tactical/battle_facts.hpp`):
   `TacticalAiHost` keeps only `fill`, `frame_events` (the six signal lists in one call), `execute`, `facts()` and the three
-  host writes (HIJACK, the two releases); the 26 per-feature query virtuals are fact families of `BattleFacts`, each with ONE
+  host writes (HIJACK, the two releases); the 21 per-feature query virtuals are fact families of `BattleFacts`, each with ONE
   rule the host writes from the battle (`BattleAi::wire_facts`). Two read modes: **live** (lane off, and the critical
   lane) asks the rule at the moment of the read; **snapshot** (set while `think()` and the lane start scripts run) answers
   from the capture. A `FactTable` family (per player: pool, can-reinforce, population cap / used, space drop frame; per

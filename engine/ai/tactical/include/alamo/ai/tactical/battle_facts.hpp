@@ -20,6 +20,7 @@
 #include <cstdint>
 #include <functional>
 #include <optional>
+#include <type_traits>
 #include <utility>
 #include <vector>
 
@@ -172,6 +173,7 @@ public:
     // index, so the table is identical for every worker count. The rule must only read.
     template <class Pf>
     void capture(std::vector<Key> keys, const Pf& pf, uint32_t grain) {
+        static_assert(!std::is_same_v<Value, bool>, "vector<bool> packs bits: parallel writes would race");
         std::sort(keys.begin(), keys.end());
         keys.erase(std::unique(keys.begin(), keys.end()), keys.end());
         std::vector<Value> values(keys.size(), missing_);
@@ -222,7 +224,7 @@ public:
     void set_snapshot(bool on) { snapshot_ = on; }
     uint64_t version() const { return version_; }
     void captured() { ++version_; }  // after a capture of the tables (the AI slot of the lane)
-    void wrote() { ++version_; }     // after an AI write the host executed (orders, releases, HIJACK)
+    void wrote() { ++version_; }     // at each AI order the host is handed (also queued or refused), release or HIJACK call
 
     // ---- what the AI reads ----
     std::vector<TacticalReinforcement> reinforcement_pool(int32_t player) const { return pool.get(snapshot_, player); }

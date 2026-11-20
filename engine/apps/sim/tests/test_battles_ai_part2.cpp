@@ -739,6 +739,54 @@ void test_battle_ai_land_drop(const Data& d) {
                 }
             });
             CHECK(ai_lane_live_reads() == reads_before);
+            // ref5 t07: right after the capture (the battle unchanged), every family with a full snapshot answer gives the
+            // live rule's answer (the drop tests are partial on the capture by design and checked above).
+            {
+                ai::tactical::BattleFacts& bf = al.facts();
+                size_t compared = 0, mismatches = 0;
+                const auto same = [&](bool eq) {
+                    ++compared;
+                    mismatches += eq ? 0u : 1u;
+                };
+                const auto read = [&](bool snapshot, int32_t p, std::vector<double>& out) {
+                    bf.set_snapshot(snapshot);
+                    out.clear();
+                    for (const ai::tactical::TacticalReinforcement& r : bf.reinforcement_pool(p)) {
+                        out.push_back(r.key);
+                        out.push_back(r.type);
+                        out.push_back(r.population);
+                    }
+                    out.push_back(bf.can_reinforce(p) ? 1.0 : 0.0);
+                    out.push_back(bf.population_cap(p));
+                    out.push_back(bf.population_used(p));
+                    ai::tactical::SpaceDropFrame f;
+                    out.push_back(bf.space_drop_frame(p, f) ? 1.0 : 0.0);
+                    out.push_back(f.entry_facing_deg);
+                    out.push_back(bf.space_reinforce_base_alive(p) ? 1.0 : 0.0);
+                    for (const ai::tactical::TacticalPad& pad : bf.build_pads(p)) {
+                        out.push_back(pad.id);
+                        out.push_back(static_cast<double>(bf.build_pad_check(p, pad.id, -1)));
+                    }
+                    for (const objects::ObjectHandle h : tm->primary().owned_by(p)) {
+                        if (!tm->primary().active(h)) continue;
+                        const auto id = static_cast<int32_t>(tm->primary().id(h));
+                        out.push_back(bf.movement_locked(id) ? 1.0 : 0.0);
+                        out.push_back(bf.replaced_builder(id));
+                        out.push_back(bf.sight_weather_factor(static_cast<int32_t>(tm->primary().type(h)), id));
+                        const Vec3 q = tm->primary().position(h);
+                        out.push_back(bf.space_prevention_hit(p, {q.x, q.y, 0.0f}) ? 1.0 : 0.0);
+                    }
+                    bf.set_snapshot(false);
+                };
+                std::vector<double> snap, live;
+                for (int32_t p = 0; p < 4; ++p) {
+                    read(true, p, snap);
+                    read(false, p, live);
+                    same(snap == live);
+                }
+                CHECK(compared == 4 && mismatches == 0);
+                std::printf("  ref5 t07 facts: snapshot = live for %zu players (%zu mismatches)\n", compared, mismatches);
+            }
             CHECK(lane_ok >= clear_ok.size() && lines > 0 && blocked > 0);
             std::printf("  ref5 t06 lane: %zu lane-valid drop spots (live %zu), %zu line tests (%zu blocked), live reads %llu\n", lane_ok,
                         clear_ok.size(), lines, blocked, static_cast<unsigned long long>(ai_lane_live_reads() - reads_before));
