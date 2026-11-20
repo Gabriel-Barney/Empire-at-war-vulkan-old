@@ -665,12 +665,12 @@ void load_special_rules(const FileProvider& provider, const data::GameDatabase& 
                     const float f = types.get_float(t, p + "Credit_Cost");
                     c.credit_cost_rounded = f > 0.0f ? static_cast<int32_t>(f + 0.5f) : types.get_int(t, p + "Credit_Cost");
                 }
-                c.required_unit_types = type_list(types, t, p + objects::tags::Required_Unit_Type);
+                c.required_unit_types = type_list(types, t, p + "Required_Unit_Type");
                 c.required_unit_count = types.get_int(t, p + "Required_Unit_Count");
                 if (!ascii_trim(types.get_string(t, p + "Required_Mission_Type")).empty())
                     c.required_mission = static_cast<int8_t>(types.get_enum(t, p + "Required_Mission_Type"));
                 c.required_mission_count = types.get_int(t, p + "Required_Mission_Count");
-                c.required_planets = type_list(types, t, p + objects::tags::Required_Planets);
+                c.required_planets = type_list(types, t, p + "Required_Planets");
                 if (const std::string_view u = ascii_trim(types.get_string(t, p + "Success_Unlock_Unit_Type")); !u.empty())
                     if (const objects::TypeIndex r = types.resolve_name(u); r != objects::kNone) c.success_unlock = r;
                 c.success_credit_bonus = types.get_float(t, p + "Success_Credit_Bonus");

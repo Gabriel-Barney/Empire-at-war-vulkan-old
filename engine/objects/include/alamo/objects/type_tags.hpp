@@ -218,7 +218,6 @@ struct SubObjectsTag {
     X(Text, Prev_Level_Base, "")                                                                                      \
     X(List, Text_ID, 0)                                                                                               \
     X(List, Planet_Slice_Affinity_Types, 0)                                                                           \
-    X(List, Required_Unit_Type, 0)                                                                                    \
     X(Int, Space_Override_Population_Value, -1)                                                                       \
     X(Bool, Respawn_Whole_Team_When_Killed, false)                                                                    \
     X(Text, Space_Tactical_Map, "")                                                                                   \

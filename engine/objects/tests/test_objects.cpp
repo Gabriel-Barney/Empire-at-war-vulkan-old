@@ -1806,8 +1806,10 @@ template <class T>
 [[maybe_unused]] static bool unset_reads_default(const GameObjectTypes& ty, TypeIndex t, const VecTag& k) {
     return ty.get(t, k) == std::array<float, 4>{};
 }
+// A list carries no default in its handle: an unset list reads empty, except Behavior, which the loader fills with the
+// class element's own behaviours.
 [[maybe_unused]] static bool unset_reads_default(const GameObjectTypes& ty, TypeIndex t, const ListTag& k) {
-    return ty.get(t, k).empty() && ty.get_type_refs(t, k).empty();
+    return k.tag == "Behavior" || (ty.get(t, k).empty() && ty.get_type_refs(t, k).empty());
 }
 [[maybe_unused]] static bool unset_reads_default(const GameObjectTypes& ty, TypeIndex t, const RefTag& k) { return ty.get(t, k) == kNone; }
 [[maybe_unused]] static bool unset_reads_default(const GameObjectTypes& ty, TypeIndex t, const MaskTag& k) { return ty.get(t, k) == 0; }
