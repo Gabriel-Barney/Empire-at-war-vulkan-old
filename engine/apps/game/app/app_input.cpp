@@ -1,5 +1,6 @@
 // alamo_game App: special systems, sim stepping, command routing, HUD / galactic / battle / menu input (split from game_main.cpp).
 #include "game_app.hpp"
+#include "options_pages.hpp"  // ref6 t04: the game setup pages
 #include "alamo/data/values.hpp"  // mcx4 t14: data::trim
 #include "alamo/galactic/economy.hpp"  // mcx4 t13: build countdown speech
 #ifdef ALAMO_SIM_HAVE_ANIM
@@ -1495,14 +1496,7 @@ void App::handle_menu_actions(const std::vector<ui::MenuAction>& acts) {
                 c.campaign = a.campaign;
                 c.faction = a.faction;
                 c.difficulty = a.difficulty;
-                if (a.game_options.set) {  // ui1 t06: IDD_CAMPAIGN_ADVANCED_OPTIONS_DIALOG accepted
-                    c.game_options.set = true;
-                    c.game_options.credits = a.game_options.credits;
-                    c.game_options.start_tech = a.game_options.start_tech;
-                    c.game_options.max_tech = a.game_options.max_tech;
-                    c.game_options.auto_resolve = a.game_options.auto_resolve;
-                    c.game_options.random_events = a.game_options.random_events;
-                }
+                c.game_options = game::CampaignOptionsPage::session_options(a.game_options);  // ui1 t06, ref6 t04
                 if (!start_session(make_session_spec(c, session_options()))) {
                     notes_.push_back("campaign " + a.campaign + " did not start");
                     open_main_menu();
@@ -1535,16 +1529,7 @@ void App::handle_menu_actions(const std::vector<ui::MenuAction>& acts) {
                 // skm1 t06: the AI slot's difficulty (TEXT_EASY / MEDIUM / HARD_AI_PLAYER) drives the AI players' difficulty.
                 c.difficulty = a.difficulty;  // clamped by make_session_spec
                 // skm1 t02: the skirmish options dialog (never accepted: GameSession takes the MP_Default_* values).
-                if (a.skirmish_options.set) {
-                    sim::BattleConfig::SkirmishOptions& o = c.skirmish_options;
-                    o.set = true;
-                    o.credits = std::max(0, a.skirmish_options.credits);
-                    o.win_condition = static_cast<uint8_t>(std::clamp(a.skirmish_options.win_condition, 0, 0xff));
-                    o.heroes = a.skirmish_options.heroes;
-                    o.starting_units = a.skirmish_options.starting_units;
-                    o.super_weapons = a.skirmish_options.super_weapons;
-                    o.prebuilt_base = a.skirmish_options.prebuilt_base;
-                }
+                c.skirmish_options = game::SkirmishOptionsPage::battle_options(a.skirmish_options);  // ref6 t04
                 open_buy_units(make_session_spec(c, session_options()));  // the skirmish starts from the buy-units screen
                 break;
             }
@@ -1552,9 +1537,7 @@ void App::handle_menu_actions(const std::vector<ui::MenuAction>& acts) {
                 // The tactical FOV replaces TacticalCameras.xml's only once the player moved it off the default.
                 if (a.camera.tactical_fov_deg != camera_.tactical_fov_deg) tactical_fov_set_ = true;
                 camera_ = a.camera;
-                gview_.camera().set_fov_deg(camera_.galactic_fov_deg);
-                bview_.camera().set_fov_override(tactical_fov_set_ ? camera_.tactical_fov_deg : 0.0f);
-                sync_control_bindings(ui_.hotkeys, camera_, ui_.bindings);  // OI host: hotkeys + queue modifier
+                apply_camera_page();
                 save_game_options();  // ui1 t02
                 break;
             case K::KeybindingsChanged:  // ui1 t02: the keyboard dialogs edited ui_.hotkeys; bindings follow, kept between runs
@@ -1569,9 +1552,7 @@ void App::handle_menu_actions(const std::vector<ui::MenuAction>& acts) {
                 // saved preference, not from the game's difficulty (the retail fill 0x9f320 is not read), so an Accept that
                 // leaves it alone must not reset per-slot or campaign difficulties.
                 if (session_ && live_input() && gameplay_.difficulty != before) (void)session_->set_ai_difficulty(gameplay_.difficulty);
-                apply_tooltip_config();
-                apply_camera_tuning();  // P1_CAMERA_INPUT.md §3.1 mouse / scroll options
-                apply_gameplay_options();  // ui1 t02: alternate mouse, game speeds
+                apply_gameplay_page();
                 save_game_options();
                 break;
             }
@@ -1591,7 +1572,7 @@ void App::handle_menu_actions(const std::vector<ui::MenuAction>& acts) {
             case K::PreviewAudio: audio_.set_volumes(a.audio.master, a.audio.sfx, a.audio.speech, a.audio.music); break;
             case K::ApplyAudio:  // ui1 t02: the dialog opens with these and they are kept between runs
                 audio_opts_ = a.audio;
-                audio_.set_volumes(a.audio.master, a.audio.sfx, a.audio.speech, a.audio.music);
+                apply_audio_page();
                 save_game_options();
                 break;
             case K::ApplyVideo: {  // the chosen resolution resizes the window (the resize path recreates swapchain + targets)

@@ -386,6 +386,10 @@ public:
     void load_game_options();
     void save_game_options();
     void apply_gameplay_options();  // alternate mouse, game speeds
+    // ref6 t04: one apply hook per options page (options_pages.hpp): dialog Accept and profile load both call it.
+    void apply_audio_page();     // volumes
+    void apply_camera_page();    // FOVs, key bindings and the queue modifier
+    void apply_gameplay_page();  // tooltips, camera tuning, gameplay options
     void queue_default_autofire(std::vector<commands::EventData>& cmds);
     bool map_shell_open_ = false;  // HUD_GAPS §4.2: map_shell shown (advanced planet map)
     bool planet_map_open_ = false;  // GALACTIC_DIALOGS §4: the FoC planet map (organiser's advanced_planetary button)
