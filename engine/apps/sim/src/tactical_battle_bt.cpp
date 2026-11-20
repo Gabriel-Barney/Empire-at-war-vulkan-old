@@ -147,12 +147,12 @@ void TacticalBattle::prepare_models(const BattleCatalog& catalog, const galactic
         if (t == objects::kNone || t >= types.size()) continue;
         use(static_cast<uint32_t>(t));
         if (pad_behavior() == objects::kNoBehavior || !types.has_behavior(t, objects::BehaviorSet::Union, pad_behavior())) continue;
-        for (const char* tag : {"Tactical_Buildable_Objects_Multiplayer", "Tactical_Buildable_Objects_Campaign"})
-            for (const std::string_view tok : types.get_list(t, tag)) {
+        for (const objects::ListTag* tag : {&objects::tags::Tactical_Buildable_Objects_Multiplayer, &objects::tags::Tactical_Buildable_Objects_Campaign})
+            for (const std::string_view tok : types.get(t, *tag)) {
                 const objects::TypeIndex uc = types.raw().find(tok);
                 if (uc == objects::kNone || uc >= types.size()) continue;
                 use(static_cast<uint32_t>(uc));
-                const objects::TypeIndex ft = types.resolve_name(types.get_string(uc, "Tactical_Buildable_Constructed"));
+                const objects::TypeIndex ft = types.resolve_name(types.get(uc, objects::tags::Tactical_Buildable_Constructed));
                 if (ft != objects::kNone) use(static_cast<uint32_t>(ft));
             }
     }
@@ -175,11 +175,11 @@ void TacticalBattle::bt_add_pad_types(const terrain::MapData& map) {
         if (std::find(types_used_.begin(), types_used_.end(), t) == types_used_.end()) types_used_.push_back(t);
     };
     for (const uint32_t pt : pads)
-        for (const std::string_view tok : types.get_list(pt, pad_list_tag())) {
+        for (const std::string_view tok : types.get(pt, pad_list_tag())) {
             const objects::TypeIndex uc = types.raw().find(tok);
             if (uc == objects::kNone || uc >= types.size()) continue;  // a faction name (row header)
             use(uc);
-            const objects::TypeIndex ft = types.resolve_name(types.get_string(uc, "Tactical_Buildable_Constructed"));
+            const objects::TypeIndex ft = types.resolve_name(types.get(uc, objects::tags::Tactical_Buildable_Constructed));
             if (ft != objects::kNone && ft < types.size()) use(ft);
         }
     if (pad_records_ && pad_restore_ && !cfg_.skirmish && !pads.empty())  // §9.4: the finished types bt_pad_restore may create
@@ -281,9 +281,9 @@ float TacticalBattle::build_cost(objects::TypeIndex uc_type, int32_t player) con
     // Both are int fields (the float view of an int field is 0).
     // t50 0x3744e0: a skirmish pad is priced from Tactical_Build_Cost_Multiplayer alone (no campaign fallback).
     // skai t17: any skirmish, land or space (0x28afb0).
-    if (cfg_.skirmish) return static_cast<float>(std::max(0, types.get_int(uc_type, "Tactical_Build_Cost_Multiplayer")));
-    int32_t c = types.get_int(uc_type, "Tactical_Build_Cost_Campaign");
-    if (c <= 0) c = types.get_int(uc_type, "Tactical_Build_Cost_Multiplayer");
+    if (cfg_.skirmish) return static_cast<float>(std::max(0, types.get(uc_type, objects::tags::Tactical_Build_Cost_Multiplayer)));
+    int32_t c = types.get(uc_type, objects::tags::Tactical_Build_Cost_Campaign);
+    if (c <= 0) c = types.get(uc_type, objects::tags::Tactical_Build_Cost_Multiplayer);
     c = std::max(0, c);
     if (player >= 0 && galaxy_) {  // mcx4 t07 (Q7.2): the corrupted battle planet's pad price factor, truncated
         const float m = galaxy_->tactical_corruption_multiplier(req_.info.planet, player,
@@ -345,15 +345,15 @@ cmd::RejectReason TacticalBattle::tactical_sell(TacticalMode& mode, uint8_t play
     float cost = 0.0f;
     const objects::ObjectHandle ph = st.find(s->pad);
     if (st.alive(ph))
-        for (const std::string_view tok : types.get_list(st.type(ph), pad_list_tag())) {
+        for (const std::string_view tok : types.get(st.type(ph), pad_list_tag())) {
             const objects::TypeIndex uc = types.raw().find(tok);
             if (uc == objects::kNone || uc >= types.size()) continue;
-            if (types.resolve_name(types.get_string(uc, "Tactical_Buildable_Constructed")) == bt) {
+            if (types.resolve_name(types.get(uc, objects::tags::Tactical_Buildable_Constructed)) == bt) {
                 cost = build_cost(uc);
                 break;
             }
         }
-    const float refund = std::floor(cost * (bt < types.size() ? types.get_float(bt, "Tactical_Sell_Percentage") : 0.0f));
+    const float refund = std::floor(cost * (bt < types.size() ? types.get(bt, objects::tags::Tactical_Sell_Percentage) : 0.0f));
     if (refund > 0.0f && credits_add_) credits_add_(static_cast<int32_t>(player), refund);
     // Release 0x42ecd0: no cooldown; then the object is killed [port: removed from the battle at once].
     s->built = objects::kNoObjectId;
@@ -449,7 +449,7 @@ void TacticalBattle::bt_retreat_attrition(uint8_t side, SimRng& rng) {
         }
         if (blockade)
             for (const Unit& u : units_)
-                if (u.side == side && u.alive && !u.retreated && catalog_->types().get_bool(u.type, "Prevents_Blockade_Run_Attrition"))
+                if (u.side == side && u.alive && !u.retreated && catalog_->types().get(u.type, objects::tags::Prevents_Blockade_Run_Attrition))
                     blockade = false;
         if (blockade) p = std::min(1.0f, p + k.blockade_run_attrition);
     }
@@ -531,15 +531,15 @@ bool TacticalBattle::bt_team(uint32_t company_type, uint32_t first_member, uint3
     squad = 0;
     if (company_type >= types.size()) return false;
     // 0x2a00b0: the helper runs when the first spawned member's type has Create_Team (+0x67), or always in space.
-    if (!space_ && !(first_member < types.size() && types.get_bool(first_member, "Create_Team"))) return false;
+    if (!space_ && !(first_member < types.size() && types.get(first_member, objects::tags::Create_Team))) return false;
     // Create_Team_Type (+0x1e50 / +0x1e58), else the type named "Team"; neither resolves -> nothing is created.
-    const std::string_view name = types.get_string(company_type, "Create_Team_Type");
+    const std::string_view name = types.get(company_type, objects::tags::Create_Team_Type);
     objects::TypeIndex tt = objects::kNone;
     if (!ascii_trim(name).empty()) tt = types.resolve_name(ascii_trim(name));
     const bool named = tt != objects::kNone && tt < types.size();
     if (!named) tt = types.resolve_name("Team");
     if (tt == objects::kNone || tt >= types.size()) return false;
-    const int32_t k = types.get_int(company_type, "Max_Squad_Size");  // company type +0x1e44, default 10
+    const int32_t k = types.get(company_type, objects::tags::Max_Squad_Size);  // company type +0x1e44, default 10
     squad = k > 0 ? static_cast<uint32_t>(k) : 10u;
     object_type = static_cast<uint32_t>(tt);
     behavior_type = named ? object_type : company_type;  // TEAM behaviour type: the company type without Create_Team_Type
@@ -600,7 +600,7 @@ void TacticalBattle::type_half_extents(uint32_t type, float& hx, float& hy) cons
         hy = sc * cy;
         return;
     }
-    if (ascii_trim(types.get_string(type, space_ ? "Space_Model_Name" : "Land_Model_Name")).empty()) return;
+    if (ascii_trim(types.get(type, space_ ? objects::tags::Space_Model_Name : objects::tags::Land_Model_Name)).empty()) return;
     const tactical::movement::AvoidModel* am = catalog_->avoid_model(type, space_);
     if (!am) {
         hx = cx > 0.0f ? sc * cx : 0.0f;
@@ -636,7 +636,7 @@ void TacticalBattle::unit_half_extents(const Unit& u, float& hx, float& hy) cons
 
 void TacticalBattle::deployed_half_extents(uint32_t type, objects::ObjectId id, float& hx, float& hy) const {
     const objects::GameObjectTypes& types = catalog_->types();
-    if (type >= types.size() || !types.get_bool(type, "Deploys") || !movement_ || !movement_->has_unit(id)) return;
+    if (type >= types.size() || !types.get(type, objects::tags::Deploys) || !movement_ || !movement_->has_unit(id)) return;
     const mv::LocoState ds = movement_->deploy_state(id);
     if (ds != mv::LocoState::WalkDeploying && ds != mv::LocoState::WalkDeployed) return;
     const float sc = types.scale_factor(type);
@@ -671,7 +671,7 @@ bool TacticalBattle::squad_joint_slots(const objects::ObjectStore& st, objects::
         slots.push_back(s);
     }
     const objects::TypeIndex t = st.type(ch);
-    if (!slots.empty() && t < catalog_->types().size()) jiggle = catalog_->types().get_float(t, "MaxJiggleDistance");
+    if (!slots.empty() && t < catalog_->types().size()) jiggle = catalog_->types().get(t, objects::tags::MaxJiggleDistance);
     facing = st.facing(ch);
     return true;
 }
@@ -785,7 +785,7 @@ Vec3 yaw_facing(float yaw_deg) {
 // names are skipped [M].
 std::vector<std::pair<objects::TypeIndex, float>> spawn_table(const objects::GameObjectTypes& types, objects::TypeIndex t) {
     std::vector<std::pair<objects::TypeIndex, float>> out;
-    const std::span<const std::string_view> list = types.get_list(t, "Map_Load_Spawn_Table");
+    const std::span<const std::string_view> list = types.get(t, objects::tags::Map_Load_Spawn_Table);
     float cum = 0.0f;
     for (size_t i = 0; i + 1 < list.size(); i += 2) {
         const objects::TypeIndex x = types.resolve_name(ascii_trim(list[i]));
@@ -949,10 +949,10 @@ void TacticalBattle::bt_map_prepass() {
         const uint32_t f = galaxy_->players()[static_cast<size_t>(player)].faction;
         if (f >= galaxy_->rules().factions.size()) return false;
         const std::string& faction = galaxy_->rules().factions[f].name;
-        for (const std::string_view tok : types.get_list(mt, "Marker_For_Specific_Object_Type")) {
+        for (const std::string_view tok : types.get(mt, objects::tags::Marker_For_Specific_Object_Type)) {
             const objects::TypeIndex x = types.resolve_name(ascii_trim(tok));
             if (x == objects::kNone || x >= types.size() || x >= type_crcs.size()) continue;
-            for (const std::string_view a : types.get_list(x, "Affiliation"))
+            for (const std::string_view a : types.get(x, objects::tags::Affiliation))
                 if (iequal_trim(a, faction)) {
                     out = marker;
                     out.type_crc = type_crcs[x];
@@ -989,9 +989,9 @@ void TacticalBattle::bt_map_prepass() {
         pl.owner = static_cast<uint32_t>(o);  // map_ owners are player ids from here on (bt_map_load, markers)
         const objects::TypeIndex t = index.find(pl.type_crc);
         if (t != objects::kNone && t < types.size()) {
-            if (def >= 0 && !cfg_.map_battle && types.get_bool(t, "Is_Branched_Map_Discardable")) {
-                const bool keep = o == def || ((req_.linked || types.get_bool(t, "Loads_When_Faction_Present")) && o == att) ||
-                                  !can_control(o) || types.get_bool(t, "Is_Marker");
+            if (def >= 0 && !cfg_.map_battle && types.get(t, objects::tags::Is_Branched_Map_Discardable)) {
+                const bool keep = o == def || ((req_.linked || types.get(t, objects::tags::Loads_When_Faction_Present)) && o == att) ||
+                                  !can_control(o) || types.get(t, objects::tags::Is_Marker);
                 if (!keep) {
                     ++map_stats_.discards;
                     continue;
@@ -1010,7 +1010,7 @@ void TacticalBattle::bt_map_prepass() {
     if (space_)
         for (const Participant& p : parts_) {
             if (p.reserve || p.starbase || p.structure || p.built || p.type >= types.size()) continue;
-            for (const objects::TypeIndex x : types.get_type_refs(static_cast<objects::TypeIndex>(p.type), "Space_Escort_Unit_Types")) {
+            for (const objects::TypeIndex x : types.get_type_refs(static_cast<objects::TypeIndex>(p.type), objects::tags::Space_Escort_Unit_Types)) {
                 company_types.clear();
                 if (x != objects::kNone && x < types.size()) bt_company_types(static_cast<uint32_t>(x), company_types);
                 for (const uint32_t y : company_types) use(y);
@@ -1105,7 +1105,7 @@ void TacticalBattle::bt_map_load(TacticalMode& mode, SimRng& rng) {
     };
     // storyb t16 (STORY_T04 §7.1 [H]): an Is_Decoration map object goes to retail's secondary store (objects::kFlagMapDecoration).
     auto note_decoration = [&](objects::TypeIndex t, objects::ObjectHandle h) {
-        if (mode.primary().alive(h) && t < types.size() && types.get_bool(t, "Is_Decoration")) {
+        if (mode.primary().alive(h) && t < types.size() && types.get(t, objects::tags::Is_Decoration)) {
             mode.primary().set_flag(h, objects::kFlagMapDecoration);
             ++map_stats_.decorations;
         }
@@ -1172,7 +1172,7 @@ void TacticalBattle::bt_map_load(TacticalMode& mode, SimRng& rng) {
             ++map_stats_.spawn_table_picks;
             bt_used_ = true;
             int32_t aff = -1;
-            const std::span<const std::string_view> af = types.get_list(t, "Affiliation");
+            const std::span<const std::string_view> af = types.get(t, objects::tags::Affiliation);
             for (size_t p = 0; p < galaxy_->players().size() && aff < 0; ++p) {
                 const uint32_t f = galaxy_->players()[p].faction;
                 if (f >= galaxy_->rules().factions.size()) continue;
@@ -1243,7 +1243,7 @@ void TacticalBattle::bt_map_load(TacticalMode& mode, SimRng& rng) {
             m.pos = pos;
             m.facing = face;
             m.map_id = static_cast<int32_t>(pl.object_id);
-            for (const std::string_view s : types.get_list(t, "Marker_For_Specific_Object_Type")) {
+            for (const std::string_view s : types.get(t, objects::tags::Marker_For_Specific_Object_Type)) {
                 const objects::TypeIndex x = types.resolve_name(ascii_trim(s));
                 if (x != objects::kNone && x < types.size()) m.specific.push_back(x);
             }
@@ -1474,9 +1474,9 @@ void TacticalBattle::bt_pick_starbase() {
         if (!p.starbase || p.reserve) continue;
         for (uint32_t t = 0; t < types.size(); ++t) {
             const auto ti = static_cast<objects::TypeIndex>(t);
-            if (!types.has_behavior(ti, objects::BehaviorSet::Union, kStarBase) || types.get_int(ti, "Base_Level") != req_.base_level) continue;
+            if (!types.has_behavior(ti, objects::BehaviorSet::Union, kStarBase) || types.get(ti, objects::tags::Base_Level) != req_.base_level) continue;
             bool aff = false;
-            for (const std::string_view a : types.get_list(ti, "Affiliation")) aff = aff || iequal_trim(a, faction);
+            for (const std::string_view a : types.get(ti, objects::tags::Affiliation)) aff = aff || iequal_trim(a, faction);
             if (!aff) continue;
             if (p.type != t) {
                 p.type = t;
@@ -1501,7 +1501,7 @@ void TacticalBattle::bt_space_escorts(uint8_t side) {
     for (size_t i = 0; i < n0; ++i) {
         const Participant& u = parts_[i];
         if (u.reserve || u.starbase || u.structure || u.built || u.side != side || u.type >= types.size()) continue;
-        const std::vector<objects::TypeIndex> esc = types.get_type_refs(static_cast<objects::TypeIndex>(u.type), "Space_Escort_Unit_Types");
+        const std::vector<objects::TypeIndex> esc = types.get_type_refs(static_cast<objects::TypeIndex>(u.type), objects::tags::Space_Escort_Unit_Types);
         for (const objects::TypeIndex x : esc) {
             if (x == objects::kNone || x >= types.size() || static_cast<uint32_t>(x) >= rules_->types.size()) continue;
             Participant e;
@@ -1568,7 +1568,7 @@ void TacticalBattle::bt_place_forces(TacticalMode& mode, SimRng& rng, const Para
     const size_t n0 = parts_.size();
     for (size_t i = 0; i < n0; ++i) {
         if (!parts_[i].structure || parts_[i].built) continue;
-        const objects::TypeIndex x = types.resolve_name(ascii_trim(types.get_string(parts_[i].type, "Tactical_Additional_Structure_Type")));
+        const objects::TypeIndex x = types.resolve_name(ascii_trim(types.get(parts_[i].type, objects::tags::Tactical_Additional_Structure_Type)));
         if (x == objects::kNone || x >= types.size()) continue;
         bool have = false;
         for (const Participant& q : parts_) have = have || (q.structure && q.type == static_cast<uint32_t>(x));
@@ -1587,7 +1587,7 @@ void TacticalBattle::bt_place_forces(TacticalMode& mode, SimRng& rng, const Para
     //    structure behaviour slot filter is not modelled].
     for (Participant& p : parts_) {
         if (!p.structure) continue;
-        const objects::TypeIndex o = types.resolve_name(ascii_trim(types.get_string(p.type, "Place_Other_Type_At_Every_Specific_Marker_Position")));
+        const objects::TypeIndex o = types.resolve_name(ascii_trim(types.get(p.type, objects::tags::Place_Other_Type_At_Every_Specific_Marker_Position)));
         if (o == objects::kNone || o >= types.size()) continue;
         p.other_type = static_cast<int32_t>(o);
         for (size_t i = 0; i < bt_markers_.size(); ++i) {
@@ -1647,7 +1647,7 @@ void TacticalBattle::bt_place_forces(TacticalMode& mode, SimRng& rng, const Para
                     pick = static_cast<int64_t>(i);
             }
             if (pick < 0) {
-                const std::string_view bp = ascii_trim(types.get_string(p.type, "Base_Position"));
+                const std::string_view bp = ascii_trim(types.get(p.type, objects::tags::Base_Position));
                 if (iequal_trim(bp, "Orbital")) pick = first_free(kMkOrbital);
                 else if (iequal_trim(bp, "In_Base")) pick = first_free(kMkInBase) >= 0 ? first_free(kMkInBase) : first_free(kMkOutBase);
                 else if (iequal_trim(bp, "Out_Base")) pick = first_free(kMkOutBase) >= 0 ? first_free(kMkOutBase) : first_free(kMkInBase);
@@ -1698,7 +1698,7 @@ void TacticalBattle::bt_place_forces(TacticalMode& mode, SimRng& rng, const Para
         if (kDummy != objects::kNoBehavior)
             for (const objects::ObjectHandle h : st.all_objects()) {
                 if (!st.active(h) || !st.has_behavior(h, kDummy) || st.owner(h) == att) continue;
-                if (types.get_float(st.type(h), "Reinforcement_Prevention_Radius") == 0.0f) continue;
+                if (types.get(st.type(h), objects::tags::Reinforcement_Prevention_Radius) == 0.0f) continue;
                 block = st.position(h);
                 have_block = true;
                 break;
@@ -1779,16 +1779,16 @@ void TacticalBattle::bt_place_forces(TacticalMode& mode, SimRng& rng, const Para
                 for (size_t k = u0; k < units_.size(); ++k) {
                     const uint32_t t = units_[k].type;
                     if (t >= types.size()) continue;
-                    const int32_t sc = types.get_int(t, "Ship_Class");
+                    const int32_t sc = types.get(t, objects::tags::Ship_Class);
                     if (sc < 0 || sc > 6) continue;
-                    if (!team && (types.get_mask(t, "CategoryMask") & 0x40u) != 0) continue;  // CategoryMask Super [M]
+                    if (!team && (types.get(t, objects::tags::CategoryMask) & 0x40u) != 0) continue;  // CategoryMask Super [M]
                     FleetEntry e;
                     e.unit = static_cast<uint32_t>(k);
                     e.group = g;
                     reg.push_back(e);
                 }
                 if (containers_.size() > c0 && units_[u0].container == c0 && units_[u0].type < types.size()) {
-                    const int32_t sc = types.get_int(units_[u0].type, "Ship_Class");  // the head of the member list
+                    const int32_t sc = types.get(units_[u0].type, objects::tags::Ship_Class);  // the head of the member list
                     if (sc >= 0 && sc <= 6) {
                         FleetEntry e;
                         e.container = static_cast<uint32_t>(c0);
@@ -1831,7 +1831,7 @@ std::vector<mv::V2> TacticalBattle::fleet_offsets(uint32_t type) const {
     std::vector<mv::V2> out;
     const objects::GameObjectTypes& types = catalog_->types();
     if (type >= types.size()) return out;
-    const std::span<const std::string_view> toks = types.get_list(type, "Squadron_Offsets");
+    const std::span<const std::string_view> toks = types.get(type, objects::tags::Squadron_Offsets);
     for (size_t i = 0; i + 1 < toks.size(); i += 3) {
         const std::string xs(ascii_trim(toks[i])), ys(ascii_trim(toks[i + 1]));
         out.push_back(mv::V2{static_cast<float>(std::strtod(xs.c_str(), nullptr)), static_cast<float>(std::strtod(ys.c_str(), nullptr))});
@@ -1860,7 +1860,7 @@ void TacticalBattle::bt_fleet_placement(TacticalMode& mode, SimRng& rng, const s
             if (e.unit != 0xFFFFFFFFu) {
                 const Unit& u = units_[e.unit];
                 if (u.container != 0xFFFFFFFFu || !u.alive || !st.alive(u.h)) continue;  // 0x39b1a0: team members skipped
-                o.ship_class = types.get_int(u.type, "Ship_Class");
+                o.ship_class = types.get(u.type, objects::tags::Ship_Class);
                 o.box = fleet_box(u.type);
             } else {
                 const Container& ct = containers_[e.container];
@@ -1869,13 +1869,13 @@ void TacticalBattle::bt_fleet_placement(TacticalMode& mode, SimRng& rng, const s
                     if (units_[k].container == e.container && units_[k].alive && st.alive(units_[k].h)) mem.push_back(k);
                 if (mem.empty()) continue;
                 o.team = true;
-                o.ship_class = types.get_int(units_[mem.front()].type, "Ship_Class");  // 0x4ec820: the first member's
+                o.ship_class = types.get(units_[mem.front()].type, objects::tags::Ship_Class);  // 0x4ec820: the first member's
                 for (const uint32_t k : mem) o.members.push_back(fleet_box(units_[k].type));
                 o.offsets_team = fleet_offsets(ct.type);          // team +0x50: Create_Team_Type, else the company type
                 o.offsets_company = fleet_offsets(ct.squad_type); // team +0x58: the company type
-                o.units_team = ct.type < types.size() ? static_cast<uint32_t>(types.get_list(ct.type, "Squadron_Units").size()) : 0u;
+                o.units_team = ct.type < types.size() ? static_cast<uint32_t>(types.get(ct.type, objects::tags::Squadron_Units).size()) : 0u;
                 o.units_company =
-                    ct.squad_type < types.size() ? static_cast<uint32_t>(types.get_list(ct.squad_type, "Squadron_Units").size()) : 0u;
+                    ct.squad_type < types.size() ? static_cast<uint32_t>(types.get(ct.squad_type, objects::tags::Squadron_Units).size()) : 0u;
             }
             objs.push_back(std::move(o));
             refs.push_back(e);
@@ -2089,7 +2089,7 @@ Vec3 TacticalBattle::bt_pad_attach_point(const TacticalMode& mode, objects::Obje
     const objects::GameObjectTypes& types = catalog_->types();
     const objects::TypeIndex t = st.type(pad);
     if (t >= types.size()) return p;
-    const std::string_view bone = ascii_trim(types.get_string(t, "Tactical_Build_Attachment_Bone_Name"));
+    const std::string_view bone = ascii_trim(types.get(t, objects::tags::Tactical_Build_Attachment_Bone_Name));
     if (bone.empty()) return p;
     Vec3 out = p;
     return model_bone_point(st, pad, bone, out) > 0 ? out : p;
@@ -2268,7 +2268,7 @@ void TacticalBattle::bt_skirmish_base(TacticalMode& mode) {
     // is skipped here).
     const bool prebuild = !cfg_.skirmish_options.set || cfg_.skirmish_options.prebuilt_base;
     for (const objects::ObjectHandle h : st.all_objects())
-        if (prebuild && st.active(h) && st.has_behavior(h, pad_behavior()) && types.get_bool(st.type(h), "Respects_Skirmish_Pre_Build_Bases_Option"))
+        if (prebuild && st.active(h) && st.has_behavior(h, pad_behavior()) && types.get(st.type(h), objects::tags::Respects_Skirmish_Pre_Build_Bases_Option))
             pads.push_back(h);
     for (const objects::ObjectHandle ph : pads) {
         const int32_t owner = st.owner(ph);
@@ -2279,7 +2279,7 @@ void TacticalBattle::bt_skirmish_base(TacticalMode& mode) {
         const std::string& faction = galaxy_->rules().factions[f].name;
         objects::TypeIndex uc = objects::kNone;
         bool in_row = false;
-        for (const std::string_view tok : types.get_list(st.type(ph), pad_list_tag())) {
+        for (const std::string_view tok : types.get(st.type(ph), pad_list_tag())) {
             const objects::TypeIndex x = types.raw().find(tok);
             if (x == objects::kNone || x >= types.size()) {
                 in_row = iequal_trim(tok, faction);
@@ -2288,7 +2288,7 @@ void TacticalBattle::bt_skirmish_base(TacticalMode& mode) {
             if (in_row && uc == objects::kNone && types.has_behavior(x, objects::BehaviorSet::Union, uc_behavior())) uc = x;
         }
         if (uc == objects::kNone) continue;
-        const objects::TypeIndex ft = types.resolve_name(types.get_string(uc, "Tactical_Buildable_Constructed"));
+        const objects::TypeIndex ft = types.resolve_name(types.get(uc, objects::tags::Tactical_Buildable_Constructed));
         if (ft == objects::kNone || ft >= types.size() ||
             std::find(types_used_.begin(), types_used_.end(), static_cast<uint32_t>(ft)) == types_used_.end())
             continue;
@@ -2425,10 +2425,10 @@ void TacticalBattle::bt_shield_stamps(const TacticalMode& mode) {
     // New: the store's object list order, inserted sorted.
     for (const objects::ObjectHandle h : st.all_objects()) {
         if (!st.active(h) || !st.has_behavior(h, kBaseShield)) continue;
-        const float r = types.get_float(st.type(h), "Base_Shield_Radius");
+        const float r = types.get(st.type(h), objects::tags::Base_Shield_Radius);
         // MOVEMENT §1.1 step 3: the occupant's SecondaryOccupationPassability (+0x1694; shipped "Shield" on the 740-radius
         // generators) over the shield radius [inferred footprint]. Types without the field are no secondary occupants.
-        const auto bits = static_cast<uint32_t>(types.get_mask(st.type(h), "SecondaryOccupationPassability"));
+        const auto bits = static_cast<uint32_t>(types.get(st.type(h), objects::tags::SecondaryOccupationPassability));
         if (!(r > 0.0f) || bits == 0) continue;
         const objects::ObjectId id = st.id(h);
         if (!on(id)) continue;

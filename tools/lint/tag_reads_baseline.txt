@@ -1,35 +1,15 @@
 # String tag reads per sim file (tools/lint/check_tag_reads.py, ref6 t01). Only goes down; target 0.
-# total 447
+# total 177
 engine/ai/src/galactic_ai.cpp 18
 engine/ai/src/galactic_seed.cpp 1
 engine/ai/tactical/src/tactical_ai.cpp 3
-engine/apps/headless/skirmish_run.cpp 6
-engine/apps/headless/tactical_trace.cpp 1
 engine/apps/sim/src/battle_ai.cpp 48
-engine/apps/sim/src/game_modes.cpp 4
 engine/apps/sim/src/object_scripts.cpp 4
 engine/apps/sim/src/story_session.cpp 11
-engine/apps/sim/src/tactical_battle.cpp 18
-engine/apps/sim/src/tactical_battle_bt.cpp 44
-engine/apps/sim/src/tactical_battle_clash.cpp 2
-engine/apps/sim/src/tactical_battle_fog.cpp 21
-engine/apps/sim/src/tactical_battle_garrison.cpp 6
-engine/apps/sim/src/tactical_battle_hangar.cpp 28
-engine/apps/sim/src/tactical_battle_internal.hpp 2
-engine/apps/sim/src/tactical_battle_l1.cpp 34
-engine/apps/sim/src/tactical_battle_l1_strikes.cpp 7
-engine/apps/sim/src/tactical_battle_oi_abilities.cpp 12
-engine/apps/sim/src/tactical_battle_pads.cpp 9
-engine/apps/sim/src/tactical_battle_part2.cpp 35
-engine/apps/sim/src/tactical_battle_part3.cpp 16
-engine/apps/sim/src/tactical_battle_retreat.cpp 3
-engine/apps/sim/src/tactical_battle_skirmish.cpp 1
-engine/apps/sim/src/tactical_battle_spawners.cpp 17
-engine/apps/sim/src/tactical_battle_victory.cpp 2
 engine/galactic/src/galactic_rules.cpp 1
 engine/lua/src/bind_ai.cpp 1
 engine/lua/src/bind_engine.cpp 1
-engine/lua/src/bind_objects.cpp 39
+engine/lua/src/bind_objects.cpp 37
 engine/lua/src/bind_players.cpp 5
 engine/lua/src/bind_presentation.cpp 2
 engine/lua/src/bind_script_gaps.cpp 12

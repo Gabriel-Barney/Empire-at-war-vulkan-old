@@ -82,7 +82,7 @@ bool TacticalBattle::vm_cp_relevant(const objects::ObjectStore& st, objects::Obj
     if (kCapturePoint == objects::kNoBehavior || !st.has_behavior(h, kCapturePoint)) return false;
     const objects::GameObjectTypes& types = catalog_->types();
     const auto t = static_cast<uint32_t>(st.type(h));
-    return t < types.size() && types.get_bool(t, "Control_Point_Domination_Condition_Relevant");
+    return t < types.size() && types.get(t, objects::tags::Control_Point_Domination_Condition_Relevant);
 }
 
 bool TacticalBattle::vm_cp_all_allied(int32_t player, objects::ObjectId skip, bool& any) const {
@@ -200,7 +200,7 @@ bool TacticalBattle::vm_hq_blocker(int32_t player) const {
         const int32_t o = st.owner(h);
         if (o < 0 || o == player || !combat_->is_enemy(player, o)) continue;
         const auto t = static_cast<uint32_t>(st.type(h));
-        if (t < types.size() && types.get_bool(t, "HQ_Win_Condition_Relevant")) return true;
+        if (t < types.size() && types.get(t, objects::tags::HQ_Win_Condition_Relevant)) return true;
     }
     return false;
 }

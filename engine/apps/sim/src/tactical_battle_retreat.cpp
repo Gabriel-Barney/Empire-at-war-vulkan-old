@@ -66,7 +66,7 @@ bool TacticalBattle::rt_begin_flight(TacticalMode& mode, uint8_t side) {
     std::vector<std::pair<int32_t, objects::ObjectId>> by_health;  // Tactical_Health is an int field
     for (const objects::ObjectId id : list) {
         const Unit* u = unit_by_id(id);
-        by_health.emplace_back(types.get_int(u->type, "Tactical_Health"), id);
+        by_health.emplace_back(types.get(u->type, objects::tags::Tactical_Health), id);
     }
     std::stable_sort(by_health.begin(), by_health.end(), [](const auto& a, const auto& b) { return a.first > b.first; });
     constexpr uint64_t kLayer20 = 0x20;  // Space_Layer 0x20: never a blocker (space_member_spots)
@@ -77,8 +77,8 @@ bool TacticalBattle::rt_begin_flight(TacticalMode& mode, uint8_t side) {
         for (const objects::ObjectHandle h : st.all_objects()) {
             if (h == u->h || !st.alive(h) || st.dying(h)) continue;
             const objects::TypeIndex t = st.type(h);
-            if (t >= types.size() || types.get_bool(t, "Is_Decoration")) continue;
-            if (st.has_behavior(h, objects::beh::Projectile) || types.get_mask(t, "Space_Layer") == kLayer20) continue;
+            if (t >= types.size() || types.get(t, objects::tags::Is_Decoration)) continue;
+            if (st.has_behavior(h, objects::beh::Projectile) || types.get(t, objects::tags::Space_Layer) == kLayer20) continue;
             const tactical::Aabb b = mode.bounds_of(h);
             if (!(b.max.x > b.min.x) && !(b.max.y > b.min.y)) continue;
             blockers.push_back({b.min.x, b.min.y, b.max.x, b.max.y});

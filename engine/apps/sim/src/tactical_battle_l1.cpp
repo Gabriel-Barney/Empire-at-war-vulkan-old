@@ -53,12 +53,12 @@ void TacticalBattle::l1_add_types(std::vector<uint32_t>& use) const {
     for (uint32_t t = 0; t < types.size(); ++t) {
         bool want = false;
         if (space_) {
-            want = types.has_behavior(t, objects::BehaviorSet::Space, b.special) && types.get_bool(t, "Is_Special_Weapon_In_Space") &&
-                   types.get_int(t, "Special_Weapon_Index") >= 0;
+            want = types.has_behavior(t, objects::BehaviorSet::Space, b.special) && types.get(t, objects::tags::Is_Special_Weapon_In_Space) &&
+                   types.get(t, objects::tags::Special_Weapon_Index) >= 0;
         } else {
             want = types.has_behavior(t, objects::BehaviorSet::Land, b.lobbing);
             // Bombing runs: every Land_Bomber_Type (its bomb projectile in the tables).
-            if (const objects::TypeIndex bt = types.get_type_ref(t, "Land_Bomber_Type"); bt != objects::kNone &&
+            if (const objects::TypeIndex bt = types.get(t, objects::tags::Land_Bomber_Type); bt != objects::kNone &&
                 std::find(use.begin(), use.end(), static_cast<uint32_t>(bt)) == use.end())
                 use.push_back(static_cast<uint32_t>(bt));
         }
@@ -85,14 +85,14 @@ void TacticalBattle::l1_setup(TacticalMode& mode) {
         const objects::TypeIndex t = st.type(h);
         if (t >= types.size()) continue;
         uint32_t kinds = 0;
-        if (types.get_bool(t, "Is_Asteroid_Field")) kinds |= ta::kFieldAsteroid;
-        if (types.get_bool(t, "Is_Impassable_Asteroid")) kinds |= ta::kFieldImpassable;
-        if (types.get_bool(t, "Is_Ion_Storm")) kinds |= ta::kFieldIonStorm;
-        if (types.get_bool(t, "Is_Nebula")) kinds |= ta::kFieldNebula;
+        if (types.get(t, objects::tags::Is_Asteroid_Field)) kinds |= ta::kFieldAsteroid;
+        if (types.get(t, objects::tags::Is_Impassable_Asteroid)) kinds |= ta::kFieldImpassable;
+        if (types.get(t, objects::tags::Is_Ion_Storm)) kinds |= ta::kFieldIonStorm;
+        if (types.get(t, objects::tags::Is_Nebula)) kinds |= ta::kFieldNebula;
         if (!kinds) continue;
         const Vec3 p = st.position(h);
-        const std::array<float, 4> off = types.get_vec(t, "Space_Obstacle_Offset");
-        l1_fields_.add({st.id(h), kinds, p.x + off[0], p.y + off[1], types.get_float(t, "Space_Obstacle_Radius")});
+        const std::array<float, 4> off = types.get(t, objects::tags::Space_Obstacle_Offset);
+        l1_fields_.add({st.id(h), kinds, p.x + off[0], p.y + off[1], types.get(t, objects::tags::Space_Obstacle_Radius)});
     }
 }
 
@@ -151,7 +151,7 @@ void TacticalBattle::l1_fields(uint32_t frame, SimRng& rng) {
                 l1_asteroid_hits_.push_back(u.id);  // mcx4 t13: presentation feed
                 // One Asteroid_Damage_Hit_Particles entry (synced int); [port] no skeleton: the model centre + 90 z,
                 // no bone draw.
-                const auto list = types.get_list(st.type(h), "Asteroid_Damage_Hit_Particles");
+                const auto list = types.get(st.type(h), objects::tags::Asteroid_Damage_Hit_Particles);
                 if (!list.empty()) {
                     const int32_t k = rng.range_int(0, static_cast<int32_t>(list.size()) - 1);
                     std::string name;
@@ -202,24 +202,24 @@ uint32_t TacticalBattle::l1_desc_of(int32_t type) {
     if (types.has_behavior(ti, set, b.special)) d.kinds |= ta::kSwSpecialWeapon;
     if (types.has_behavior(ti, set, b.lobbing)) d.kinds |= ta::kSwLobbing;
     if (types.has_behavior(ti, set, b.tsw)) d.kinds |= ta::kSwTsw;
-    d.recharge_seconds = types.get_float(ti, "Projectile_Fire_Recharge_Seconds");
-    d.pulse_count = std::max(1, types.get_int(ti, "Projectile_Fire_Pulse_Count"));
-    d.pulse_delay_seconds = types.get_float(ti, "Projectile_Fire_Pulse_Delay_Seconds");
+    d.recharge_seconds = types.get(ti, objects::tags::Projectile_Fire_Recharge_Seconds);
+    d.pulse_count = std::max(1, types.get(ti, objects::tags::Projectile_Fire_Pulse_Count));
+    d.pulse_delay_seconds = types.get(ti, objects::tags::Projectile_Fire_Pulse_Delay_Seconds);
     for (size_t i = 0; i < types_used_.size(); ++i)  // the weapon projectile from the battle tables
         if (static_cast<int32_t>(types_used_[i]) == type && descs_[i] < tables_->combat.units.size())
             d.projectile = tables_->combat.units[descs_[i]].listed_projectile;  // S8 t08: with or without WEAPON
-    d.valid_targets = types.get_mask(ti, "Special_Weapon_Valid_Targets");
-    d.requires_base_power = types.get_bool(ti, "Requires_Base_Power");
-    d.target_action_index = types.get_int(ti, "Special_Weapon_Target_Action_Index");
+    d.valid_targets = types.get(ti, objects::tags::Special_Weapon_Valid_Targets);
+    d.requires_base_power = types.get(ti, objects::tags::Requires_Base_Power);
+    d.target_action_index = types.get(ti, objects::tags::Special_Weapon_Target_Action_Index);
     d.max_speed = ti < types.columns().max_speed.size() ? types.columns().max_speed[ti] : 0.0f;
-    d.tsw_start_distance = types.get_float(ti, "TSW_Start_Distance_From_Target");
-    d.tsw_attack_distance = types.get_float(ti, "TSW_Attack_Distance_From_Target");
-    d.tsw_match_target_z = types.get_bool(ti, "TSW_Start_Pos_Match_Targets_Z");
-    d.tsw_z_adjust = types.get_float(ti, "TSW_Z_Adjust_Relative_To_Target_Pos");
-    d.tsw_power_up_seconds = types.get_float(ti, "TSW_Power_Up_Countdown_Seconds");
-    d.tsw_attack_anim_seconds = types.get_float(ti, "TSW_Attack_Anim_Duration_Seconds");
-    d.tsw_debris_delay_frames = types.get_int(ti, "TSW_Explosion_Debris_Creation_Frame_Delay");
-    d.tsw_post_destruction_frames = types.get_int(ti, "TSW_Post_Destruction_Wait_Frames");
+    d.tsw_start_distance = types.get(ti, objects::tags::TSW_Start_Distance_From_Target);
+    d.tsw_attack_distance = types.get(ti, objects::tags::TSW_Attack_Distance_From_Target);
+    d.tsw_match_target_z = types.get(ti, objects::tags::TSW_Start_Pos_Match_Targets_Z);
+    d.tsw_z_adjust = types.get(ti, objects::tags::TSW_Z_Adjust_Relative_To_Target_Pos);
+    d.tsw_power_up_seconds = types.get(ti, objects::tags::TSW_Power_Up_Countdown_Seconds);
+    d.tsw_attack_anim_seconds = types.get(ti, objects::tags::TSW_Attack_Anim_Duration_Seconds);
+    d.tsw_debris_delay_frames = types.get(ti, objects::tags::TSW_Explosion_Debris_Creation_Frame_Delay);
+    d.tsw_post_destruction_frames = types.get(ti, objects::tags::TSW_Post_Destruction_Wait_Frames);
     const uint32_t idx = l1_sw_.add_desc(d);
     l1_desc_cache_.emplace_back(type, idx);
     return idx;
@@ -297,7 +297,7 @@ ta::SpecialWeaponWorld TacticalBattle::l1_world(const TacticalMode& mode) {
     w.category_mask = [this, st](tc::ObjectId t) -> uint64_t {
         if (combat_->has_unit(t)) return combat_->data().units[combat_->desc_index(t)].category_mask;
         const objects::ObjectHandle h = st->find(t);
-        return st->alive(h) ? catalog_->types().get_mask(st->type(h), "CategoryMask") : 0u;
+        return st->alive(h) ? catalog_->types().get(st->type(h), objects::tags::CategoryMask) : 0u;
     };
     w.target_flagged = [st](tc::ObjectId t) { return !st->alive(st->find(t)); };  // obj +0x3a0 & 0x40 [M: dying]
     // OI abilities: the Base_Power_Ability list (TACTICAL_GAPS §7.3; empty = no power) replaces the "passes" stand-in.
@@ -322,7 +322,7 @@ ta::SpecialWeaponWorld TacticalBattle::l1_world(const TacticalMode& mode) {
     const objects::GameObjectTypes* types = &catalog_->types();
     w.debris_choices = [st, types](tc::ObjectId target) {
         const objects::ObjectHandle h = st->find(target);
-        return st->alive(h) ? static_cast<uint32_t>(types->get_type_refs(st->type(h), "Death_Explosions").size()) : 0u;
+        return st->alive(h) ? static_cast<uint32_t>(types->get_type_refs(st->type(h), objects::tags::Death_Explosions).size()) : 0u;
     };
     return w;
 }
@@ -370,7 +370,7 @@ bool TacticalBattle::tsw_fire(objects::ObjectId tsw) {
         const uint32_t gt = galaxy_->planets()[p].type;
         if (gt < galaxy_->rules().types.size()) {
             const objects::TypeIndex t = catalog_->types().resolve_name(galaxy_->rules().types[gt].name);
-            planet_ok = t != objects::kNone && catalog_->types().get_bool(t, "Planet_Is_Destroyable_By_TSW");
+            planet_ok = t != objects::kNone && catalog_->types().get(t, objects::tags::Planet_Is_Destroyable_By_TSW);
         }
     }
     return l1_sw_.tsw_fire(tsw, planet_ok, frame_);
@@ -429,8 +429,8 @@ bool TacticalBattle::hyperspace_out(objects::ObjectId id, int32_t delay_frames, 
     // vf +0x2a8 is implemented by the FIGHTER and SIMPLE_SPACE locomotors only (STARSHIP_LOCOMOTOR: empty stub).
     const objects::GameObjectTypes& types = catalog_->types();
     bool implemented = false;
-    for (const char* tag : {"Behavior", "SpaceBehavior"})
-        for (std::string_view b : types.get_list(st.type(u->h), tag)) {
+    for (const objects::ListTag* tag : {&objects::tags::Behavior, &objects::tags::SpaceBehavior})
+        for (std::string_view b : types.get(st.type(u->h), *tag)) {
             std::string up;
             for (char ch : b)
                 if (ch != ' ' && ch != '\t' && ch != ',') up.push_back(ch >= 'a' && ch <= 'z' ? static_cast<char>(ch - 'a' + 'A') : ch);
@@ -589,7 +589,7 @@ void TacticalBattle::l1_force_disable(const TacticalMode& mode) {
     if (force_disable_range_.size() != types.size()) {
         force_disable_range_.assign(types.size(), 0.0f);
         for (objects::TypeIndex t = 0; t < types.size(); ++t)
-            force_disable_range_[t] = types.get_float(t, "Disable_Force_Abilities_Range");  // read as a float [M]
+            force_disable_range_[t] = types.get(t, objects::tags::Disable_Force_Abilities_Range);  // read as a float [M]
     }
     // cu8f t07 (CU8F_T01_T02_T07_RE.md §3.1): DisableForceAbilitiesBehaviorClass (0x52) Service 0x636260, interval 1, so
     // every frame. Only objects that carry DISABLE_FORCE_ABILITIES in their current mode's list emit (FoC: Ysalamiri_Tree,
@@ -713,7 +713,7 @@ void TacticalBattle::l1_tsw_destruction(TacticalMode& mode, const ta::SpecialWea
     const objects::TypeIndex dt = st.type(dh);
     const Vec3 pos = st.position(dh), facing = st.facing(dh);
     const int32_t neutral = galaxy_->neutral_player();
-    const auto explosions = types.get_type_refs(dt, "Death_Explosions");
+    const auto explosions = types.get_type_refs(dt, objects::tags::Death_Explosions);
     if (e.value >= 0 && static_cast<size_t>(e.value) < explosions.size() && explosions[static_cast<size_t>(e.value)] != objects::kNone)
         spawn_particle(mode, static_cast<int32_t>(explosions[static_cast<size_t>(e.value)]), pos, neutral);
     bt_kill_silently(mode, dh);
@@ -737,7 +737,7 @@ void TacticalBattle::l1_tsw_debris(TacticalMode& mode, const ta::SpecialWeaponEv
     const L1TswDebris d = *it;
     l1_tsw_debris_.erase(it);
     const int32_t neutral = galaxy_->neutral_player();
-    for (const objects::TypeIndex t : catalog_->types().get_type_refs(static_cast<objects::TypeIndex>(d.type), "Death_By_TSW_Replacements"))
+    for (const objects::TypeIndex t : catalog_->types().get_type_refs(static_cast<objects::TypeIndex>(d.type), objects::tags::Death_By_TSW_Replacements))
         if (t != objects::kNone && spawn_prop(mode, static_cast<int32_t>(t), d.pos, d.facing, neutral)) ++stats_.props;
 }
 
@@ -848,7 +848,7 @@ float TacticalBattle::weather_sight_modifier(objects::ObjectId id) const {
     const objects::ObjectHandle h = st.find(id);
     if (!st.exists(h)) return 1.0f;
     if (abilities_ && !abilities_->weather_affected(st.owner(h))) return 1.0f;  // cu8 t01: Weatherproof owner
-    return l1_weather_.sight_modifier(catalog_->types().get_string(st.type(h), "Weather_Category"));
+    return l1_weather_.sight_modifier(catalog_->types().get(st.type(h), objects::tags::Weather_Category));
 }
 
 // ---- damage statistics (L1_S4_REMAINING §2.4) ----
@@ -970,7 +970,7 @@ std::vector<objects::TypeIndex> TacticalBattle::projectile_types(objects::Object
     const objects::ObjectStore& st = l1_mode_->primary();
     const objects::ObjectHandle h = st.find(x);
     if (!st.alive(h)) return out;
-    for (const objects::TypeIndex t : types.get_type_refs(st.type(h), "Projectile_Types"))
+    for (const objects::TypeIndex t : types.get_type_refs(st.type(h), objects::tags::Projectile_Types))
         if (t != objects::kNone) out.push_back(t);
     return out;
 }
@@ -1011,7 +1011,7 @@ objects::TypeIndex TacticalBattle::current_projectile(objects::ObjectId id) cons
             if (!member) return objects::kNone;
         }
     if (!st.alive(h)) return objects::kNone;
-    const auto refs = catalog_->types().get_type_refs(st.type(h), "Projectile_Types");
+    const auto refs = catalog_->types().get_type_refs(st.type(h), objects::tags::Projectile_Types);
     if (refs.empty()) return objects::kNone;
     // S8 t12 (TACTICAL_COMBAT §3.1.1 "Lua Get_Current_Projectile_Type", 0x578470): Projectile_Types[obj +0x324] (the weapon
     // index: 0 at creation, SWAP_WEAPONS / Permanent_Weapon_Swap), with no WEAPON behaviour test; an index outside the list
@@ -1027,7 +1027,7 @@ bool TacticalBattle::opposite_sides_of_shield(Vec3 a, Vec3 b, int32_t player, bo
     const objects::GameObjectTypes& types = catalog_->types();
     for (const objects::ObjectHandle h : st.all_objects()) {  // the land store's object list order
         if (!st.alive(h) || kBaseShield == objects::kNoBehavior || !st.has_behavior(h, kBaseShield)) continue;
-        const float r = types.get_float(st.type(h), "Base_Shield_Radius");
+        const float r = types.get(st.type(h), objects::tags::Base_Shield_Radius);
         if (!(r > 0.0f)) continue;
         // tru1 t02 (TRU1_A_RE_ANSWERS A5 / L1_S4 §1.2): only a shield that is on; a shot without shield damage counts
         // only upgraded ones (pack +0xc)

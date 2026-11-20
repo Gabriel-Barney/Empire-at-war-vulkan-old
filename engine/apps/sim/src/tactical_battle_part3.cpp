@@ -141,8 +141,8 @@ const TacticalBattle::PresenceTypeInfo& TacticalBattle::presence_info(uint32_t t
 #ifdef ALAMO_SIM_HAVE_ANIM
     const objects::GameObjectTypes& ty = catalog_->types();
     const auto t = static_cast<objects::TypeIndex>(type);
-    info.range = ty.get_float(t, "Presence_Range");
-    for (std::string_view tok : ty.get_list(t, "Presence_Induced_Animations")) {
+    info.range = ty.get(t, objects::tags::Presence_Range);
+    for (std::string_view tok : ty.get(t, objects::tags::Presence_Induced_Animations)) {
         while (!tok.empty() && std::isspace(static_cast<unsigned char>(tok.front()))) tok.remove_prefix(1);
         while (!tok.empty() && std::isspace(static_cast<unsigned char>(tok.back()))) tok.remove_suffix(1);
         if (tok.empty()) continue;
@@ -372,7 +372,7 @@ void TacticalBattle::drive_animation(objects::ObjectStore& store, SimRng& rng, u
         if (ps.uc == objects::kNoObjectId || !w->contains(ps.uc)) continue;
         const objects::ObjectHandle uh = st.find(ps.uc);
         if (!st.alive(uh)) continue;
-        const int32_t secs = std::max(0, catalog_->types().get_int(st.type(uh), "Tactical_Build_Time_Seconds"));
+        const int32_t secs = std::max(0, catalog_->types().get(st.type(uh), objects::tags::Tactical_Build_Time_Seconds));
         const uint32_t start = ps.uc_end - static_cast<uint32_t>(secs) * 30u;
         if (frame_ != start + 1u) continue;
         const anim::AnimModel* m = w->model(ps.uc);
@@ -479,7 +479,7 @@ void TacticalBattle::spawn_particle(TacticalMode& mode, int32_t type, Vec3 pos, 
     sp.position = pos;
     sp.facing = {1.0f, 0.0f, 0.0f};
     const objects::ObjectHandle h = mode.primary().create(sp);  // not in the spatial trees (never a target)
-    int32_t life = catalog_->types().get_int(sp.type, "Particle_Lifetime_Frames");
+    int32_t life = catalog_->types().get(sp.type, objects::tags::Particle_Lifetime_Frames);
     if (life <= 0) life = static_cast<int32_t>(cfg_.particle_default_lifetime);
     particles_.push_back({mode.primary().id(h), h, frame_ + static_cast<uint32_t>(life)});
     ++stats_.particles;
@@ -508,7 +508,7 @@ void TacticalBattle::spawn_death_explosion(TacticalMode& mode, int32_t type, Vec
     const size_t before = particles_.size();
     spawn_particle(mode, type, pos, clone_owner);
     if (particles_.size() == before || type < 0 || static_cast<size_t>(type) >= catalog_->types().size()) return;
-    if (catalog_->types().get_bool(static_cast<objects::TypeIndex>(type), "Is_Decoration"))
+    if (catalog_->types().get(static_cast<objects::TypeIndex>(type), objects::tags::Is_Decoration))
         mode.primary().set_flag(particles_.back().h, objects::kFlagMapDecoration);
 }
 
@@ -526,7 +526,7 @@ bool TacticalBattle::death_clone_corpse_path(uint32_t dying_type, int32_t clone_
         const auto m = types.enums().get(objects::EnumId::GameObjectCategory).lookup("Infantry");
         infantry_category_ = m ? static_cast<uint64_t>(*m) : ~uint64_t{0};
     }
-    if (*infantry_category_ == ~uint64_t{0} || (types.get_mask(dying_type, "CategoryMask") & *infantry_category_) == 0) return false;
+    if (*infantry_category_ == ~uint64_t{0} || (types.get(dying_type, objects::tags::CategoryMask) & *infantry_category_) == 0) return false;
     const auto ct = static_cast<objects::TypeIndex>(clone_type);
     // storyb t17 (STORYB_T17_SPAWNS_AND_DEATH.md §3.2 step 4 [H]): the clone type's generic <Behavior> set only (not the
     // Land / Space / Galactic sets), and 0x5051d0: a collision-avoiding (Avoidance_Disabled false, a UnitCollisionClass)
@@ -534,8 +534,8 @@ bool TacticalBattle::death_clone_corpse_path(uint32_t dying_type, int32_t clone_
     for (const objects::BehaviorTypeId b : {objects::BehaviorTypeId{0x19}, objects::BehaviorTypeId{0x40}, objects::BehaviorTypeId{0x14},
                                             objects::BehaviorTypeId{0x55}})
         if (types.has_behavior(ct, objects::BehaviorSet::Generic, b)) return false;
-    if (!types.get_bool(ct, "Avoidance_Disabled") && !types.get_string(ct, "UnitCollisionClass").empty() &&
-        types.get_bool(ct, "IsDeathCloneObstacle"))
+    if (!types.get(ct, objects::tags::Avoidance_Disabled) && !types.get_string(ct, objects::tags::UnitCollisionClass).empty() &&
+        types.get(ct, objects::tags::IsDeathCloneObstacle))
         return false;
     return true;
 }
@@ -569,7 +569,7 @@ void TacticalBattle::consume_events(TacticalMode& mode, SimRng& rng) {
             const objects::ObjectHandle sh = store.find(static_cast<objects::ObjectId>(e.source));
             if (!store.alive(sh)) continue;
             const objects::TypeIndex st = store.type(sh);
-            if (st >= dtypes.size() || !dtypes.get_bool(st, "Is_Valid_Target") || !dtypes.get_bool(st, "Collidable_By_Projectile_Living"))
+            if (st >= dtypes.size() || !dtypes.get(st, objects::tags::Is_Valid_Target) || !dtypes.get(st, objects::tags::Collidable_By_Projectile_Living))
                 continue;
             auto key = static_cast<int32_t>(e.source);
             if (const Unit* su = unit_by_id(static_cast<objects::ObjectId>(e.source)); su && su->container != 0xFFFFFFFFu &&
@@ -800,8 +800,8 @@ void TacticalBattle::oi_apply_crush(uint32_t frame) {
         r.amount = mv::kCrushDamage;
         r.source = e.crusher;
         r.kind = kKindCrush;
-        if (!types.get_string(cr->type, "Squash_Damage_Type").empty()) {
-            const int32_t k = types.get_enum(cr->type, "Squash_Damage_Type");
+        if (!types.get_string(cr->type, objects::tags::Squash_Damage_Type).empty()) {
+            const int32_t k = types.get(cr->type, objects::tags::Squash_Damage_Type);
             if (k >= 0 && k <= 0xff) r.kind = static_cast<uint8_t>(k);
         }
         combat_->take_damage(r, frame);
@@ -826,7 +826,7 @@ bool TacticalBattle::infantry_type(uint32_t type) const {
         const auto m = types.enums().get(objects::EnumId::GameObjectCategory).lookup("Infantry");
         infantry_category_ = m ? static_cast<uint64_t>(*m) : ~uint64_t{0};
     }
-    return *infantry_category_ != ~uint64_t{0} && (types.get_mask(type, "CategoryMask") & *infantry_category_) != 0;
+    return *infantry_category_ != ~uint64_t{0} && (types.get(type, objects::tags::CategoryMask) & *infantry_category_) != 0;
 }
 
 void TacticalBattle::schedule_death_clone(TacticalMode& mode, objects::ObjectHandle clone, int32_t clone_type, uint8_t kind, SimRng& rng,
@@ -849,14 +849,14 @@ void TacticalBattle::schedule_death_clone(TacticalMode& mode, objects::ObjectHan
     // Death_Persistence_Duration (< 0 forever, default) + Death_Fade_Time (default 0.25 s), int(30 x s) each.
     (void)rng, (void)kind;
     const objects::GameObjectTypes& types = catalog_->types();
-    const auto seconds = [&types, t](const char* field, float def) {
-        return types.get_string(t, field).empty() ? def : types.get_float(t, field);
+    const auto seconds = [&types, t](const objects::FloatTag& field, float def) {
+        return types.get_string(t, field).empty() ? def : types.get(t, field);
     };
     const auto frames = [](float s) { return s > 0.0f ? uint64_t{static_cast<uint32_t>(frames_trunc(s * 30.0f))} : uint64_t{0}; };
-    const bool remove_now = types.get_bool(t, "Remove_Upon_Death");
-    const float persist = persistence_override ? *persistence_override : seconds("Death_Persistence_Duration", -1.0f);
+    const bool remove_now = types.get(t, objects::tags::Remove_Upon_Death);
+    const float persist = persistence_override ? *persistence_override : seconds(objects::tags::Death_Persistence_Duration, -1.0f);
     const bool forever = !remove_now && persist < 0.0f;
-    const uint64_t lifetime = frames(persist) + frames(seconds("Death_Fade_Time", 0.25f));
+    const uint64_t lifetime = frames(persist) + frames(seconds(objects::tags::Death_Fade_Time, 0.25f));
 #endif
     if (remove_now || (!forever && lifetime == 0)) {
         mode.destroy(clone);
@@ -882,7 +882,7 @@ void TacticalBattle::register_clone_obstacle(TacticalMode& mode, objects::Object
     if (space_ || !movement_ || clone_type < 0) return;
     const objects::GameObjectTypes& types = catalog_->types();
     const auto t = static_cast<objects::TypeIndex>(clone_type);
-    if (t >= types.size() || !types.get_bool(t, "IsDeathCloneObstacle")) return;
+    if (t >= types.size() || !types.get(t, objects::tags::IsDeathCloneObstacle)) return;
     mv::UnitDesc md = mv::unit_desc_from_type(types, t);
     if (md.collision_class < 0) return;
     const objects::ObjectStore& store = mode.primary();

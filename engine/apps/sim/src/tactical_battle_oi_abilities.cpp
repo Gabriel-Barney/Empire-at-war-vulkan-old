@@ -80,7 +80,7 @@ void TacticalBattle::oi_add_ability_types() {
         if (thief) {  // Vehicle_Thief: the capture variants (Vehicle_Thief_Inside_Clone) of the battle types
             const std::vector<uint32_t> now = types_used_;
             for (const uint32_t t : now) {
-                const std::string_view name = types_trim(types.get_string(static_cast<objects::TypeIndex>(t), "Vehicle_Thief_Inside_Clone"));
+                const std::string_view name = types_trim(types.get(static_cast<objects::TypeIndex>(t), objects::tags::Vehicle_Thief_Inside_Clone));
                 if (name.empty()) continue;
                 const objects::TypeIndex v = types.resolve_name(name);
                 if (v != objects::kNone) use(static_cast<int32_t>(v));
@@ -102,8 +102,8 @@ bool TacticalBattle::oi_company_members(int32_t type, std::vector<int32_t>& memb
     const objects::GameObjectTypes& types = catalog_->types();
     if (type < 0 || static_cast<size_t>(type) >= types.size()) return false;
     const auto t = static_cast<objects::TypeIndex>(type);
-    std::span<const std::string_view> list = types.get_list(t, "Company_Units");
-    if (list.empty()) list = types.get_list(t, "Squadron_Units");
+    std::span<const std::string_view> list = types.get(t, objects::tags::Company_Units);
+    if (list.empty()) list = types.get(t, objects::tags::Squadron_Units);
     if (list.empty()) return false;
     for (const std::string_view n : list) {
         const objects::TypeIndex m = types.resolve_name(types_trim(n));
@@ -526,7 +526,7 @@ void TacticalBattle::script_member_spots(const TacticalMode& mode, std::span<con
     out.clear();
     const objects::GameObjectTypes& types = catalog_->types();
     auto has_model = [&](uint32_t t) {
-        return !types_trim(types.get_string(t, space_ ? "Space_Model_Name" : "Land_Model_Name")).empty();
+        return !types_trim(types.get(t, space_ ? objects::tags::Space_Model_Name : objects::tags::Land_Model_Name)).empty();
     };
     constexpr uint64_t kLayer20 = 0x20;  // Space_Layer 0x20: never a blocker (space_member_spots)
     // Blockers: as space_member_spots (the object tree, all owners: live, not dying, not Is_Decoration, a model for the
@@ -536,11 +536,11 @@ void TacticalBattle::script_member_spots(const TacticalMode& mode, std::span<con
     for (const objects::ObjectHandle h : st.all_objects()) {
         if (!st.alive(h) || st.dying(h)) continue;
         const objects::TypeIndex t = st.type(h);
-        if (t >= types.size() || types.get_bool(t, "Is_Decoration") || !has_model(t)) continue;
+        if (t >= types.size() || types.get(t, objects::tags::Is_Decoration) || !has_model(t)) continue;
         if (st.has_behavior(h, objects::beh::TransportLanding) || st.has_behavior(h, objects::beh::LandObstacle) ||
             st.has_behavior(h, objects::beh::Projectile))
             continue;
-        if (space_ && types.get_mask(t, "Space_Layer") == kLayer20) continue;
+        if (space_ && types.get(t, objects::tags::Space_Layer) == kLayer20) continue;
         const tactical::Aabb b = mode.bounds_of(h);
         blockers.push_back({b.min.x, b.min.y, b.max.x, b.max.y});
     }
@@ -576,7 +576,7 @@ void TacticalBattle::script_member_spots(const TacticalMode& mode, std::span<con
 bool TacticalBattle::script_has_model(const TacticalMode& mode, objects::ObjectHandle h) const {
     const objects::ObjectStore& store = mode.primary();
     if (!store.exists(h)) return false;
-    return !types_trim(catalog_->types().get_string(store.type(h), space_ ? "Space_Model_Name" : "Land_Model_Name")).empty();
+    return !types_trim(catalog_->types().get(store.type(h), space_ ? objects::tags::Space_Model_Name : objects::tags::Land_Model_Name)).empty();
 }
 
 Vec3 TacticalBattle::script_spawn_facing(Vec3 p) const { return facing_to_origin(p, space_); }
@@ -722,7 +722,7 @@ void TacticalBattle::oi_events(TacticalMode& mode) {
                 const Unit* victim = unit_by_id(q.target);
                 if (vt < 0 && victim) {
                     const std::string_view name =
-                        types_trim(catalog_->types().get_string(static_cast<objects::TypeIndex>(victim->type), "Vehicle_Thief_Inside_Clone"));
+                        types_trim(catalog_->types().get(static_cast<objects::TypeIndex>(victim->type), objects::tags::Vehicle_Thief_Inside_Clone));
                     if (!name.empty()) {
                         const objects::TypeIndex t = catalog_->types().resolve_name(name);
                         if (t != objects::kNone) vt = static_cast<int32_t>(t);
@@ -914,7 +914,7 @@ void TacticalBattle::oi_deployed_behaviors(TacticalMode& mode, objects::ObjectId
     const objects::GameObjectTypes& types = catalog_->types();
     const objects::TypeIndex t = st.type(h);
     if (t >= types.size()) return;
-    for (const std::string_view raw : types.get_list(t, "DeployedBehavior")) {
+    for (const std::string_view raw : types.get(t, objects::tags::DeployedBehavior)) {
         const objects::BehaviorTypeId b = objects::behavior_type_id(data::trim(raw));
         if (b == objects::kNoBehavior) continue;
         if (deployed) {
@@ -922,7 +922,7 @@ void TacticalBattle::oi_deployed_behaviors(TacticalMode& mode, objects::ObjectId
             continue;
         }
         bool generic = false;
-        for (const std::string_view g : types.get_list(t, "Behavior")) generic = generic || objects::behavior_type_id(data::trim(g)) == b;
+        for (const std::string_view g : types.get(t, objects::tags::Behavior)) generic = generic || objects::behavior_type_id(data::trim(g)) == b;
         if (generic) continue;
         const std::span<const objects::BehaviorTypeId> list = st.behaviors(h);
         for (size_t k = list.size(); k-- > 0;)
@@ -1032,8 +1032,8 @@ void TacticalBattle::bt_base_shield_anims(uint64_t gframe, SimRng& rng) {
         const objects::ObjectHandle h = st.find(e.id);
         if (!st.exists(h) || !w->contains(e.id) || (beh && beh->is_corpse(e.id))) continue;  // r3h review: no corpse rows
         if (combat_->has_unit(e.id) && !combat_->alive(e.id)) continue;
-        const int32_t on_anim = anim::find_anim_type(types.get_string(st.type(h), "Shield_On_Anim"));
-        const int32_t off_anim = anim::find_anim_type(types.get_string(st.type(h), "Shield_Off_Anim"));
+        const int32_t on_anim = anim::find_anim_type(types.get(st.type(h), objects::tags::Shield_On_Anim));
+        const int32_t off_anim = anim::find_anim_type(types.get(st.type(h), objects::tags::Shield_Off_Anim));
         if (on_anim == anim::kNoAnimType || off_anim == anim::kNoAnimType) continue;
         anim::PlayRequest r;
         r.type = e.on ? on_anim : off_anim;

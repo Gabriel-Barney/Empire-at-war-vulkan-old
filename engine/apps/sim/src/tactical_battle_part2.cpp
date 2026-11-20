@@ -327,7 +327,7 @@ cmd::RejectReason TacticalBattle::reinforce_block(int32_t player, objects::Objec
             if (used + p.pop > rules_->faction(f).space_unit_cap) return R::QueueFull;
         } else if (!cfg_.skirmish) {
             const objects::GameObjectTypes& types = catalog_->types();
-            if (p.type < types.size() && types.get_bool(p.type, "Stay_In_Transport_During_Ground_Battle")) return R::NotAllowed;
+            if (p.type < types.size() && types.get(p.type, objects::tags::Stay_In_Transport_During_Ground_Battle)) return R::NotAllowed;
             if (galaxy_->planet_restricts(req_.info.planet, p.type)) return R::NotAllowed;
         }
         return R::None;
@@ -379,7 +379,7 @@ cmd::RejectReason TacticalBattle::order_reinforce(TacticalMode& mode, uint8_t pl
             // contents hold such a type cannot be in the port's pool (it holds companies); the "battle decided" gate is [M].
             if (!cfg_.skirmish) {
                 const objects::GameObjectTypes& types = catalog_->types();
-                if (p.type < types.size() && types.get_bool(p.type, "Stay_In_Transport_During_Ground_Battle")) return R::NotAllowed;
+                if (p.type < types.size() && types.get(p.type, objects::tags::Stay_In_Transport_During_Ground_Battle)) return R::NotAllowed;
                 if (galaxy_->planet_restricts(req_.info.planet, p.type)) return R::NotAllowed;
             }
             const float yaw = drop_yaw(p.side);
@@ -695,7 +695,7 @@ void drop_half_extents(const objects::GameObjectTypes& types, const BattleCatalo
     // only) -> (0, 0), even with one custom set; else per axis the hard extent when > 0, else the |collision-bound half|
     // of the land model. [port] a named land model that does not load (no art data, or no catalog): per axis the hard
     // extent, else 0.
-    if (ascii_trim(types.get_string(type, "Land_Model_Name")).empty()) return;
+    if (ascii_trim(types.get(type, objects::tags::Land_Model_Name)).empty()) return;
     const tactical::movement::AvoidModel* am = catalog ? catalog->avoid_model(type, false) : nullptr;
     hx = (cx > 0.0f ? cx : am ? std::fabs(am->bound_h.x) : 0.0f) * sc;
     hy = (cy > 0.0f ? cy : am ? std::fabs(am->bound_h.y) : 0.0f) * sc;
@@ -722,7 +722,7 @@ LandDropShape land_drop_shape(const objects::GameObjectTypes& types, const Battl
             for (int32_t i = 0; i < n; ++i) s.members.push_back(mt);
     }
     if (s.members.empty()) return s;
-    if (const uint32_t f = s.members.front(); f < types.size()) s.create_team = types.get_bool(f, "Create_Team");  // original member
+    if (const uint32_t f = s.members.front(); f < types.size()) s.create_team = types.get(f, objects::tags::Create_Team);  // original member
     // a1h t06 (TACTICAL_GAPS §4.2.2 item 2): a member without a land model that names a Unique_Ground_Unit (+0x1b60; FoC:
     // General_Veers -> Veers_AT_AT_Walker) is laid out, passability-tested and box-tested as that type.
     auto trimmed = [](std::string_view v) {
@@ -731,8 +731,8 @@ LandDropShape land_drop_shape(const objects::GameObjectTypes& types, const Battl
         return v;
     };
     for (uint32_t& t : s.members) {
-        if (t >= types.size() || !trimmed(types.get_string(t, "Land_Model_Name")).empty()) continue;
-        const std::string_view name = trimmed(types.get_string(t, "Unique_Ground_Unit"));
+        if (t >= types.size() || !trimmed(types.get(t, objects::tags::Land_Model_Name)).empty()) continue;
+        const std::string_view name = trimmed(types.get(t, objects::tags::Unique_Ground_Unit));
         const objects::TypeIndex u = name.empty() ? objects::kNone : types.resolve_name(name);
         if (u != objects::kNone && u < types.size()) t = u;
     }
@@ -742,18 +742,18 @@ LandDropShape land_drop_shape(const objects::GameObjectTypes& types, const Battl
         s.hx.push_back(hx);
         s.hy.push_back(hy);
     }
-    if (const uint32_t f = s.members.front(); f < types.size()) s.formation_spacing = types.get_float(f, "FormationSpacing");
+    if (const uint32_t f = s.members.front(); f < types.size()) s.formation_spacing = types.get(f, objects::tags::FormationSpacing);
     if (company_type < types.size()) {
-        const int32_t k = types.get_int(company_type, "Max_Squad_Size");  // +0x1e44, default 10 (bt_team)
+        const int32_t k = types.get(company_type, objects::tags::Max_Squad_Size);  // +0x1e44, default 10 (bt_team)
         s.squad = k > 0 ? static_cast<uint32_t>(k) : 10u;
-        std::string_view name = types.get_string(company_type, "Create_Team_Type");
+        std::string_view name = types.get(company_type, objects::tags::Create_Team_Type);
         while (!name.empty() && (name.front() == ' ' || name.front() == '\t' || name.front() == '\r' || name.front() == '\n')) name.remove_prefix(1);
         while (!name.empty() && (name.back() == ' ' || name.back() == '\t' || name.back() == '\r' || name.back() == '\n')) name.remove_suffix(1);
         const objects::TypeIndex tt = name.empty() ? objects::kNone : types.resolve_name(name);
         // LandBehavior (+0x718) lists LAND_TEAM_CONTAINER_LOCOMOTOR (its behaviour id is shared with the other
         // locomotors, so the list text is read).
         if (tt != objects::kNone && tt < types.size())
-            s.container_locomotor = drop_token_is(types.get_string(tt, "LandBehavior"), "LAND_TEAM_CONTAINER_LOCOMOTOR");
+            s.container_locomotor = drop_token_is(types.get_string(tt, objects::tags::LandBehavior), "LAND_TEAM_CONTAINER_LOCOMOTOR");
     }
     return s;
 }
@@ -779,7 +779,7 @@ bool TacticalBattle::mv_squad_add(TacticalMode& mode, size_t ci, uint32_t object
     for (const Unit& u : units_) {  // ascending id = the chunk's list order (team index order)
         if (u.container != ci) continue;
         if (!u.alive || u.retreated || !u.movable || !movement_->has_unit(u.id) || u.type >= types.size()) return false;
-        if (movement_->view(u.id).locomotor != mv::LocomotorKind::Default || types.get_bool(u.type, "Uses_Multiple_Locomotors"))
+        if (movement_->view(u.id).locomotor != mv::LocomotorKind::Default || types.get(u.type, objects::tags::Uses_Multiple_Locomotors))
             return false;
         ids.push_back(u.id);
         mem.push_back(&u);
@@ -794,7 +794,7 @@ bool TacticalBattle::mv_squad_add(TacticalMode& mode, size_t ci, uint32_t object
     type_half_extents(f, fx, fy);
     std::vector<Off2> offs;
     float bx = 0.0f, by = 0.0f;
-    drop_team(fx, fy, 20.0f * types.get_float(f, "FormationSpacing"), static_cast<uint32_t>(ids.size()), offs, bx, by);
+    drop_team(fx, fy, 20.0f * types.get(f, objects::tags::FormationSpacing), static_cast<uint32_t>(ids.size()), offs, bx, by);
     if (offs.size() != ids.size()) return false;
     std::vector<mv::V2> slots(ids.size());
     std::vector<ta::SquadSlot> box(ids.size());
@@ -805,7 +805,7 @@ bool TacticalBattle::mv_squad_add(TacticalMode& mode, size_t ci, uint32_t object
         unit_half_extents(*mem[i], box[i].hx, box[i].hy);
     }
     float jx = 0.0f, jy = 0.0f;
-    ta::squad_joint_half_extents(box, types.get_float(object_type, "MaxJiggleDistance"), jx, jy);
+    ta::squad_joint_half_extents(box, types.get(object_type, objects::tags::MaxJiggleDistance), jx, jy);
     const objects::ObjectStore& st = mode.primary();
     const Vec3 p = st.position(ct.h);
     mv::UnitDesc d = mv::unit_desc_from_type(types, object_type);
@@ -830,7 +830,7 @@ bool TacticalBattle::mv_squad_add(TacticalMode& mode, size_t ci, uint32_t object
     // The formation layout reads the container's hard radius 0x397780: sqrt(hx^2 + hy^2) of the joint box.
     const float r = dmath::sqrt(jx * jx + jy * jy);
     if (r > 0.0f) d.radius = r;
-    if (types.get_string(object_type, "Max_Speed").empty()) {  // [port] untagged: the members' minimum (the team cap rules)
+    if (types.get_string(object_type, objects::tags::Max_Speed).empty()) {  // [port] untagged: the members' minimum (the team cap rules)
         float mn = 3.0e38f;
         for (const Unit* u : mem) mn = std::min(mn, mv::unit_desc_from_type(types, u->type).max_speed);
         d.max_speed = mn;
@@ -883,10 +883,10 @@ TacticalBattle::Landing TacticalBattle::spawn_landing(TacticalMode& mode, const 
     Landing out;
     const objects::GameObjectTypes& types = catalog_->types();
     if (p.type >= types.size()) return out;
-    const std::vector<objects::TypeIndex> tr = types.get_type_refs(p.type, "Company_Transport_Unit");
+    const std::vector<objects::TypeIndex> tr = types.get_type_refs(p.type, objects::tags::Company_Transport_Unit);
     objects::TypeIndex l = tr.empty() ? objects::kNone : tr.front();  // the first entry (0x400f30)
     if (l == objects::kNone || l >= types.size()) return out;
-    std::string_view vname = types.get_string(l, "Landing_Transport_Variant");  // one name (+0x1e68)
+    std::string_view vname = types.get(l, objects::tags::Landing_Transport_Variant);  // one name (+0x1e68)
     while (!vname.empty() && std::isspace(static_cast<unsigned char>(vname.front())) != 0) vname.remove_prefix(1);
     while (!vname.empty() && std::isspace(static_cast<unsigned char>(vname.back())) != 0) vname.remove_suffix(1);
     if (const objects::TypeIndex v = vname.empty() ? objects::kNone : types.resolve_name(vname); v != objects::kNone && v < types.size())
@@ -894,7 +894,7 @@ TacticalBattle::Landing TacticalBattle::spawn_landing(TacticalMode& mode, const 
     objects::SpawnParams sp;
     sp.type = l;
     sp.owner = p.owner;
-    sp.position = {x, y, map_.terrain.sample_height(x, y) + types.get_float(l, "Hover_Offset")};
+    sp.position = {x, y, map_.terrain.sample_height(x, y) + types.get(l, objects::tags::Hover_Offset)};
     const Vec3 f = p.side < kMaxSides ? drop_facing_[p.side] : Vec3{};
     sp.facing = f.x == 0.0f && f.y == 0.0f ? facing_of_yaw(0.0f) : f;
     sp.parent_mode_id = p.built ? objects::kNoObjectId : p.galactic_id;  // q6 t19: tactical production pool entries
@@ -1084,10 +1084,10 @@ void TacticalBattle::landing_service(TacticalMode& mode, SimRng& rng) {
             continue;
         }
         // 0x644330: one team chunk or one vehicle at the landing position.
-        const int32_t mss = types.get_int(P.type, "Max_Squad_Size");
+        const int32_t mss = types.get(P.type, objects::tags::Max_Squad_Size);
         const uint32_t k = std::min(mss > 0 ? static_cast<uint32_t>(mss) : 10u, std::max(n, 1u));
         const uint32_t i = l.unloaded;
-        const uint32_t cnt = members[i] < types.size() && types.get_bool(members[i], "Create_Team") ? std::min(k, n - i) : 1u;
+        const uint32_t cnt = members[i] < types.size() && types.get(members[i], objects::tags::Create_Team) ? std::min(k, n - i) : 1u;
         const Vec3 at = store.position(l.h);
         drop_pos_.assign(n, Vec3{at.x, at.y, 0.0f});
         // s78j t01 (TACTICAL_COMBAT §3.1.1 "Units leaving a land landing object") [H]: step j's units are created at the
@@ -1095,7 +1095,7 @@ void TacticalBattle::landing_service(TacticalMode& mode, SimRng& rng) {
         // landing's own facing instead (vehicles have no step-0 override). O_j = the unload layout's step offset before the
         // passable-cell snap, rebuilt here from the landing position and the side's drop yaw (as order_reinforce built it).
         const Vec3 psi = store.facing(l.h);
-        const bool team = cnt > 1 || (members[i] < types.size() && types.get_bool(members[i], "Create_Team"));
+        const bool team = cnt > 1 || (members[i] < types.size() && types.get(members[i], objects::tags::Create_Team));
         {
             const LandDropLayout lay = land_drop_layout(land_drop_shape(P.type), at.x, at.y, drop_yaw(P.side), 3.0f);
             const uint32_t j = l.next_offset;
@@ -1185,7 +1185,7 @@ bool TacticalBattle::space_member_spots(TacticalMode& mode, const Participant& p
         return true;
     }
     auto has_model = [&](uint32_t t) {
-        std::string_view v = types.get_string(t, "Space_Model_Name");
+        std::string_view v = types.get(t, objects::tags::Space_Model_Name);
         while (!v.empty() && (v.front() == ' ' || v.front() == '\t' || v.front() == '\r' || v.front() == '\n')) v.remove_prefix(1);
         return !v.empty();
     };
@@ -1195,7 +1195,7 @@ bool TacticalBattle::space_member_spots(TacticalMode& mode, const Participant& p
     std::vector<uint8_t> at_p(members.size(), 0);
     for (size_t i = 0; i < members.size(); ++i) {
         const uint32_t t = members[i];
-        if (t >= types.size() || !has_model(t) || types.get_mask(t, "Space_Layer") == kLayer20) {
+        if (t >= types.size() || !has_model(t) || types.get(t, objects::tags::Space_Layer) == kLayer20) {
             at_p[i] = 1;
             continue;
         }
@@ -1210,11 +1210,11 @@ bool TacticalBattle::space_member_spots(TacticalMode& mode, const Participant& p
     for (const objects::ObjectHandle h : st.all_objects()) {
         if (!st.alive(h) || st.dying(h)) continue;
         const objects::TypeIndex t = st.type(h);
-        if (t >= types.size() || types.get_bool(t, "Is_Decoration") || !has_model(t)) continue;
+        if (t >= types.size() || types.get(t, objects::tags::Is_Decoration) || !has_model(t)) continue;
         if (st.has_behavior(h, objects::beh::TransportLanding) || st.has_behavior(h, objects::beh::LandObstacle) ||
             st.has_behavior(h, objects::beh::Projectile))
             continue;
-        if (types.get_mask(t, "Space_Layer") == kLayer20) continue;
+        if (types.get(t, objects::tags::Space_Layer) == kLayer20) continue;
         const tactical::Aabb b = mode.bounds_of(h);
         blockers.push_back({b.min.x, b.min.y, b.max.x, b.max.y});
     }
@@ -1280,15 +1280,15 @@ bool TacticalBattle::land_drop_valid(const TacticalMode& mode, int32_t player, o
             ro.x = q.x;
             ro.y = q.y;
             ro.allied = o >= 0 && (o == player || !combat_->is_enemy(player, o));  // 0x2823c0 / 0x39a230
-            ro.enabling = types.get_float(t, "Reinforcement_Enabling_Radius");
-            ro.prevention = types.get_float(t, "Reinforcement_Prevention_Radius");
+            ro.enabling = types.get(t, objects::tags::Reinforcement_Enabling_Radius);
+            ro.prevention = types.get(t, objects::tags::Reinforcement_Prevention_Radius);
             ro.powered = st.has_behavior(h, objects::beh::Powered);
             ro.owner_base_power = o >= 0 && combat_->has_base_power(o);
             if (ro.enabling > 0.0f || ro.prevention > 0.0f) radius.push_back(ro);
         }
         // a1h t06 (§4.2.2 item 4): the object tree GOM +0xd8 - Collidable_By_Projectile_Living (a death clone: _Dead),
         // any owner; never proximity mines; an AI issuer ignores movers; a human issuer ignores landing transports (item 3).
-        if (!types.get_bool(t, st.dying(h) ? "Collidable_By_Projectile_Dead" : "Collidable_By_Projectile_Living")) continue;
+        if (!types.get(t, st.dying(h) ? objects::tags::Collidable_By_Projectile_Dead : objects::tags::Collidable_By_Projectile_Living)) continue;
         if (kMine != objects::kNoBehavior && st.has_behavior(h, kMine)) continue;
         const bool obstacle = st.has_behavior(h, objects::beh::LandObstacle);
         if (!human && st.has_behavior(h, objects::beh::Locomotor) && !obstacle) continue;
@@ -1299,7 +1299,7 @@ bool TacticalBattle::land_drop_valid(const TacticalMode& mode, int32_t player, o
         DropBox xb;
         xb.yaw_deg = f.x == 0.0f && f.y == 0.0f ? 0.0f : yaw_of(f);
         const float sc = types.scale_factor(t);
-        const float ox = types.get_float(t, "Custom_Hard_XExtent_Offset") * sc, oy = types.get_float(t, "Custom_Hard_YExtent_Offset") * sc;
+        const float ox = types.get(t, objects::tags::Custom_Hard_XExtent_Offset) * sc, oy = types.get(t, objects::tags::Custom_Hard_YExtent_Offset) * sc;
         float sn = 0.0f, cs = 1.0f;
         dmath::sincos(xb.yaw_deg * (dmath::kPiF / 180.0f), sn, cs);
         xb.cx = q.x + ox * cs - oy * sn;
@@ -1309,7 +1309,7 @@ bool TacticalBattle::land_drop_valid(const TacticalMode& mode, int32_t player, o
         // a movement-backed unit (as unit_half_extents), else [port] DEPLOY active. [M, not ported] a land squad
         // container's joint box as a blocker (whether 0x3b6170's tree query returns containers was not traced).
         bool dep = false;
-        if (types.get_bool(t, "Deploys") && st.has_behavior(h, objects::beh::Locomotor)) {
+        if (types.get(t, objects::tags::Deploys) && st.has_behavior(h, objects::beh::Locomotor)) {
             if (movement_ && movement_->has_unit(st.id(h))) {
                 const mv::LocoState ds = movement_->deploy_state(st.id(h));
                 dep = ds == mv::LocoState::WalkDeploying || ds == mv::LocoState::WalkDeployed;
@@ -1786,7 +1786,7 @@ bool TacticalBattle::victory_relevant(uint32_t type) {
     uint8_t& c = vr_cache_[type];
     if (c == 0) {
         const auto t = static_cast<objects::TypeIndex>(type);
-        const bool r = types.get_bool(t, "Victory_Relevant") || types.get_bool(t, space_ ? "Space_Victory_Relevant" : "Land_Victory_Relevant");
+        const bool r = types.get(t, objects::tags::Victory_Relevant) || types.get(t, space_ ? objects::tags::Space_Victory_Relevant : objects::tags::Land_Victory_Relevant);
         c = r ? 2 : 1;
     }
     return c == 2;
@@ -1875,7 +1875,7 @@ void TacticalBattle::apply_speed_factors() {
         float& m = sp_type_max_speed_[c.type];
         if (m == kMaxSpeedUnread) {
             const auto ct = static_cast<objects::TypeIndex>(c.type);
-            m = types.get_string(ct, "Max_Speed").empty() ? -1.0f : types.get_float(ct, "Max_Speed");
+            m = types.get_string(ct, objects::tags::Max_Speed).empty() ? -1.0f : types.get(ct, objects::tags::Max_Speed);
         }
     }
     const auto container_max = [&](const Container& c) { return c.type < types.size() ? sp_type_max_speed_[c.type] : -1.0f; };
@@ -2128,7 +2128,7 @@ void TacticalBattle::fighter_sync() {
         // follows it. The chase ranges (0x4165f0's u = the container) are the squadron type's.
         if (const Unit* m0 = unit_by_id(d.members.front()); m0 && m0->type < types.size()) {
             const objects::TypeIndex mt = static_cast<objects::TypeIndex>(m0->type);
-            d.guard_follow = types.get_mask(mt, "Space_Layer") == 0 || types.get_bool(mt, "Disregard_Space_Layer_For_Guard_Attack_Move");
+            d.guard_follow = types.get(mt, objects::tags::Space_Layer) == 0 || types.get(mt, objects::tags::Disregard_Space_Layer_For_Guard_Attack_Move);
         }
         if (ct.squad_type < types.size()) d.chase = mv::fighter_chase_ranges_from_type(types, ct.squad_type);
         movement_->set_fighter_squad(d);

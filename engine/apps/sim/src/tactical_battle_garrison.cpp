@@ -105,8 +105,8 @@ bool TacticalBattle::s4_group(objects::ObjectId unit, tg::GarrisonGroup& g) cons
     g.category = 0;
     if (c.type < types.size()) {
         const auto t = static_cast<objects::TypeIndex>(c.type);
-        if (!types.get_string(t, "Garrison_Value").empty()) g.value = types.get_int(t, "Garrison_Value");
-        g.category = types.get_mask(t, "Garrison_Category");
+        if (!types.get_string(t, objects::tags::Garrison_Value).empty()) g.value = types.get(t, objects::tags::Garrison_Value);
+        g.category = types.get(t, objects::tags::Garrison_Category);
     }
     return true;
 }
@@ -425,7 +425,7 @@ void TacticalBattle::s4_hold(TacticalMode& mode, objects::ObjectId holder) {
 void TacticalBattle::s4_hover_lower(objects::ObjectId holder) {
     if (!movement_ || !movement_->hover_lower(holder)) return;
     const Unit* h = unit_by_id(holder);
-    if (h && h->type < catalog_->types().size() && catalog_->types().get_bool(h->type, "Deploys"))
+    if (h && h->type < catalog_->types().size() && catalog_->types().get(h->type, objects::tags::Deploys))
         (void)movement_->deploy(holder, true, frame_);
 }
 
@@ -671,7 +671,7 @@ void TacticalBattle::s4_tick(TacticalMode& mode, SimRng& rng) {
         for (const Unit& u : units_) {
             if (!u.alive || u.retreated || garrison_.garrisoned(u.id) || !store.alive(u.h)) continue;
             const int32_t owner = store.owner(u.h);
-            if (owner < 0 || u.type >= types.size() || !types.get_bool(static_cast<objects::TypeIndex>(u.type), "Influences_Cash_Point")) continue;
+            if (owner < 0 || u.type >= types.size() || !types.get(static_cast<objects::TypeIndex>(u.type), objects::tags::Influences_Cash_Point)) continue;
             inf.push_back({u.id, owner, store.position(u.h)});
         }
         std::vector<int32_t> players;
@@ -711,7 +711,7 @@ void TacticalBattle::bt_capture_anims(SimRng& rng, uint64_t gframe) {
             if (f < factions.size()) faction = factions[f].name;
         }
         uint32_t index = anim::kRandomVariant;
-        const std::span<const std::string_view> pairs = types.get_list(st.type(h), "Faction_Anim_Subindex");
+        const std::span<const std::string_view> pairs = types.get(st.type(h), objects::tags::Faction_Anim_Subindex);
         for (size_t i = 0; !faction.empty() && i + 1 < pairs.size(); i += 2) {
             if (!ascii_iequals(pairs[i], faction)) continue;
             uint32_t v = 0;

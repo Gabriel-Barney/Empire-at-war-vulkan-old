@@ -16,8 +16,8 @@ constexpr int32_t kPlacementTries = 10;                        // 0x140a436a0
 constexpr float kPackRadius = 50.0f;                           // pack members around the first member
 constexpr int32_t kSnapRings = 16;                             // [port] nearest passable cell search (cells)
 
-objects::TypeIndex first_type_of_list(const objects::GameObjectTypes& types, objects::TypeIndex t, std::string_view tag) {
-    for (const std::string_view s : types.get_list(t, tag)) {
+objects::TypeIndex first_type_of_list(const objects::GameObjectTypes& types, objects::TypeIndex t, const objects::ListTag& tag) {
+    for (const std::string_view s : types.get(t, tag)) {
         const objects::TypeIndex x = types.resolve_name(ascii_trim(s));
         if (x != objects::kNone && x < types.size()) return x;
     }
@@ -27,7 +27,7 @@ objects::TypeIndex first_type_of_list(const objects::GameObjectTypes& types, obj
 std::vector<objects::TypeIndex> spawned_types(const objects::GameObjectTypes& types, objects::TypeIndex t) {
     // Spawned_Indigenous_Units_Type in list order; unknown names keep their slot as kNone (the index draw covers the whole list).
     std::vector<objects::TypeIndex> out;
-    for (const std::string_view s : types.get_list(t, "Spawned_Indigenous_Units_Type")) out.push_back(types.resolve_name(ascii_trim(s)));
+    for (const std::string_view s : types.get(t, objects::tags::Spawned_Indigenous_Units_Type)) out.push_back(types.resolve_name(ascii_trim(s)));
     return out;
 }
 
@@ -55,8 +55,8 @@ void TacticalBattle::sp_add_types() {
         const std::vector<objects::TypeIndex> list = spawned_types(types, t);
         for (const objects::TypeIndex x : list)
             if (x != objects::kNone && x < types.size()) use(static_cast<uint32_t>(x));
-        const objects::TypeIndex pack = types.resolve_name(ascii_trim(types.get_string(t, "Spawned_Indigenous_Pack_Type")));
-        const objects::TypeIndex first = first_type_of_list(types, t, "Spawned_Indigenous_Units_Type");
+        const objects::TypeIndex pack = types.resolve_name(ascii_trim(types.get(t, objects::tags::Spawned_Indigenous_Pack_Type)));
+        const objects::TypeIndex first = first_type_of_list(types, t, objects::tags::Spawned_Indigenous_Units_Type);
         uint32_t ot = 0xFFFFFFFFu, bt = 0xFFFFFFFFu, squad = 0;
         if (pack != objects::kNone && pack < types.size() && first != objects::kNone &&
             bt_team(static_cast<uint32_t>(pack), static_cast<uint32_t>(first), ot, bt, squad)) {
@@ -97,9 +97,9 @@ void TacticalBattle::sp_tick(TacticalMode& mode, SimRng& rng) {
             const objects::TypeIndex t = st.type(h);
             DebrisPiece d;
             d.id = st.id(h);
-            const int32_t life = rng.range_int(types.get_int(t, "Debris_Min_Lifetime_Seconds"), types.get_int(t, "Debris_Max_Lifetime_Seconds"));
+            const int32_t life = rng.range_int(types.get(t, objects::tags::Debris_Min_Lifetime_Seconds), types.get(t, objects::tags::Debris_Max_Lifetime_Seconds));
             d.expiry = life < 1 ? 0u : mf + static_cast<uint32_t>(life) * 30u;
-            const objects::TypeIndex pt = types.resolve_name(ascii_trim(types.get_string(t, "Debris_Attached_Particle")));
+            const objects::TypeIndex pt = types.resolve_name(ascii_trim(types.get(t, objects::tags::Debris_Attached_Particle)));
             if (pt != objects::kNone && pt < types.size()) {
                 objects::SpawnParams sp;
                 sp.type = pt;
@@ -140,8 +140,8 @@ void TacticalBattle::sp_tick(TacticalMode& mode, SimRng& rng) {
         }
         st.set_behavior_next_service(h, bi, mf + std::max<uint32_t>(1u, st.behavior_interval(h, bi)));
         const objects::TypeIndex t = st.type(h);
-        const std::array<float, 4> mv = types.get_vec(t, "Debris_Movement_Vector");
-        const std::array<float, 4> rv = types.get_vec(t, "Debris_Facing_Rotate_Vector");
+        const std::array<float, 4> mv = types.get(t, objects::tags::Debris_Movement_Vector);
+        const std::array<float, 4> rv = types.get(t, objects::tags::Debris_Facing_Rotate_Vector);
         const Vec3 p0 = st.position(h);
         const Vec3 p{p0.x + mv[0], p0.y + mv[1], p0.z + mv[2]};
         st.set_position(h, p);
@@ -154,7 +154,7 @@ void TacticalBattle::sp_tick(TacticalMode& mode, SimRng& rng) {
             const objects::ObjectHandle ph = st.find(d.particle);
             if (st.alive(ph)) st.set_position(ph, p);
         }
-        if (types.get_int(t, "Debris_Max_Lifetime_Seconds") > 0 && d.expiry != 0 && d.expiry <= mf) {
+        if (types.get(t, objects::tags::Debris_Max_Lifetime_Seconds) > 0 && d.expiry != 0 && d.expiry <= mf) {
             const DebrisPiece gone = d;
             sp_debris_.erase(sp_debris_.begin() + static_cast<std::ptrdiff_t>(i));
             sp_debris_expire(mode, rng, gone);
@@ -191,7 +191,7 @@ void TacticalBattle::sp_debris_expire(TacticalMode& mode, SimRng& rng, const Deb
         ++stats_.death_clones;
         schedule_death_clone(mode, ch, static_cast<int32_t>(t), 1, rng);
     }
-    const objects::TypeIndex ex = first_type_of_list(catalog_->types(), t, "Death_Explosions");
+    const objects::TypeIndex ex = first_type_of_list(catalog_->types(), t, objects::tags::Death_Explosions);
     if (ex != objects::kNone) {
         const int32_t neutral = galaxy_ ? galaxy_->neutral_player() : -1;  // storyb t17: the clone's owner
         spawn_death_explosion(mode, static_cast<int32_t>(ex), at, neutral >= 0 ? neutral : owner);
@@ -225,7 +225,7 @@ uint32_t TacticalBattle::sp_rebalance(const TacticalMode& mode, SimRng& rng, obj
     }
     const int32_t n = static_cast<int32_t>(undecided.size() + active.size());
     if (n == 0) return 0;
-    float c = std::max(0.0f, chance < 0.0f ? types.get_float(type, "Spawn_Indigenous_Units_Chance") : chance);
+    float c = std::max(0.0f, chance < 0.0f ? types.get(type, objects::tags::Spawn_Indigenous_Units_Chance) : chance);
     if (c > 1.0f) c = std::clamp(c * 0.01f, 0.0f, 1.0f);
     const auto target = static_cast<int32_t>(static_cast<float>(n) * c);
     const auto have = static_cast<int32_t>(active.size());
@@ -265,9 +265,9 @@ void TacticalBattle::sp_service(TacticalMode& mode, SimRng& rng, size_t index) {
     if (sp_spawners_[index].state == -1) sp_activate(mode, rng, index);
     const uint32_t mf = st.mode_frame();
     if (sp_spawners_[index].state != 1 || mf < sp_spawners_[index].next) return;
-    const int32_t quantity = types.get_int(t, "Spawned_Indigenous_Units_Quantity");
+    const int32_t quantity = types.get(t, objects::tags::Spawned_Indigenous_Units_Quantity);
     const int32_t spawner_owner = st.owner(sh);
-    if (!types.get_bool(t, "Spawn_Indigenous_Units_In_Packs")) {
+    if (!types.get(t, objects::tags::Spawn_Indigenous_Units_In_Packs)) {
         const auto have = static_cast<int32_t>(sp_spawners_[index].spawned.size());
         if (quantity <= have) return;  // full: the next spawn frame stays
         for (int32_t k = quantity - have; k > 0; --k) {
@@ -297,7 +297,7 @@ void TacticalBattle::sp_service(TacticalMode& mode, SimRng& rng, size_t index) {
             // container without a pack type that resolves to a team (the original then uses the first member's type), or
             // for an Is_Neutral owner (its members are bare objects, as map units).
             uint32_t ci = 0xFFFFFFFFu;
-            const objects::TypeIndex pack = types.resolve_name(ascii_trim(types.get_string(t, "Spawned_Indigenous_Pack_Type")));
+            const objects::TypeIndex pack = types.resolve_name(ascii_trim(types.get(t, objects::tags::Spawned_Indigenous_Pack_Type)));
             uint32_t ot = 0xFFFFFFFFu, bt = 0xFFFFFFFFu, squad = 0;
             if (adopt && pack != objects::kNone && pack < types.size() &&
                 bt_team(static_cast<uint32_t>(pack), static_cast<uint32_t>(st.type(first)), ot, bt, squad) &&
@@ -328,7 +328,7 @@ void TacticalBattle::sp_service(TacticalMode& mode, SimRng& rng, size_t index) {
             }
         }
     }
-    sp_spawners_[index].next = mf + static_cast<uint32_t>(frames_trunc(30.0f * std::max(0.0f, types.get_float(t, "Spawned_Indigenous_Units_Delay_Seconds"))));
+    sp_spawners_[index].next = mf + static_cast<uint32_t>(frames_trunc(30.0f * std::max(0.0f, types.get(t, objects::tags::Spawned_Indigenous_Units_Delay_Seconds))));
 }
 
 int32_t TacticalBattle::sp_corrupt_owner(objects::TypeIndex unit_type, int32_t owner) const {
@@ -338,7 +338,7 @@ int32_t TacticalBattle::sp_corrupt_owner(objects::TypeIndex unit_type, int32_t o
     // Corruption_Corrupt_Militia (4), changes owner to the first player (list order) whose faction has
     // Benefits_From_Corruption.
     const objects::GameObjectTypes& types = catalog_->types();
-    if (unit_type == objects::kNone || unit_type >= types.size() || !types.get_bool(unit_type, "Is_Indigenous_Unit_Corruptible")) return owner;
+    if (unit_type == objects::kNone || unit_type >= types.size() || !types.get(unit_type, objects::tags::Is_Indigenous_Unit_Corruptible)) return owner;
     const auto planet = static_cast<size_t>(req_.info.planet);
     if (planet >= galaxy_->planets().size() || galaxy_->planets()[planet].corruption != 4) return owner;
     const auto& factions = galaxy_->rules().factions;
@@ -368,9 +368,9 @@ objects::ObjectHandle TacticalBattle::sp_spawn_one(TacticalMode& mode, SimRng& r
     sp.facing = Vec3{b, a, 0.0f};
     const objects::ObjectHandle h = mode.spawn(sp, 1.0f);
     if (!st.alive(h)) return {};
-    const float radius = centre ? kPackRadius : types.get_float(t, "Spawn_Indigenous_Units_Radius");
+    const float radius = centre ? kPackRadius : types.get(t, objects::tags::Spawn_Indigenous_Units_Radius);
     const Vec3 c = centre ? *centre : st.position(spawner);
-    const float hover = types.get_float(ut, "Hover_Offset");
+    const float hover = types.get(ut, objects::tags::Hover_Offset);
     for (int32_t k = 0; k < kPlacementTries; ++k) {
         const float dy = rng.range_float(-1.0f, 1.0f);
         const float dx = rng.range_float(-1.0f, 1.0f);
@@ -413,14 +413,14 @@ int32_t TacticalBattle::sp_place(TacticalMode& mode, objects::ObjectHandle h, Ve
                     }
                 }
         if (!found) return 2;
-        if (map_.terrain.present) p.z = map_.terrain.sample_height(p.x, p.y) + std::max(0.0f, types.get_float(t, "Hover_Offset"));
+        if (map_.terrain.present) p.z = map_.terrain.sample_height(p.x, p.y) + std::max(0.0f, types.get(t, objects::tags::Hover_Offset));
     }
     float hx = 0.0f, hy = 0.0f;
     drop_half_extents(static_cast<uint32_t>(t), hx, hy);
     for (const objects::ObjectHandle o : st.all_objects()) {
         if (o == h || !st.alive(o)) continue;
         const objects::TypeIndex ot = st.type(o);
-        if (ot >= types.size() || !types.get_bool(ot, st.dying(o) ? "Collidable_By_Projectile_Dead" : "Collidable_By_Projectile_Living"))
+        if (ot >= types.size() || !types.get(ot, st.dying(o) ? objects::tags::Collidable_By_Projectile_Dead : objects::tags::Collidable_By_Projectile_Living))
             continue;
         const tactical::Aabb b = mode.bounds_of(o);
         if (p.x + hx > b.min.x && p.x - hx < b.max.x && p.y + hy > b.min.y && p.y - hy < b.max.y) return 1;

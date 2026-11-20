@@ -61,7 +61,7 @@ public:
         if (type < 0) return false;
         const objects::GameObjectTypes& t = b_.catalog_->types();
         const auto ti = static_cast<objects::TypeIndex>(type);
-        return t.get_bool(ti, "Is_Named_Hero") || t.get_bool(ti, "Is_Generic_Hero");
+        return t.get(ti, objects::tags::Is_Named_Hero) || t.get(ti, objects::tags::Is_Generic_Hero);
     }
     bool enemies(int32_t a, int32_t c) override { return b_.combat_->is_enemy(a, c); }
     tactical::Vec3 position(tc::ObjectId id) override {

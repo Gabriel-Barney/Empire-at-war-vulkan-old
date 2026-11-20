@@ -103,14 +103,14 @@ void TacticalBattle::fog_after_deploy(TacticalMode& mode) {
         const objects::TypeIndex t = store.type(h);
         if (t >= types.size()) continue;
         if (obstacle != objects::kNoBehavior && store.has_behavior(h, obstacle) &&
-            (types.get_bool(t, "Is_Asteroid_Field") || types.get_bool(t, "Is_Impassable_Asteroid") || types.get_bool(t, "Is_Ion_Storm") ||
-             types.get_bool(t, "Is_Nebula"))) {
+            (types.get(t, objects::tags::Is_Asteroid_Field) || types.get(t, objects::tags::Is_Impassable_Asteroid) || types.get(t, objects::tags::Is_Ion_Storm) ||
+             types.get(t, objects::tags::Is_Nebula))) {
             const Vec3 p = store.position(h);
-            const std::array<float, 4> off = types.get_vec(t, "Space_Obstacle_Offset");
-            dense.push_back({p.x + off[0], p.y + off[1], types.get_float(t, "Space_Obstacle_Radius")});
+            const std::array<float, 4> off = types.get(t, objects::tags::Space_Obstacle_Offset);
+            dense.push_back({p.x + off[0], p.y + off[1], types.get(t, objects::tags::Space_Obstacle_Radius)});
         }
-        if (store.owner(h) == sides.summed && types.get_bool(t, "Modifies_Reveal_Range"))
-            mods.push_back(types.get_float(t, "Reveal_Range_Modifier"));
+        if (store.owner(h) == sides.summed && types.get(t, objects::tags::Modifies_Reveal_Range))
+            mods.push_back(types.get(t, objects::tags::Reveal_Range_Modifier));
     }
     fog_.set_dense_obstacles(dense);
     fog_.set_battle_scale(sides.scaled, fw::battle_reveal_scale(mods));
@@ -133,9 +133,9 @@ fw::FogObject TacticalBattle::fog_object_of(const objects::ObjectStore& store, o
         // weather-affected, FOG_OF_WAR §3.1.1 / TACTICAL_GAPS §7.4); space: Space_FOW_Reveal_Range.
         const bool weather = !abilities_ || abilities_->weather_affected(o.owner);
         o.sight_range = space_ ? types.columns().space_fow_reveal_range[t]
-                        : weather ? types.columns().land_fow_reveal_range[t] * l1_weather_.sight_modifier(types.get_string(t, "Weather_Category"))
+                        : weather ? types.columns().land_fow_reveal_range[t] * l1_weather_.sight_modifier(types.get(t, objects::tags::Weather_Category))
                                   : types.columns().land_fow_reveal_range[t];
-        o.dense_multiplier = std::clamp(types.get_float(t, "Dense_FOW_Reveal_Range_Multiplier"), 0.0f, 1.0f);
+        o.dense_multiplier = std::clamp(types.get(t, objects::tags::Dense_FOW_Reveal_Range_Multiplier), 0.0f, 1.0f);
     }
     const objects::ObjectId id = store.id(h);
     if (combat_ && combat_->has_unit(id)) o.object_modifier = combat_->modifier(id, tactical::combat::ModList::RevealRange);
@@ -189,7 +189,7 @@ void TacticalBattle::fog_footprint_samples(const objects::ObjectStore& store, ob
         if (!squad.empty()) tactical::abilities::squad_joint_half_extents(squad, jiggle, hx, hy);
     } else {
         if (!(ex > 0.0f) || !(ey > 0.0f)) {
-            if (catalog_->files() && ascii_trim(types.get_string(t, space_ ? "Space_Model_Name" : "Land_Model_Name")).empty()) {
+            if (catalog_->files() && ascii_trim(types.get(t, space_ ? objects::tags::Space_Model_Name : objects::tags::Land_Model_Name)).empty()) {
                 hx = hy = 0.0f;  // s78n t10: no model for the mode (0x3729f0 null)
             } else {
                 float mx = 0.0f, my = 0.0f;
@@ -218,8 +218,8 @@ void TacticalBattle::fog_footprint_samples(const objects::ObjectStore& store, ob
         ay = f.y * inv;
     }
     const float bx = -ay, by = ax;  // b = (-sin, cos)
-    const float ox = scale * types.get_float(t, "Custom_Hard_XExtent_Offset");
-    const float oy = scale * types.get_float(t, "Custom_Hard_YExtent_Offset");
+    const float ox = scale * types.get(t, objects::tags::Custom_Hard_XExtent_Offset);
+    const float oy = scale * types.get(t, objects::tags::Custom_Hard_YExtent_Offset);
     const Vec3 p = store.position(h);
     const float cx = p.x + ox * ax + oy * bx, cy = p.y + ox * ay + oy * by;
     // c +- hx a +- hy b (corners), then c + hx a, c - hy b, c - hx a, c + hy b.
@@ -266,7 +266,7 @@ void TacticalBattle::fog_service_sources(const objects::ObjectStore& store) {
             if (!reveal || !store.has_behavior(u.h, fog_reveal_beh_)) continue;
             const objects::TypeIndex t = store.type(u.h);
             use[i] = 1;
-            x.setup_only = t < catalog_->types().size() && catalog_->types().get_bool(t, "Reveal_During_Setup_Phase_Only");
+            x.setup_only = t < catalog_->types().size() && catalog_->types().get(t, objects::tags::Reveal_During_Setup_Phase_Only);
             x.contained = garrison_.garrisoned(u.id);  // OI fog: obj +0x3a7 (garrisoned / contained)
             x.obj = fog_object_of(store, u.h);
         }
@@ -395,7 +395,7 @@ bool TacticalBattle::fog_object_hidden(int32_t player, objects::ObjectId id, boo
     q.y = p.y;
     q.z = p.z;
     const objects::TypeIndex t = store.type(h);
-    q.multisample = t < catalog_->types().size() && catalog_->types().get_bool(t, "Multisample_FOW_Check");
+    q.multisample = t < catalog_->types().size() && catalog_->types().get(t, objects::tags::Multisample_FOW_Check);
     if (q.multisample) fog_footprint_samples(store, h, q.corners.data());  // FOWF t02: the footprint rectangle (z = 0)
     return fog_.object_hidden(player, q, force);
 }
@@ -435,12 +435,12 @@ std::vector<fw::FogSetupObject> TacticalBattle::fog_setup_objects() const {
         if (t >= types.size()) continue;
         fw::FogSetupObject so;
         so.obj = fog_object_of(store, h);
-        so.reveal_during_setup = types.get_bool(t, "Reveal_During_Setup_Phase") || types.get_bool(t, "Reveal_During_Setup_Phase_Only");
-        so.reveal_for_attacker = types.get_bool(t, "Reveal_For_Attacker");
-        so.reveal_for_defender = types.get_bool(t, "Reveal_For_Defender");
+        so.reveal_during_setup = types.get(t, objects::tags::Reveal_During_Setup_Phase) || types.get(t, objects::tags::Reveal_During_Setup_Phase_Only);
+        so.reveal_for_attacker = types.get(t, objects::tags::Reveal_For_Attacker);
+        so.reveal_for_defender = types.get(t, objects::tags::Reveal_For_Defender);
         so.has_locomotor = store.has_behavior(h, objects::beh::Locomotor);
         so.has_reveal = fog_reveal_beh_ != objects::kNoBehavior && store.has_behavior(h, fog_reveal_beh_);
-        so.reinforcement_prevention_radius = types.get_float(t, "Reinforcement_Prevention_Radius");
+        so.reinforcement_prevention_radius = types.get(t, objects::tags::Reinforcement_Prevention_Radius);
         // FOWF t03: obj +0x341 (POWERED slot); the base power itself is the target player's (set_base_power in fog_begin).
         so.has_powered = powered != objects::kNoBehavior && store.has_behavior(h, powered);
         out.push_back(so);
@@ -525,7 +525,7 @@ std::vector<fw::PreventionCircle> TacticalBattle::fog_prevention_circles() const
         if (!store.exists(h)) continue;
         const objects::TypeIndex t = store.type(h);
         if (t >= types.size()) continue;
-        const float r = types.get_float(t, "Reinforcement_Prevention_Radius");
+        const float r = types.get(t, objects::tags::Reinforcement_Prevention_Radius);
         if (!(r > 0.0f)) continue;
         const Vec3 p = store.position(h);
         out.push_back({store.owner(h), p.x, p.y, r});

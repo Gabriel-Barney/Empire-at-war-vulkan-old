@@ -74,8 +74,8 @@ TacticalBattle::TacticalBattle(const BattleCatalog& catalog, const galactic::Gal
         // §3.2 steps 2-3: Tactical_Additional_Structure_Type temporaries, Place_Other_Type_At_Every_Specific_Marker_Position.
         if (p.structure) {
             const objects::GameObjectTypes& types = catalog.types();
-            for (const char* tag : {"Tactical_Additional_Structure_Type", "Place_Other_Type_At_Every_Specific_Marker_Position"}) {
-                const objects::TypeIndex x = types.resolve_name(types.get_string(p.type, tag));
+            for (const objects::TextTag* tag : {&objects::tags::Tactical_Additional_Structure_Type, &objects::tags::Place_Other_Type_At_Every_Specific_Marker_Position}) {
+                const objects::TypeIndex x = types.resolve_name(types.get(p.type, *tag));
                 if (x != objects::kNone && x < types.size()) use(static_cast<uint32_t>(x));
             }
         }
@@ -166,8 +166,8 @@ TacticalBattle::Unit* TacticalBattle::unit_by_id(objects::ObjectId id) {
 std::string_view TacticalBattle::mv_locomotor_token(uint32_t type) const {
     const objects::GameObjectTypes& types = catalog_->types();
     if (type >= types.size()) return {};
-    for (const std::string_view tag : {space_ ? std::string_view("SpaceBehavior") : std::string_view("LandBehavior"), std::string_view("Behavior")}) {
-        for (const std::string_view raw : types.get_list(type, tag)) {
+    for (const objects::ListTag* tag : {space_ ? &objects::tags::SpaceBehavior : &objects::tags::LandBehavior, &objects::tags::Behavior}) {
+        for (const std::string_view raw : types.get(type, *tag)) {
             const std::string_view t = ascii_trim(raw);
             constexpr std::string_view kSuffix = "LOCOMOTOR";  // any *_LOCOMOTOR token is the locomotor slot
             if (t.size() >= kSuffix.size() && ascii_iequals(t.substr(t.size() - kSuffix.size()), kSuffix)) return t;
@@ -305,11 +305,11 @@ bool TacticalBattle::clearance_info(objects::ObjectId id, mv::ClearanceInfo& out
     }
     if (!clr_known_[t]) {
         mv::ClearanceInfo ci;
-        ci.uses_multiple_locomotors = types.get_bool(t, "Uses_Multiple_Locomotors");
-        ci.stationary_space_layer = static_cast<uint32_t>(types.get_int(t, "Stationary_Space_Layer"));
+        ci.uses_multiple_locomotors = types.get(t, objects::tags::Uses_Multiple_Locomotors);
+        ci.stationary_space_layer = static_cast<uint32_t>(types.get(t, objects::tags::Stationary_Space_Layer));
         ci.scale_factor = types.columns().scale_factor[t];
         const mv::AvoidModel* am = catalog_->avoid_model(t, false);
-        const bool named = !ascii_trim(types.get_string(t, "Land_Model_Name")).empty();
+        const bool named = !ascii_trim(types.get(t, objects::tags::Land_Model_Name)).empty();
         ci.has_box = am != nullptr;
         if (am) {
             ci.box_lo_z = am->bound_c.z;
@@ -341,8 +341,8 @@ void TacticalBattle::avoid_snapshot(const objects::ObjectStore& store) {
         const uint32_t t = store.type(h);
         if (t >= types.size()) continue;
         if (avoid_type_[t] < 0) {
-            const bool member = !types.get_bool(t, "Is_Asteroid_Field") && !types.get_bool(t, "Is_Ion_Storm") &&
-                                !types.get_bool(t, "Is_Nebula") && (types.get_mask(t, "Space_Layer") & ~uint64_t{0x10}) != 0;
+            const bool member = !types.get(t, objects::tags::Is_Asteroid_Field) && !types.get(t, objects::tags::Is_Ion_Storm) &&
+                                !types.get(t, objects::tags::Is_Nebula) && (types.get(t, objects::tags::Space_Layer) & ~uint64_t{0x10}) != 0;
             const bool shielded = types.has_behavior(t, objects::BehaviorSet::Union, objects::beh::Shielded);
             avoid_type_[t] = static_cast<int8_t>(member ? (shielded ? 2 : 1) : 0);
         }
@@ -482,7 +482,7 @@ void TacticalBattle::setup(TacticalMode& mode, terrain::MapData map, SimRng& rng
             if (!u || u->type >= types.size() || !catalog_->files()) return false;
             scale = types.columns().scale_factor[u->type];
             model = nullptr;
-            if (ascii_trim(types.get_string(u->type, "Space_Model_Name")).empty()) return true;
+            if (ascii_trim(types.get(u->type, objects::tags::Space_Model_Name)).empty()) return true;
             model = catalog_->avoid_model(u->type, true);
             return model != nullptr;
         });
@@ -999,7 +999,7 @@ void TacticalBattle::deploy(TacticalMode& mode, uint32_t pi, SimRng& rng, uint32
     // cu8l t02 (CU8K_T02_T06_RE §3 row 0x6a1f90, rule 8): Lua Spawn_Unit's company path runs the same placer 0x29e960 and
     // helper, so a script-spawned space container adopts at once too (with the placer's Create_Team condition [M]).
     const bool helper = (cfg_.skirmish || deploy_script_) ? units_.size() > first && units_[first].type < types.size() &&
-                                                                types.get_bool(units_[first].type, "Create_Team")
+                                                                types.get(units_[first].type, objects::tags::Create_Team)
                                                           : true;
     for (size_t k = 0; k < groups.size(); ++k) {  // OI abilities: + the container's SAP-init draws
         abilities_->add_container(containers_[c0 + k].id, desc_of(team_beh), P.owner, groups[k], frame_, &rng);
@@ -1113,7 +1113,7 @@ bool TacticalBattle::land_obstacle_attach(const TacticalMode& mode, objects::Obj
         return false;
     }
     // S8 t13 (MOVEMENT §1.3 "proxy bits"): the bits come from the object's own live behaviours (0x397350), never the proxy.
-    fp.bits = mv::land_obstacle_bits(static_cast<uint32_t>(types.get_mask(t, "OverridePassability")), true,
+    fp.bits = mv::land_obstacle_bits(static_cast<uint32_t>(types.get(t, objects::tags::OverridePassability)), true,
                                      st.has_behavior(h, kWallBehavior));
     // OPT3 t12: the Fine_Tune rays (a whole-mesh test per 10-unit sample; a skirmish base structure has ~400 samples on
     // ~14k triangles) run through pf. The hook is const catalog data (as stamp_map_obstacles).
@@ -1350,7 +1350,7 @@ namespace {
 // (Custom_Soft_Footprint_Radius, else Space_Obstacle_Radius, else the larger model half extent; BKT1_ATTACK_RE §1.3).
 // Every live object of the mode is scanned in the canonical (newest-first) list order, not only the selection.
 void snap_move_point(const objects::ObjectStore& st, const BattleCatalog& cat, const terrain::MapData& map, float& x, float& y) {
-    static const uint32_t kSnapField = objects::find_type_field("Snap_Movement_Orders_To_Center");
+    static const uint32_t kSnapField = objects::find_type_field(objects::tags::Snap_Movement_Orders_To_Center.tag);
     const objects::GameObjectTypes& types = cat.types();
     std::vector<mv::SnapCenter> cands;
     const std::span<const objects::ObjectHandle> all = st.all_objects();
@@ -1358,11 +1358,11 @@ void snap_move_point(const objects::ObjectStore& st, const BattleCatalog& cat, c
         const objects::ObjectHandle h = all[k];
         if (!st.alive(h)) continue;
         const objects::TypeIndex t = st.type(h);
-        if (t >= types.size() || types.value(t, kSnapField) == nullptr || !types.get_bool(t, "Snap_Movement_Orders_To_Center"))
+        if (t >= types.size() || types.value(t, kSnapField) == nullptr || !types.get(t, objects::tags::Snap_Movement_Orders_To_Center))
             continue;
         const float sc = types.scale_factor(t);
-        float r = types.get_float(t, "Custom_Soft_Footprint_Radius");
-        if (!(r > 0.0f)) r = types.get_float(t, "Space_Obstacle_Radius");
+        float r = types.get(t, objects::tags::Custom_Soft_Footprint_Radius);
+        if (!(r > 0.0f)) r = types.get(t, objects::tags::Space_Obstacle_Radius);
         if (!(r > 0.0f)) {
             float hx = 0.0f, hy = 0.0f, hz = 0.0f;
             r = cat.model_half_extents(t, hx, hy, hz) ? std::max(hx, hy) : 0.0f;
@@ -1743,8 +1743,8 @@ Vec3 TacticalBattle::attack_stage_goal(const TacticalMode& mode, std::span<const
     const Unit* tu = unit_by_id(target);
     if (movers == 1 && attack_mover(m) == m && tu && mu->type < types.size() && tu->type < types.size() &&
         types.has_behavior(mu->type, objects::BehaviorSet::Union, 0x26)) {  // SQUASH
-        const bool squash = types.get_bool(tu->type, "Is_Squashable") ||
-                            (types.get_bool(mu->type, "Is_Supercrusher") && types.get_bool(tu->type, "Is_Squashable_By_Supercrusher"));
+        const bool squash = types.get(tu->type, objects::tags::Is_Squashable) ||
+                            (types.get(mu->type, objects::tags::Is_Supercrusher) && types.get(tu->type, objects::tags::Is_Squashable_By_Supercrusher));
         if (squash) return tp;
     }
     const float d = mn + 0.2f * (combat_->base_attack_range_of(m) - mn);
@@ -1917,7 +1917,7 @@ void TacticalBattle::attack_target_unseen(const objects::ObjectStore& st, const 
     stealthed = false;
     if (abilities_ && (abilities_->is_stealthed(target, frame_) || (obj != target && abilities_->is_stealthed(obj, frame_)))) {
         const objects::GameObjectTypes& types = catalog_->types();
-        stealthed = !(unit.type < types.size() && types.get_bool(unit.type, "Target_Stealth_Units"));
+        stealthed = !(unit.type < types.size() && types.get(unit.type, objects::tags::Target_Stealth_Units));
     }
 }
 

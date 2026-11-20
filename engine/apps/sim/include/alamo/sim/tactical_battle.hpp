@@ -71,6 +71,7 @@
 #include "alamo/core/sim_crc_fwd.hpp"
 #include "alamo/core/sim_rng.hpp"
 #include "alamo/galactic/conflicts.hpp"
+#include "alamo/objects/type_tags.hpp"  // ref6 t01: pad_list_tag
 #include "alamo/sim/battle_catalog.hpp"
 #include "alamo/sim/fleet_groups.hpp"  // [port] fleet groups
 #include "alamo/sim/game_modes.hpp"
@@ -1327,7 +1328,9 @@ public:
     uint8_t victory_record_type(int32_t player) const;
     // skai t17 (L1_S4_REMAINING §3.6, SKIRMISH_SETUP 0x372c10: "skirmish (0x28afb0)"): every skirmish, land or space, lists
     // pad builds from _Multiplayer (a space skirmish read _Campaign, which the Mineral_Extractor_Pad does not have).
-    const char* pad_list_tag() const { return cfg_.skirmish ? "Tactical_Buildable_Objects_Multiplayer" : "Tactical_Buildable_Objects_Campaign"; }
+    const objects::ListTag& pad_list_tag() const {
+        return cfg_.skirmish ? objects::tags::Tactical_Buildable_Objects_Multiplayer : objects::tags::Tactical_Buildable_Objects_Campaign;
+    }
     // t50: the skirmish slot -> player map [M: slot N = the N-th battle participant by ascending player id]; -1 = none.
     // skm2 t02: BattleConfig::skirmish_slots when set.
     int32_t skirmish_slot_player(int32_t slot) const;

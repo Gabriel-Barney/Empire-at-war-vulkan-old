@@ -193,7 +193,7 @@ TacticalMode::TacticalMode(ModeKind kind, const objects::GameObjectTypes& types,
         float e = hx > hy ? hx : hy;
         if (!(e > 0.0f) || !finite(e)) e = base * sc;
         half_extent_[t] = e;
-        box_modifier_[t] = types.get_float(t, "Collision_Box_Modifier");
+        box_modifier_[t] = types.get(t, objects::tags::Collision_Box_Modifier);
         team_[t] = types.has_behavior(t, objects::BehaviorSet::Union, objects::beh::Team) ? 1 : 0;
         shielded_[t] = types.has_behavior(t, objects::BehaviorSet::Union, objects::beh::Shielded) ? 1 : 0;
     }
@@ -276,7 +276,7 @@ ObjectHandle TacticalMode::spawn(const objects::SpawnParams& p, float health_fra
     primary_.set_health(h, health_fraction * max_health);
     tactical::TreeMembership m;
     m.owner = p.owner;
-    m.projectile_collidable = t < types_->size() && types_->get_bool(t, "Collidable_By_Projectile_Living");
+    m.projectile_collidable = t < types_->size() && types_->get(t, objects::tags::Collidable_By_Projectile_Living);
     const tactical::Aabb box = bounds_of(h);
     if (tactical::valid(box)) trees_.add(static_cast<tactical::EntityHandle>(primary_.id(h)), box, category_of(h), m);
     return h;
@@ -298,7 +298,7 @@ ObjectHandle TacticalMode::spawn_death_clone(const objects::SpawnParams& p) {
     primary_.set_health(h, t < types_->size() ? types_->columns().tactical_health[t] : 0.0f);
     tactical::TreeMembership m;
     m.owner = p.owner;
-    m.projectile_collidable = t < types_->size() && types_->get_bool(t, "Collidable_By_Projectile_Dead");
+    m.projectile_collidable = t < types_->size() && types_->get(t, objects::tags::Collidable_By_Projectile_Dead);
     const tactical::Aabb box = bounds_of(h);
     if (tactical::valid(box)) trees_.add(static_cast<tactical::EntityHandle>(primary_.id(h)), box, category_of(h), m);
     // S8 t09 (S9_DEATH_CLONE_SHIELDS §1.6 [H], MOVEMENT §1.3): right after the create, 0x29f270 detaches and removes every
@@ -308,7 +308,7 @@ ObjectHandle TacticalMode::spawn_death_clone(const objects::SpawnParams& p) {
     // the host's land_obstacles_sync) iff it kept LAND_OBSTACLE. The attach draws of the full list were made by the create,
     // as in Create_Object. [port] the tree category above is taken from the full list (the registration order inside
     // Create_Object was not traced); the detach side effects (vf15) are nothing here: a clone has no system state yet.
-    const bool keep_obstacle = t < types_->size() && types_->get_bool(t, "Death_Clone_Is_Obstacle");
+    const bool keep_obstacle = t < types_->size() && types_->get(t, objects::tags::Death_Clone_Is_Obstacle);
     for (size_t k = primary_.behaviors(h).size(); k-- > 0;) {
         const objects::BehaviorTypeId b = primary_.behaviors(h)[k];
         if (b == kCloneKeepHideWhenFogged || b == kCloneKeepImposingPresence || (b == objects::beh::LandObstacle && keep_obstacle))

@@ -165,7 +165,7 @@ IncomeStreamDef parse_income_stream(const objects::GameObjectTypes& types, uint3
     if (type >= types.size()) return out;
     const objects::ObjectTypeDatabase& raw = types.raw();
     const objects::FieldColumns& fc = raw.fields();
-    for (const objects::FieldIndex f : types.get_sub_objects(static_cast<objects::TypeIndex>(type), "Abilities")) {
+    for (const objects::FieldIndex f : types.sub_objects(static_cast<objects::TypeIndex>(type), objects::tags::Abilities)) {
         const std::string_view tag = raw.tag_name(f);
         const bool stream = ascii_iequals(tag, "Income_Stream_Ability"), mod = ascii_iequals(tag, "Income_Stream_Mod_Ability");
         if (!stream && !mod) continue;

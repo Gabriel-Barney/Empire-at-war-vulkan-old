@@ -223,9 +223,9 @@ void TacticalBattle::l1_strikes_setup(TacticalMode& mode) {
     // interval = max(int(FPS x Min), int(int(FPS x Max) x f)).
     int32_t bombers = 0, bomber_type = -1;
     for (const uint32_t t : orbit_types)
-        if (types.get_int(t, "Ship_Class") == 1 || ascii_iequals(types.get_string(t, "Ship_Class"), "bomber")) {  // fighter 0, bomber 1
+        if (types.get(t, objects::tags::Ship_Class) == 1 || ascii_iequals(types.get_string(t, objects::tags::Ship_Class), "bomber")) {  // fighter 0, bomber 1
             ++bombers;
-            const objects::TypeIndex bt = types.get_type_ref(t, "Land_Bomber_Type");
+            const objects::TypeIndex bt = types.get(t, objects::tags::Land_Bomber_Type);
             if (bt != objects::kNone && bomber_type < 0) bomber_type = static_cast<int32_t>(bt);
         }
     if (bombers > 0 && bomber_type >= 0) {
@@ -256,7 +256,7 @@ bool TacticalBattle::l1_base_shield_covers(Vec3 p) const {
         if (!st.active(h) || kBaseShield == objects::kNoBehavior || !st.has_behavior(h, kBaseShield)) continue;
         // tru1 t02: the shield must be on (combat's BASE_SHIELD state machine; TRU1_A_RE_ANSWERS A1)
         if (combat_->has_unit(st.id(h)) && !combat_->base_shield_active(st.id(h))) continue;
-        const float r = catalog_->types().get_float(st.type(h), "Base_Shield_Radius");
+        const float r = catalog_->types().get(st.type(h), objects::tags::Base_Shield_Radius);
         const Vec3 c = st.position(h);
         const float dx = p.x - c.x, dy = p.y - c.y, dz = p.z - c.z;
         if (r > 0.0f && dx * dx + dy * dy + dz * dz < r * r) return true;
@@ -274,7 +274,7 @@ bool TacticalBattle::bombing_run_target_valid(int32_t player, Vec3 target) const
     const objects::ObjectStore& st = l1_mode_->primary();
     for (const objects::ObjectHandle h : st.all_objects()) {  // Bombing_Run_Prevention_Radius of objects not the player's
         if (!st.active(h) || st.owner(h) == player) continue;
-        const float r = catalog_->types().get_float(st.type(h), "Bombing_Run_Prevention_Radius");  // float field (bkc1 t07)
+        const float r = catalog_->types().get(st.type(h), objects::tags::Bombing_Run_Prevention_Radius);  // float field (bkc1 t07)
         if (!(r > 0.0f)) continue;
         const Vec3 c = st.position(h);
         const float dx = target.x - c.x, dy = target.y - c.y, dz = target.z - c.z;
@@ -466,8 +466,8 @@ bool TacticalBattle::start_bombing_run(TacticalMode& mode, int32_t player, Vec3 
             bm.exit = Vec3{exit.x + o.x, exit.y + o.y, gz};
             bm.speed = std::max(types.columns().max_speed[bt], 0.0f) * 1.56f;  // land mode multiplier
             bm.range = types.columns().targeting_max_attack_distance[bt];
-            bm.recharge = types.get_float(bt, "Projectile_Fire_Recharge_Seconds");
-            const auto refs = types.get_type_refs(bt, "Projectile_Types");
+            bm.recharge = types.get(bt, objects::tags::Projectile_Fire_Recharge_Seconds);
+            const auto refs = types.get_type_refs(bt, objects::tags::Projectile_Types);
             bm.projectile = refs.empty() ? -1 : l1_projectile_of_type(static_cast<int32_t>(refs.front()));
             bm.next_fire = frame_;
             if (mt != objects::kNone) {

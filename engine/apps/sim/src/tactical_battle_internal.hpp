@@ -63,7 +63,7 @@ inline mv::MapStampHooks land_stamp_hooks(const BattleCatalog* cat) {
     hooks.model_half_extents = [cat](uint32_t ty, float& hx, float& hy, float& hz) { return cat->model_half_extents(ty, hx, hy, hz); };
     hooks.ray_model = [cat](uint32_t ty) {
         if (!cat->files() || ty >= cat->types().size()) return mv::StampRayModel::Unknown;
-        std::string_view name = cat->types().get_string(ty, "Land_Model_Name");
+        std::string_view name = cat->types().get(ty, objects::tags::Land_Model_Name);
         while (!name.empty() && (name.front() == ' ' || name.front() == '\t' || name.front() == '\r' || name.front() == '\n'))
             name.remove_prefix(1);
         while (!name.empty() && (name.back() == ' ' || name.back() == '\t' || name.back() == '\r' || name.back() == '\n'))
@@ -181,7 +181,7 @@ public:
         if (arg) {
             const int32_t t = c.data().units[c.desc_index(id)].object_type;
             const objects::GameObjectTypes& ty = b_->catalog_->types();
-            if (t >= 0 && static_cast<size_t>(t) < ty.size() && ty.get_bool(static_cast<objects::TypeIndex>(t), "Locomotor_Has_Animation_Priority"))
+            if (t >= 0 && static_cast<size_t>(t) < ty.size() && ty.get(static_cast<objects::TypeIndex>(t), objects::tags::Locomotor_Has_Animation_Priority))
                 return;
         }
         const int32_t cur = world_->current_type(id);

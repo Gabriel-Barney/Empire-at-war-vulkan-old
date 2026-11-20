@@ -22,7 +22,7 @@ void TacticalBattle::pad_persist(const objects::ObjectStore& st, objects::Object
     if (!pad_records_ || cfg_.skirmish || req_.sandbox || !st.alive(pad) || type == objects::kNone) return;
     const objects::GameObjectTypes& types = catalog_->types();
     const objects::TypeIndex pt = st.type(pad);
-    if (pt >= types.size() || !types.get_bool(pt, "Tactically_Built_Child_Object_Persists")) return;
+    if (pt >= types.size() || !types.get(pt, objects::tags::Tactically_Built_Child_Object_Persists)) return;
     std::vector<PadRecord>& v = *pad_records_;
     if (add) {
         // 0x4b6c70: refused when the pad's base level is outside 0..5 (unsigned compare) or a record has the same x and y
@@ -140,7 +140,7 @@ int32_t TacticalBattle::pad_build(TacticalMode& mode, objects::ObjectId pad, obj
         }
         const std::string_view name = types.name(type);
         bool listed = false, in_row = false;
-        for (const std::string_view tok : types.get_list(st.type(ph), pad_list_tag())) {
+        for (const std::string_view tok : types.get(st.type(ph), pad_list_tag())) {
             if (types.raw().find(tok) == objects::kNone) {
                 in_row = ascii_iequals(data::trim(tok), faction);
                 continue;
@@ -150,13 +150,13 @@ int32_t TacticalBattle::pad_build(TacticalMode& mode, objects::ObjectId pad, obj
         // Rule 0x42e400: empty, no blocking object (alive, Influences_Capture_Point, pad_rule_blocker) within the radius.
         bool blocked = !empty;
         const objects::TypeIndex pt = st.type(ph);
-        const double r = pt < types.size() ? static_cast<double>(types.get_float(pt, "Capture_Point_Radius")) : 0.0;
+        const double r = pt < types.size() ? static_cast<double>(types.get(pt, objects::tags::Capture_Point_Radius)) : 0.0;
         const Vec3 pp = st.position(ph);
         for (const objects::ObjectHandle h : st.all_objects()) {
             if (blocked) break;
             if (!st.active(h) || h == ph) continue;
             const objects::TypeIndex t = st.type(h);
-            if (t >= types.size() || !types.get_bool(t, "Influences_Capture_Point") || !pad_rule_blocker(st, h, owner)) continue;
+            if (t >= types.size() || !types.get(t, objects::tags::Influences_Capture_Point) || !pad_rule_blocker(st, h, owner)) continue;
             const Vec3 q = st.position(h);
             const double dx = static_cast<double>(q.x) - pp.x, dy = static_cast<double>(q.y) - pp.y, dz = static_cast<double>(q.z) - pp.z;
             blocked = dx * dx + dy * dy + dz * dz <= r * r;
@@ -179,7 +179,7 @@ int32_t TacticalBattle::pad_build(TacticalMode& mode, objects::ObjectId pad, obj
     s->uc = st.id(uc);
     s->builder = builder;
     s->cooldown_start = s->cooldown_end = 0;
-    const int32_t secs = std::max(0, types.get_int(type, "Tactical_Build_Time_Seconds"));  // int field (+0xa00)
+    const int32_t secs = std::max(0, types.get(type, objects::tags::Tactical_Build_Time_Seconds));  // int field (+0xa00)
     const uint32_t frames = static_cast<uint32_t>(secs) * 30u;  // [port] per-mode player multiplier 1
     s->uc_end = frame_ + frames;
     // battle host: the UC joins the battle as a combat unit of the builder; health ramp vf9 / vf6 (rate = max / frames,
@@ -224,12 +224,12 @@ void TacticalBattle::pads_tick(TacticalMode& mode) {
                 at.z += 0.1f;
                 pad_persist(st, ph, child_type, at, false);
             }
-            if (pt < types.size() && types.get_bool(pt, "Destroy_When_Child_Dies")) {
+            if (pt < types.size() && types.get(pt, objects::tags::Destroy_When_Child_Dies)) {
                 mode.destroy(ph);
                 return;
             }
             if (pad_alive) s4_capture_reset(mode, s.pad);  // §6.5: a CAPTURE_POINT pad goes back to the neutral player
-            const float wait = pt < types.size() ? types.get_float(pt, "Minimum_Time_Before_Pad_Can_Build_Again") : 0.0f;
+            const float wait = pt < types.size() ? types.get(pt, objects::tags::Minimum_Time_Before_Pad_Can_Build_Again) : 0.0f;
             if (wait > 0.0f) {
                 s.cooldown_start = frame_;
                 s.cooldown_end = frame_ + static_cast<uint32_t>(frames_trunc(wait * 30.0f + 0.5f));
@@ -245,7 +245,7 @@ void TacticalBattle::pads_tick(TacticalMode& mode) {
             } else if (frame_ >= s.uc_end) {
                 // Completion 0x42e890: the final type for the builder at the UC (+0.1 z), then the UC goes.
                 const objects::TypeIndex ut = st.type(uh);
-                const objects::TypeIndex ft = ut < types.size() ? types.resolve_name(types.get_string(ut, "Tactical_Buildable_Constructed"))
+                const objects::TypeIndex ft = ut < types.size() ? types.resolve_name(types.get(ut, objects::tags::Tactical_Buildable_Constructed))
                                                                 : objects::kNone;
                 // battle host: the UC's health fraction carries over; the UC leaves the battle (replacement, not a death).
                 float frac = 1.0f;
@@ -284,8 +284,8 @@ void TacticalBattle::pads_tick(TacticalMode& mode) {
                     // §6.5 kill list (+0xa60): every object of exactly Previous_Upgrade_Level_Type (the built type's, else
                     // the UC type's [M: which type carries the field]) owned by a player allied with the pad owner
                     // (0x39a230) is killed silently (0x391310 flag 1), store order.
-                    std::string_view prev = data::trim(types.get_string(ft, "Previous_Upgrade_Level_Type"));
-                    if (prev.empty() && ut < types.size()) prev = data::trim(types.get_string(ut, "Previous_Upgrade_Level_Type"));
+                    std::string_view prev = data::trim(types.get(ft, objects::tags::Previous_Upgrade_Level_Type));
+                    if (prev.empty() && ut < types.size()) prev = data::trim(types.get(ut, objects::tags::Previous_Upgrade_Level_Type));
                     const objects::TypeIndex pv = prev.empty() ? objects::kNone : types.resolve_name(prev);
                     if (pv != objects::kNone && pad_alive) {
                         const int32_t po = st.owner(ph);
