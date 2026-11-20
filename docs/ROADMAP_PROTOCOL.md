@@ -190,7 +190,7 @@ leave the group.
   audit (Gabriel; `docs/ROADMAP_AUDIT_2026-11-19.md`) there is one category per box: Parity (`parity-sim` movement and combat →
   MOVE, `parity-anim` → ANIM, `parity-rules` other tactical rules → ABIL, `parity-ai` galactic rules and AI → Q2F,
   `parity-tactical-ai` → AIVIEW, `parity-story` → STORY), Engine (`lua-data` → RE, `render-ui` render and UI → UIART, `audio` →
-  AUDIO, `mod-system` → MODC, `perf` → OPT), Process (`tools-harness` tools, docs and workflow → PROC), Research (`re-research` RE
+  AUDIO, `mod-system` → MCX6 (MODC until 2026-11-20), `perf` → OPT), Process (`tools-harness` tools, docs and workflow → PROC), Research (`re-research` RE
   questions and Gabriel's runs → CONFIRM). The audit merged `parity-combat`, `parity-campaign`, `docs-process` and `gabriel` into
   the category of the same box and gave `audio` its own rule. Merge only categories that share a box: a category's box is the box
   `backlog add` and `backlog move --cat` give an entry. `backlog cats` lists them with their stage. Every entry carries its own
@@ -208,7 +208,7 @@ leave the group.
 - **Follow-ups stay in Stage 6 groups** (Gabriel, 2026-11-12, to help development there). Stage 6 · Parity (lane `st6`:
   box Q4 and any box added to it later; `meta/backlog` `keep_followups` lists the stages this applies to) is the
   exception to the backlog rule. Since 2026-11-17 (Gabriel) Stage 9 · Mod system (lane `st9`: boxes MCX1-MCX6,
-  groups `mcx0`-`mcx9`, and since 2026-11-19 the former Stage 6 mod boxes Q5, Q6, MODC) follows the same rule, and since 2026-11-18 (Gabriel) Stage 10 · Unified mod system refactor (lane `st10`:
+  groups `mcx0`-`mcx9`, and since 2026-11-19 the former Stage 6 mod boxes Q5, Q6; MODC was folded into MCX6 on 2026-11-20) follows the same rule, and since 2026-11-18 (Gabriel) Stage 10 · Unified mod system refactor (lane `st10`:
   boxes UMS1-UMS2, groups `ums0`-`ums5`) too: `keep_followups` is `["st6", "st9", "st10"]`, and everything below says "Stage 6" for
   all three. Stage 10 goes one step further: it is also in `meta/backlog` `keep_all_followups`, so its tier-3 findings and tasks stay
   group tasks as well (`backlog add --from` adds them, `trim-group --move` and `close-group` refuse them like any other open task;

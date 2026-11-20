@@ -80,8 +80,8 @@ findings) join the list above; `spec-review` and `codebase-design`'s design-it-t
    <group> [--tier 1|2|3]`; a rule files it into a category; tier 3 means drop it unless a tier-2 metric fails) or is dropped.
    The backlog holds only S3 (Gabriel, 2026-11-15; `docs/ROADMAP_PROTOCOL.md`, "S1 and S2 are group tasks"). Current focus (Gabriel, 2026-11-10): do only tier 1 and tier 2
    tasks; a tier-3 task of your group is skipped, not started (`docs/DECISIONS.md`, "Current focus"). Never grow the group past its cap (8 tasks).
-   **Stage 6 · Parity (box Q4) and Stage 9 · Mod system (boxes MCX1-MCX6, Q5, Q6, MODC) keep their
-   follow-ups** (Gabriel, 2026-11-12; Stage 9 2026-11-17; Q5 / Q6 / MODC moved from Stage 6 2026-11-19): the same `backlog add ... --from
+   **Stage 6 · Parity (box Q4) and Stage 9 · Mod system (boxes MCX1-MCX6, Q5, Q6) keep their
+   follow-ups** (Gabriel, 2026-11-12; Stage 9 2026-11-17; Q5 / Q6 moved from Stage 6 2026-11-19, MODC folded into MCX6 2026-11-20): the same `backlog add ... --from
    <group>` adds the finding as a new task of your group instead of a backlog entry (tier 3 still goes to the backlog), and these
    groups have no cap (`docs/ROADMAP_PROTOCOL.md`, "Follow-ups stay in Stage 6 groups").
    You have every tool the session has (default workflow, Gabriel 2026-11-15): PowerShell, LSP, web search / fetch, the browser,

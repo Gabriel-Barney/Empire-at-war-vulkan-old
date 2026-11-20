@@ -433,6 +433,10 @@ Gabriel approved a cleanup of every open mod-system task (session mod-cleanup-6f
   (stack overflow on deep mod XML) promoted to mcx2 as S2; b0383 / b0385 stay S3 (no installed mod calls them); b0501 stays
   S3 until a re-question reads the GUI_Row constructor default. New tasks for the gaps found: mcx8 (the four newly installed
   mods to G3), mcx3 (restate its exit, the AOW stack is not installed), modc (Gabriel: how MODC closes next to mcx8).
+- **MODC folded into MCX6 (Gabriel, 2026-11-20, modc t52):** MODC's exit (the four reference mods pass MODS.md §10.1) was
+  mostly mcx8 t02-t05 reaching G3, so two exit tests checked the same thing. The MODC box is removed; the `modc` group is
+  closed on box MCX6 with t50 moved to mcx8 t21 and t51 to mcx9 t04, and MODC's exit appended to mcx9's. The `mod-system`
+  backlog category and its entries now belong to box MCX6.
 
 ## Unified mod system refactor (Gabriel, 2026-11-18)
 
