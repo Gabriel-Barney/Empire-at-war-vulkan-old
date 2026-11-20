@@ -261,61 +261,230 @@ constexpr int32_t kLifeForever = -1;
 // Galactic_Hints hint-set defaults [H].
 constexpr std::string_view kGalacticHints[] = {"CHOKEPOINT", "OFFENSEDELAYGROUND", "OFFENSEDELAYSPACE", "PRIORITYTARGET"};
 
-// mcx0 t05 (docs/MOD_COMPAT_DESIGN.md §9.4): the token path registry - every root-relative, upper-case path a resolve_*
-// handler below evaluates, grouped by the handler that owns it. implements() and the load report's ai.token_coverage read
-// it; GalacticSimTokenResolver::dispatches() runs the handlers themselves, and the registry test
-// (tests/test_ai_galactic_part1.cpp test_token_registry) checks the two agree path by path in both directions, so a
-// handler added without its path (or a path without a handler) fails there.
-// Self / Human / Enemy (resolve_player); "HOMEPLANET." + a target path delegates to resolve_target.
-constexpr std::string_view kPlayerPaths[] = {
-    "ACTIVEGOALS", "ANYCURRENTTHREATS", "AVERAGEAGEOFGROUNDINTELLIGENCE", "AVERAGEAGEOFSPACEINTELLIGENCE",
-    "BUDGETALLOCATION", "BUDGETFRACTIONTOBUILD", "CANADVANCETECH", "CREDITSUNNORMALIZED", "GROSSINCOMENBPTM",
-    "GROSSINCOMENBTF", "GROSSINCOMEUNNORMALIZED", "GROUNDDEFENDEDPLANETS", "GROUNDTOTALUNNORMALIZED",
-    "HASGROUNDBASEOFLEVEL", "HASSTARBASEOFLEVEL", "HASSTRUCTURE", "HASTECHTOPRODUCE", "HASUNIT", "ISDIFFICULTY",
-    "ISFACTION", "MAINTENANCE", "MAINTENANCEUNNORMALIZED", "MAXALLPLANETSINCOMEUNNORMALIZED", "MAXEDGROUNDBASES",
-    "MAXEDSTARBASES", "MAXGROUNDBASELEVEL", "MAXGROUNDBASELEVELUNNORMALIZED", "MAXOWNEDPLANETSINCOMEUNNORMALIZED",
-    "MAXSTARBASELEVEL", "MAXSTARBASELEVELUNNORMALIZED", "NETINCOMENBPTM", "NETINCOMENBTF", "NETINCOMEUNNORMALIZED",
-    "NUMGROUNDBASEOFLEVEL", "NUMSTARBASEOFLEVEL", "NUMSTRUCTURE", "PLANETSCONTROLLED",
-    "PLANETSCONTROLLEDUNNORMALIZED", "SPACEDEFENDEDPLANETS", "SPACETOTALUNNORMALIZED", "STORYTRIGGER",
-    "STRUCTURECOUNT", "TECHLEVEL", "TIMESINCEGROUNDATTACKER", "TIMESINCEGROUNDDEFENDER", "TIMESINCESPACEATTACKER",
-    "TIMESINCESPACEDEFENDER", "WORSTISLANDFRACTIONOFLARGEST",
+// ref6 t03: the token spec table - one row per root-relative, upper-case path a resolve_* handler below evaluates (mcx0
+// t05's path registry), with what its leaf cache and the fog recompute need. Read by the registry (path_registered,
+// registered_paths, implements() and the load report's ai.token_coverage), by the handlers (every cached leaf takes its
+// key and lifetime from its row: cached() with token_spec() for a literal path, a compile error when the path has no
+// row, or spec_of() for a matched runtime path) and by the signal 0xE recompute (the rows with a fog mask), so a cache
+// key or a fog mask is written once. GalacticSimTokenResolver::dispatches() runs the handlers themselves, and the registry
+// test (tests/test_ai_galactic_part1.cpp test_token_registry) checks the two agree path by path in both directions; the
+// fogged-leaf test checks that evaluating each fogged path fills the cache entry its row names.
+//   key       the leaf cache key (AI_GALACTIC_TOKENS §9.9; Force: the EnemyForce side's, key_f the FriendlyForce side's);
+//             empty = not cached by this resolver (lifetime 0, or a delegating path)
+//   life      the cache lifetime in seconds (kLifeForever = kept for the game)
+//   fog       q6 t18 (§9.9): the leaf mask M of a fogged leaf the port caches; fog_order its place in the 0xE recompute
+//             of its evaluator (planet evaluator first, then FriendlyForce, then EnemyForce [M: the signal's listener
+//             order])
+enum class TokenScope : uint8_t { Player, Target, Force, Game };
+struct TokenSpec {
+    TokenScope scope;
+    std::string_view path, key, key_f;
+    int32_t life;
+    uint32_t fog;
+    uint8_t fog_order;
+    std::string_view key_for(bool enemy) const { return scope == TokenScope::Force && !enemy ? key_f : key; }
 };
-// Target / Location (resolve_target); "ENEMYFORCE." / "FRIENDLYFORCE." + a force path delegates to resolve_force.
-constexpr std::string_view kTargetPaths[] = {
-    "ACTIVETRADEROUTES", "BASEINCOME", "BASEINCOMENBTP", "BLACKMARKETABILITIESAVAILABLE",
-    "BLACKMARKETMINIMUMABILITYPRICE", "BLACKMARKETPRICEMODIFIER", "CONNECTSISOLATEDPLANETSBYFORCE",
-    "CONNECTSISOLATEDPLANETSBYLENGTH", "CONNECTSLARGESTISLANDS", "ENEMYEXTERNALCONNECTIVITY", "ENEMYINTERNALCONNECTIVITY", "FRIENDLYEXTERNALCONNECTIVITY",
-    "FRIENDLYINTERNALCONNECTIVITY", "GROUNDBASELEVEL", "GROUNDBASELEVELUNNORMALIZED",
-    "HASCREDITSIPHON", "HASGROUNDBASEOFLEVEL", "HASINDIGENOUSUNITS", "HASSTARBASEOFLEVEL", "HASSTRUCTURE", "HINTS.CHOKEPOINT",
-    "HINTS.OFFENSEDELAYGROUND", "HINTS.OFFENSEDELAYSPACE", "HINTS.PRIORITYTARGET", "INCOMEUNNORMALIZED",
-    "ISCONNECTEDTO", "ISCONNECTEDTOCORRUPTION", "ISCORRUPTED", "ISCORRUPTIONTRANSITIONACTIVE", "ISFACTION",
-    "ISHUMANCONTROLLED", "ISSURFACEACCESSIBLE", "MARKUP", "MAXGROUNDBASELEVEL", "MAXGROUNDBASELEVELUNNORMALIZED",
-    "MAXSTARBASELEVEL", "MAXSTARBASELEVELUNNORMALIZED", "MAXSTRUCTURESLOTS", "MAXSTRUCTURESLOTSUNNORMALIZED",
-    "OPENGROUNDCOMPANYSLOTS", "OPENSTRUCTURESLOTS", "OPENSTRUCTURESLOTSUNNORMALIZED", "OWNER.BUDGETALLOCATION",
-    "OWNER.ISFACTION", "OWNER.TIMESINCEGROUNDATTACKER", "OWNER.TIMESINCEGROUNDDEFENDER",
-    "OWNER.TIMESINCESPACEATTACKER", "OWNER.TIMESINCESPACEDEFENDER", "RETAINSRESIDUALINFLUENCE", "STARBASELEVEL",
-    "STARBASELEVELUNNORMALIZED", "STORYTRIGGER", "STRUCTURECOUNT", "TARGETPLAYERID", "TARGETPOLITICALCONTROL", "TIMESINCECONVERSION",
-    "TIMESINCECORRUPTIONCHANGE", "TIMESINCEGROUNDCONFLICT", "TIMESINCESPACECONFLICT", "TRADEROUTES", "TYPE.ISTYPE",
-    "TYPE.TOKEN",
+constexpr TokenSpec kTokenSpecs[] = {
+    // Self / Human / Enemy (resolve_player); "HOMEPLANET." + a target path delegates to resolve_target.
+    {TokenScope::Player, "ACTIVEGOALS", "", "", 0, 0x0, 0},
+    {TokenScope::Player, "ANYCURRENTTHREATS", "P:ANYCURRENTTHREATS", "", 15, 0x0, 0},
+    {TokenScope::Player, "AVERAGEAGEOFGROUNDINTELLIGENCE", "", "", 0, 0x0, 0},
+    {TokenScope::Player, "AVERAGEAGEOFSPACEINTELLIGENCE", "", "", 0, 0x0, 0},
+    {TokenScope::Player, "BUDGETALLOCATION", "P:BUDGETALLOCATION", "", 2, 0x0, 0},
+    {TokenScope::Player, "BUDGETFRACTIONTOBUILD", "P:BUDGETFRACTIONTOBUILD", "", 5, 0x0, 0},
+    {TokenScope::Player, "CANADVANCETECH", "P:CANADVANCETECH", "", 6, 0x0, 0},
+    {TokenScope::Player, "CREDITSUNNORMALIZED", "", "", 0, 0x0, 0},
+    {TokenScope::Player, "GROSSINCOMENBPTM", "P:GROSSINCOMENBPTM", "", 7, 0x0, 0},
+    {TokenScope::Player, "GROSSINCOMENBTF", "P:GROSSINCOMENBTF", "", 7, 0x0, 0},
+    {TokenScope::Player, "GROSSINCOMEUNNORMALIZED", "P:GROSSINCOMEUNNORMALIZED", "", 7, 0x0, 0},
+    {TokenScope::Player, "GROUNDDEFENDEDPLANETS", "P:GROUNDDEFENDEDPLANETS", "", 5, 0x0, 0},
+    {TokenScope::Player, "GROUNDTOTALUNNORMALIZED", "P:GROUNDTOTALUNNORMALIZED", "", 10, 0x0, 0},
+    {TokenScope::Player, "HASGROUNDBASEOFLEVEL", "P:HASGROUNDBASEOFLEVEL", "", 3, 0x0, 0},
+    {TokenScope::Player, "HASSTARBASEOFLEVEL", "P:HASSTARBASEOFLEVEL", "", 3, 0x0, 0},
+    {TokenScope::Player, "HASSTRUCTURE", "P:HASSTRUCTURE", "", 3, 0x0, 0},
+    {TokenScope::Player, "HASTECHTOPRODUCE", "P:HASTECHTOPRODUCE", "", 8, 0x0, 0},
+    {TokenScope::Player, "HASUNIT", "P:HASUNIT", "", 8, 0x0, 0},
+    {TokenScope::Player, "ISDIFFICULTY", "", "", 0, 0x0, 0},
+    {TokenScope::Player, "ISFACTION", "", "", 0, 0x0, 0},
+    {TokenScope::Player, "MAINTENANCE", "P:MAINTENANCE", "", 7, 0x0, 0},
+    {TokenScope::Player, "MAINTENANCEUNNORMALIZED", "P:MAINTENANCEUNNORMALIZED", "", 7, 0x0, 0},
+    {TokenScope::Player, "MAXALLPLANETSINCOMEUNNORMALIZED", "P:MAXALLPLANETSINCOMEUNNORMALIZED", "", kLifeForever, 0x0, 0},
+    {TokenScope::Player, "MAXEDGROUNDBASES", "P:MAXEDGROUNDBASES", "", 5, 0x0, 0},
+    {TokenScope::Player, "MAXEDSTARBASES", "P:MAXEDSTARBASES", "", 5, 0x0, 0},
+    {TokenScope::Player, "MAXGROUNDBASELEVEL", "P:MAXGROUNDBASELEVEL", "", 4, 0x0, 0},
+    {TokenScope::Player, "MAXGROUNDBASELEVELUNNORMALIZED", "P:MAXGROUNDBASELEVELUNNORMALIZED", "", 4, 0x0, 0},
+    {TokenScope::Player, "MAXOWNEDPLANETSINCOMEUNNORMALIZED", "P:MAXOWNEDPLANETSINCOMEUNNORMALIZED", "", 7, 0x0, 0},
+    {TokenScope::Player, "MAXSTARBASELEVEL", "P:MAXSTARBASELEVEL", "", 4, 0x0, 0},
+    {TokenScope::Player, "MAXSTARBASELEVELUNNORMALIZED", "P:MAXSTARBASELEVELUNNORMALIZED", "", 4, 0x0, 0},
+    {TokenScope::Player, "NETINCOMENBPTM", "P:NETINCOMENBPTM", "", 7, 0x0, 0},
+    {TokenScope::Player, "NETINCOMENBTF", "P:NETINCOMENBTF", "", 7, 0x0, 0},
+    {TokenScope::Player, "NETINCOMEUNNORMALIZED", "P:NETINCOMEUNNORMALIZED", "", 7, 0x0, 0},
+    {TokenScope::Player, "NUMGROUNDBASEOFLEVEL", "P:NUMGROUNDBASEOFLEVEL", "", 3, 0x0, 0},
+    {TokenScope::Player, "NUMSTARBASEOFLEVEL", "P:NUMSTARBASEOFLEVEL", "", 3, 0x0, 0},
+    {TokenScope::Player, "NUMSTRUCTURE", "P:NUMSTRUCTURE", "", 3, 0x0, 0},
+    {TokenScope::Player, "PLANETSCONTROLLED", "P:PLANETSCONTROLLED", "", 3, 0x0, 0},
+    {TokenScope::Player, "PLANETSCONTROLLEDUNNORMALIZED", "P:PLANETSCONTROLLEDUNNORMALIZED", "", 3, 0x0, 0},
+    {TokenScope::Player, "SPACEDEFENDEDPLANETS", "P:SPACEDEFENDEDPLANETS", "", 5, 0x0, 0},
+    {TokenScope::Player, "SPACETOTALUNNORMALIZED", "P:SPACETOTALUNNORMALIZED", "", 10, 0x0, 0},
+    {TokenScope::Player, "STORYTRIGGER", "", "", 0, 0x0, 0},
+    {TokenScope::Player, "STRUCTURECOUNT", "P:STRUCTURECOUNT", "", 4, 0x0, 0},
+    {TokenScope::Player, "TECHLEVEL", "", "", 0, 0x0, 0},
+    {TokenScope::Player, "TIMESINCEGROUNDATTACKER", "", "", 0, 0x0, 0},
+    {TokenScope::Player, "TIMESINCEGROUNDDEFENDER", "", "", 0, 0x0, 0},
+    {TokenScope::Player, "TIMESINCESPACEATTACKER", "", "", 0, 0x0, 0},
+    {TokenScope::Player, "TIMESINCESPACEDEFENDER", "", "", 0, 0x0, 0},
+    {TokenScope::Player, "WORSTISLANDFRACTIONOFLARGEST", "", "", 0, 0x0, 0},
+    // Target / Location (resolve_target); "ENEMYFORCE." / "FRIENDLYFORCE." + a force path delegates to resolve_force.
+    {TokenScope::Target, "ACTIVETRADEROUTES", "T:ACTIVETRADEROUTES", "", 15, 0x8, 4},
+    {TokenScope::Target, "BASEINCOME", "T:BASEINCOME", "", 15, 0x0, 0},
+    {TokenScope::Target, "BASEINCOMENBTP", "T:BASEINCOMENBTP", "", 15, 0x0, 0},
+    {TokenScope::Target, "BLACKMARKETABILITIESAVAILABLE", "T:BLACKMARKETABILITIESAVAILABLE", "", 5, 0x0, 0},
+    {TokenScope::Target, "BLACKMARKETMINIMUMABILITYPRICE", "T:BLACKMARKETMINIMUMABILITYPRICE", "", 6, 0x0, 0},
+    {TokenScope::Target, "BLACKMARKETPRICEMODIFIER", "T:BLACKMARKETPRICEMODIFIER", "", kLifeForever, 0x0, 0},
+    {TokenScope::Target, "CONNECTSISOLATEDPLANETSBYFORCE", "", "", 0, 0x0, 0},
+    {TokenScope::Target, "CONNECTSISOLATEDPLANETSBYLENGTH", "", "", 0, 0x0, 0},
+    {TokenScope::Target, "CONNECTSLARGESTISLANDS", "", "", 0, 0x0, 0},
+    {TokenScope::Target, "ENEMYEXTERNALCONNECTIVITY", "T:ENEMYEXTERNALCONNECTIVITY", "", 15, 0x0, 0},
+    {TokenScope::Target, "ENEMYINTERNALCONNECTIVITY", "T:ENEMYINTERNALCONNECTIVITY", "", 15, 0x0, 0},
+    {TokenScope::Target, "FRIENDLYEXTERNALCONNECTIVITY", "T:FRIENDLYEXTERNALCONNECTIVITY", "", 15, 0x0, 0},
+    {TokenScope::Target, "FRIENDLYINTERNALCONNECTIVITY", "T:FRIENDLYINTERNALCONNECTIVITY", "", 15, 0x0, 0},
+    {TokenScope::Target, "GROUNDBASELEVEL", "", "", 0, 0x0, 0},
+    {TokenScope::Target, "GROUNDBASELEVELUNNORMALIZED", "", "", 0, 0x0, 0},
+    {TokenScope::Target, "HASCREDITSIPHON", "", "", 0, 0x0, 0},
+    {TokenScope::Target, "HASGROUNDBASEOFLEVEL", "", "", 0, 0x0, 0},
+    {TokenScope::Target, "HASINDIGENOUSUNITS", "", "", 0, 0x0, 0},
+    {TokenScope::Target, "HASSTARBASEOFLEVEL", "", "", 0, 0x0, 0},
+    {TokenScope::Target, "HASSTRUCTURE", "T:HASSTRUCTURE", "", 13, 0x200, 5},
+    {TokenScope::Target, "HINTS.CHOKEPOINT", "", "", 0, 0x0, 0},
+    {TokenScope::Target, "HINTS.OFFENSEDELAYGROUND", "", "", 0, 0x0, 0},
+    {TokenScope::Target, "HINTS.OFFENSEDELAYSPACE", "", "", 0, 0x0, 0},
+    {TokenScope::Target, "HINTS.PRIORITYTARGET", "", "", 0, 0x0, 0},
+    {TokenScope::Target, "INCOMEUNNORMALIZED", "T:INCOMEUNNORMALIZED", "", 15, 0x8, 3},
+    {TokenScope::Target, "ISCONNECTEDTO", "T:ISCONNECTEDTO", "", 5, 0x0, 0},
+    {TokenScope::Target, "ISCONNECTEDTOCORRUPTION", "T:ISCONNECTEDTOCORRUPTION", "", 4, 0x0, 0},
+    {TokenScope::Target, "ISCORRUPTED", "T:ISCORRUPTED", "", 3, 0x0, 0},
+    {TokenScope::Target, "ISCORRUPTIONTRANSITIONACTIVE", "T:ISCORRUPTIONTRANSITIONACTIVE", "", 2, 0x0, 0},
+    {TokenScope::Target, "ISFACTION", "", "", 0, 0x0, 0},
+    {TokenScope::Target, "ISHUMANCONTROLLED", "", "", 0, 0x0, 0},
+    {TokenScope::Target, "ISSURFACEACCESSIBLE", "", "", 0, 0x0, 0},
+    {TokenScope::Target, "MARKUP", "", "", 0, 0x0, 0},
+    {TokenScope::Target, "MAXGROUNDBASELEVEL", "", "", 0, 0x0, 0},
+    {TokenScope::Target, "MAXGROUNDBASELEVELUNNORMALIZED", "", "", 0, 0x0, 0},
+    {TokenScope::Target, "MAXSTARBASELEVEL", "", "", 0, 0x0, 0},
+    {TokenScope::Target, "MAXSTARBASELEVELUNNORMALIZED", "", "", 0, 0x0, 0},
+    {TokenScope::Target, "MAXSTRUCTURESLOTS", "", "", 0, 0x0, 0},
+    {TokenScope::Target, "MAXSTRUCTURESLOTSUNNORMALIZED", "", "", 0, 0x0, 0},
+    {TokenScope::Target, "OPENGROUNDCOMPANYSLOTS", "T:OPENGROUNDCOMPANYSLOTS", "", 13, 0x80, 2},
+    {TokenScope::Target, "OPENSTRUCTURESLOTS", "T:OPENSTRUCTURESLOTS", "", 15, 0x200, 1},
+    {TokenScope::Target, "OPENSTRUCTURESLOTSUNNORMALIZED", "", "", 0, 0x0, 0},
+    {TokenScope::Target, "OWNER.BUDGETALLOCATION", "", "", 0, 0x0, 0},
+    {TokenScope::Target, "OWNER.ISFACTION", "", "", 0, 0x0, 0},
+    {TokenScope::Target, "OWNER.TIMESINCEGROUNDATTACKER", "", "", 0, 0x0, 0},
+    {TokenScope::Target, "OWNER.TIMESINCEGROUNDDEFENDER", "", "", 0, 0x0, 0},
+    {TokenScope::Target, "OWNER.TIMESINCESPACEATTACKER", "", "", 0, 0x0, 0},
+    {TokenScope::Target, "OWNER.TIMESINCESPACEDEFENDER", "", "", 0, 0x0, 0},
+    {TokenScope::Target, "RETAINSRESIDUALINFLUENCE", "", "", 0, 0x0, 0},
+    {TokenScope::Target, "STARBASELEVEL", "", "", 0, 0x0, 0},
+    {TokenScope::Target, "STARBASELEVELUNNORMALIZED", "", "", 0, 0x0, 0},
+    {TokenScope::Target, "STORYTRIGGER", "", "", 0, 0x0, 0},
+    {TokenScope::Target, "STRUCTURECOUNT", "T:STRUCTURECOUNT", "", 2, 0x0, 0},
+    {TokenScope::Target, "TARGETPLAYERID", "", "", 0, 0x0, 0},
+    {TokenScope::Target, "TARGETPOLITICALCONTROL", "", "", 0, 0x0, 0},
+    {TokenScope::Target, "TIMESINCECONVERSION", "", "", 0, 0x0, 0},
+    {TokenScope::Target, "TIMESINCECORRUPTIONCHANGE", "", "", 0, 0x0, 0},
+    {TokenScope::Target, "TIMESINCEGROUNDCONFLICT", "", "", 0, 0x0, 0},
+    {TokenScope::Target, "TIMESINCESPACECONFLICT", "", "", 0, 0x0, 0},
+    {TokenScope::Target, "TRADEROUTES", "T:TRADEROUTES", "", kLifeForever, 0x0, 0},
+    {TokenScope::Target, "TYPE.ISTYPE", "", "", 0, 0x0, 0},
+    {TokenScope::Target, "TYPE.TOKEN", "", "", 0, 0x0, 0},
+    // Target.EnemyForce / Target.FriendlyForce (resolve_force, the same evaluator for both sides).
+    {TokenScope::Force, "ANTISTEALTHEFFECTIVENESS", "", "", 0, 0x0, 0},
+    {TokenScope::Force, "GROUNDBASETOTALUNNORMALIZED", "", "", 0, 0x0, 0},
+    {TokenScope::Force, "GROUNDTOTAL", "PF:E.GROUNDTOTAL", "PF:F.GROUNDTOTAL", 15, 0x80, 3},
+    {TokenScope::Force, "GROUNDTOTAL.TIMELASTSEEN", "", "", 0, 0x0, 0},
+    {TokenScope::Force, "GROUNDTOTAL.TIMELASTSEENUNNORMALIZED", "", "", 0, 0x0, 0},
+    {TokenScope::Force, "GROUNDTOTALNBPTM", "PF:E.GROUNDTOTALNBPTM", "PF:F.GROUNDTOTALNBPTM", 15, 0x80, 6},
+    {TokenScope::Force, "GROUNDTOTALNBTD", "PF:E.GROUNDTOTALNBTD", "PF:F.GROUNDTOTALNBTD", 15, 0x80, 5},
+    {TokenScope::Force, "GROUNDTOTALNBTT", "PF:E.GROUNDTOTALNBTT", "PF:F.GROUNDTOTALNBTT", 15, 0x80, 7},
+    {TokenScope::Force, "GROUNDTOTALUNNORMALIZED", "PF:E.GROUND", "PF:F.GROUND", 15, 0x80, 1},
+    {TokenScope::Force, "HASGROUNDFORCE", "PF:E.HASGROUND", "PF:F.HASGROUND", 7, 0x80, 12},
+    {TokenScope::Force, "HASGROUNDUNITSBITFIELD", "PF:E.HASGROUNDUNITSBITFIELD", "PF:F.HASGROUNDUNITSBITFIELD", 13, 0x80, 14},
+    {TokenScope::Force, "HASNEARBYGROUNDFORCE", "PF:E.HASNEARBYGROUNDFORCE", "PF:F.HASNEARBYGROUNDFORCE", 11, 0x0, 0},
+    {TokenScope::Force, "HASNEARBYSPACEFORCE", "PF:E.HASNEARBYSPACEFORCE", "PF:F.HASNEARBYSPACEFORCE", 11, 0x0, 0},
+    {TokenScope::Force, "HASSPACEFORCE", "PF:E.HASSPACE", "PF:F.HASSPACE", 7, 0x10, 11},
+    {TokenScope::Force, "HASSPACEUNITSBITFIELD", "PF:E.HASSPACEUNITSBITFIELD", "PF:F.HASSPACEUNITSBITFIELD", 13, 0x10, 13},
+    {TokenScope::Force, "MAINTENANCE", "PF:E.MAINT", "PF:F.MAINT", 15, 0x0, 0},
+    {TokenScope::Force, "MAINTENANCEUNNORMALIZED", "PF:E.MAINTUNN", "PF:F.MAINTUNN", 15, 0x0, 0},
+    {TokenScope::Force, "NEARBYGROUNDTOTAL", "PF:E.NEARBYGROUNDTOTAL", "PF:F.NEARBYGROUNDTOTAL", 30, 0x0, 0},
+    {TokenScope::Force, "NEARBYSPACETOTAL", "PF:E.NEARBYSPACETOTAL", "PF:F.NEARBYSPACETOTAL", 30, 0x0, 0},
+    {TokenScope::Force, "SPACETOTAL", "PF:E.SPACETOTAL", "PF:F.SPACETOTAL", 15, 0x20, 4},
+    {TokenScope::Force, "SPACETOTAL.TIMELASTSEEN", "", "", 0, 0x0, 0},
+    {TokenScope::Force, "SPACETOTAL.TIMELASTSEENUNNORMALIZED", "", "", 0, 0x0, 0},
+    {TokenScope::Force, "SPACETOTALNBPTM", "PF:E.SPACETOTALNBPTM", "PF:F.SPACETOTALNBPTM", 15, 0x20, 9},
+    {TokenScope::Force, "SPACETOTALNBTD", "PF:E.SPACETOTALNBTD", "PF:F.SPACETOTALNBTD", 15, 0x20, 8},
+    {TokenScope::Force, "SPACETOTALNBTT", "PF:E.SPACETOTALNBTT", "PF:F.SPACETOTALNBTT", 15, 0x20, 10},
+    {TokenScope::Force, "SPACETOTALUNNORMALIZED", "PF:E.SPACE", "PF:F.SPACE", 15, 0x20, 2},
+    {TokenScope::Force, "STARBASETOTALUNNORMALIZED", "", "", 0, 0x0, 0},
+    // Game (resolve_game).
+    {TokenScope::Game, "AGE", "", "", 0, 0x0, 0},
+    {TokenScope::Game, "ENEMYFORCE.GROUNDTOTALUNNORMALIZED", "G:E.GROUND", "", 30, 0x0, 0},
+    {TokenScope::Game, "ENEMYFORCE.PERTARGETMAXGROUNDFORCE", "G:E.MAXGROUND", "", 30, 0x0, 0},
+    {TokenScope::Game, "ENEMYFORCE.PERTARGETMAXSPACEFORCE", "G:E.MAXSPACE", "", 30, 0x0, 0},
+    {TokenScope::Game, "ENEMYFORCE.SPACETOTALUNNORMALIZED", "G:E.SPACE", "", 30, 0x0, 0},
+    {TokenScope::Game, "FRIENDLYFORCE.GROUNDTOTALUNNORMALIZED", "G:F.GROUND", "", 30, 0x0, 0},
+    {TokenScope::Game, "FRIENDLYFORCE.PERTARGETMAXGROUNDFORCE", "G:F.MAXGROUND", "", 30, 0x0, 0},
+    {TokenScope::Game, "FRIENDLYFORCE.PERTARGETMAXSPACEFORCE", "G:F.MAXSPACE", "", 30, 0x0, 0},
+    {TokenScope::Game, "FRIENDLYFORCE.SPACETOTALUNNORMALIZED", "G:F.SPACE", "", 30, 0x0, 0},
+    {TokenScope::Game, "INTERVENTIONSENABLED", "", "", 0, 0x0, 0},
+    {TokenScope::Game, "ISCAMPAIGNGAME", "", "", 0, 0x0, 0},
+    {TokenScope::Game, "ISLANDCONTROLGAME", "", "", 0, 0x0, 0},
+    {TokenScope::Game, "ISSETUPPHASE", "", "", 0, 0x0, 0},
+    {TokenScope::Game, "ISSTORYCAMPAIGN", "", "", 0, 0x0, 0},
+    {TokenScope::Game, "PLANETSCORRUPTED", "G:PLANETSCORRUPTED", "", 7, 0x0, 0},
+    {TokenScope::Game, "PLANETSCORRUPTEDUNNORMALIZED", "G:PLANETSCORRUPTEDUNNORMALIZED", "", 7, 0x0, 0},
+    {TokenScope::Game, "TIMELINE", "", "", 0, 0x0, 0},
 };
-// Target.EnemyForce / Target.FriendlyForce (resolve_force, the same evaluator for both sides).
-constexpr std::string_view kForcePaths[] = {
-    "ANTISTEALTHEFFECTIVENESS", "GROUNDBASETOTALUNNORMALIZED", "GROUNDTOTAL", "GROUNDTOTAL.TIMELASTSEEN",
-    "GROUNDTOTAL.TIMELASTSEENUNNORMALIZED", "GROUNDTOTALNBPTM", "GROUNDTOTALNBTD", "GROUNDTOTALNBTT",
-    "GROUNDTOTALUNNORMALIZED", "HASGROUNDFORCE", "HASGROUNDUNITSBITFIELD", "HASNEARBYGROUNDFORCE",
-    "HASNEARBYSPACEFORCE", "HASSPACEFORCE", "HASSPACEUNITSBITFIELD", "MAINTENANCE", "MAINTENANCEUNNORMALIZED",
-    "NEARBYGROUNDTOTAL", "NEARBYSPACETOTAL", "SPACETOTAL", "SPACETOTAL.TIMELASTSEEN",
-    "SPACETOTAL.TIMELASTSEENUNNORMALIZED", "SPACETOTALNBPTM", "SPACETOTALNBTD", "SPACETOTALNBTT",
-    "SPACETOTALUNNORMALIZED", "STARBASETOTALUNNORMALIZED",
-};
-// Game (resolve_game).
-constexpr std::string_view kGamePaths[] = {
-    "AGE", "ENEMYFORCE.GROUNDTOTALUNNORMALIZED", "ENEMYFORCE.PERTARGETMAXGROUNDFORCE",
-    "ENEMYFORCE.PERTARGETMAXSPACEFORCE", "ENEMYFORCE.SPACETOTALUNNORMALIZED", "FRIENDLYFORCE.GROUNDTOTALUNNORMALIZED",
-    "FRIENDLYFORCE.PERTARGETMAXGROUNDFORCE", "FRIENDLYFORCE.PERTARGETMAXSPACEFORCE",
-    "FRIENDLYFORCE.SPACETOTALUNNORMALIZED", "INTERVENTIONSENABLED", "ISCAMPAIGNGAME", "ISLANDCONTROLGAME", "ISSETUPPHASE", "ISSTORYCAMPAIGN",
-    "PLANETSCORRUPTED", "PLANETSCORRUPTEDUNNORMALIZED", "TIMELINE",
-};
+// Sorted by (scope, path), so a runtime path is found by binary search; keys unique; every fogged row cached.
+constexpr bool token_specs_valid() {
+    for (size_t i = 0; i < std::size(kTokenSpecs); ++i) {
+        const TokenSpec& a = kTokenSpecs[i];
+        if (i > 0) {
+            const TokenSpec& b = kTokenSpecs[i - 1];
+            if (b.scope > a.scope || (b.scope == a.scope && !(b.path < a.path))) return false;
+        }
+        if ((a.key.empty()) != (a.life == 0)) return false;
+        // a Force row has both side keys or neither; other rows have no friendly key
+        if (a.scope == TokenScope::Force ? a.key.empty() != a.key_f.empty() : !a.key_f.empty()) return false;
+        // a fogged row: one mask bit, a cache key, a Target (planet evaluator) or Force row, a recompute place of its own
+        if ((a.fog != 0) != (a.fog_order != 0)) return false;
+        if (a.fog != 0 && (a.key.empty() || (a.fog & (a.fog - 1)) != 0 || (a.scope != TokenScope::Target && a.scope != TokenScope::Force)))
+            return false;
+        for (size_t j = 0; j < i; ++j) {
+            const TokenSpec& b = kTokenSpecs[j];
+            for (const std::string_view k : {a.key, a.key_f})
+                if (!k.empty() && (b.key == k || b.key_f == k)) return false;
+            if (a.fog != 0 && b.fog != 0 && b.scope == a.scope && b.fog_order == a.fog_order) return false;
+        }
+        if (!a.key_f.empty() && a.key_f == a.key) return false;
+    }
+    return true;
+}
+static_assert(token_specs_valid(), "kTokenSpecs: unsorted, a duplicate key or fog_order, or a malformed (fogged) row");
+consteval size_t token_spec_index(TokenScope scope, std::string_view path) {
+    for (size_t i = 0; i < std::size(kTokenSpecs); ++i)
+        if (kTokenSpecs[i].scope == scope && kTokenSpecs[i].path == path) return i;
+    throw "kTokenSpecs has no row for this path";  // a compile error: the call is a constant expression
+}
+// The row of a literal path, found at compile time.
+consteval const TokenSpec& token_spec(TokenScope scope, std::string_view path) { return kTokenSpecs[token_spec_index(scope, path)]; }
+// The row of a runtime path (nullptr: none).
+const TokenSpec* spec_of(TokenScope scope, std::string_view path) {
+    const auto* it = std::lower_bound(std::begin(kTokenSpecs), std::end(kTokenSpecs), std::pair(scope, path),
+                                      [](const TokenSpec& t, const std::pair<TokenScope, std::string_view>& v) {
+                                          return t.scope < v.first || (t.scope == v.first && t.path < v.second);
+                                      });
+    return it != std::end(kTokenSpecs) && it->scope == scope && it->path == path ? it : nullptr;
+}
 
 std::vector<std::string_view> param_texts(std::span<const Param> params, std::string_view name) {
     std::vector<std::string_view> out;
@@ -402,38 +571,14 @@ std::string param_key(std::span<const Param> params, bool category_as_mask, cons
     return out;
 }
 
-// q6 t18 (§9.9): the fogged leaves the port caches (lifetime != 0) with their leaf mask M (§1 / §2 tables) and the path
-// the 0xE recompute evaluates. Planet evaluator first, then FriendlyForce, then EnemyForce, each in table order [M: the
-// signal's listener order].
-struct FoggedLeaf {
-    const char* key;   // cache leaf key (planet: full; force: after "PF:E." / "PF:F.")
-    uint32_t mask;     // M
-    const char* path;  // Target-relative path (force: after "ENEMYFORCE." / "FRIENDLYFORCE.")
-};
-constexpr FoggedLeaf kPlanetFogged[] = {
-    {"T:OPENSTRUCTURESLOTS", 0x200, "OPENSTRUCTURESLOTS"},
-    {"T:OPENGROUNDCOMPANYSLOTS", 0x80, "OPENGROUNDCOMPANYSLOTS"},
-    {"T:INCOMEUNNORMALIZED", 0x8, "INCOMEUNNORMALIZED"},
-    {"T:ACTIVETRADEROUTES", 0x8, "ACTIVETRADEROUTES"},
-    {"T:HASSTRUCTURE", 0x200, "HASSTRUCTURE"},
-};
-constexpr FoggedLeaf kForceFogged[] = {
-    {"GROUND", 0x80, "GROUNDTOTALUNNORMALIZED"},
-    {"SPACE", 0x20, "SPACETOTALUNNORMALIZED"},
-    {"GROUNDTOTAL", 0x80, "GROUNDTOTAL"},
-    {"SPACETOTAL", 0x20, "SPACETOTAL"},
-    {"GROUNDTOTALNBTD", 0x80, "GROUNDTOTALNBTD"},
-    {"GROUNDTOTALNBPTM", 0x80, "GROUNDTOTALNBPTM"},
-    {"GROUNDTOTALNBTT", 0x80, "GROUNDTOTALNBTT"},
-    {"SPACETOTALNBTD", 0x20, "SPACETOTALNBTD"},
-    {"SPACETOTALNBPTM", 0x20, "SPACETOTALNBPTM"},
-    {"SPACETOTALNBTT", 0x20, "SPACETOTALNBTT"},
-    {"HASSPACE", 0x10, "HASSPACEFORCE"},
-    {"HASGROUND", 0x80, "HASGROUNDFORCE"},
-    {"HASSPACEUNITSBITFIELD", 0x10, "HASSPACEUNITSBITFIELD"},
-    {"HASGROUNDUNITSBITFIELD", 0x80, "HASGROUNDUNITSBITFIELD"},
-};
-constexpr uint32_t kFoggedBits = 0x200u | 0x80u | 0x20u | 0x10u | 0x8u;  // every M above (single bits)
+// q6 t18 (§9.9): every fog mask M of a cached fogged leaf (single bits).
+constexpr uint32_t fogged_bits() {
+    uint32_t m = 0;
+    for (const TokenSpec& t : kTokenSpecs) m |= t.fog;
+    return m;
+}
+constexpr uint32_t kFoggedBits = fogged_bits();
+static_assert(kFoggedBits == (0x200u | 0x80u | 0x20u | 0x10u | 0x8u));
 // limit: retail AI_GALACTIC_TOKENS §9.9 (0x65ac40: +0xA8 < 0x65)
 constexpr size_t kRecomputeMaxEntries = 100;                              // node +0xA8 < 0x65
 double b2d(bool b) { return b ? 1.0 : 0.0; }
@@ -837,13 +982,10 @@ void GalacticSimTokenResolver::observe_conflicts(const gal::ConflictManager& cm,
 }
 
 namespace {
-bool listed(std::span<const std::string_view> list, std::string_view k) {
-    return std::find(list.begin(), list.end(), k) != list.end();
-}
 bool target_path_registered(std::string_view k) {
-    if (listed(kTargetPaths, k)) return true;
-    if (k.substr(0, 11) == "ENEMYFORCE.") return listed(kForcePaths, k.substr(11));
-    if (k.substr(0, 14) == "FRIENDLYFORCE.") return listed(kForcePaths, k.substr(14));
+    if (spec_of(TokenScope::Target, k)) return true;
+    if (k.substr(0, 11) == "ENEMYFORCE.") return spec_of(TokenScope::Force, k.substr(11)) != nullptr;
+    if (k.substr(0, 14) == "FRIENDLYFORCE.") return spec_of(TokenScope::Force, k.substr(14)) != nullptr;
     return false;
 }
 }  // namespace
@@ -854,22 +996,50 @@ bool GalacticSimTokenResolver::path_registered(Root root, std::string_view k) {
         case Root::Human:
         case Root::Enemy:
             if (k.substr(0, 11) == "HOMEPLANET.") return target_path_registered(k.substr(11));
-            return listed(kPlayerPaths, k);
+            return spec_of(TokenScope::Player, k) != nullptr;
         case Root::Target:
         case Root::Location: return target_path_registered(k);
-        case Root::Game: return listed(kGamePaths, k);
+        case Root::Game: return spec_of(TokenScope::Game, k) != nullptr;
     }
     return false;
 }
 
 std::vector<std::pair<Root, std::string>> GalacticSimTokenResolver::registered_paths() {
     std::vector<std::pair<Root, std::string>> out;
-    for (const std::string_view p : kPlayerPaths) out.emplace_back(Root::Self, std::string(p));
-    for (const std::string_view p : kTargetPaths) out.emplace_back(Root::Target, std::string(p));
-    for (const std::string_view side : {std::string_view("ENEMYFORCE."), std::string_view("FRIENDLYFORCE.")})
-        for (const std::string_view p : kForcePaths) out.emplace_back(Root::Target, std::string(side) + std::string(p));
-    for (const std::string_view p : kGamePaths) out.emplace_back(Root::Game, std::string(p));
+    auto add = [&out](TokenScope scope, Root root, std::string_view prefix) {
+        for (const TokenSpec& t : kTokenSpecs)
+            if (t.scope == scope) out.emplace_back(root, std::string(prefix) + std::string(t.path));
+    };
+    add(TokenScope::Player, Root::Self, "");
+    add(TokenScope::Target, Root::Target, "");
+    add(TokenScope::Force, Root::Target, "ENEMYFORCE.");
+    add(TokenScope::Force, Root::Target, "FRIENDLYFORCE.");
+    add(TokenScope::Game, Root::Game, "");
     return out;
+}
+
+std::vector<GalacticSimTokenResolver::FoggedLeaf> GalacticSimTokenResolver::fogged_leaves() {
+    std::vector<FoggedLeaf> out;
+    for (const TokenSpec& t : kTokenSpecs) {
+        if (t.fog == 0) continue;
+        if (t.scope == TokenScope::Force) {
+            out.push_back({"ENEMYFORCE." + std::string(t.path), std::string(t.key), t.fog});
+            out.push_back({"FRIENDLYFORCE." + std::string(t.path), std::string(t.key_f), t.fog});
+        } else {
+            out.push_back({std::string(t.path), std::string(t.key), t.fog});
+        }
+    }
+    return out;
+}
+
+bool GalacticSimTokenResolver::cache_holds(std::string_view leaf, int32_t inst, int32_t self) const {
+    std::lock_guard<std::mutex> lock(mu_);
+    CacheKey lo;
+    lo.leaf = std::string(leaf);
+    lo.inst = inst;
+    lo.self = self;
+    const auto it = cache_.lower_bound(lo);
+    return it != cache_.end() && it->first.leaf == leaf && it->first.inst == inst && it->first.self == self;
 }
 
 bool GalacticSimTokenResolver::implements(Root root, std::span<const TokenId> path, const TokenTable& tokens) const {
@@ -944,6 +1114,19 @@ struct GalacticSimTokenResolver::Impl {
         return true;
     }
 
+    // ref6 t03: a cached leaf whose key and lifetime come from its token spec row (`enemy` picks a Force row's side).
+    template <class F>
+    bool cached(const TokenSpec& spec, bool enemy, int32_t inst, std::span<const Param> params, F&& compute, double& out) const {
+        return leaf(spec.key_for(enemy), inst, spec.life, params, std::forward<F>(compute), out);
+    }
+    // ... of a path the caller matched at run time (no row: not a path this resolver evaluates).
+    template <class F>
+    bool cached_path(TokenScope scope, std::string_view path, bool enemy, int32_t inst, std::span<const Param> params, F&& compute,
+                     double& out) const {
+        const TokenSpec* spec = spec_of(scope, path);
+        if (!spec) return no_path();
+        return cached(*spec, enemy, inst, params, std::forward<F>(compute), out);
+    }
     bool valid_player(int32_t p) const { return p >= 0 && static_cast<size_t>(p) < players.size(); }
     bool valid_planet(int32_t p) const { return p >= 0 && static_cast<size_t>(p) < planets.size() && planets[static_cast<size_t>(p)].is_planet; }
     bool neutral(int32_t p) const {
@@ -1120,7 +1303,7 @@ struct GalacticSimTokenResolver::Impl {
     // CategoryMask does not meet; add (double)(f x u x (cost / btime / 30)) in float.
     bool force_maintenance_unn(size_t p, bool enemy, std::span<const Param> params, double& out) const {
         const uint64_t cat = category_param(params);
-        return leaf(enemy ? "PF:E.MAINTUNN" : "PF:F.MAINTUNN", static_cast<int32_t>(p), 15, params, [&](double& v) {
+        return cached(token_spec(TokenScope::Force, "MAINTENANCEUNNORMALIZED"), enemy, static_cast<int32_t>(p), params, [&](double& v) {
             v = 0.0;
             for (const uint32_t f : planets[p].orbit) {
                 if (f >= sim.fleets().size()) continue;
@@ -1149,7 +1332,7 @@ struct GalacticSimTokenResolver::Impl {
     // (no caller parameters); 0 -> 0; den = Variable_Enemy (Enemy side) / Variable_Self (Friendly side)
     // .GrossIncomeUnnormalized, its success ignored; den > 0 -> num / den, else the token fails.
     bool force_maintenance(size_t p, bool enemy, std::span<const Param> params, double& out) const {
-        return leaf(enemy ? "PF:E.MAINT" : "PF:F.MAINT", static_cast<int32_t>(p), 15, params, [&](double& v) {
+        return cached(token_spec(TokenScope::Force, "MAINTENANCE"), enemy, static_cast<int32_t>(p), params, [&](double& v) {
             double num = 0.0;
             if (!force_maintenance_unn(p, enemy, {}, num)) return false;
             if (num == 0.0) {
@@ -1168,18 +1351,27 @@ struct GalacticSimTokenResolver::Impl {
         return galactic_ai_planet_force(sim, r.types_, static_cast<PlanetIndex>(p), ctx.self, enemy, space, cat, r.categories_);
     }
     bool force_unn(size_t p, bool enemy, bool space, std::span<const Param> params, double& out) const {
-        const char* key = space ? (enemy ? "PF:E.SPACE" : "PF:F.SPACE") : (enemy ? "PF:E.GROUND" : "PF:F.GROUND");
+        const TokenSpec& spec = space ? token_spec(TokenScope::Force, "SPACETOTALUNNORMALIZED")
+                                      : token_spec(TokenScope::Force, "GROUNDTOTALUNNORMALIZED");
         const uint64_t cat = category_param(params);
-        return leaf(key, static_cast<int32_t>(p), 15, params, [&](double& v) {
+        return cached(spec, enemy, static_cast<int32_t>(p), params, [&](double& v) {
             v = force_raw(p, enemy, space, cat);
             return true;
         }, out);
     }
     // Game.<side>.X (GameForce 0x6e3a10): Σ over the target list with the caller's params dropped; 30 s.
     bool game_force(bool enemy, bool space, bool max_of, double& out) const {
-        const char* key = max_of ? (space ? (enemy ? "G:E.MAXSPACE" : "G:F.MAXSPACE") : (enemy ? "G:E.MAXGROUND" : "G:F.MAXGROUND"))
-                                 : (space ? (enemy ? "G:E.SPACE" : "G:F.SPACE") : (enemy ? "G:E.GROUND" : "G:F.GROUND"));
-        return leaf(key, -1, 30, {}, [&](double& v) {
+        // [enemy][space][max_of]: the Game.<side> paths this sum serves
+        static constexpr const TokenSpec* kGameForce[2][2][2] = {
+            {{&token_spec(TokenScope::Game, "FRIENDLYFORCE.GROUNDTOTALUNNORMALIZED"),
+              &token_spec(TokenScope::Game, "FRIENDLYFORCE.PERTARGETMAXGROUNDFORCE")},
+             {&token_spec(TokenScope::Game, "FRIENDLYFORCE.SPACETOTALUNNORMALIZED"),
+              &token_spec(TokenScope::Game, "FRIENDLYFORCE.PERTARGETMAXSPACEFORCE")}},
+            {{&token_spec(TokenScope::Game, "ENEMYFORCE.GROUNDTOTALUNNORMALIZED"),
+              &token_spec(TokenScope::Game, "ENEMYFORCE.PERTARGETMAXGROUNDFORCE")},
+             {&token_spec(TokenScope::Game, "ENEMYFORCE.SPACETOTALUNNORMALIZED"),
+              &token_spec(TokenScope::Game, "ENEMYFORCE.PERTARGETMAXSPACEFORCE")}}};
+        return cached(*kGameForce[enemy ? 1 : 0][space ? 1 : 0][max_of ? 1 : 0], true, -1, {}, [&](double& v) {
             v = 0.0;
             for (size_t p = 0; p < planets.size(); ++p) {
                 if (!planets[p].is_planet) continue;
@@ -1191,7 +1383,7 @@ struct GalacticSimTokenResolver::Impl {
         }, out);
     }
     bool has_force(size_t p, bool enemy, bool space, std::span<const Param> params, double& out) const {
-        const char* key = space ? (enemy ? "PF:E.HASSPACE" : "PF:F.HASSPACE") : (enemy ? "PF:E.HASGROUND" : "PF:F.HASGROUND");
+        const TokenSpec& spec = space ? token_spec(TokenScope::Force, "HASSPACEFORCE") : token_spec(TokenScope::Force, "HASGROUNDFORCE");
         const std::vector<std::string_view> fac = param_texts(params, "Parameter_Faction");
         auto faction_ok = [&](int32_t owner) {
             if (fac.empty()) return true;
@@ -1200,7 +1392,7 @@ struct GalacticSimTokenResolver::Impl {
                 if (f < rules.factions.size() && ai_iequal(rules.factions[f].name, n)) return true;
             return false;
         };
-        return leaf(key, static_cast<int32_t>(p), 7, params, [&](double& v) {
+        return cached(spec, enemy, static_cast<int32_t>(p), params, [&](double& v) {
             bool any = false;
             const gal::PlanetState& ps = planets[p];
             if (space) {
@@ -1232,8 +1424,7 @@ struct GalacticSimTokenResolver::Impl {
                 return true;
             }
             if (k == base || k == base + "NBTD" || k == base + "NBPTM" || k == base + "NBTT") {
-                const std::string key = std::string(enemy ? "PF:E." : "PF:F.") + std::string(k);
-                return leaf(key, static_cast<int32_t>(p), 15, params, [&](double& v) {
+                return cached_path(TokenScope::Force, k, enemy, static_cast<int32_t>(p), params, [&](double& v) {
                     double num = 0.0, den = 0.0;
                     if (!force_unn(p, enemy, space, params, num)) return false;
                     if (k == base) {
@@ -1250,8 +1441,7 @@ struct GalacticSimTokenResolver::Impl {
                 }, out);
             }
             if (k == (space ? std::string("NEARBYSPACETOTAL") : std::string("NEARBYGROUNDTOTAL"))) {
-                const std::string key = std::string(enemy ? "PF:E." : "PF:F.") + std::string(k);
-                return leaf(key, static_cast<int32_t>(p), 30, params, [&](double& v) {
+                return cached_path(TokenScope::Force, k, enemy, static_cast<int32_t>(p), params, [&](double& v) {
                     double a = 1.0;  // Parameter_Attenuator default 1.0 (no attenuation) [H]
                     param_number(params, "Parameter_Attenuator", a);
                     double s = 0.0;
@@ -1277,8 +1467,7 @@ struct GalacticSimTokenResolver::Impl {
             }
             if (k == (space ? std::string("HASSPACEFORCE") : std::string("HASGROUNDFORCE"))) return has_force(p, enemy, space, params, out);
             if (k == (space ? std::string("HASNEARBYSPACEFORCE") : std::string("HASNEARBYGROUNDFORCE"))) {
-                const std::string key = std::string(enemy ? "PF:E." : "PF:F.") + std::string(k);
-                return leaf(key, static_cast<int32_t>(p), 11, params, [&](double& v) {
+                return cached_path(TokenScope::Force, k, enemy, static_cast<int32_t>(p), params, [&](double& v) {
                     double x = 0.0;
                     if (!has_force(p, enemy, space, params, x)) return false;
                     bool any = x > 0.0;
@@ -1292,8 +1481,7 @@ struct GalacticSimTokenResolver::Impl {
                 }, out);
             }
             if (k == (space ? std::string("HASSPACEUNITSBITFIELD") : std::string("HASGROUNDUNITSBITFIELD"))) {
-                const std::string key = std::string(enemy ? "PF:E." : "PF:F.") + std::string(k);
-                return leaf(key, static_cast<int32_t>(p), 13, params, [&](double& v) {
+                return cached_path(TokenScope::Force, k, enemy, static_cast<int32_t>(p), params, [&](double& v) {
                     const std::vector<std::string_view> names = param_texts(params, "Parameter_Type");
                     uint64_t bits = 0;
                     auto mark = [&](uint32_t t) {
@@ -1354,7 +1542,8 @@ struct GalacticSimTokenResolver::Impl {
         const std::vector<std::string_view> names = param_texts(params, "Parameter_Type");
         double only_complete = 0.0;
         param_number(params, "Parameter_Only_Consider_Complete", only_complete);
-        return leaf(count ? "T:STRUCTURECOUNT" : "T:HASSTRUCTURE", static_cast<int32_t>(p), count ? 2 : 13, params, [&](double& v) {
+        return cached(count ? token_spec(TokenScope::Target, "STRUCTURECOUNT") : token_spec(TokenScope::Target, "HASSTRUCTURE"), true,
+                      static_cast<int32_t>(p), params, [&](double& v) {
             const gal::PlanetState& ps = planets[p];
             int32_t n = 0;
             for (const ObjectHandle s : ps.structures) n += st.alive(s) && type_named(st.type(s), names) ? 1 : 0;
@@ -1538,19 +1727,19 @@ struct GalacticSimTokenResolver::Impl {
         }
         if (k == "MAXSTRUCTURESLOTSUNNORMALIZED") return out = max_ground_base(p), true;
         if (k == "OPENSTRUCTURESLOTS")
-            return leaf("T:OPENSTRUCTURESLOTS", ip, 15, params, [&](double& v) {
+            return cached(token_spec(TokenScope::Target, "OPENSTRUCTURESLOTS"), true, ip, params, [&](double& v) {
                 const int32_t total = max_ground_base(p);
                 v = total <= 0 ? 0.0 : 1.0 - static_cast<double>(used_ground) / static_cast<double>(total);
                 return true;
             }, out);
         if (k == "OPENSTRUCTURESLOTSUNNORMALIZED") return out = max_ground_base(p) - used_ground, true;
         if (k == "OPENGROUNDCOMPANYSLOTS")
-            return leaf("T:OPENGROUNDCOMPANYSLOTS", ip, 13, params, [&](double& v) {
+            return cached(token_spec(TokenScope::Target, "OPENGROUNDCOMPANYSLOTS"), true, ip, params, [&](double& v) {
                 v = static_cast<double>(rules.constants.max_ground_forces_on_planet) - static_cast<double>(ps.surface.size());
                 return true;
             }, out);
         if (k == "BASEINCOME" || k == "BASEINCOMENBTP")
-            return leaf(k == "BASEINCOME" ? "T:BASEINCOME" : "T:BASEINCOMENBTP", ip, 15, params, [&](double& v) {
+            return cached_path(TokenScope::Target, k, true, ip, params, [&](double& v) {
                 const int32_t group = political_player(p);
                 double mx = 0.0;
                 for (size_t i = 0; i < planets.size(); ++i)
@@ -1560,12 +1749,12 @@ struct GalacticSimTokenResolver::Impl {
                 return true;
             }, out);
         if (k == "INCOMEUNNORMALIZED")
-            return leaf("T:INCOMEUNNORMALIZED", ip, 15, params, [&](double& v) {
+            return cached(token_spec(TokenScope::Target, "INCOMEUNNORMALIZED"), true, ip, params, [&](double& v) {
                 v = planet_income(p);
                 return true;
             }, out);
         if (k == "TRADEROUTES")
-            return leaf("T:TRADEROUTES", ip, kLifeForever, params, [&](double& v) {
+            return cached(token_spec(TokenScope::Target, "TRADEROUTES"), true, ip, params, [&](double& v) {
                 double mx = 0.0;
                 for (const gal::PlanetState& q : planets)
                     if (q.is_planet) mx = std::max(mx, static_cast<double>(q.links.size()));
@@ -1573,7 +1762,7 @@ struct GalacticSimTokenResolver::Impl {
                 return true;
             }, out);
         if (k == "ACTIVETRADEROUTES")
-            return leaf("T:ACTIVETRADEROUTES", ip, 15, params, [&](double& v) {
+            return cached(token_spec(TokenScope::Target, "ACTIVETRADEROUTES"), true, ip, params, [&](double& v) {
                 if (ps.links.empty()) {
                     v = 0.0;
                     return true;
@@ -1600,7 +1789,7 @@ struct GalacticSimTokenResolver::Impl {
         // value skipped; from 0). Cache life 15 s; no leaf fails. No shipped equation uses them (mods only).
         if (k == "FRIENDLYINTERNALCONNECTIVITY" || k == "FRIENDLYEXTERNALCONNECTIVITY" || k == "ENEMYINTERNALCONNECTIVITY" ||
             k == "ENEMYEXTERNALCONNECTIVITY")
-            return leaf(std::string("T:") + std::string(k), ip, 15, params, [&](double& v) {
+            return cached_path(TokenScope::Target, k, true, ip, params, [&](double& v) {
                 const bool internal = k.find("INTERNAL") != std::string_view::npos;
                 v = 0.0;
                 if (k[0] == 'F') {
@@ -1613,7 +1802,7 @@ struct GalacticSimTokenResolver::Impl {
                 return true;
             }, out);
         if (k == "ISCONNECTEDTO")
-            return leaf("T:ISCONNECTEDTO", ip, 5, params, [&](double& v) {
+            return cached(token_spec(TokenScope::Target, "ISCONNECTEDTO"), true, ip, params, [&](double& v) {
                 const std::vector<std::string_view> types = param_texts(params, "Parameter_Type");
                 const bool fac = has_param(params, "Parameter_Faction");
                 if (types.empty() && !fac) {
@@ -1649,19 +1838,19 @@ struct GalacticSimTokenResolver::Impl {
         if (k == "HASCREDITSIPHON") return out = b2d(ps.siphon_player >= 0), true;
         if (k == "ISSURFACEACCESSIBLE") return out = b2d(sim.surface_accessible(static_cast<PlanetIndex>(p))), true;  // 0x375220 (destroyed -> 0)
         if (k == "ISCORRUPTED")
-            return leaf("T:ISCORRUPTED", ip, 3, params, [&](double& v) {
+            return cached(token_spec(TokenScope::Target, "ISCORRUPTED"), true, ip, params, [&](double& v) {
                 v = b2d(ps.corruption != gal::kCorruptionNone);  // false leaves the output unwritten (0) [H]
                 return true;
             }, out);
         if (k == "ISCONNECTEDTOCORRUPTION")
-            return leaf("T:ISCONNECTEDTOCORRUPTION", ip, 4, params, [&](double& v) {
+            return cached(token_spec(TokenScope::Target, "ISCONNECTEDTOCORRUPTION"), true, ip, params, [&](double& v) {
                 bool any = false;
                 for (const uint32_t n : r.neighbours_[p]) any = any || planets[n].corruption != gal::kCorruptionNone;
                 v = b2d(any);
                 return true;
             }, out);
         if (k == "ISCORRUPTIONTRANSITIONACTIVE")
-            return leaf("T:ISCORRUPTIONTRANSITIONACTIVE", ip, 2, params, [&](double& v) {
+            return cached(token_spec(TokenScope::Target, "ISCORRUPTIONTRANSITIONACTIVE"), true, ip, params, [&](double& v) {
                 v = b2d(sim.corruption_transition_active(static_cast<PlanetIndex>(p)));  // D+0x2E2 gaining || +0x2E3 removing
                 return true;
             }, out);
@@ -1720,11 +1909,11 @@ struct GalacticSimTokenResolver::Impl {
         }
         if (k == "BLACKMARKETABILITIESAVAILABLE" || k == "BLACKMARKETMINIMUMABILITYPRICE") {
             const bool avail = k == "BLACKMARKETABILITIESAVAILABLE";
-            return leaf(avail ? "T:BLACKMARKETABILITIESAVAILABLE" : "T:BLACKMARKETMINIMUMABILITYPRICE", ip, avail ? 5 : 6, params,
+            return cached_path(TokenScope::Target, k, true, ip, params,
                         [&](double& v) { return black_market(p, params, avail, v); }, out);
         }
         if (k == "BLACKMARKETPRICEMODIFIER")  // type float +0x800 (Planet_Black_Market_Modifier) [H]
-            return leaf("T:BLACKMARKETPRICEMODIFIER", ip, -1, params, [&](double& v) {
+            return cached(token_spec(TokenScope::Target, "BLACKMARKETPRICEMODIFIER"), true, ip, params, [&](double& v) {
                 v = static_cast<double>(rules.special.type(ps.type).black_market_modifier);
                 return true;
             }, out);
@@ -1864,7 +2053,7 @@ struct GalacticSimTokenResolver::Impl {
         const gal::PlayerState& ps = players[static_cast<size_t>(pl)];
         const bool self = pl == ctx.self;
         if (k == "PLANETSCONTROLLEDUNNORMALIZED" || k == "PLANETSCONTROLLED")
-            return leaf(std::string("P:") + std::string(k), pl, 3, params, [&](double& v) {
+            return cached_path(TokenScope::Player, k, true, pl, params, [&](double& v) {
                 v = static_cast<double>(owned(pl).size());
                 if (k == "PLANETSCONTROLLED") {
                     size_t n = 0;
@@ -1874,12 +2063,12 @@ struct GalacticSimTokenResolver::Impl {
                 return true;
             }, out);
         if (k == "SPACETOTALUNNORMALIZED" || k == "GROUNDTOTALUNNORMALIZED")
-            return leaf(std::string("P:") + std::string(k), pl, 10, params, [&](double& v) {
+            return cached_path(TokenScope::Player, k, true, pl, params, [&](double& v) {
                 v = player_total(pl, k == "SPACETOTALUNNORMALIZED", category_param(params));
                 return true;
             }, out);
         if (k == "SPACEDEFENDEDPLANETS" || k == "GROUNDDEFENDEDPLANETS")
-            return leaf(std::string("P:") + std::string(k), pl, 5, params, [&](double& v) {
+            return cached_path(TokenScope::Player, k, true, pl, params, [&](double& v) {
                 const std::vector<size_t> o = owned(pl);
                 if (o.empty()) {
                     v = 0.0;
@@ -1895,7 +2084,7 @@ struct GalacticSimTokenResolver::Impl {
                 return true;
             }, out);
         if (k == "MAXEDSTARBASES" || k == "MAXEDGROUNDBASES")
-            return leaf(std::string("P:") + std::string(k), pl, 5, params, [&](double& v) {
+            return cached_path(TokenScope::Player, k, true, pl, params, [&](double& v) {
                 const std::vector<size_t> o = owned(pl);
                 if (o.empty()) {
                     v = 0.0;
@@ -1913,7 +2102,7 @@ struct GalacticSimTokenResolver::Impl {
             }, out);
         if (k == "MAXSTARBASELEVEL" || k == "MAXSTARBASELEVELUNNORMALIZED" || k == "MAXGROUNDBASELEVEL" ||
             k == "MAXGROUNDBASELEVELUNNORMALIZED")
-            return leaf(std::string("P:") + std::string(k), pl, 4, params, [&](double& v) {
+            return cached_path(TokenScope::Player, k, true, pl, params, [&](double& v) {
                 const bool ground = k.substr(0, 9) == "MAXGROUND";
                 int32_t mx = 0;
                 for (const size_t p : owned(pl))
@@ -1924,7 +2113,7 @@ struct GalacticSimTokenResolver::Impl {
             }, out);
         if (k == "NUMSTARBASEOFLEVEL" || k == "NUMGROUNDBASEOFLEVEL" || k == "NUMSTRUCTURE" || k == "HASSTARBASEOFLEVEL" ||
             k == "HASGROUNDBASEOFLEVEL" || k == "HASSTRUCTURE")
-            return leaf(std::string("P:") + std::string(k), pl, 3, params, [&](double& v) {
+            return cached_path(TokenScope::Player, k, true, pl, params, [&](double& v) {
                 int32_t n = 0;
                 const bool structure = k == "NUMSTRUCTURE" || k == "HASSTRUCTURE";
                 const bool ground = k.find("GROUND") != std::string_view::npos;
@@ -1939,7 +2128,7 @@ struct GalacticSimTokenResolver::Impl {
                 return true;
             }, out);
         if (k == "STRUCTURECOUNT")
-            return leaf("P:STRUCTURECOUNT", pl, 4, params, [&](double& v) {
+            return cached(token_spec(TokenScope::Player, "STRUCTURECOUNT"), true, pl, params, [&](double& v) {
                 v = 0.0;
                 for (const size_t p : owned(pl)) {
                     double x = 0.0;
@@ -1956,7 +2145,7 @@ struct GalacticSimTokenResolver::Impl {
             return out = static_cast<double>(is.sizes[1]) / static_cast<double>(is.sizes[0]), true;
         }
         if (k == "ANYCURRENTTHREATS")
-            return leaf("P:ANYCURRENTTHREATS", pl, 15, params, [&](double& v) {
+            return cached(token_spec(TokenScope::Player, "ANYCURRENTTHREATS"), true, pl, params, [&](double& v) {
                 v = 0.0;
                 if (ps.human) return true;
                 for (size_t p = 0; p < planets.size() && v == 0.0; ++p) {
@@ -1978,7 +2167,7 @@ struct GalacticSimTokenResolver::Impl {
             return out = 0.0, true;   // fog off: TimeLastSeen = 0
         }
         if (k == "BUDGETFRACTIONTOBUILD")  // 0x667120 (A2H_GALACTIC_AI_RE §2) [H]
-            return leaf("P:BUDGETFRACTIONTOBUILD", pl, 5, params, [&](double& v) {
+            return cached(token_spec(TokenScope::Player, "BUDGETFRACTIONTOBUILD"), true, pl, params, [&](double& v) {
                 if (!self) {  // step 1: another root player -> 0
                     v = 0.0;
                     return true;
@@ -2031,7 +2220,7 @@ struct GalacticSimTokenResolver::Impl {
                 return true;
             }, out);
         if (k == "CANADVANCETECH")
-            return leaf("P:CANADVANCETECH", pl, 6, params, [&](double& v) {
+            return cached(token_spec(TokenScope::Player, "CANADVANCETECH"), true, pl, params, [&](double& v) {
                 const uint32_t t = next_tech_type(pl);
                 v = 0.0;
                 if (t == gal::kNoIndex) return true;
@@ -2045,7 +2234,7 @@ struct GalacticSimTokenResolver::Impl {
                 return true;
             }, out);
         if (k == "HASTECHTOPRODUCE")
-            return leaf("P:HASTECHTOPRODUCE", pl, 8, params, [&](double& v) {
+            return cached(token_spec(TokenScope::Player, "HASTECHTOPRODUCE"), true, pl, params, [&](double& v) {
                 if (!has_param(params, "Parameter_Type")) return false;
                 bool any = false;
                 for (const std::string_view n : param_texts(params, "Parameter_Type")) {
@@ -2060,7 +2249,7 @@ struct GalacticSimTokenResolver::Impl {
                 return true;
             }, out);
         if (k == "GROSSINCOMEUNNORMALIZED" || k == "NETINCOMEUNNORMALIZED")
-            return leaf(std::string("P:") + std::string(k), pl, 7, params, [&](double& v) {
+            return cached_path(TokenScope::Player, k, true, pl, params, [&](double& v) {
                 v = gross_income(pl);  // credits per income cycle (0x667fb0) [H]
                 if (k == "NETINCOMEUNNORMALIZED") {  // 0x66a420: Gross - Unn (a non-Self root: A2I_TOKENS_RE §1.1) [H]
                     double m = 0.0;
@@ -2072,7 +2261,7 @@ struct GalacticSimTokenResolver::Impl {
         // 0x66a730(numerator, denominator) (A2I_TOKENS_RE §1.4) [H]: both paths on the root with no parameters; either
         // failing fails; den = 0: 0 when num = 0, else fail; otherwise num / den, no clamp (a negative net stays negative).
         if (k == "GROSSINCOMENBPTM" || k == "GROSSINCOMENBTF" || k == "NETINCOMENBPTM" || k == "NETINCOMENBTF")
-            return leaf(std::string("P:") + std::string(k), pl, 7, params, [&](double& v) {
+            return cached_path(TokenScope::Player, k, true, pl, params, [&](double& v) {
                 double num = 0.0, den = 0.0;
                 if (!resolve_player(pl, k.substr(0, 3) == "NET" ? "NETINCOMEUNNORMALIZED" : "GROSSINCOMEUNNORMALIZED", {}, num)) return false;
                 const bool all = k.find("NBPTM") != std::string_view::npos;
@@ -2090,7 +2279,7 @@ struct GalacticSimTokenResolver::Impl {
         // the same over the planets whose TargetPlayerID (truncated to int) is the root's id; lifetime 7.
         if (k == "MAXALLPLANETSINCOMEUNNORMALIZED" || k == "MAXOWNEDPLANETSINCOMEUNNORMALIZED") {
             const bool all = k == "MAXALLPLANETSINCOMEUNNORMALIZED";
-            return leaf(std::string("P:") + std::string(k), pl, all ? kLifeForever : 7, params, [&](double& v) {
+            return cached_path(TokenScope::Player, k, true, pl, params, [&](double& v) {
                 v = 0.0;
                 for (size_t p = 0; p < planets.size(); ++p) {
                     if (!planets[p].is_planet) continue;
@@ -2105,7 +2294,7 @@ struct GalacticSimTokenResolver::Impl {
             }, out);
         }
         if (k == "MAINTENANCE" || k == "MAINTENANCEUNNORMALIZED")  // 0x669110 / 0x669420 (A2H_GALACTIC_AI_RE §3) [H]
-            return leaf(std::string("P:") + std::string(k), pl, 7, params, [&](double& v) {
+            return cached_path(TokenScope::Player, k, true, pl, params, [&](double& v) {
                 if (!maintenance_unnormalized(pl, self, v)) return false;
                 if (k == "MAINTENANCE") {  // Unn / GrossIncomeUnnormalized, 0 when the gross is 0
                     const double g = gross_income(pl);
@@ -2131,7 +2320,7 @@ struct GalacticSimTokenResolver::Impl {
             return out = ps.account.credits, true;
         }
         if (k == "HASUNIT")
-            return leaf("P:HASUNIT", pl, 8, params, [&](double& v) {
+            return cached(token_spec(TokenScope::Player, "HASUNIT"), true, pl, params, [&](double& v) {
                 if (!has_param(params, "Parameter_Type")) return false;
                 const std::vector<std::string_view> names = param_texts(params, "Parameter_Type");
                 double count = 1.0, complete = 0.0;
@@ -2191,7 +2380,7 @@ struct GalacticSimTokenResolver::Impl {
         // Parameter_Category key in Self's budget, 0.0 for a key it does not hold.
         if (k == "BUDGETALLOCATION") {
             if (!self) return false;
-            return leaf("P:BUDGETALLOCATION", pl, 2, params, [&](double& v) {
+            return cached(token_spec(TokenScope::Player, "BUDGETALLOCATION"), true, pl, params, [&](double& v) {
                 return r.hooks_.budget_weight && r.hooks_.budget_weight(pl, budget_key(params), v);
             }, out);
         }
@@ -2219,7 +2408,7 @@ struct GalacticSimTokenResolver::Impl {
         // (random events) ? 1.0 : 0.0. Never fails. The host folds the two flags into the hook.
         if (k == "INTERVENTIONSENABLED") return out = b2d(r.hooks_.interventions_enabled), true;
         if (k == "PLANETSCORRUPTED" || k == "PLANETSCORRUPTEDUNNORMALIZED")
-            return leaf(std::string("G:") + std::string(k), -1, 7, params, [&](double& v) {
+            return cached_path(TokenScope::Game, k, true, -1, params, [&](double& v) {
                 int32_t n = 0, total = 0;
                 for (const gal::PlanetState& ps : planets) {
                     if (!ps.is_planet) continue;
@@ -2326,12 +2515,21 @@ void GalacticSimTokenResolver::visibility_event(PlanetIndex planet, int32_t play
         x.force_leaf = nullptr;
         x.force_inst = -1;
     };
-    for (const FoggedLeaf& l : kPlanetFogged)
-        if ((l.mask & recompute) != 0) node(l.key, l.path);
+    // ref6 t03: the fogged rows of the token spec table, each evaluator's in fog_order.
+    static const auto fogged = [] {
+        std::array<std::vector<const TokenSpec*>, 2> o;  // [0] planet (Target rows), [1] force (Force rows)
+        for (const TokenSpec& t : kTokenSpecs)
+            if (t.fog != 0) o[t.scope == TokenScope::Force ? 1 : 0].push_back(&t);
+        for (auto& v : o)  // fog_order is unique per group (token_specs_valid)
+            std::stable_sort(v.begin(), v.end(), [](const TokenSpec* a, const TokenSpec* b) { return a->fog_order < b->fog_order; });
+        return o;
+    }();
+    for (const TokenSpec* t : fogged[0])
+        if ((t->fog & recompute) != 0) node(std::string(t->key), std::string(t->path));
     for (const bool enemy : {false, true})  // FriendlyForce (+0xA8) is created before EnemyForce (+0xB0) [M: listener order]
-        for (const FoggedLeaf& l : kForceFogged)
-            if ((l.mask & recompute) != 0)
-                node(std::string(enemy ? "PF:E." : "PF:F.") + l.key, std::string(enemy ? "ENEMYFORCE." : "FRIENDLYFORCE.") + l.path);
+        for (const TokenSpec* t : fogged[1])
+            if ((t->fog & recompute) != 0)
+                node(std::string(t->key_for(enemy)), std::string(enemy ? "ENEMYFORCE." : "FRIENDLYFORCE.") + std::string(t->path));
 }
 
 bool GalacticSimTokenResolver::dispatches(const EvalContext& ctx, Root root, std::string_view path) const {
