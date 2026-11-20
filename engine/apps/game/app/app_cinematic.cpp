@@ -35,7 +35,11 @@ void App::tsw_shot_begin(const TswCue& c, const sim::TacticalBattle& b, const ob
         e = {h, h, h};
     }
     in.half_extents = e;
-    in.z_adjust = data_.types.get(c.type, objects::tags::Ranged_Target_Z_Adjust);  // type +0x4dc, default 6.0 (ref6 t01)
+    {  // Ranged_Target_Z_Adjust (type +0x4dc), constructor default 6.0
+        static const uint32_t f = objects::find_type_field("Ranged_Target_Z_Adjust");
+        const objects::FieldValue* v = f != 0xFFFFFFFFu ? data_.types.value(c.type, f) : nullptr;
+        in.z_adjust = v ? v->f : 6.0f;
+    }
     // M: the first `Space Station Position` marker of the store query 0x2a9ff0(store, 0x11) [M: the marker list; here
     // the primary store's objects of that type, creation order].
     if (const objects::TypeIndex mt = data_.types.resolve_name(kStationMarker); mt != objects::kNone)
