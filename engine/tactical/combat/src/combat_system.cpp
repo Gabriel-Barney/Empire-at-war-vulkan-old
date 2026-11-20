@@ -72,11 +72,11 @@ CombatSystem::CombatSystem(const CombatData& data, CombatConfig config, std::vec
 }
 
 void apply_game_constants(CombatConfig& c, const data::GameConstants& gc) {
-    c.low_health_threshold = gc.get_float("Health_Low_Percent_Threshold", c.low_health_threshold);
+    c.low_health_threshold = gc.shared.health_low_percent_threshold.value_or(c.low_health_threshold);  // ref4 t06: GameConstants::shared
+    c.turn_multiplier_space = gc.shared.object_max_speed_multiplier_space.value_or(c.turn_multiplier_space);  // S9 t05
+    c.turn_multiplier_land = gc.shared.object_max_speed_multiplier_land.value_or(c.turn_multiplier_land);
     c.short_range_cutoff = gc.get_float("Melee_Cutoff_Range", c.short_range_cutoff);
     c.opportunity_recharge_cutoff = gc.get_float("Hardpoint_Recharge_Cutoff_For_Opportunity_Fire", c.opportunity_recharge_cutoff);
-    c.turn_multiplier_space = gc.get_float("Object_Max_Speed_Multiplier_Space", c.turn_multiplier_space);  // S9 t05
-    c.turn_multiplier_land = gc.get_float("Object_Max_Speed_Multiplier_Land", c.turn_multiplier_land);
     // cu8 t03: the remaining data-backed knobs (FoC: only Base_Shield_Vulnerability_Modifier 2.0f differs from the
     // defaults; AITestGameConstants changes the shield / energy ones).
     c.base_shield_vulnerability = gc.get_float("Base_Shield_Vulnerability_Modifier", c.base_shield_vulnerability);

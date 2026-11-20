@@ -107,7 +107,8 @@ BattleCatalog::BattleCatalog(const objects::GameObjectTypes& types, const FilePr
         lb.move = constants->get_float("MoveBlendTime", lb.move);
         lb.team_move = constants->get_float("TeamMoveBlendTime", lb.team_move);
         lb.team_crouch_move = constants->get_float("TeamCrouchMoveBlendTime", lb.team_crouch_move);
-        lb.infantry_turn = constants->get_float("InfantryTurnBlendTime", lb.infantry_turn);
+        const data::SharedGameConstants& shared = constants->shared;  // ref4 t06: GameConstants::shared
+        lb.infantry_turn = shared.infantry_turn_blend_time.value_or(lb.infantry_turn);
         // --- battle host: transition constants (TACTICAL_GAPS §4.2 raid / lead, §4.9 retreat attrition) ---
         TransitionConstants& k = transition_;
         k.space_retreat_attrition = constants->get_float("Space_Retreat_Attrition_Factor", k.space_retreat_attrition);
@@ -136,17 +137,17 @@ BattleCatalog::BattleCatalog(const objects::GameObjectTypes& types, const FilePr
         };
         k.raid_free_mask = mask("Raid_Force_Free_Object_Category_Mask");
         k.raid_limited_mask = mask("Raid_Force_Limited_Object_Category_Mask");
-        k.raid_max_limited = constants->get_int("Raid_Force_Max_Limited_Objects", 0);
-        k.raid_max_heroes = constants->get_int("Raid_Force_Max_Heros", 0);
+        k.raid_max_limited = shared.raid_force_max_limited_objects.value_or(0);
+        k.raid_max_heroes = shared.raid_force_max_heros.value_or(0);
         // --- end battle host ---
         // --- fog of war constants (owner: fog agent) ---
         tactical::fog::FogConstants& f = fog_constants_;
-        f.desired_land_cell_size = constants->get_float("DesiredLandFOWCellSize", f.desired_land_cell_size);
-        f.desired_space_cell_size = constants->get_float("DesiredSpaceFOWCellSize", f.desired_space_cell_size);
+        f.desired_land_cell_size = shared.desired_land_fow_cell_size.value_or(f.desired_land_cell_size);
+        f.desired_space_cell_size = shared.desired_space_fow_cell_size.value_or(f.desired_space_cell_size);
+        f.ai_uses_fog_land = shared.ai_uses_fog_of_war_land.value_or(f.ai_uses_fog_land);
+        f.ai_uses_fog_space = shared.ai_uses_fog_of_war_space.value_or(f.ai_uses_fog_space);
         f.land_regrow_time = constants->get_float("LandFOWRegrowTime", f.land_regrow_time);
         f.space_regrow_time = constants->get_float("SpaceFOWRegrowTime", f.space_regrow_time);
-        f.ai_uses_fog_land = constants->get_bool("AIUsesFogOfWarLand", f.ai_uses_fog_land);
-        f.ai_uses_fog_space = constants->get_bool("AIUsesFogOfWarSpace", f.ai_uses_fog_space);
         f.tactical_overrun_multiple = constants->get_float("Tactical_Overrun_Multiple", f.tactical_overrun_multiple);
         f.min_overrun_seconds = constants->get_float("Minimum_Tactical_Overrun_Time_In_Secs", f.min_overrun_seconds);
         f.setup_phase_enabled = constants->get_bool("SetupPhaseEnabled", f.setup_phase_enabled);  // OI fog

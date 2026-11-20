@@ -78,8 +78,9 @@ MovementConstants MovementConstants::from_game_constants(const data::GameConstan
         gc.get_float("VehicleFormationRecruitmentDistance", c.vehicle_formation_recruitment_distance);
     c.double_click_move_max_speed_ratio = gc.get_float("DoubleClickMoveMaxSpeedRatio", c.double_click_move_max_speed_ratio);
     c.fleeing_infantry_speed_bonus = gc.get_float("Fleeing_Infantry_Speed_Bonus", c.fleeing_infantry_speed_bonus);  // s78n t14
-    c.land_speed_multiplier = gc.get_float("Object_Max_Speed_Multiplier_Land", c.land_speed_multiplier);
-    c.space_speed_multiplier = gc.get_float("Object_Max_Speed_Multiplier_Space", c.space_speed_multiplier);
+    c.land_speed_multiplier = gc.shared.object_max_speed_multiplier_land.value_or(c.land_speed_multiplier);  // ref4 t06: GameConstants::shared
+    c.space_speed_multiplier = gc.shared.object_max_speed_multiplier_space.value_or(c.space_speed_multiplier);
+    c.infantry_turn_blend_time = gc.shared.infantry_turn_blend_time.value_or(c.infantry_turn_blend_time);  // mcx4 t11
     c.space_guard_range = gc.get_float("Space_Guard_Range", c.space_guard_range);  // S7 t37
     c.land_guard_range = gc.get_float("Land_Guard_Range", c.land_guard_range);
     c.max_waypoints_per_path = get_u32(gc, "MaxWaypointsPerPath", c.max_waypoints_per_path);  // s78f t02
@@ -102,7 +103,6 @@ MovementConstants MovementConstants::from_game_constants(const data::GameConstan
     c.final_formation_facing_delta_coefficient =
         gc.get_float("FinalFormationFacingDeltaCoefficient", c.final_formation_facing_delta_coefficient);
     c.rotate_formation_facing_moves = gc.get_bool("Rotate_Formation_Facing_Moves", c.rotate_formation_facing_moves);
-    c.infantry_turn_blend_time = gc.get_float("InfantryTurnBlendTime", c.infantry_turn_blend_time);  // mcx4 t11
     return c;
 }
 

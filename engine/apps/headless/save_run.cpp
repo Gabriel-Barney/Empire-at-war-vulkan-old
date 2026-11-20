@@ -558,7 +558,7 @@ public:
         const uint32_t normal = rules_.find_difficulty("Normal_Default");
         gcfg_.difficulties = ai::load_ai_difficulties(*files_);
         gcfg_.contrast = &crules_.contrast;
-        gcfg_.ai_uses_fog_galactic = db_.constants().get_bool("AIUsesFogOfWarGalactic", gcfg_.ai_uses_fog_galactic);
+        gcfg_.ai_uses_fog_galactic = db_.constants().shared.ai_uses_fog_of_war_galactic.value_or(gcfg_.ai_uses_fog_galactic);  // ref4 t06: GameConstants::shared (shipped False)
         const data::CampaignDef* cdef = db_.find_campaign(campaign_);
         const std::vector<std::string> no_pairs;
         const std::vector<std::string>& control = cdef ? cdef->ai_player_control : no_pairs;

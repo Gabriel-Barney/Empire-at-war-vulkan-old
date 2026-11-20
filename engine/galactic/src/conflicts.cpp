@@ -127,8 +127,8 @@ bool load_conflict_rules(const FileProvider& provider, const data::GameDatabase&
         };
         out.raid_free_mask = mask("Raid_Force_Free_Object_Category_Mask");
         out.raid_limited_mask = mask("Raid_Force_Limited_Object_Category_Mask");
-        out.raid_max_limited = g.get_int("Raid_Force_Max_Limited_Objects", 0);
-        out.raid_max_heroes = g.get_int("Raid_Force_Max_Heros", 0);
+        out.raid_max_limited = g.shared.raid_force_max_limited_objects.value_or(0);  // ref4 t06: GameConstants::shared
+        out.raid_max_heroes = g.shared.raid_force_max_heros.value_or(0);
     }
 
     // Per type.

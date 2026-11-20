@@ -224,7 +224,7 @@ bool make_skirmish_galaxy(const GameData& data, const SkirmishSetup& setup, gala
     ai.ai = true;
     // t50: a land skirmish side starts with MP_Default_Credits (GameConstants, shipped 6000): the pads' Tactical_Build_Cost_Multiplayer
     // charges the galactic account. A space skirmish buys nothing in the battle, so its sides keep 0.
-    if (s.land) human.credits = ai.credits = static_cast<float>(std::max(0, data.db.constants().get_int("MP_Default_Credits", 0)));
+    if (s.land) human.credits = ai.credits = static_cast<float>(data.db.constants().shared.mp_default_credits.value_or(0));
     neutral.faction = neutral_faction(rules);
     if (human.faction == galactic::kNoIndex || ai.faction == galactic::kNoIndex) {
         // mcx1 t08 (MCX1_RE_ANSWERS Q6.2): with no playable faction left for a slot the original's skirmish faction lists
