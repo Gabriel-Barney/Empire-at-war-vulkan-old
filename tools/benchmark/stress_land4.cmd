@@ -14,7 +14,7 @@ call "%CD%\tools\test_env.cmd"
 set "W=%~1"
 if "%W%"=="" set "W=0"
 set "EXE="
-for %%B in (build-wt-msvc build-msvc) do if not defined EXE if exist "%%B\bin\alamo_headless.exe" set "EXE=%%B\bin\alamo_headless.exe"
+for /f "delims=" %%e in ('""%CD%\toolchain\venv\Scripts\python.exe" -I "%CD%\tools\lint\build_trees.py" exe alamo_headless.exe"') do set "EXE=%%e"
 if not defined EXE (echo stress_land4: no alamo_headless.exe; build first& exit /b 2)
 set "SC=logs\bench_stress\land_stress4.abench"
 if not exist logs\bench_stress mkdir logs\bench_stress

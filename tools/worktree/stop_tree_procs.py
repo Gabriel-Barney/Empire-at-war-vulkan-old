@@ -18,6 +18,9 @@ import os
 import subprocess
 import sys
 
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'lint'))
+import build_trees  # noqa: E402
+
 
 def norm(p: str) -> str:
     return os.path.normcase(os.path.normpath(p))
@@ -31,11 +34,11 @@ def toplevel() -> str:
 def tree_roots(top: str, names: list[str]) -> list[str] | None:
     if not names:
         return [os.path.join(top, d) for d in sorted(os.listdir(top))
-                if d.lower().startswith('build-') and os.path.isdir(os.path.join(top, d))]
+                if build_trees.is_tree_name(d) and os.path.isdir(os.path.join(top, d))]
     roots = []
     for n in names:
         p = os.path.normpath(n if os.path.isabs(n) else os.path.join(top, n))
-        if norm(os.path.dirname(p)) != norm(top) or not os.path.basename(p).lower().startswith('build-'):
+        if norm(os.path.dirname(p)) != norm(top) or not build_trees.is_tree_name(os.path.basename(p)):
             print(f'refused {n}: not a build-* folder of {top}')
             return None
         roots.append(p)
@@ -94,15 +97,16 @@ def main(argv: list[str]) -> int:
 def selftest() -> int:
     top = os.path.join('E:' + os.sep, 'repo', '.claude', 'worktrees', 'a')
     other = os.path.join('E:' + os.sep, 'repo', '.claude', 'worktrees', 'ab')
+    wt, clang = build_trees.WARM_TREE, build_trees.main_tree('clang')
     procs = [
-        {'ProcessId': 1, 'ExecutablePath': os.path.join(top, 'build-wt-msvc', 'engine', 'core', 'alamo_core_tests.exe')},
-        {'ProcessId': 2, 'ExecutablePath': os.path.join(other, 'build-wt-msvc', 'alamo_core_tests.exe')},
+        {'ProcessId': 1, 'ExecutablePath': os.path.join(top, wt, 'engine', 'core', 'alamo_core_tests.exe')},
+        {'ProcessId': 2, 'ExecutablePath': os.path.join(other, wt, 'alamo_core_tests.exe')},
         {'ProcessId': 3, 'ExecutablePath': os.path.join(top, 'toolchain', 'venv', 'Scripts', 'ctest.exe')},
-        {'ProcessId': 4, 'ExecutablePath': os.path.join(top, 'BUILD-CLANG', 'x.exe')},
+        {'ProcessId': 4, 'ExecutablePath': os.path.join(top, clang.upper(), 'x.exe')},
         {'ProcessId': 5, 'ExecutablePath': None},
-        {'ProcessId': 6, 'ExecutablePath': os.path.join(top, 'build-wt-msvcX', 'y.exe')},
+        {'ProcessId': 6, 'ExecutablePath': os.path.join(top, wt + 'X', 'y.exe')},
     ]
-    roots = [os.path.join(top, 'build-wt-msvc'), os.path.join(top, 'build-clang')]
+    roots = [os.path.join(top, wt), os.path.join(top, clang)]
     got = sorted(p['ProcessId'] for p in matches(procs, roots, own_pid=99))
     assert got == [1, 4], got
     assert matches(procs, roots, own_pid=1)[0]['ProcessId'] == 4

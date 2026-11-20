@@ -4,6 +4,8 @@ rem headers/libs), -Wall -Wextra -Wpedantic from the CMake files plus -Wconversi
 rem Dir build-clang\, logs logs\clang_configure.txt / logs\clang_build.txt (finished when clang_configure.txt ends with BUILD_DONE).
 setlocal EnableDelayedExpansion
 cd /d "%~dp0"
+rem Tree name from tools\lint\build_trees.py (ref3 t03), the one place that names build trees.
+for /f "delims=" %%t in ('""%~dp0toolchain\venv\Scripts\python.exe" -I "%~dp0tools\lint\build_trees.py" name main clang"') do set "BT=%%t"
 if not exist logs mkdir logs
 set TC=%~dp0toolchain
 if not exist "%TC%\llvm\bin\clang++.exe" (
@@ -18,26 +20,26 @@ set CTEST=%TC%\venv\Scripts\ctest.exe
 call "%~dp0tools\test_env.cmd"
 call "%~dp0tools\cache_env.cmd"
 rem Which code this run builds (commit, worktree, source hash), copied into the build record with the outcome.
-python -I tools\lint\build_state.py begin build-clang --modules all --tests all
+python -I tools\lint\build_state.py begin %BT% --modules all --tests all
 > logs\clang_configure.txt (
   "%TC%\llvm\bin\clang++.exe" --version 2>&1
   rem -U drops a cached module list so the full build always gets every module (engine/CMakeLists.txt default).
-  "%CMAKE%" -S . -B build-clang -G Ninja -DCMAKE_BUILD_TYPE=Release "-DCMAKE_MAKE_PROGRAM=%TC%\venv\Scripts\ninja.exe" "-DCMAKE_CXX_COMPILER=%TC%\llvm\bin\clang++.exe" "-DCMAKE_CXX_FLAGS=-Wconversion -Wshadow" -U ALAMO_ENGINE_MODULES %* 2>&1
+  "%CMAKE%" -S . -B %BT% -G Ninja -DCMAKE_BUILD_TYPE=Release "-DCMAKE_MAKE_PROGRAM=%TC%\venv\Scripts\ninja.exe" "-DCMAKE_CXX_COMPILER=%TC%\llvm\bin\clang++.exe" "-DCMAKE_CXX_FLAGS=-Wconversion -Wshadow" -U ALAMO_ENGINE_MODULES %* 2>&1
   echo configure exit !ERRORLEVEL!
 )
 > logs\clang_build.txt (
-  "%CMAKE%" --build build-clang 2>&1
+  "%CMAKE%" --build %BT% 2>&1
   echo build exit !ERRORLEVEL!
   echo === tests
   rem Per-tree temp dir: tests write fixtures under fixed %TEMP% names, so concurrent builds would clobber each other.
-  if not exist build-clang\tmp mkdir build-clang\tmp
-  set "TMP=%~dp0build-clang\tmp"
-  set "TEMP=%~dp0build-clang\tmp"
-  python -I tools\lint\test_slot.py -- "%CTEST%" --test-dir build-clang --output-on-failure --output-junit "%~dp0build-clang\ctest_junit.xml" -j 8 2>&1
+  if not exist %BT%\tmp mkdir %BT%\tmp
+  set "TMP=%~dp0%BT%\tmp"
+  set "TEMP=%~dp0%BT%\tmp"
+  python -I tools\lint\test_slot.py -- "%CTEST%" --test-dir %BT% --output-on-failure --output-junit "%~dp0%BT%\ctest_junit.xml" -j 8 2>&1
   echo ctest exit !ERRORLEVEL!
-  python tools\lint\ctest_skips.py "%~dp0build-clang\ctest_junit.xml"
+  python tools\lint\ctest_skips.py "%~dp0%BT%\ctest_junit.xml"
 )
 echo BUILD_DONE>> logs\clang_configure.txt
-python tools\lint\build_summary.py --state build-clang\build_state.json logs\clang_configure.txt logs\clang_build.txt
-set "ALAMO_BUILD_EXTRA=%~dp0build-clang\build_state.json"
-python roadmap-store\roadmap_store.py record-build clang build-clang logs\clang_configure.txt logs\clang_build.txt
+python tools\lint\build_summary.py --state %BT%\build_state.json logs\clang_configure.txt logs\clang_build.txt
+set "ALAMO_BUILD_EXTRA=%~dp0%BT%\build_state.json"
+python roadmap-store\roadmap_store.py record-build clang %BT% logs\clang_configure.txt logs\clang_build.txt

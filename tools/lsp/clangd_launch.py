@@ -22,8 +22,10 @@ ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)
 TC = os.path.join(ROOT, 'toolchain')
 CLANGD = os.path.join(TC, 'llvm', 'bin', 'clangd.exe')
 SETUP = os.path.join(TC, 'msvc', 'setup_x64.bat')
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'lint'))
+import build_trees  # noqa: E402
 # The tree `.clangd` names; only used for the hint below.
-CLANGD_TREE = 'build-wt-clang'
+CLANGD_TREE = build_trees.CLANGD_TREE
 ENV_KEYS = ('INCLUDE', 'LIB', 'LIBPATH', 'PATH', 'VCToolsInstallDir', 'WindowsSdkDir', 'WindowsSDKVersion',
             'UniversalCRTSdkDir', 'UCRTVersion', 'VCINSTALLDIR')
 

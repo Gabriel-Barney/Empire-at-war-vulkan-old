@@ -18,6 +18,8 @@ import subprocess
 import sys
 
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'lint'))
+import build_trees  # noqa: E402
 LLVM_BIN = os.path.join(ROOT, "toolchain", "llvm", "bin")
 # llvm-cov regexes for files that are not engine code (LLVM regex: no look-ahead, so several patterns).
 CLI_FILES = ("megtool.cpp", "fx2dump.cpp")
@@ -125,7 +127,7 @@ def selftest():
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--tree", default="build-cov")
+    ap.add_argument("--tree", default=build_trees.main_tree("cov"))
     ap.add_argument("--no-html", action="store_true")
     ap.add_argument("--files", action="store_true", help="print every file, lowest line coverage first")
     ap.add_argument("--min-lines", type=int, default=0, help="with --files: only files with at least N lines")

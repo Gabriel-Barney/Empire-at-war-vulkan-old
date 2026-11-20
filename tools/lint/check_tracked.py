@@ -28,12 +28,15 @@ import subprocess
 import sys
 import tempfile
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import build_trees  # noqa: E402
+
 MAX_BYTES = 512 * 1024
 DATA_MAX_BYTES = 128 * 1024
 DATA_EXTS = {'.json', '.csv', '.tsv', '.xml', '.txt', '.crc', '.yaml', '.yml', '.html', '.ini'}
 OUTPUT_DIRS = {'out', 'work', 'mods', 'bin', 'obj', 'logs', 'dist', 'backups', '__pycache__', '.vs', 'x64',
                'debug', 'release', 'cmakefiles'}
-OUTPUT_PREFIXES = ('build-', 'optional_')
+OUTPUT_PREFIXES = (build_trees.PREFIX, 'optional_')
 BUILD_EXTS = {'.obj', '.o', '.pdb', '.ilk', '.exe', '.dll', '.lib', '.exp', '.idb', '.ipch', '.pch', '.pyc', '.pyo',
               '.log', '.tmp', '.actual', '.spv', '.dxil', '.cso', '.fxo', '.trace', '.pkl', '.dat'}
 DATA_ROOTS = ('tests/**', '**/testdata/**')
@@ -185,7 +188,7 @@ def selftest():
     expect(r('engine/apps/sim/src/big.cpp', 468 * 1024) == [], 'source keeps the 512 KiB limit')
     expect(any(w.startswith('output') for w in r('tools/probe_mod/v2/Mods/P/Data/x.xml')), 'Mods output folder')
     expect(any(w.startswith('output') for w in r('tools/probe_mod/v2/OPTIONAL_X/a.txt')), 'OPTIONAL_ output folder')
-    expect(any(w.startswith('output') for w in r('build-wt-msvc/CMakeCache.txt')), 'build- output folder')
+    expect(any(w.startswith('output') for w in r(build_trees.WARM_TREE + '/CMakeCache.txt')), 'build- output folder')
     expect(r('engine/apps/game/testdata/mod_fixture/corruption/Mods/F/Data/XML/a.xml') == [], 'Mods in testdata')
     expect(any(w.startswith('type') for w in r('tools/x/run.log')), 'log file type')
     expect(any(w.startswith('type') for w in r('engine/render/shaders/a.spv', 10, True)), 'spv type')

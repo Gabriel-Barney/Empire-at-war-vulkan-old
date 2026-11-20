@@ -25,6 +25,9 @@ import re
 import subprocess
 import sys
 
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), *(['..'] * 4), 'tools', 'lint'))
+import build_trees  # noqa: E402
+
 TICKS = 36000
 FRAME_MARGIN = 3000
 ALPHA = 0.05
@@ -133,7 +136,7 @@ def selftest():
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--exe", default=os.path.join("build-wt-msvc", "bin", "alamo_headless.exe"))
+    ap.add_argument("--exe", default=os.path.join(build_trees.WARM_TREE, "bin", "alamo_headless.exe"))
     ap.add_argument("--seeds", type=int, default=10)
     ap.add_argument("--jobs", type=int, default=4)
     ap.add_argument("--out", default=os.path.join("tools", "probe_mod", "q2_traces", "out", "skai_exit"))

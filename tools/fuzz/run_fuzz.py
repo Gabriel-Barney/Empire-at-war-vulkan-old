@@ -21,6 +21,8 @@ import sys
 import time
 
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'lint'))
+import build_trees  # noqa: E402
 TARGETS = ["fuzz_xml", "fuzz_meg", "fuzz_alo", "fuzz_ala", "fuzz_texture", "fuzz_fx2",
            # mcx2 t08: the smoke targets (smoke/fuzz_targets.hpp); alamo_fuzz_smoke runs the same readers in every tree
            "fuzz_ted", "fuzz_dat", "fuzz_mtd", "fuzz_rc", "fuzz_clip", "fuzz_particle", "fuzz_lc", "fuzz_wav", "fuzz_bink"]
@@ -191,7 +193,7 @@ def selftest():
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--tree", default="build-fuzz")
+    ap.add_argument("--tree", default=build_trees.main_tree("fuzz"))
     ap.add_argument("--seconds", type=int, default=60, help="time budget per target")
     ap.add_argument("--only", default="", help="comma-separated targets (default: all)")
     ap.add_argument("--jobs", type=int, default=1, help="parallel libFuzzer workers per target")

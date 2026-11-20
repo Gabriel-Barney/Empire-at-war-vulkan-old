@@ -29,6 +29,7 @@ import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from run_suite import ROOT, cpu_busy_pct, scenes  # noqa: E402
+from run_suite import build_trees  # noqa: E402
 
 
 def zone_rows(results: dict, scene: str, counts: list[int], patterns: list[str]) -> list[list[str]]:
@@ -72,7 +73,7 @@ def main(argv: list[str]) -> int:
     ap.add_argument("--workers", default="0,1,3,7,15")
     ap.add_argument("--rounds", type=int, default=2)
     ap.add_argument("--scenes", default="", help="comma list of scene names (default: all in tests/benchmark)")
-    ap.add_argument("--build-dir", default="build-wt-msvc")
+    ap.add_argument("--build-dir", default=build_trees.WARM_TREE)
     ap.add_argument("--out", default="")
     ap.add_argument("--zones", default="", help="comma list of zone names or prefix* patterns for the zone table")
     ap.add_argument("--max-busy", type=float, default=0.0,

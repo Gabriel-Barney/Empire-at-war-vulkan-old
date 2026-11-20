@@ -45,6 +45,8 @@ import tempfile
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.dirname(os.path.dirname(HERE))
 KIT_REL = os.path.join("tools", "probe_mod", "q2_traces")
+sys.path.insert(0, os.path.join(REPO, "tools", "lint"))
+import build_trees  # noqa: E402
 sys.path.insert(0, os.path.join(REPO, KIT_REL, "analysis"))
 import q2_parity as q2  # noqa: E402  (tools/probe_mod/q2_traces/analysis/q2_parity.py: trace / queue / AI-log parsers)
 
@@ -145,11 +147,7 @@ def refs_search(a):
 
 
 def default_port_exe():
-    for tree in ("build-wt-msvc", "build-msvc", "build-wt-clang", "build-clang"):
-        p = os.path.join(REPO, tree, "bin", "alamo_headless.exe")
-        if os.path.exists(p):
-            return p
-    return None
+    return build_trees.find_exe("alamo_headless.exe", REPO)
 
 
 # ---- metric extraction: galactic ----------------------------------------------------------------------------------------

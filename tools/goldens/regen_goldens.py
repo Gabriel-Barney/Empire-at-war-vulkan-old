@@ -44,6 +44,8 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(os.path.dirname(HERE))
 sys.path.insert(0, HERE)
 import convert_goldens as cg  # noqa: E402
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'lint'))
+import build_trees  # noqa: E402
 
 HEADLESS_DIR = "engine/apps/headless/testdata"
 MODS_DIR = "tests/goldens/mods"
@@ -323,7 +325,7 @@ def bench_step(build_dir: str, build_arg: str, check_only: bool, listing: bool, 
 
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
-    ap.add_argument("--build-dir", default="build-msvc")
+    ap.add_argument("--build-dir", default=build_trees.main_tree("msvc"))
     ap.add_argument("--only", choices=("headless", "game", "all", "bench", "mods"), default="headless")
     ap.add_argument("--mods", action="store_true", help="only the mod goldens (tests/goldens/mods; same as --only mods)")
     ap.add_argument("--no-mods", action="store_true", help="leave the mod goldens alone in --only headless / all")

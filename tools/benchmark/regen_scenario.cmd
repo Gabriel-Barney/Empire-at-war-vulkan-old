@@ -12,7 +12,7 @@ if "%SC%"=="" set "SC=space_battle"
 if /i not "%SC:~-7%"==".abench" set "SC=tests\benchmark\%SC%.abench"
 set "EXE="
 if not "%~2"=="" set "EXE=%~2\bin\alamo_headless.exe"
-if "%EXE%"=="" for %%B in (build-msvc build-wt-msvc) do if not defined EXE if exist "%%B\bin\alamo_headless.exe" set "EXE=%%B\bin\alamo_headless.exe"
+if "%EXE%"=="" for /f "delims=" %%e in ('""%CD%\toolchain\venv\Scripts\python.exe" -I "%CD%\tools\lint\build_trees.py" exe alamo_headless.exe --main-first"') do set "EXE=%%e"
 if not exist "%EXE%" (echo regen_scenario: no alamo_headless.exe; build first ^(build_msvc.cmd^)& exit /b 2)
 if not exist "%SC%" (echo regen_scenario: %SC% not found& exit /b 2)
 echo regen_scenario: %EXE% --bench-regen %SC%

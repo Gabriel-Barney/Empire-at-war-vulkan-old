@@ -31,6 +31,8 @@ import sys
 import time
 
 ROOT = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'lint'))
+import build_trees  # noqa: E402
 BENCH_DIR = os.path.join(ROOT, "tests", "benchmark")
 
 
@@ -105,7 +107,7 @@ def main(argv: list[str]) -> int:
     ap.add_argument("--repeats", type=int, default=3)
     ap.add_argument("--scenes", default="", help="comma list of scene names (default: all in tests/benchmark)")
     ap.add_argument("--load", action="store_true", help="map-load scenes: realtime, cold then warm cache, rendered scenes only")
-    ap.add_argument("--build-dir", default="build-msvc")
+    ap.add_argument("--build-dir", default=build_trees.main_tree("msvc"))
     ap.add_argument("--out", default=os.path.join("logs", "bench_suite"))
     ap.add_argument("--max-busy", type=float, default=10.0, help="CPU percent above which a run counts as noisy (default 10)")
     ap.add_argument("--keep-going", action="store_true", help="carry on after a failed run")

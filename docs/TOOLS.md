@@ -37,6 +37,7 @@ How it is wired:
 | Launcher (Rust) | `build_launcher.cmd`; by hand `launcher\cargo.cmd <args>` |
 | Read a build result | `python tools\lint\build_summary.py <logs>` (the scripts print it) |
 | Which tests cover my change | `python -I tools\lint\changed_tests.py` |
+| Build-tree name or exe path | `python -I tools\lint\build_trees.py name agent wt msvc`, `exe alamo_headless.exe` (Python: `import build_trees`) |
 | Static checks | `python tools\lint\run_tidy.py` (clang-tidy), `check_mod_names.py`, `check_limits.py` (limit tags, §8), `check_mod_system.py` (mod-system shims, ums4), `check_string_literals.py` (hook) |
 | Goldens | `tools\regen_goldens.cmd` (skill `regen-goldens` first; `--mods` for the mod goldens of `tests/goldens/mods`) |
 | Grade every installed mod and stack (G0-G3) | `tools\modcorpus\run_corpus.cmd` (`tools/modcorpus/README.md`); weekly ASan sweep `tools\modcorpus\asan_sweep.cmd` |

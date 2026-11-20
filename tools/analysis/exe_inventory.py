@@ -2,7 +2,9 @@
 # Usage: ctest --test-dir <tree> --show-only=json-v1 > <dir>/ctest.json; python tools/analysis/exe_inventory.py <dir> [tree]
 # Writes <dir>/inv.json and prints one line per exe. Link times are wall time of the ninja step under load.
 import json,os,re,sys,collections
-sp=sys.argv[1]; b=sys.argv[2] if len(sys.argv)>2 else 'build-wt-msvc'
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'lint'))
+import build_trees  # noqa: E402
+sp=sys.argv[1]; b=sys.argv[2] if len(sys.argv)>2 else build_trees.WARM_TREE
 j=json.load(open(sp+'/ctest.json',encoding='utf-8'))
 cost={}
 for l in open(b+'/Testing/Temporary/CTestCostData.txt'):

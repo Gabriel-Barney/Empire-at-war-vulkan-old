@@ -22,6 +22,9 @@ import tempfile
 from contextlib import redirect_stdout
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import build_trees  # noqa: E402
+
 MAX_DIAG = 12      # warning / error lines shown
 MAX_FAIL_LINES = 25  # output lines shown per failed test
 MAX_FAILED = 8     # failed tests with output shown
@@ -281,7 +284,7 @@ def selftest() -> int:
         if info['failure_kind'] != 'compile':
             bad.append(f"compile kind {info['failure_kind']}")
         log.write_text('configure exit 0\nbuild exit 0\n100% tests passed out of 3\nctest exit 0\nAGENT_DONE\n', encoding='utf8')
-        state = Path(td) / 'build-wt-msvc' / 'build_state.json'
+        state = Path(td) / build_trees.WARM_TREE / 'build_state.json'
         state.parent.mkdir()
         state.write_text('{"commit": "abc"}', encoding='utf8')
         with redirect_stdout(io.StringIO()):

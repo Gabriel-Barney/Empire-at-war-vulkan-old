@@ -12,7 +12,8 @@ call "%CD%\build_agent.cmd" msvc all none
 if errorlevel 1 (echo asan_sweep: MSVC build failed& exit /b 4)
 set "ALAMO_SANITIZE=address"
 call "%CD%\build_asan.cmd" "core;vfs;data;jobs;galactic;objects;anim;commands;tactical;lua;ai;assets;rhi;shaderxlat;materials;terrain;render;ui;audio;video;apps"
-if not exist "%CD%\build-asan\bin\alamo_headless.exe" (echo asan_sweep: ASan build has no alamo_headless.exe& exit /b 4)
+for /f "delims=" %%t in ('""%CD%\toolchain\venv\Scripts\python.exe" -I "%CD%\tools\lint\build_trees.py" name main asan"') do set "BT=%%t"
+if not exist "%CD%\%BT%\bin\alamo_headless.exe" (echo asan_sweep: ASan build has no alamo_headless.exe& exit /b 4)
 for /f %%D in ('python -c "import datetime;print(datetime.date.today().isoformat())"') do set "TODAY=%%D"
 call "%CD%\tools\modcorpus\run_corpus.cmd" --asan --stages check,runs --date %TODAY%-asan %*
 exit /b %ERRORLEVEL%

@@ -24,6 +24,9 @@ import tempfile
 import time
 from pathlib import Path
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import build_trees  # noqa: E402
+
 PENDING = 'verify_pending.json'
 VERIFIED = 'verified.json'
 # Paths that cannot change what the MSVC build or its tests do. Anything else needs a build.
@@ -155,23 +158,24 @@ def selftest() -> int:
         g('add', '.')
         g('commit', '-q', '-m', 'one')
         base = git(repo, 'rev-parse', 'HEAD')[1]
-        tree = repo / 'build-wt-msvc'
+        wt, main_t = build_trees.LAND_TREES
+        tree = repo / wt
         # docs-only change: no build needed
         (repo / 'docs' / 'x.md').write_text('y\n')
         g('commit', '-q', '-am', 'docs')
-        check(cmd_land_check(base, 'HEAD', ['build-wt-msvc'], repo) == 0, 'docs-only change should pass')
+        check(cmd_land_check(base, 'HEAD', [wt], repo) == 0, 'docs-only change should pass')
         # code change, no stamp: fail
         (repo / 'a.cpp').write_text('int b;\n')
         g('commit', '-q', '-am', 'code')
-        check(cmd_land_check(base, 'HEAD', ['build-wt-msvc'], repo) == 1, 'code change without a stamp should fail')
+        check(cmd_land_check(base, 'HEAD', [wt], repo) == 1, 'code change without a stamp should fail')
         # module subset stamp: fail
         cmd_begin(tree, 'core;lua', '', repo)
         cmd_pass(tree)
-        check(cmd_land_check(base, 'HEAD', ['build-wt-msvc'], repo) == 1, 'subset stamp should fail')
+        check(cmd_land_check(base, 'HEAD', [wt], repo) == 1, 'subset stamp should fail')
         # regex stamp: fail
         cmd_begin(tree, 'all', 'lua', repo)
         cmd_pass(tree)
-        check(cmd_land_check(base, 'HEAD', ['build-wt-msvc'], repo) == 1, 'regex stamp should fail')
+        check(cmd_land_check(base, 'HEAD', [wt], repo) == 1, 'regex stamp should fail')
         # dirty at begin: no stamp
         (repo / 'a.cpp').write_text('int c;\n')
         cmd_begin(tree, 'all', '', repo)
@@ -181,21 +185,21 @@ def selftest() -> int:
         # begin without pass (failed build): no stamp, and it drops an older one
         cmd_begin(tree, 'all', '', repo)
         cmd_pass(tree)
-        check(cmd_land_check(base, 'HEAD', ['build-wt-msvc'], repo) == 0, 'full fast-tier stamp should pass')
+        check(cmd_land_check(base, 'HEAD', [wt], repo) == 0, 'full fast-tier stamp should pass')
         cmd_begin(tree, 'all', '', repo)
-        check(cmd_land_check(base, 'HEAD', ['build-wt-msvc'], repo) == 1, 'a started, unfinished build must drop the stamp')
+        check(cmd_land_check(base, 'HEAD', [wt], repo) == 1, 'a started, unfinished build must drop the stamp')
         # all-tests stamp in the second tree counts
-        cmd_begin(repo / 'build-msvc', 'all', 'all', repo)
-        cmd_pass(repo / 'build-msvc')
-        check(cmd_land_check(base, 'HEAD', ['build-wt-msvc', 'build-msvc'], repo) == 0, 'build-msvc stamp should pass')
+        cmd_begin(repo / main_t, 'all', 'all', repo)
+        cmd_pass(repo / main_t)
+        check(cmd_land_check(base, 'HEAD', [wt, main_t], repo) == 0, 'build-msvc stamp should pass')
         # a docs-only commit on top of a stamped one keeps the stamp valid (same build-source hash)
         (repo / 'docs' / 'x.md').write_text('z\n')
         g('commit', '-q', '-am', 'docs again')
-        check(cmd_land_check(base, 'HEAD', ['build-wt-msvc', 'build-msvc'], repo) == 0, 'docs commit after a stamp should keep it')
+        check(cmd_land_check(base, 'HEAD', [wt, main_t], repo) == 0, 'docs commit after a stamp should keep it')
         # new commit makes the stamp stale
         (repo / 'a.cpp').write_text('int d;\n')
         g('commit', '-q', '-am', 'more')
-        check(cmd_land_check(base, 'HEAD', ['build-wt-msvc', 'build-msvc'], repo) == 1, 'stale stamp should fail')
+        check(cmd_land_check(base, 'HEAD', [wt, main_t], repo) == 1, 'stale stamp should fail')
     for b in bad:
         print('FAIL: ' + b)
     print('verified_build selftest: ' + ('FAILED' if bad else 'ok'))
@@ -226,7 +230,7 @@ def main(argv=None) -> int:
         return cmd_pass(Path(a.tree))
     if a.cmd == 'land-check':
         rc, top = git(cwd, 'rev-parse', '--show-toplevel')  # trees live at the worktree root, wherever this runs from
-        return cmd_land_check(a.base, a.head, a.tree or ['build-wt-msvc', 'build-msvc'], top if rc == 0 and top else cwd)
+        return cmd_land_check(a.base, a.head, a.tree or list(build_trees.LAND_TREES), top if rc == 0 and top else cwd)
     ap.print_help()
     return 2
 

@@ -18,6 +18,8 @@ import subprocess
 import sys
 
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import build_trees  # noqa: E402
 TIDY = os.path.join(ROOT, "toolchain", "llvm", "bin", "clang-tidy.exe")
 FINDING = re.compile(r"^(?P<file>[A-Za-z]:[^:]+|[^:]+):(?P<line>\d+):(?P<col>\d+): (?P<kind>warning|error): (?P<msg>.*) \[(?P<check>[\w.,-]+)\]$")
 
@@ -83,7 +85,7 @@ def selftest():
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--tree", default="build-wt-clang")
+    ap.add_argument("--tree", default=build_trees.CLANGD_TREE)
     ap.add_argument("--only", help="regex on the repo-relative source path")
     ap.add_argument("--tests", action="store_true", help="include */tests/* sources")
     ap.add_argument("-j", type=int, default=max(1, (os.cpu_count() or 2) // 2))

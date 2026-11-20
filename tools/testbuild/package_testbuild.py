@@ -41,6 +41,8 @@ import zipfile
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 HERE = ROOT / "tools" / "testbuild"
+sys.path.insert(0, str(ROOT / "tools" / "lint"))
+import build_trees  # noqa: E402
 BINARIES = ["Play.exe", "alamo_game.exe", "alamo_mod_check.exe", "avcodec-62.dll", "avformat-62.dll", "avutil-60.dll",
             "dxcompiler.dll", "dxil.dll", "amd_fidelityfx_loader_vk.dll", "amd_fidelityfx_upscaler_vk.dll",
             "libxess.dll", "intel_xess_license.txt", "COPYING.LGPLv2.1"]
@@ -291,7 +293,7 @@ def smoke(stage, out_dir):
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--build-dir", default="build-msvc")
+    ap.add_argument("--build-dir", default=build_trees.main_tree("msvc"))
     ap.add_argument("--name", default="")
     ap.add_argument("--smoke", action="store_true")
     ap.add_argument("--allow-dirty", action="store_true")

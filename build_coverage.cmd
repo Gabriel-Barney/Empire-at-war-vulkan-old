@@ -8,6 +8,8 @@ rem Not a gate build and not recorded on the roadmap. Coverage counters change n
 rem instrumented tests run slower; a test that fails here and passes in build-wt-clang is a timing or fixture issue first.
 setlocal EnableDelayedExpansion
 cd /d "%~dp0"
+rem Tree name from tools\lint\build_trees.py (ref3 t03), the one place that names build trees.
+for /f "delims=" %%t in ('""%~dp0toolchain\venv\Scripts\python.exe" -I "%~dp0tools\lint\build_trees.py" name main cov"') do set "BT=%%t"
 if not exist logs mkdir logs
 set TC=%~dp0toolchain
 set MODULES=core;vfs;data;jobs;galactic;objects;anim;commands;tactical;lua;ai
@@ -26,28 +28,28 @@ call "%~dp0tools\test_env.cmd"
 call "%~dp0tools\cache_env.cmd"
 set "COV=-fprofile-instr-generate -fcoverage-mapping"
 > logs\cov_configure.txt (
-  "%CMAKE%" -S . -B build-cov -G Ninja -DCMAKE_BUILD_TYPE=Release "-DCMAKE_MAKE_PROGRAM=%TC%\venv\Scripts\ninja.exe" "-DCMAKE_CXX_COMPILER=%TC%\llvm\bin\clang++.exe" "-DCMAKE_CXX_FLAGS=-Wconversion -Wshadow %COV%" "-DCMAKE_EXE_LINKER_FLAGS=%COV%" "-DALAMO_ENGINE_MODULES=!MODULES!" 2>&1
+  "%CMAKE%" -S . -B %BT% -G Ninja -DCMAKE_BUILD_TYPE=Release "-DCMAKE_MAKE_PROGRAM=%TC%\venv\Scripts\ninja.exe" "-DCMAKE_CXX_COMPILER=%TC%\llvm\bin\clang++.exe" "-DCMAKE_CXX_FLAGS=-Wconversion -Wshadow %COV%" "-DCMAKE_EXE_LINKER_FLAGS=%COV%" "-DALAMO_ENGINE_MODULES=!MODULES!" 2>&1
   echo configure exit !ERRORLEVEL!
 )
-if exist build-cov\coverage\raw rmdir /s /q build-cov\coverage\raw
-mkdir build-cov\coverage\raw
+if exist %BT%\coverage\raw rmdir /s /q %BT%\coverage\raw
+mkdir %BT%\coverage\raw
 set CTEST_SEL=-LE slow
 if /i "%TIER%"=="all" set CTEST_SEL=
 > logs\cov_build.txt (
-  "%CMAKE%" --build build-cov 2>&1
+  "%CMAKE%" --build %BT% 2>&1
   echo build exit !ERRORLEVEL!
   echo === tests
-  if not exist build-cov\tmp mkdir build-cov\tmp
-  set "TMP=%~dp0build-cov\tmp"
-  set "TEMP=%~dp0build-cov\tmp"
+  if not exist %BT%\tmp mkdir %BT%\tmp
+  set "TMP=%~dp0%BT%\tmp"
+  set "TEMP=%~dp0%BT%\tmp"
   rem %%m = binary signature, %%p = process id: one raw profile per test process, merged afterwards.
-  set "LLVM_PROFILE_FILE=%~dp0build-cov\coverage\raw\%%m-%%p.profraw"
-  python -I tools\lint\test_slot.py -- "%CTEST%" --test-dir build-cov !CTEST_SEL! --output-on-failure --output-junit "%~dp0build-cov\ctest_junit.xml" -j 6 2>&1
+  set "LLVM_PROFILE_FILE=%~dp0%BT%\coverage\raw\%%m-%%p.profraw"
+  python -I tools\lint\test_slot.py -- "%CTEST%" --test-dir %BT% !CTEST_SEL! --output-on-failure --output-junit "%~dp0%BT%\ctest_junit.xml" -j 6 2>&1
   echo ctest exit !ERRORLEVEL!
-  python tools\lint\ctest_skips.py "%~dp0build-cov\ctest_junit.xml"
+  python tools\lint\ctest_skips.py "%~dp0%BT%\ctest_junit.xml"
 )
 echo BUILD_DONE>> logs\cov_configure.txt
 python tools\lint\build_summary.py logs\cov_configure.txt logs\cov_build.txt
 findstr /c:"build exit 0" logs\cov_build.txt >nul || exit /b 2
-python -I tools\coverage\coverage_report.py --tree build-cov
+python -I tools\coverage\coverage_report.py --tree %BT%
 exit /b !ERRORLEVEL!

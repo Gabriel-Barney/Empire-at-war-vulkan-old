@@ -14,8 +14,7 @@ if "%ID%"=="" (echo usage: run_t09.cmd port^|retail^|check ^<workshop id^>& exit
 shift
 shift
 set "ROOT=%~dp0..\..\.."
-if not defined ALAMO_BIN if exist "%ROOT%\build-msvc\bin\alamo_game.exe" set "ALAMO_BIN=%ROOT%\build-msvc\bin"
-if not defined ALAMO_BIN if exist "%ROOT%\build-wt-msvc\bin\alamo_game.exe" set "ALAMO_BIN=%ROOT%\build-wt-msvc\bin"
+if not defined ALAMO_BIN for /f "delims=" %%b in ('""%ROOT%\toolchain\venv\Scripts\python.exe" -I "%ROOT%\tools\lint\build_trees.py" bin --main-first --exe alamo_game.exe --root "%ROOT%""') do set "ALAMO_BIN=%%b"
 set "OUT=%~dp0out"
 if not exist "%OUT%" mkdir "%OUT%"
 for /f %%T in ('powershell -NoProfile -Command "Get-Date -Format yyyyMMdd-HHmmss"') do set "STAMP=%%T"

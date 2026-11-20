@@ -39,7 +39,10 @@ if defined TREE_LEFT_OUT (
   set "ATESTS=%~4"
 )
 set TC=%~dp0toolchain
-set B=build-!ATREE!-!ACOMP!
+rem Tree name from tools\lint\build_trees.py (ref3 t03), the one place that names build trees.
+set "B="
+for /f "delims=" %%t in ('""%~dp0toolchain\venv\Scripts\python.exe" -I "%~dp0tools\lint\build_trees.py" name agent !ATREE! !ACOMP!"') do set "B=%%t"
+if not defined B (echo build_agent: no tree name from tools\lint\build_trees.py& exit /b 2)
 set LOG=logs\agent_!ATREE!_!ACOMP!.txt
 if not exist logs mkdir logs
 call "%TC%\msvc\setup_x64.bat" >nul
@@ -68,6 +71,9 @@ rem Cheap check first (2026-11-12): a string literal an edit split across lines 
 rem fails here in a second instead of in a build. Scans the C++ files changed against origin/dev.
 python -I tools\lint\check_string_literals.py --changed
 if errorlevel 1 (echo build_agent: fix the literal above first; nothing was built.& exit /b 1)
+rem ref3 t03: build-tree names are spelled only in tools\lint\build_trees.py (instant).
+python -I tools\lint\build_trees.py check
+if errorlevel 1 (echo build_agent: ask tools\lint\build_trees.py for the tree names above; nothing was built.& exit /b 1)
 rem mcx0 t03: the tag ledger and the Lua binding effect column match the code (tools\lint\check_tag_ledger.py, about a second).
 python -I tools\lint\check_tag_ledger.py
 if errorlevel 1 (echo build_agent: regenerate the ledger named above first; nothing was built.& exit /b 1)

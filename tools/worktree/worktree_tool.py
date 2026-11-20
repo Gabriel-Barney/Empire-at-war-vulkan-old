@@ -41,10 +41,13 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 LINKED = ("Data", "extracted", "toolchain", "roadmap-store")
-MAIN_TREES_KEPT = {"build-msvc", "build-clang", "build-asan"}
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "lint"))
+import build_trees  # noqa: E402
+
+MAIN_TREES_KEPT = build_trees.MAIN_TREES_KEPT
 # The tree build_agent.cmd uses by default (bo1 t06): every kept worktree keeps it warm however long it has been idle, so the
 # next task there starts from an incremental build, not a clean one. Other trees (per-task, bench, clang) are pruned by age.
-WARM_TREE = "build-wt-msvc"
+WARM_TREE = build_trees.WARM_TREE
 NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
 REPARSE_ATTR = 0x400
 DIR_ATTR = 0x10
@@ -309,7 +312,7 @@ def inspect(ctx: Ctx, wt: Worktree, keep: set, only: set, days: float, pushed_ok
     if sizes:
         for e in sorted(os.listdir(wt.path)):
             full = os.path.join(wt.path, e)
-            if e.startswith("build-") and os.path.isdir(full) and not is_link_dir(full):
+            if build_trees.is_tree_name(e) and os.path.isdir(full) and not is_link_dir(full):
                 inf.build_bytes += tree_scan(full)[0]
                 inf.build_trees += 1
     if inf.merged is None:
@@ -494,7 +497,7 @@ def cmd_clean(ctx: Ctx, apply: bool = False, days: float = 2.0, keep=(), only=()
 def _prune_trees(wt: Worktree, days: float, apply: bool, out, result: dict):
     for e in sorted(os.listdir(wt.path)):
         full = os.path.join(wt.path, e)
-        if not (e.startswith("build-") and os.path.isdir(full)) or is_link_dir(full):
+        if not (build_trees.is_tree_name(e) and os.path.isdir(full)) or is_link_dir(full):
             continue
         if wt.is_main and e in MAIN_TREES_KEPT:
             continue

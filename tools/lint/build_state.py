@@ -23,6 +23,9 @@ import tempfile
 import time
 from pathlib import Path
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import build_trees  # noqa: E402
+
 STATE = 'build_state.json'
 BIG = 4 << 20  # untracked files above this are hashed by size and mtime only
 # Keys that define "the same build"; a failure with all of them equal is a repeat.
@@ -114,7 +117,7 @@ def selftest() -> int:
         (repo / 'a.cpp').write_text('int a;\n')
         g('add', '.')
         g('commit', '-q', '-m', 'one')
-        tree = repo / 'build-wt-msvc'
+        tree = repo / build_trees.WARM_TREE
         s0 = source_state(repo)
         check(s0['worktree'] == 'wt-x' and not s0['dirty'] and s0['commit'], f'clean state {s0}')
         (repo / 'a.cpp').write_text('int b;\n')

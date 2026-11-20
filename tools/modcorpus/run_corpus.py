@@ -50,6 +50,7 @@ ROOT = os.path.dirname(os.path.dirname(HERE))
 sys.path.insert(0, HERE)
 sys.path.insert(0, os.path.join(ROOT, "tools", "lint"))
 import grade as gr  # noqa: E402
+import build_trees  # noqa: E402
 
 try:
     import test_slot  # noqa: E402
@@ -574,7 +575,7 @@ def parse_args(argv=None):
     ap.add_argument("--build-dir", default=None)
     ap.add_argument("--bin", default=None, help="the folder of the exes (default <build-dir>/bin)")
     ap.add_argument("--asan", action="store_true", help="also run the headless runs under the ASan build (t05)")
-    ap.add_argument("--asan-build-dir", default="build-asan")
+    ap.add_argument("--asan-build-dir", default=build_trees.main_tree("asan"))
     ap.add_argument("--asan-slowdown", type=float, default=8.0, help="timeout factor of the ASan runs")
     ap.add_argument("--out-root", default=os.path.join(ROOT, "logs", "modcorpus"))
     ap.add_argument("--date", default=datetime.date.today().isoformat())
@@ -599,7 +600,7 @@ def parse_args(argv=None):
     if "check" not in a.stages:
         ap.error("--stages must include check")
     if a.build_dir is None:
-        a.build_dir = next((p for p in ("build-wt-msvc", "build-msvc") if os.path.isdir(os.path.join(ROOT, p, "bin"))), "build-wt-msvc")
+        a.build_dir = os.path.basename(build_trees.find_tree(ROOT) or build_trees.WARM_TREE)
     if a.game:
         a.game = os.path.abspath(a.game)
     if a.steam_root:

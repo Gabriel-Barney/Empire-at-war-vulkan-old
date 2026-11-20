@@ -20,6 +20,8 @@ import tempfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import build_trees  # noqa: E402
 LIST = 'alamo_golden_merge.txt'
 HEADLESS = re.compile(r'^engine/apps/headless/testdata/[^/]+\.crc$')
 SMOKE = re.compile(r'^engine/apps/game/testdata/game_smoke_[a-z]+\.(?:crc|rec)$')
@@ -200,7 +202,7 @@ def main(argv) -> int:
     if argv[:1] == ['resolve']:
         return cmd_resolve(cwd)
     if argv[:1] == ['regen']:
-        return cmd_regen(cwd, argv[1] if len(argv) > 1 else 'build-wt-msvc')
+        return cmd_regen(cwd, argv[1] if len(argv) > 1 else build_trees.WARM_TREE)
     print(__doc__)
     return 2
 

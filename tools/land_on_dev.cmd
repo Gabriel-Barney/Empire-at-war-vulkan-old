@@ -24,6 +24,8 @@ if /i "%~1"=="--create" set "CREATE=1"
 set "GOLDEN_MERGE="
 set "PY=python"
 if exist "%~dp0..\toolchain\venv\Scripts\python.exe" set "PY=%~dp0..\toolchain\venv\Scripts\python.exe"
+rem The worktree's MSVC tree, named by tools\lint\build_trees.py (ref3 t03).
+for /f "delims=" %%t in ('""%PY%" -I "%~dp0lint\build_trees.py" name agent msvc"') do set "WT_TREE=%%t"
 
 for /f "delims=" %%b in ('git rev-parse --abbrev-ref HEAD') do set "BR=%%b"
 if "%BR%"=="" goto :nobranch
@@ -87,7 +89,7 @@ if defined GOLDEN_MERGE (
   echo land_on_dev: building the merged HEAD without tests, to regenerate the goldens taken from origin/dev.
   call "%~dp0..\build_agent.cmd" msvc wt all none
   cd /d "%~dp0.."
-  "%PY%" -I "%~dp0lint\golden_merge.py" regen build-wt-msvc
+  "%PY%" -I "%~dp0lint\golden_merge.py" regen %WT_TREE%
   if errorlevel 1 (
     echo.
     echo land_on_dev: regenerating the merged goldens failed, see above. The merge is committed here; nothing was pushed.
@@ -99,12 +101,12 @@ rem dev must stay green (2026-11-12): push only a commit that was built and test
 rem can still break dev together, so a pass before the merge with origin/dev does not count. tools\lint\verified_build.py
 rem accepts a build-wt-msvc or build-msvc stamp for exactly HEAD (every module, fast tier or all tests; build_agent.cmd and
 rem build_msvc.cmd write it), or a change to docs / *.md / .claude only. Otherwise this runs the fast tier itself.
-"%PY%" -I "%~dp0lint\verified_build.py" land-check --base origin/dev --head HEAD --tree build-wt-msvc --tree build-msvc
+"%PY%" -I "%~dp0lint\verified_build.py" land-check --base origin/dev --head HEAD
 if errorlevel 1 (
   echo land_on_dev: building and testing the merged HEAD: build_agent.cmd msvc wt all, the fast tier. This takes a while.
   call "%~dp0..\build_agent.cmd" msvc wt all
   cd /d "%~dp0.."
-  "%PY%" -I "%~dp0lint\verified_build.py" land-check --base origin/dev --head HEAD --tree build-wt-msvc
+  "%PY%" -I "%~dp0lint\verified_build.py" land-check --base origin/dev --head HEAD --tree %WT_TREE%
   if errorlevel 1 (
     echo.
     echo land_on_dev: the merged HEAD did not pass the MSVC build and fast tier above. Nothing was pushed.
