@@ -1412,3 +1412,35 @@ void test_type_info_mod_categories() {
     CHECK(builtin[atat].category_mask == 0x20 && galactic_ai_structure_mask(builtin, static_cast<uint32_t>(ion)) == 0x20);
     CHECK(ai_category_bit("Mod_Walker", cat) == walker && ai_category_bit("Mod_Walker") == 0);
 }
+
+// tst2 t01 (b0137): ParityWorld's GameObjectTypes is never built. GameObjectTypes::raw() then answers an empty database,
+// so Find_All_Objects_Of_Type called by a plan thread does not crash: the player filter returns the player's store
+// objects (no company member views: no type has Company_Units), and a type-name filter finds no type, so the binding logs
+// its "unknown filter parameter" error and returns nothing.
+void test_find_all_objects_empty_types() {
+    {
+        objects::GameObjectTypes empty;
+        CHECK(empty.size() == 0 && empty.raw().type_count() == 0 && empty.raw().find("HeroShip") == objects::kNone);
+        CHECK(empty.resolve_name("HeroShip") == objects::kNone && empty.get_type_refs(0, "Company_Units").empty());
+    }
+    ParityWorld pw(false, {"Tst2FindAll"});
+    lua::GlobalValueStore gv;
+    pw.world->set_global_values(&gv);
+    auto num = [&gv](const char* n) { const lua::AiGlobalValue v = gv.get(n); return v.kind == lua::AiGlobalValue::Number ? v.number : -1.0; };
+    for (int32_t f = 1; f <= 30 * 60 && num("tst2_find_done") < 0.0; ++f) {
+        pw.sim->update();
+        pw.world->update_player(0, f, true, false);
+    }
+    int expected = 0;  // the Empire's live objects in the galactic store when the thread ran (it adds none before)
+    for (uint32_t slot = 0; slot < pw.store->capacity(); ++slot) {
+        const objects::ObjectHandle h = pw.store->handle_of_slot(slot);
+        if (h && pw.store->alive(h) && pw.store->owner(h) == 0) ++expected;
+    }
+    std::printf("find_all empty types: done %.0f, player filter %.0f objects (store %d), name -> %s, player + name -> %s\n",
+                num("tst2_find_done"), num("tst2_find_player"), expected, num("tst2_find_name_nil") == 1.0 ? "nil" : "a table",
+                num("tst2_find_both_nil") == 1.0 ? "nil" : "a table");
+    CHECK(num("tst2_find_done") == 1.0);
+    CHECK(expected > 0 && num("tst2_find_player") == static_cast<double>(expected));
+    CHECK(num("tst2_find_name_nil") == 1.0 && num("tst2_find_both_nil") == 1.0);
+    pw.world->set_global_values(nullptr);
+}

@@ -977,6 +977,43 @@ void test_scene_guard() {
     }
 }
 
+// tst2 t03 (bkt1 t06 coverage, b0079; MOVEMENT §4.3.2 item 7 [H], BKT1_ATTACK_RE §1.2): a staged attack block - the
+// block goal point G moved off T's point C by the staging (here G = C - (150, 0), as 0x40e260 / 0x440f90 would leave it
+// for a member inside its min range) - plans to G and the fire trim's line of fire ends at G, never at C. The height
+// passed with G is the order's C height (PHASE4 bkt1 t06 [port]: a staged G takes C's height). The scene of
+// test_scene_unit_target (engage 255, target half extents 5 at (1000, 0)); C's z 7.5.
+void test_scene_staged_trim() {
+    ::alamo::test::section("scene_staged_trim");
+    MovementSystem sys{MovementConfig{}};
+    scene_system(sys);
+    CHECK(sys.add_unit(attacker(10, kO)));
+    CHECK(sys.add_unit(attacker(900, kO + V2{1000.0f, 0.0f}, 5.0f)));
+    const V2 c = kO + V2{1000.0f, 0.0f}, g = kO + V2{850.0f, 0.0f};
+    // only the trim's tests count: they are taken along the path (x >= 600 here); the item-6 test "every member can fire
+    // from where it stands" (0x40edd0) is taken at the start point and aims at the object itself
+    uint32_t asked = 0, at_g = 0, at_c = 0, at_cz = 0;
+    alamo::test::set_fire_test<V2>(alamo::test::engagement_of(sys), [&](ObjectId, V2 p, ObjectId, bool, V2 end, float z) {
+        if (p.x - kO.x < 600.0f) return distance(p, c) <= 255.0f;
+        ++asked;
+        if (close2(end, g, 0.01f)) ++at_g;
+        if (close2(end, c, 0.01f)) ++at_c;
+        if (z == 7.5f) ++at_cz;
+        return distance(p, c) <= 255.0f;
+    });
+    MoveOrder o = attack_order({10}, 900, c, 5.0f, 255.0f);
+    o.destination = g;
+    o.attack.g = g;
+    o.attack.cz = 7.5f;
+    SimRng rng(7);
+    sys.move(o, rng, 1);
+    const UnitView v = sys.view(10);
+    std::printf("staged trim: %u fire test(s), %u ending at G, %u at C, %u with C's height; goal (%.3f, %.3f)\n", asked, at_g, at_c,
+                at_cz, static_cast<double>(v.goal.x - kO.x), static_cast<double>(v.goal.y - kO.y));
+    CHECK(asked > 0 && at_g == asked && at_c == 0 && at_cz == asked);
+    // the plan goes to G (the uncut path ends there); the trim keeps the outermost point within 255 of C, 10-steps from G
+    CHECK(v.has_goal && v.goal.x - kO.x >= 745.0f - 0.01f && v.goal.x - kO.x <= 755.0f + 0.01f);
+}
+
 // s78n t25 review fix 2 (MOVEMENT §4.2 item 6 [H]: "Otherwise short-range is set when d < E_r x
 // Short_Range_Attack_Formation_Coefficient 1.6"); bkm1 t04 (§4.2 step 2 item 7 test 3 [H]): a short-range seed recruits only
 // units of its own exact type. The scene of scene_solo: two Standard vehicles 50 apart, E_r = 255, r_seed = sqrt(15^2 +
@@ -1105,6 +1142,7 @@ int main() {
     test_scene_solo();
     test_scene_plain_orders();
     test_scene_guard();  // s78n t25.4
+    test_scene_staged_trim();  // tst2 t03 (bkt1 t06 coverage)
     test_scene_short_range();      // s78n t25 review fixes
     test_scene_guard_formation();
     test_scene_guard_trim_start();  // cmb1 t05

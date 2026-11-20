@@ -94,6 +94,7 @@ int main(int argc, char** argv) {
     test_hack_repair_range();  // s78n t07 / t01
     test_s78n_allied_users();  // s78n t07
     test_s78n_min_range();  // s78n t02
+    test_bkt1_pending_ranges_and_min_gate();  // tst2 t03 (bkt1 t01 coverage)
     test_s78n_t11_ability_range();  // s78n t11 review
     test_s78n_combat_bonus_and_enhance_defense();  // s78n t04
     test_cu8f_abilities_disabled();
