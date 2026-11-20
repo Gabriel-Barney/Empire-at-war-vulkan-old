@@ -39,29 +39,67 @@ bool read_story_ui_event(const commands::EventData& ev, sim::StoryUiNotification
     return true;
 }
 
+namespace {
+using MediaParams = std::vector<std::string>;
+std::string_view media_param(const MediaParams& params, size_t i) {
+    if (i >= params.size()) return {};
+    std::string_view v = params[i];
+    while (!v.empty() && static_cast<unsigned char>(v.front()) <= 0x20) v.remove_prefix(1);
+    while (!v.empty() && static_cast<unsigned char>(v.back()) <= 0x20) v.remove_suffix(1);
+    return v;
+}
+// ui2 t07 (STORY_PRESENTATION_REWARDS.md 1.3, 1.4, 6.2): the loop flag is atoi(P10) / atoi(P2), an empty one 0.
+bool media_flag(const MediaParams& params, size_t i) {
+    const std::string_view v = media_param(params, i);
+    return !v.empty() && std::atoi(std::string(v).c_str()) != 0;
+}
+// A cue with Reward_Param(i + 1) as its name, when that parameter is given.
+void media_named(std::vector<StoryMediaCue>& out, StoryMediaCue::Kind kind, const MediaParams& params, size_t i) {
+    if (!media_param(params, i).empty()) out.push_back({kind, std::string(media_param(params, i))});
+}
+struct MediaHandler {
+    std::string_view name;
+    void (*fn)(const MediaParams& params, std::vector<StoryMediaCue>& out);
+};
+// ref5 t02: one handler per media reward name.
+constexpr MediaHandler kMediaHandlers[] = {
+    {"START_MOVIE", [](const MediaParams& p, std::vector<StoryMediaCue>& out) { media_named(out, StoryMediaCue::Kind::Movie, p, 0); }},
+    {"SPEECH", [](const MediaParams& p, std::vector<StoryMediaCue>& out) { media_named(out, StoryMediaCue::Kind::Speech, p, 0); }},
+    {"MULTIMEDIA",
+     [](const MediaParams& p, std::vector<StoryMediaCue>& out) {
+         media_named(out, StoryMediaCue::Kind::Speech, p, 7);
+         // FIXPASS_GALACTIC §4.2 (capture C2): Reward_Param9 = the talking head; the data also holds "" and "-1" (no head).
+         // Retail opens any given name (the shipped ones end in _Loop), so the name is not tested; a head named without the
+         // suffix plays too.
+         if (!media_param(p, 8).empty() && media_param(p, 8) != "-1")
+             out.push_back({StoryMediaCue::Kind::AdvisorMovie, std::string(media_param(p, 8)), media_flag(p, 9)});
+     }},
+    {"COMMANDBAR_MOVIE",
+     [](const MediaParams& p, std::vector<StoryMediaCue>& out) {
+         if (!media_param(p, 0).empty() && media_param(p, 0) != "-1")
+             out.push_back({StoryMediaCue::Kind::AdvisorMovie, std::string(media_param(p, 0)), media_flag(p, 1)});
+     }},
+    {"STOP_COMMANDBAR_MOVIE", [](const MediaParams&, std::vector<StoryMediaCue>& out) { out.push_back({StoryMediaCue::Kind::AdvisorStop, {}}); }},
+    // STORY_REWARDS_GALACTIC §1.22: the SFX event P1 through the SFX manager (no player test).
+    {"SFX", [](const MediaParams& p, std::vector<StoryMediaCue>& out) { media_named(out, StoryMediaCue::Kind::Sfx, p, 0); }},
+};
+}  // namespace
+
 void story_reward_media(std::string_view reward_type, const std::vector<std::string>& params, std::vector<StoryMediaCue>& out) {
-    auto param = [&params](size_t i) -> std::string_view {
-        if (i >= params.size()) return {};
-        std::string_view v = params[i];
-        while (!v.empty() && static_cast<unsigned char>(v.front()) <= 0x20) v.remove_prefix(1);
-        while (!v.empty() && static_cast<unsigned char>(v.back()) <= 0x20) v.remove_suffix(1);
-        return v;
-    };
-    // ui2 t07 (STORY_PRESENTATION_REWARDS.md 1.3, 1.4, 6.2): the loop flag is atoi(P10) / atoi(P2), an empty one 0.
-    auto flag = [&param](size_t i) {
-        const std::string_view v = param(i);
-        return !v.empty() && std::atoi(std::string(v).c_str()) != 0;
-    };
-    if (reward_type == "START_MOVIE" && !param(0).empty()) out.push_back({StoryMediaCue::Kind::Movie, std::string(param(0))});
-    if (reward_type == "SPEECH" && !param(0).empty()) out.push_back({StoryMediaCue::Kind::Speech, std::string(param(0))});
-    if (reward_type == "MULTIMEDIA" && !param(7).empty()) out.push_back({StoryMediaCue::Kind::Speech, std::string(param(7))});
-    // FIXPASS_GALACTIC §4.2 (capture C2): Reward_Param9 = the talking head; the data also holds "" and "-1" (no head). Retail opens
-    // any given name (the shipped ones end in _Loop), so the name is not tested; a head named without the suffix plays too.
-    if (reward_type == "MULTIMEDIA" && !param(8).empty() && param(8) != "-1")
-        out.push_back({StoryMediaCue::Kind::AdvisorMovie, std::string(param(8)), flag(9)});
-    if (reward_type == "COMMANDBAR_MOVIE" && !param(0).empty() && param(0) != "-1")
-        out.push_back({StoryMediaCue::Kind::AdvisorMovie, std::string(param(0)), flag(1)});
-    if (reward_type == "STOP_COMMANDBAR_MOVIE") out.push_back({StoryMediaCue::Kind::AdvisorStop, {}});
+    for (const MediaHandler& h : kMediaHandlers)
+        if (h.name == reward_type) h.fn(params, out);
+}
+
+bool story_reward_media_handles(std::string_view reward_type) {
+    for (const MediaHandler& h : kMediaHandlers)
+        if (h.name == reward_type) return true;
+    return false;
+}
+
+std::vector<std::string_view> story_reward_media_names() {
+    std::vector<std::string_view> out;
+    for (const MediaHandler& h : kMediaHandlers) out.push_back(h.name);
+    return out;
 }
 
 void StoryUiFeed::reset() {

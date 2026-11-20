@@ -22,6 +22,7 @@
 #include <functional>
 #include <optional>
 #include <set>
+#include <span>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -67,10 +68,10 @@ struct StoryTextLine {
 
 // One of the ten tutorial arrow slots (§3.2).
 struct StoryArrow {
-    enum class Kind : uint8_t { Component, Planet, Fleet, Production, Ability, MapObject };
+    enum class Kind : uint8_t { Component, Planet, Fleet, Production, Ability, MapObject, Unit };  // Unit: FLASH_UNIT (ref5 t02)
     Kind kind = Kind::Component;
     std::string target;  // component name / planet type / unit type / ability / object type
-    std::string region;  // FLASH_PLANET_GUI P2 (upper case)
+    std::string region;  // FLASH_PLANET_GUI P2 / FLASH_UNIT P1 (upper case)
     int32_t sub = 0;     // FLASH_PLANET_GUI P3
     std::string label;   // the flash id (HIDE_TUTORIAL_CURSOR compares it, case-sensitive)
     uint8_t hud_mode = 0;
@@ -177,6 +178,20 @@ public:
     // game mode type of the plot (0 galactic, 1 space, 2 land; SET_ADVISOR's slot). Returns true when this class handles
     // the reward (the media rewards START_MOVIE / SPEECH playback stay with story_reward_media).
     bool on_reward(std::string_view type, const std::vector<std::string>& params, double now, uint8_t mode);
+    // ref5 t02: the reward names on_reward handles (upper case), in registration order. The game's coverage test checks the
+    // Ui rows of the sim's story reward table against these and story_reward_media_handles (story_ui.hpp).
+    static bool has_reward_handler(std::string_view name);
+    static std::vector<std::string_view> reward_names();
+    struct RewardCall {  // one on_reward call, as a handler sees it
+        std::string_view type;  // upper case
+        const std::vector<std::string>& p;
+        double now = 0.0;
+        uint8_t mode = 0;
+    };
+    struct RewardHandler {
+        std::string_view name;
+        void (*fn)(StoryPresenter& s, const RewardCall& c);
+    };
 
     // Lua presentation calls (presentation.hpp).
     void remove_all_text();                                     // Remove_All_Text
@@ -271,8 +286,14 @@ public:
     static bool is_lasting_reward(std::string_view type);
 
 private:
+    static std::span<const RewardHandler> reward_handlers();
     void add_text(std::string_view type, const std::vector<std::string>& p, double now);
     void add_arrow(StoryArrow a);
+    void add_flash_arrow(StoryArrow::Kind kind, const RewardCall& c);
+    void push_camera(StoryCameraCommand::Kind kind, const std::vector<std::string>& p);
+    void force_slot(const RewardCall& c, std::string_view slot, bool show);
+    // A FLASH_GUI (component) / FLASH_PLANET_GUI (planet) flash of `seconds`, or held while DUAL_FLASH is armed (§2.5).
+    void flash_or_hold(bool planet, std::string target, double now, double seconds);
     std::u32string resolve(std::string_view id) const;
 
     Hooks hooks_;
@@ -304,6 +325,16 @@ private:
     std::set<std::string> slots_;                    // "PLANET|SLOT" upper case
     mutable std::vector<StoryTextLine> live_;
     uint64_t handled_ = 0;
+    // DUAL_FLASH (§2.5, ref5 t02): armed by the reward, holds up to two flashes; saved (presenter save v2).
+    struct DualHeld {
+        bool planet = false;
+        std::string target;
+    };
+    struct DualFlash {
+        bool armed = false;
+        double time = 0.0, rate = 0.0;
+        std::vector<DualHeld> held;
+    } dual_;
 };
 
 // ---- data readers (ui2 t07, STORY_PRESENTATION_REWARDS.md 6.4) ----

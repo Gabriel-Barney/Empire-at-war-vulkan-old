@@ -387,7 +387,7 @@ void App::story_component_flash(ui::HudDrawList& dl, const ui::HudCanvas& canvas
     const ui::HudLayout& layout = gal ? ui_.galactic_hud.layout() : ui_.tactical_hud.layout();
     std::set<int32_t> active;
     for (const StoryComponentFlash& f : story_present_.flashes()) {
-        if (!story_present_.component_flashing(f.component, now_s_)) continue;
+        if (now_s_ < f.start || now_s_ >= f.until) continue;  // this entry's window (ref5 t02: DUAL_FLASH steps start later)
         const int32_t idx = ui_.components.find(f.component);
         if (idx < 0) continue;
         active.insert(idx);
@@ -476,7 +476,7 @@ void App::build_story_pointers(ui::HudDrawList& dl, const ui::HudCanvas& canvas)
             draw_highlight(dl, at, hl.small ? 14.0f : 26.0f, now_s_, kHighlightColor);
     }
     for (const StoryObjectFlash& f : story_present_.object_flashes()) {  // FLASH_OBJECT / FLASH_PLANET: the object's colour flash
-        if (now_s_ >= f.until) continue;
+        if (now_s_ >= f.until || now_s_ < f.start) continue;  // ref5 t02: a held DUAL_FLASH step starts later
         ui::Vec3 p;
         ui::Vec2f at;
         if ((static_cast<int64_t>(std::floor((now_s_ - f.start) / 0.2)) % 2) == 0 && story_type_position(f.type_name, p) &&

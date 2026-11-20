@@ -832,6 +832,12 @@ void ConflictManager::auto_setup(const ConflictInfo& head) {
     }
 }
 
+void ConflictManager::battle_loss(ObjectHandle h, PlanetIndex planet, bool tactical_mode) {
+    sim_->hero_defeated(h, planet);
+    if (tactical_mode) sim_->destroy_object(h);
+    else sim_->destroy_object_auto_resolve(h);
+}
+
 void ConflictManager::auto_finish(const ConflictInfo& head) {
     const AutoResolveResult& r = last_ar_;
     const bool space = head.kind == ConflictKind::Space;
@@ -857,12 +863,9 @@ void ConflictManager::auto_finish(const ConflictInfo& head) {
                 sim_->replace_starbase(planet, kNoIndex);
             } else {
                 // mcx4 t05 (MCX4_RE_ANSWERS_TACTICAL §13): an auto-resolve kill runs Die 0x39bdb0 in galactic mode, whose
-                // step 6 schedules the hero's respawn (0x48eb10, default time, the hero's planet).
-                sim_->hero_defeated(h, planet);
-                // Q4: a galactic auto-resolve kill takes no "hero defeated" 0x3a01f0 (no STORY_DEFEAT_HERO); the tactical
-                // Auto-resolve button kills in tactical mode, so its losses take the battle-end path that does.
-                if (ar_in_.from_tactical) sim_->destroy_object(h);
-                else sim_->destroy_object_auto_resolve(h);
+                // step 6 schedules the hero's respawn (0x48eb10, default time, the hero's planet). Q4: the tactical
+                // Auto-resolve button kills in tactical mode, so its losses notify the story as a fought battle's do.
+                battle_loss(h, planet, ar_in_.from_tactical);
             }
         } else if (is_starbase && sim_->store().alive(h) && r.starbase_type[i] != static_cast<uint32_t>(sim_->store().type(h))) {
             sim_->replace_starbase(planet, r.starbase_type[i]);
@@ -875,9 +878,7 @@ void ConflictManager::auto_finish(const ConflictInfo& head) {
     for (size_t i = 0; i < ar_cargo_.size(); ++i)
         if (!r.cargo_survives[i]) {
             (ar_in_.cargo[i].owner == head.attacker ? e.attacker_losses : e.defender_losses)++;
-            sim_->hero_defeated(ar_cargo_[i], planet);  // mcx4 t05
-            if (ar_in_.from_tactical) sim_->destroy_object(ar_cargo_[i]);
-            else sim_->destroy_object_auto_resolve(ar_cargo_[i]);
+            battle_loss(ar_cargo_[i], planet, ar_in_.from_tactical);  // mcx4 t05
         }
     // AI_GALACTIC_TOKENS §9.4: a land auto-resolve keeps only the winner's persisted built objects (0x60b930; on an attacker
     // win 0x2b76a0 site B filters again by the attacker, the same result). [port] no winner: the records stay.
@@ -1329,8 +1330,7 @@ void ConflictManager::finish_battle(const BattleResult& result, LinkedResolution
         if (h == sim_->planets()[planet].starbase) {
             sim_->replace_starbase(planet, kNoIndex);
         } else {
-            sim_->hero_defeated(h, planet);
-            sim_->destroy_object(h);
+            battle_loss(h, planet, true);
         }
     }
     // mcx4 t22 (MCX4_RE_ANSWERS_TACTICAL §13): a surviving company loses its dead members (GalacticSim::lose_company_members).
@@ -1422,10 +1422,7 @@ void ConflictManager::apply_resolution(const ConflictInfo& head, LinkedResolutio
             std::vector<ObjectHandle> kill;  // every AI-owned surface unit (surface order)
             for (ObjectHandle u : sim_->planets()[planet].surface)
                 if (store.alive(u) && store.owner(u) != kNoPlayer && !human(store.owner(u))) kill.push_back(u);
-            for (ObjectHandle u : kill) {
-                sim_->hero_defeated(u, planet);  // mcx4 t05 (§13: 0x2aa510 -> 0x3a01f0 per hero)
-                sim_->destroy_object(u);
-            }
+            for (ObjectHandle u : kill) battle_loss(u, planet, true);  // mcx4 t05 (§13: 0x2aa510 -> 0x3a01f0 per hero)
         }
     } else {
         for (int32_t side : {head.attacker, head.defender}) {
@@ -1462,8 +1459,7 @@ void ConflictManager::finish_corruption_mission(const BattleResult& result) {
         if (h == sim_->planets()[head.planet].starbase) {
             sim_->replace_starbase(head.planet, kNoIndex);
         } else {
-            sim_->hero_defeated(h, head.planet);  // mcx4 t05
-            sim_->destroy_object(h);
+            battle_loss(h, head.planet, true);  // mcx4 t05
         }
     }
     for (const auto& [h, members] : result.survivors) sim_->lose_company_members(h, members, head.planet);  // mcx4 t22
@@ -1492,8 +1488,7 @@ int32_t ConflictManager::resolve_battle(const BattleResult& so_far) {
         if (h == sim_->planets()[head.planet].starbase) {
             sim_->replace_starbase(head.planet, kNoIndex);
         } else {
-            sim_->hero_defeated(h, head.planet);  // mcx4 t05
-            sim_->destroy_object(h);
+            battle_loss(h, head.planet, true);  // mcx4 t05
         }
     }
     if (so_far.starbase_destroyed && store.alive(sim_->planets()[head.planet].starbase)) sim_->replace_starbase(head.planet, kNoIndex);

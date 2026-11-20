@@ -723,99 +723,177 @@ void StoryModel::add_objective(std::string_view text, bool battle_info) {
     objectives_.push_back(StoryObjective{std::string(text), StoryObjectiveState::Active, battle_info});
 }
 
-// Reward application (0x456970), Â§6.
+// Reward application (0x456970), §6. ref5 t02: one handler per Reward_Type name the model applies itself (the Model rows of
+// the sim's story reward table; the coverage test fails for a row without one); any other name goes to on_reward.
+std::span<const StoryModel::RewardHandler> StoryModel::reward_handlers() {
+    static constexpr RewardHandler kHandlers[] = {
+        {"SET_FLAG", &StoryModel::reward_set_flag},
+        {"INCREMENT_FLAG", &StoryModel::reward_increment_flag},
+        {"ADD_OBJECTIVE", &StoryModel::reward_add_objective},
+        {"OBJECTIVE_COMPLETE", &StoryModel::reward_objective_state},
+        {"OBJECTIVE_FAILED", &StoryModel::reward_objective_state},
+        {"UPDATE_OBJECTIVE", &StoryModel::reward_update_objective},
+        {"REMOVE_OBJECTIVE", &StoryModel::reward_remove_objective},
+        {"REMOVE_ALL_OBJECTIVES", &StoryModel::reward_remove_all_objectives},
+        {"TRIGGER_EVENT", &StoryModel::reward_trigger_event},
+        {"RESET_EVENT", &StoryModel::reward_reset_event},
+        {"RESET_BRANCH", &StoryModel::reward_reset_branch},
+        {"DISABLE_BRANCH", &StoryModel::reward_disable_branch},
+        {"DISABLE_STORY_EVENT", &StoryModel::reward_disable_story_event},
+        {"STORY_ELEMENT", &StoryModel::reward_story_element},
+        {"REMOVE_STORY_GOAL", &StoryModel::reward_remove_story_goal},
+        {"STORY_GOAL_COMPLETED", &StoryModel::reward_story_goal_completed},
+    };
+    return kHandlers;
+}
+
+bool StoryModel::has_reward_handler(std::string_view name) {
+    for (const RewardHandler& h : reward_handlers())
+        if (h.name == name) return true;
+    return false;
+}
+
+std::vector<std::string_view> StoryModel::reward_names() {
+    std::vector<std::string_view> out;
+    for (const RewardHandler& h : reward_handlers()) out.push_back(h.name);
+    return out;
+}
+
 void StoryModel::apply_reward(uint32_t p, uint32_t e) {
     const std::string type = plots_[p].events[e].reward_type;
     if (type.empty()) return;
     const std::vector<StoryParam> rp = plots_[p].events[e].reward_params;
-    const std::string p1(text_at(rp, 0)), p2(text_at(rp, 1)), p3(text_at(rp, 2));
-    if (type == "SET_FLAG") {
-        if (!p2.empty()) (*flags_)[ascii_upper(p1)] = parse_int(p2, 0);
-    } else if (type == "INCREMENT_FLAG") {
-        const auto it = flags_->find(ascii_upper(p1));
-        if (!p2.empty() && it != flags_->end()) it->second += parse_int(p2, 0);  // undefined: nothing
-    } else if (type == "ADD_OBJECTIVE") {
-        add_objective(p1, false);
-    } else if (type == "OBJECTIVE_COMPLETE" || type == "OBJECTIVE_FAILED") {
-        if (StoryObjective* o = find_objective(p1))
-            o->state = type == "OBJECTIVE_COMPLETE" ? StoryObjectiveState::Complete : StoryObjectiveState::Failed;
-    } else if (type == "UPDATE_OBJECTIVE") {
-        if (StoryObjective* o = find_objective(p1)) o->text = p2;
-    } else if (type == "REMOVE_OBJECTIVE") {
-        for (size_t i = 0; i < objectives_.size(); ++i)
-            if (ascii_iequals(objectives_[i].text, p1)) {
-                objectives_.erase(objectives_.begin() + static_cast<std::ptrdiff_t>(i));
-                break;
-            }
-    } else if (type == "REMOVE_ALL_OBJECTIVES") {
-        objectives_.clear();
-    } else if (type == "TRIGGER_EVENT") {
-        // Every plot of the mode's table, every player's, active or not (§2.4): through the StoryTable when there is one.
-        if (table_) table_->trigger_event_by_name(p1);
-        else trigger_event_by_name(p1);
-    } else if (type == "RESET_EVENT") {
-        std::vector<std::string> names{p1};
-        for (const std::string& n : plots_[p].events[e].reward_param_list) names.push_back(n);
-        for (const std::string& n : names) {
-            const uint32_t ev = find_event(p, n);
-            if (ev == kNone) continue;
+    for (const RewardHandler& h : reward_handlers())
+        if (h.name == type) {
+            (this->*h.fn)(p, e, type, rp);
+            return;
+        }
+    if (on_reward) on_reward(p, e, type, rp);
+}
+
+void StoryModel::reward_set_flag(uint32_t /*p*/, uint32_t /*e*/, const std::string& /*type*/, const std::vector<StoryParam>& rp) {
+    const std::string p1(text_at(rp, 0)), p2(text_at(rp, 1));
+    if (!p2.empty()) (*flags_)[ascii_upper(p1)] = parse_int(p2, 0);
+}
+
+void StoryModel::reward_increment_flag(uint32_t /*p*/, uint32_t /*e*/, const std::string& /*type*/, const std::vector<StoryParam>& rp) {
+    const std::string p1(text_at(rp, 0)), p2(text_at(rp, 1));
+    const auto it = flags_->find(ascii_upper(p1));
+    if (!p2.empty() && it != flags_->end()) it->second += parse_int(p2, 0);  // undefined: nothing
+}
+
+void StoryModel::reward_add_objective(uint32_t /*p*/, uint32_t /*e*/, const std::string& /*type*/, const std::vector<StoryParam>& rp) {
+    add_objective(text_at(rp, 0), false);
+}
+
+// OBJECTIVE_COMPLETE / OBJECTIVE_FAILED
+void StoryModel::reward_objective_state(uint32_t /*p*/, uint32_t /*e*/, const std::string& type, const std::vector<StoryParam>& rp) {
+    if (StoryObjective* o = find_objective(text_at(rp, 0)))
+        o->state = type == "OBJECTIVE_COMPLETE" ? StoryObjectiveState::Complete : StoryObjectiveState::Failed;
+}
+
+void StoryModel::reward_update_objective(uint32_t /*p*/, uint32_t /*e*/, const std::string& /*type*/, const std::vector<StoryParam>& rp) {
+    if (StoryObjective* o = find_objective(text_at(rp, 0))) o->text = std::string(text_at(rp, 1));
+}
+
+void StoryModel::reward_remove_objective(uint32_t /*p*/, uint32_t /*e*/, const std::string& /*type*/, const std::vector<StoryParam>& rp) {
+    const std::string_view p1 = text_at(rp, 0);
+    for (size_t i = 0; i < objectives_.size(); ++i)
+        if (ascii_iequals(objectives_[i].text, p1)) {
+            objectives_.erase(objectives_.begin() + static_cast<std::ptrdiff_t>(i));
+            break;
+        }
+}
+
+void StoryModel::reward_remove_all_objectives(uint32_t /*p*/, uint32_t /*e*/, const std::string& /*type*/,
+                                              const std::vector<StoryParam>& /*rp*/) {
+    objectives_.clear();
+}
+
+void StoryModel::reward_trigger_event(uint32_t /*p*/, uint32_t /*e*/, const std::string& /*type*/, const std::vector<StoryParam>& rp) {
+    // Every plot of the mode's table, every player's, active or not (§2.4): through the StoryTable when there is one.
+    const std::string p1(text_at(rp, 0));
+    if (table_) table_->trigger_event_by_name(p1);
+    else trigger_event_by_name(p1);
+}
+
+void StoryModel::reward_reset_event(uint32_t p, uint32_t e, const std::string& /*type*/, const std::vector<StoryParam>& rp) {
+    std::vector<std::string> names{std::string(text_at(rp, 0))};
+    for (const std::string& n : plots_[p].events[e].reward_param_list) names.push_back(n);
+    for (const std::string& n : names) {
+        const uint32_t ev = find_event(p, n);
+        if (ev == kNone) continue;
+        plots_[p].state[ev].fired = false;
+        reset_event(p, ev);
+    }
+}
+
+void StoryModel::reward_reset_branch(uint32_t p, uint32_t /*e*/, const std::string& /*type*/, const std::vector<StoryParam>& rp) {
+    const std::string p1(text_at(rp, 0)), p2(text_at(rp, 1));
+    if (reset_depth_ >= kMaxResetDepth || p1.empty()) return;  // "Event resets itself over and over forever"
+    ++reset_depth_;
+    const std::vector<uint32_t> walk = plots_[p].walk;
+    for (const uint32_t ev : walk)
+        if (plots_[p].events[ev].branch == p1) {  // exact, case-sensitive
             plots_[p].state[ev].fired = false;
             reset_event(p, ev);
         }
-    } else if (type == "RESET_BRANCH") {
-        if (reset_depth_ >= kMaxResetDepth || p1.empty()) return;  // "Event resets itself over and over forever"
-        ++reset_depth_;
-        const std::vector<uint32_t> walk = plots_[p].walk;
-        for (const uint32_t ev : walk)
-            if (plots_[p].events[ev].branch == p1) {  // exact, case-sensitive
-                plots_[p].state[ev].fired = false;
-                reset_event(p, ev);
-            }
-        for (const uint32_t ev : walk) {
-            if (plots_[p].events[ev].branch != p1) continue;
-            const StoryEventState& st = plots_[p].state[ev];
-            if (st.armed || st.fired || !plots_[p].events[ev].has_prereq_tags || !prereqs_hold(p, ev)) continue;
-            arm(p, ev);
-        }
-        if (!p2.empty()) {
-            const uint32_t ev = find_event(p, p2);
-            if (ev != kNone) fire(p, ev);
-        }
-        --reset_depth_;
-    } else if (type == "DISABLE_BRANCH") {
-        if (p1.empty() || p2.empty()) return;  // logged and ignored by the original
-        const bool disable = parse_int(p2, 0) != 0;
-        for (size_t i = 0; i < plots_[p].events.size(); ++i)
-            if (plots_[p].events[i].branch == p1) plots_[p].state[i].enabled = !disable;  // [M] exact compare
-    } else if (type == "DISABLE_STORY_EVENT") {
-        if (p1.empty() || p2.empty()) return;
-        const bool disable = parse_int(p2, 0) != 0;
-        const bool all = parse_int(p3, 0) != 0;
-        if (all && table_) {
-            table_->set_event_enabled(p1, !disable);  // every plot of the table (q6 t03, §6.2)
-        } else {
-            for (uint32_t q = 0; q < plots_.size(); ++q) {
-                if (!all && q != p) continue;
-                if (all && !plots_[q].in_table) continue;
-                const uint32_t ev = find_event(q, p1);
-                if (ev != kNone) plots_[q].state[ev].enabled = !disable;
-            }
-        }
-    } else if (type == "STORY_ELEMENT") {
-        // Any player's plot of the mode's table, active or suspended; silent when not found (§2.4).
-        if (table_) {
-            const StoryTable::PlotRef q = table_->find_plot(p1 + ".xml");
-            if (q.valid()) table_->model(q.set)->set_plot_active(q.plot, true);
-        } else if (const uint32_t q = find_plot(p1 + ".xml"); q != kNone) {
-            set_plot_active(q, true);
-        }
-    } else if (type == "REMOVE_STORY_GOAL") {  // 0x2C (0x47eea0): the newest holocron record with tag P1 goes
-        holocron_->remove_tag(p1);
-    } else if (type == "STORY_GOAL_COMPLETED") {  // 0x38 (0x47f5b0): ... is marked completed (the Completed tab)
-        holocron_->complete_tag(p1);
-    } else if (on_reward) {
-        on_reward(p, e, type, rp);
+    for (const uint32_t ev : walk) {
+        if (plots_[p].events[ev].branch != p1) continue;
+        const StoryEventState& st = plots_[p].state[ev];
+        if (st.armed || st.fired || !plots_[p].events[ev].has_prereq_tags || !prereqs_hold(p, ev)) continue;
+        arm(p, ev);
     }
+    if (!p2.empty()) {
+        const uint32_t ev = find_event(p, p2);
+        if (ev != kNone) fire(p, ev);
+    }
+    --reset_depth_;
+}
+
+void StoryModel::reward_disable_branch(uint32_t p, uint32_t /*e*/, const std::string& /*type*/, const std::vector<StoryParam>& rp) {
+    const std::string p1(text_at(rp, 0)), p2(text_at(rp, 1));
+    if (p1.empty() || p2.empty()) return;  // logged and ignored by the original
+    const bool disable = parse_int(p2, 0) != 0;
+    for (size_t i = 0; i < plots_[p].events.size(); ++i)
+        if (plots_[p].events[i].branch == p1) plots_[p].state[i].enabled = !disable;  // [M] exact compare
+}
+
+void StoryModel::reward_disable_story_event(uint32_t p, uint32_t /*e*/, const std::string& /*type*/, const std::vector<StoryParam>& rp) {
+    const std::string p1(text_at(rp, 0)), p2(text_at(rp, 1)), p3(text_at(rp, 2));
+    if (p1.empty() || p2.empty()) return;
+    const bool disable = parse_int(p2, 0) != 0;
+    const bool all = parse_int(p3, 0) != 0;
+    if (all && table_) {
+        table_->set_event_enabled(p1, !disable);  // every plot of the table (q6 t03, §6.2)
+    } else {
+        for (uint32_t q = 0; q < plots_.size(); ++q) {
+            if (!all && q != p) continue;
+            if (all && !plots_[q].in_table) continue;
+            const uint32_t ev = find_event(q, p1);
+            if (ev != kNone) plots_[q].state[ev].enabled = !disable;
+        }
+    }
+}
+
+void StoryModel::reward_story_element(uint32_t /*p*/, uint32_t /*e*/, const std::string& /*type*/, const std::vector<StoryParam>& rp) {
+    // Any player's plot of the mode's table, active or suspended; silent when not found (§2.4).
+    const std::string p1(text_at(rp, 0));
+    if (table_) {
+        const StoryTable::PlotRef q = table_->find_plot(p1 + ".xml");
+        if (q.valid()) table_->model(q.set)->set_plot_active(q.plot, true);
+    } else if (const uint32_t q = find_plot(p1 + ".xml"); q != kNone) {
+        set_plot_active(q, true);
+    }
+}
+
+void StoryModel::reward_remove_story_goal(uint32_t /*p*/, uint32_t /*e*/, const std::string& /*type*/, const std::vector<StoryParam>& rp) {
+    holocron_->remove_tag(std::string(text_at(rp, 0)));  // 0x2C (0x47eea0): the newest holocron record with tag P1 goes
+}
+
+void StoryModel::reward_story_goal_completed(uint32_t /*p*/, uint32_t /*e*/, const std::string& /*type*/,
+                                             const std::vector<StoryParam>& rp) {
+    holocron_->complete_tag(std::string(text_at(rp, 0)));  // 0x38 (0x47f5b0): ... is marked completed (the Completed tab)
 }
 
 bool StoryModel::tick_timer(StoryEventState& st, double threshold) {
