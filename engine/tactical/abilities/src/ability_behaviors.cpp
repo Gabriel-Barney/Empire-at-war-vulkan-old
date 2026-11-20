@@ -516,7 +516,7 @@ void AbilitySystem::enhance_defense_apply(Obj& src, SpecialState& sp, uint32_t f
     const uint32_t crc = desc(src).name_crc;  // the CRC of S's type name (type +0x120)
     for (int32_t i = 0; i < np; ++i) {
         if (i != p && !(s.apply_to_all_allies && friendly(i, p))) continue;
-        combat_->player_modifiers(i).insert(ModList::Defense, s.stacking_category, v, combat::kPermanent, crc, src.id);
+        combat_->insert_player_modifier(i, ModList::Defense, s.stacking_category, v, combat::kPermanent, crc, src.id);
     }
     event(AbilityEventKind::EffectOn, sp.trigger, src.id, kNoObject, frame);  // the presentation 0x48e4d0
 }
@@ -524,14 +524,14 @@ void AbilitySystem::enhance_defense_apply(Obj& src, SpecialState& sp, uint32_t f
 void AbilitySystem::aura_give(const Obj& src, const SpecialAbilityDesc& s, ObjectId target) {
     // CombatBonusAbilityClass::vf30 (0x6f42d0): one APPEND insert per non-zero field into the target object's set,
     // stacking category = Stacking_Category, source = the ability's owner, permanent. Health: current += new max - old.
-    combat::ModifierSet* m = combat_->unit_modifiers(target);
-    if (!m) return;
+    if (!combat_->modifiers_of(target)) return;
     const float before = combat_->max_health(target);
     bool health = false;
     for (uint32_t l = 0; l < combat::kModListCount; ++l) {
         const float v = s.bonus[l];
         if (v == 0.0f) continue;
-        m->insert(static_cast<ModList>(l), s.stacking_category, v, combat::kPermanent, s.name_crc, src.id);
+        combat_->insert_unit_modifier(target, static_cast<ModList>(l), s.stacking_category, v, combat::kPermanent, s.name_crc,
+                                      src.id);
         health = health || l == static_cast<uint32_t>(ModList::MaxHealth);
     }
     if (health) {
@@ -597,12 +597,10 @@ void AbilitySystem::aura_off(Obj& src, SpecialState& sp, uint32_t frame) {
         case SpecialClass::CombatBonus:  // s78n t04: Enhance_Defense's entries are never removed
             for (Obj& t : objs_) {
                 if (!t.combat_unit || !combat_->has_unit(t.id)) continue;
-                if (combat::ModifierSet* m = combat_->unit_modifiers(t.id)) {
-                    if (m->remove_source(src.id, s.name_crc) == 0) continue;
-                    combat_->modifier(t.id, ModList::MaxHealth);
-                    const float mh = combat_->max_health(t.id);  // [M] health clamped to the new maximum
-                    if (combat_->health(t.id) > mh) combat_->set_health(t.id, mh);
-                }
+                if (combat_->remove_unit_modifiers(t.id, src.id, s.name_crc) == 0) continue;
+                combat_->modifier(t.id, ModList::MaxHealth);
+                const float mh = combat_->max_health(t.id);  // [M] health clamped to the new maximum
+                if (combat_->health(t.id) > mh) combat_->set_health(t.id, mh);
             }
             break;
         case SpecialClass::BattlefieldModifier:

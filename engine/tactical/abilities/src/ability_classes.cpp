@@ -778,8 +778,7 @@ bool AbilitySystem::class_apply(Obj& o, SpecialState& sp, ObjectId target, int32
             // dealt", stacking category 0, keyed by the ability [M: source key = the ability name CRC]: all damage the
             // owner deals is x (1 + m) while draining.
             if (o.combat_unit)
-                if (combat::ModifierSet* m = combat_->unit_modifiers(o.id))
-                    m->set_by_source(ModList::Damage, 0, s.damage_multiplier, combat::kPermanent, s.name_crc, o.id);
+                combat_->set_unit_modifier(o.id, ModList::Damage, 0, s.damage_multiplier, combat::kPermanent, s.name_crc, o.id);
             sp.counter = frames_of(s.duration_secs, fps);
             start_recharge(o, kLeechShields);
             event(AbilityEventKind::EffectOn, kLeechShields, o.id, target, frame);
@@ -1906,7 +1905,7 @@ void AbilitySystem::class_remove(Obj& o, SpecialState& sp, uint32_t frame) {
         case C::LeechShields:  // remove 0x717f70: 58 off, the list-1 entries of this source deleted, effect destroyed
             o.active[kLeechShields] = 0;
             if (o.combat_unit)
-                if (combat::ModifierSet* m = combat_->unit_modifiers(o.id)) m->remove_source_in_list(ModList::Damage, o.id, s.name_crc);
+                combat_->remove_unit_modifiers_in_list(o.id, ModList::Damage, o.id, s.name_crc);
             sync_combat(o);
             break;
         case C::MaximumFirepower:

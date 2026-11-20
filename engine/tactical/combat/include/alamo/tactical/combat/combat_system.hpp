@@ -1718,6 +1718,20 @@ public:
 
     ModifierSet* unit_modifiers(ObjectId id);  // nullptr if unknown
     ModifierSet& player_modifiers(int32_t player);
+    // REF4 t07: named modifier entries, the calls AbilitySystem changes modifiers through (it holds no ModifierSet of
+    // combat's). An entry is named by its source: the source object id and the source CRC. Each call is the ModifierSet
+    // operation of the same meaning (modifiers.hpp: insert, set_by_source, remove_source, remove_source_in_list) on the
+    // unit's or player's set, so the entries end up in the order a direct call gives. A unit call on an unknown unit
+    // does nothing (false / 0).
+    const ModifierSet* modifiers_of(ObjectId id) const;  // nullptr if unknown
+    void insert_player_modifier(int32_t player, ModList list, int32_t category, float value, uint32_t expiry,
+                                uint32_t source_crc, int32_t source_id);
+    bool insert_unit_modifier(ObjectId unit, ModList list, int32_t category, float value, uint32_t expiry,
+                              uint32_t source_crc, int32_t source_id);
+    bool set_unit_modifier(ObjectId unit, ModList list, int32_t category, float value, uint32_t expiry,
+                           uint32_t source_crc, int32_t source_id);
+    uint32_t remove_unit_modifiers(ObjectId unit, int32_t source_id, uint32_t source_crc);
+    uint32_t remove_unit_modifiers_in_list(ObjectId unit, ModList list, int32_t source_id, uint32_t source_crc);
 
     // ---- simulation ----
     void tick(uint32_t frame, const TreeSet& trees, SimRng& rng, const ParallelFor& pf = serial_for);
