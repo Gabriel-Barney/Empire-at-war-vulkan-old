@@ -604,7 +604,145 @@ static int bench_regen_prepare(const Options& opt, const std::vector<std::string
     return 0;
 }
 
+// ref3 t05: every flag main()'s argument loop reads, in one table. The loop dispatches through it, and
+// `alamo_game --list-flags --json` prints it (schema alamo.game_flags v1, print_flag_list) for the Command Center
+// (launcher/src/launch.rs), so a flag added or renamed here reaches the launcher's argument check with no second copy.
+// A value flag takes the next argument, whatever it is ("" at the end of the line); an argument with '=' in it is a data
+// argument (MODPATH= ...); anything else prints the usage and exits with 2. The benchmark families (--benchmark,
+// --bench-save, ... in benchmark.hpp; --bench-new-save, --bench-maps, ... in benchmark_save.hpp) are read by their own
+// parsers before this table and are not listed; nor is --list-flags [--json] itself, read before anything else.
+struct FlagTarget {
+    Options& opt;
+    std::string& export_in;   // --export-save
+    std::string& export_out;  // --out
+};
+
+struct GameFlag {
+    std::string_view name;
+    bool value;               // the next argument is its value
+    std::string_view one_of;  // the values it accepts, '|'-separated; "" = any
+    bool positive;            // the value must be a whole number above 0 (checked after the loop)
+    bool (*apply)(FlagTarget& t, const GameFlag& f, const std::string& v);  // false: a value it rejects (usage)
+};
+
+// The index of `v` in f.one_of, -1 when it is not one of them.
+static int one_of_index(const GameFlag& f, std::string_view v) {
+    std::string_view rest = f.one_of;
+    for (int i = 0; !rest.empty(); ++i) {
+        const size_t bar = rest.find('|');
+        if (rest.substr(0, bar) == v) return i;
+        rest = bar == std::string_view::npos ? std::string_view() : rest.substr(bar + 1);
+    }
+    return -1;
+}
+
+static uint32_t to_u32(const std::string& v) { return static_cast<uint32_t>(std::strtoul(v.c_str(), nullptr, 10)); }
+
+using FT = FlagTarget;
+using GF = GameFlag;
+using FV = const std::string&;
+static const GameFlag kGameFlags[] = {
+    {"--game", true, "", false, [](FT& t, const GF&, FV v) { t.opt.game = v; return true; }},
+    {"--width", true, "", true, [](FT& t, const GF&, FV v) { t.opt.width = to_u32(v), t.opt.size_set = true; return true; }},
+    {"--height", true, "", true, [](FT& t, const GF&, FV v) { t.opt.height = to_u32(v), t.opt.size_set = true; return true; }},
+    {"--hidden", false, "", false, [](FT& t, const GF&, FV) { t.opt.hidden = true; return true; }},
+    {"--fleet-groups", false, "", false, [](FT& t, const GF&, FV) { t.opt.fleet_groups = true; return true; }},  // [port] off by default
+    {"--audio", true, "device|null|off", false,
+     [](FT& t, const GF& f, FV v) {
+         constexpr AudioBackendKind kKinds[] = {AudioBackendKind::Device, AudioBackendKind::Null, AudioBackendKind::Off};
+         const int i = one_of_index(f, v);
+         if (i < 0) return false;
+         t.opt.audio = kKinds[i];
+         return true;
+     }},
+    {"--seed", true, "", false, [](FT& t, const GF&, FV v) { t.opt.seed = to_u32(v); return true; }},
+    {"--workers", true, "", false,
+     [](FT& t, const GF&, FV v) { t.opt.workers = static_cast<int32_t>(std::strtol(v.c_str(), nullptr, 10)); return true; }},
+    {"--priority", true, "above|normal", false,
+     [](FT& t, const GF& f, FV v) {
+         const int i = one_of_index(f, v);
+         if (i < 0) return false;
+         t.opt.priority = i == 0 ? 1 : 0;  // above, normal
+         return true;
+     }},
+    {"--frames", true, "", false, [](FT& t, const GF&, FV v) { t.opt.frames = std::atol(v.c_str()); return true; }},
+    {"--battle-max-frames", true, "", false, [](FT& t, const GF&, FV v) { t.opt.battle_max_frames = to_u32(v); return true; }},
+    {"--cache-dir", true, "", false, [](FT& t, const GF&, FV v) { t.opt.cache_dir = v; return true; }},
+    {"--png-dir", true, "", false, [](FT& t, const GF&, FV v) { t.opt.png_dir = v; return true; }},
+    // Checked after the loop (one_of_index on this row), so an --export-save run never looks at it.
+    {"--smoke", true, "skirmish|campaign|land|saveload", false, [](FT& t, const GF&, FV v) { t.opt.smoke = v; return true; }},
+    {"--movie", true, "", false, [](FT& t, const GF&, FV v) { t.opt.movies.push_back(v); return true; }},
+    {"--no-intro", false, "", false, [](FT& t, const GF&, FV) { t.opt.intro = false; return true; }},
+    {"--attract", false, "", false, [](FT& t, const GF&, FV) { t.opt.attract = true; return true; }},
+    {"--mailbox", false, "", false,
+     [](FT& t, const GF&, FV) { t.opt.mode = rhi::PresentMode::Mailbox, t.opt.mode_set = true; return true; }},
+    {"--immediate", false, "", false,
+     [](FT& t, const GF&, FV) { t.opt.mode = rhi::PresentMode::Immediate, t.opt.mode_set = true; return true; }},
+    {"--frame-cap", true, "", false,  // a number, or "display"
+     [](FT& t, const GF&, FV v) {
+         t.opt.frame_cap = v == "display" ? ui::kFrameCapDisplay : std::max(0, std::atoi(v.c_str()));
+         t.opt.frame_cap_set = true;
+         return true;
+     }},
+    {"--video-options", true, "", false, [](FT& t, const GF&, FV v) { t.opt.video_options = v; return true; }},
+    {"--saves-dir", true, "", false, [](FT& t, const GF&, FV v) { t.opt.saves_dir = v; return true; }},
+    {"--frame-overlay", false, "", false, [](FT& t, const GF&, FV) { t.opt.frame_overlay = true; return true; }},
+    {"--profile", false, "", false, [](FT& t, const GF&, FV) { t.opt.profile = true; return true; }},
+    {"--profile-out", true, "", false, [](FT& t, const GF&, FV v) { t.opt.profile = true, t.opt.profile_out = v; return true; }},
+    {"--profile-budget", true, "", false, [](FT& t, const GF&, FV v) { t.opt.profile_budget = std::strtod(v.c_str(), nullptr); return true; }},
+    // bm2 / bm3: read before the loop (load_bench_scenario_arg, bench_regen_prepare); the loop only skips the value.
+    {"--bench-scenario", true, "", false, [](FT&, const GF&, FV) { return true; }},
+    {"--bench-make", true, "", false, [](FT&, const GF&, FV) { return true; }},
+    {"--bench-regen", true, "", false, [](FT&, const GF&, FV) { return true; }},
+    {"--export-save", true, "", false, [](FT& t, const GF&, FV v) { t.export_in = v; return true; }},  // launcher support (save_export.hpp)
+    {"--out", true, "", false, [](FT& t, const GF&, FV v) { t.export_out = v; return true; }},
+};
+
+static const GameFlag* find_game_flag(std::string_view name) {
+    for (const GameFlag& f : kGameFlags)
+        if (f.name == name) return &f;
+    return nullptr;
+}
+
+// --list-flags [--json]: kGameFlags as alamo.game_flags v1 (keys in this order; a key is never removed or changed in
+// meaning without raising the version):
+//   { "schema": "alamo.game_flags", "version": 1,
+//     "flags": [ { "flag": "--audio", "value": true, "one_of": ["device", "null", "off"], "positive": false }, ... ] }
+// value: the next argument is the flag's value; one_of: the values it accepts ([] = any); positive: a whole number above
+// 0. Without --json, one flag per line. Names and values are plain ASCII with no quote or backslash: no escaping.
+static int print_flag_list(bool json) {
+    if (!json) {
+        for (const GameFlag& f : kGameFlags)
+            std::printf("%.*s%s%.*s\n", static_cast<int>(f.name.size()), f.name.data(), f.value ? " VALUE " : "",
+                        static_cast<int>(f.one_of.size()), f.one_of.data());
+        return 0;
+    }
+    std::string s = "{\n  \"schema\": \"alamo.game_flags\",\n  \"version\": 1,\n  \"flags\": [";
+    bool first = true;
+    for (const GameFlag& f : kGameFlags) {
+        s += first ? "\n    {" : ",\n    {";
+        first = false;
+        s += "\"flag\": \"" + std::string(f.name) + "\", \"value\": " + (f.value ? "true" : "false") + ", \"one_of\": [";
+        std::string_view rest = f.one_of;
+        for (bool first_value = true; !rest.empty(); first_value = false) {
+            const size_t bar = rest.find('|');
+            s += (first_value ? "\"" : ", \"") + std::string(rest.substr(0, bar)) + "\"";
+            rest = bar == std::string_view::npos ? std::string_view() : rest.substr(bar + 1);
+        }
+        s += std::string("], \"positive\": ") + (f.positive ? "true" : "false") + "}";
+    }
+    s += "\n  ]\n}\n";
+    std::fputs(s.c_str(), stdout);
+    return 0;
+}
+
 int main(int argc, char** argv) {
+    for (int i = 1; i < argc; ++i)  // ref3 t05: before anything that could print
+        if (std::string_view(argv[i]) == "--list-flags") {
+            bool json = false;
+            for (int k = 1; k < argc; ++k) json = json || std::string_view(argv[k]) == "--json";
+            return print_flag_list(json);
+        }
     {  // [port] crash minidumps (%LOCALAPPDATA%\alamo\crashes; ALAMO_CRASHDUMP=0 turns them off, ALAMO_CRASH_TEST=<kind> checks them)
         alamo::crash::Options crash_opt;
         crash_opt.app_name = "alamo_game";
@@ -633,6 +771,7 @@ int main(int argc, char** argv) {
         if (!regen_save.empty()) opt.bench.save = regen_save;
     }
     std::string export_in, export_out;  // --export-save / --out (save_export.hpp)
+    FlagTarget target{opt, export_in, export_out};
     for (int i = 1; i < argc; ++i) {
         {  // BM2a: the benchmark flags (benchmark.hpp)
             size_t bi = static_cast<size_t>(i);
@@ -661,50 +800,14 @@ int main(int argc, char** argv) {
             }
         }
         const std::string a = argv[i];
-        auto next = [&]() -> std::string { return i + 1 < argc ? argv[++i] : std::string(); };
-        if (a == "--game") opt.game = next();
-        else if (a == "--width") opt.width = static_cast<uint32_t>(std::strtoul(next().c_str(), nullptr, 10)), opt.size_set = true;
-        else if (a == "--height") opt.height = static_cast<uint32_t>(std::strtoul(next().c_str(), nullptr, 10)), opt.size_set = true;
-        else if (a == "--hidden") opt.hidden = true;
-        else if (a == "--fleet-groups") opt.fleet_groups = true;  // [port] fleet groups (off by default)
-        else if (a == "--audio") {
-            const std::string m = next();
-            if (m == "device") opt.audio = AudioBackendKind::Device;
-            else if (m == "null") opt.audio = AudioBackendKind::Null;
-            else if (m == "off") opt.audio = AudioBackendKind::Off;
-            else return usage();
-        } else if (a == "--seed") opt.seed = static_cast<uint32_t>(std::strtoul(next().c_str(), nullptr, 10));
-        else if (a == "--workers") opt.workers = static_cast<int32_t>(std::strtol(next().c_str(), nullptr, 10));
-        else if (a == "--priority") {
-            const std::string m = next();
-            if (m == "above") opt.priority = 1;
-            else if (m == "normal") opt.priority = 0;
-            else return usage();
-        } else if (a == "--frames") opt.frames = std::atol(next().c_str());
-        else if (a == "--battle-max-frames") opt.battle_max_frames = static_cast<uint32_t>(std::strtoul(next().c_str(), nullptr, 10));
-        else if (a == "--cache-dir") opt.cache_dir = next();
-        else if (a == "--png-dir") opt.png_dir = next();
-        else if (a == "--smoke") opt.smoke = next();
-        else if (a == "--movie") opt.movies.push_back(next());
-        else if (a == "--no-intro") opt.intro = false;
-        else if (a == "--attract") opt.attract = true;
-        else if (a == "--mailbox") opt.mode = rhi::PresentMode::Mailbox, opt.mode_set = true;
-        else if (a == "--immediate") opt.mode = rhi::PresentMode::Immediate, opt.mode_set = true;
-        else if (a == "--frame-cap") {
-            const std::string v = next();
-            opt.frame_cap = v == "display" ? ui::kFrameCapDisplay : std::max(0, std::atoi(v.c_str()));
-            opt.frame_cap_set = true;
-        } else if (a == "--video-options") opt.video_options = next();
-        else if (a == "--saves-dir") opt.saves_dir = next();
-        else if (a == "--frame-overlay") opt.frame_overlay = true;
-        else if (a == "--profile") opt.profile = true;
-        else if (a == "--profile-out") opt.profile = true, opt.profile_out = next();
-        else if (a == "--profile-budget") opt.profile_budget = std::strtod(next().c_str(), nullptr);
-        else if (a == "--bench-scenario" || a == "--bench-make" || a == "--bench-regen") (void)next();  // bm2 / bm3: read before this loop
-        else if (a == "--export-save") export_in = next();  // launcher support (save_export.hpp)
-        else if (a == "--out") export_out = next();
-        else if (a.find('=') != std::string::npos) opt.game_args.push_back(a);
-        else return usage();
+        if (const GameFlag* f = find_game_flag(a)) {  // ref3 t05: kGameFlags
+            const std::string v = f->value && i + 1 < argc ? argv[++i] : std::string();
+            if (!f->apply(target, *f, v)) return usage();
+        } else if (a.find('=') != std::string::npos) {
+            opt.game_args.push_back(a);
+        } else {
+            return usage();
+        }
     }
     if (!export_in.empty()) {  // launcher support: no window, Vulkan or audio
         log::set_min_level(log::Level::Warn);
@@ -712,7 +815,7 @@ int main(int argc, char** argv) {
     }
     if (opt.bench_new.active()) return bench_new_main(opt);  // BM3: no window, no renderer
     if (opt.width == 0 || opt.height == 0) return usage();
-    if (!opt.smoke.empty() && opt.smoke != "skirmish" && opt.smoke != "campaign" && opt.smoke != "land" && opt.smoke != "saveload") return usage();
+    if (!opt.smoke.empty() && one_of_index(*find_game_flag("--smoke"), opt.smoke) < 0) return usage();
     if (opt.bench.active()) {  // BM2a: no smoke script, intro, attract demo or frame-time overlay in a benchmark run
         if (const std::string why = check_benchmark_options(opt.bench); !why.empty() || !opt.smoke.empty()) {
             std::fprintf(stderr, "benchmark: %s\n", why.empty() ? "--benchmark and --smoke do not mix" : why.c_str());

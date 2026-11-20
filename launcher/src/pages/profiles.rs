@@ -776,6 +776,7 @@ fn editor(app: &mut App, st: &mut State, ui: &mut egui::Ui, report: Option<&Repo
             parts.join(" · ")
         }
     };
+    let game_exe = app.cfg.settings.game_exe.clone(); // its flag list checks the extra arguments
     section(ui, "launch", "Launch options", &launch_summary, true, |ui| {
         let p = app.cfg.active_mut();
         let o = &mut p.options;
@@ -865,7 +866,7 @@ fn editor(app: &mut App, st: &mut State, ui: &mut egui::Ui, report: Option<&Repo
                     .hint_text("Added to the end of the command line"),
             )
             .changed();
-        for issue in launch::extra_arg_issues(&o.extra_args) {
+        for issue in launch::check_extra_args(game_exe.as_deref(), &o.extra_args) {
             ui.horizontal(|ui| {
                 ui.label(RichText::new(icon::WARNING).color(theme::WARN).size(12.0));
                 ui.add(egui::Label::new(RichText::new(issue.text()).color(theme::WARN).size(12.0)).wrap());
