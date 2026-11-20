@@ -25,6 +25,7 @@
 #define ALAMO_TACTICAL_BATTLE_LEDGER(SAVED, REBUILT, DERIVED) \
     DERIVED(land_obstacle_none_, "per-type cache (filled from type data on first use)") \
     DERIVED(drop_pos_, "scratch inside one call or tick") \
+    DERIVED(despawning_, "scratch inside one call (script_despawn)") \
     DERIVED(deploy_unload_, "scratch inside one call or tick") \
     DERIVED(drop_face_, "scratch inside one call or tick") \
     SAVED(landings_, state) \
