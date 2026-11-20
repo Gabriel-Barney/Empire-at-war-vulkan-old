@@ -2760,17 +2760,26 @@ bool TacticalAiWorld::Impl::step_status(StatusRec& s) {
         case StatusKind::Explore: {
             // aitac t07 (§2.3.1): 0x10 / 0x1a of a unit (dead, or another owner) take it out of the list; signal 10 (the
             // formation arrived) asks for a new pick, made at this poll (IsFinished 0x6b04a0); Result is true.
-            // [port] Arrival = after the last order, no listed unit is moving.
+            // [port] Arrival = a listed unit was seen moving after the last order (`direction` 1; 0 at the order) and now
+            // none is: a move that never starts (an unreachable point) gets no arrival, as retail gets no signal 10.
             const int32_t owner = s.members.empty() ? -1 : store.owner(store.find(s.members.front()));
+            // A unit another task force collected (a newer TF order of this AI raises 0xb on it, §33.3) leaves too.
+            const TfRec* ft = s.tf >= 0 ? tf_rec(s.tf) : nullptr;
             std::erase_if(s.members, [&](int32_t id) {
                 const ObjectHandle h = store.find(id);
-                return !store.alive(h) || store.dying(h) || (owner >= 0 && store.owner(h) != owner);
+                if (!store.alive(h) || store.dying(h) || (owner >= 0 && store.owner(h) != owner)) return true;
+                if (s.tf < 0) return false;
+                if (!ft) return true;
+                const ObjectHandle team = store.container(h);
+                return std::find(ft->units.begin(), ft->units.end(), h) == ft->units.end() &&
+                       (!team || std::find(ft->units.begin(), ft->units.end(), team) == ft->units.end());
             });
             if (!s.lists && now > s.last_order) {
                 bool moving = false;
                 for (const int32_t id : s.members)
                     if (const TacticalAiObject* f = fact(id); f && f->moving) moving = true;
-                if (!moving && !s.members.empty()) s.lists = true;
+                if (moving) s.direction = 1;
+                else if (s.direction == 1 && !s.members.empty()) s.lists = true;
             }
             if (s.lists) explore_pick(s);
             if (s.finished) s.result = lua::AiStatusResult::True;
@@ -3003,6 +3012,7 @@ void TacticalAiWorld::Impl::explore_pick(StatusRec& s) {
                                          std::to_string(static_cast<int32_t>(p.y)) + ")"; });
     s.dest = p;
     s.last_order = now;
+    s.direction = 0;  // not seen moving yet (the arrival test above)
 }
 
 // The pickers 0x6558b0 (rectangle) / 0x655be0 (land zone) [H]: the candidate cells are fogged for `player` (force 1), and

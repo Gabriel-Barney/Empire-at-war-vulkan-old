@@ -48,7 +48,8 @@ struct TfRec {
 // Ambush: S7 t21 SpaceAmbushBlockStatus (AI_TACTICAL §7.3.1); Ability: S7 t15 A1 AbilityBlockStatus of the task-force
 // Activate_Ability (MOVEMENT §3.1.1 step 6). Reinforce: a1j t01 land ReinforceBlockStatus with landings in flight.
 // Explore: aitac t07 ExploreAreaBlockStatus (L1_S4_REMAINING §2.3.1): `members` = the unit list (+0x40), `target` = the AI
-// target slot (+0x48), `plan_frame` = the start frame (+0x54), `lists` = pick again (+0x50); `unit` the one-unit form.
+// target slot (+0x48), `plan_frame` = the start frame (+0x54), `lists` = pick again (+0x50), `direction` = 1 once a unit was
+// seen moving after the last pick's order [port: the arrival stand-in]; `unit` the one-unit form.
 enum class StatusKind : uint8_t { Done, Failed, ProduceForce, Move, AttackTarget, Guard, SpaceReinforce, Ambush, Ability, Reinforce, Explore };
 
 struct StatusRec {
