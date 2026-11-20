@@ -33,9 +33,15 @@ void make_object_bridge(TacticalBattle& battle, std::function<TacticalMode*()> m
         TacticalMode* tm = mode_for();
         return tm ? bt->script_spawn_company(*tm, p) : objects::ObjectHandle{};
     };
+    out.spawn_effect = [bt, mode_for](const objects::SpawnParams& p) {
+        TacticalMode* tm = mode_for();
+        return tm ? bt->script_spawn_effect(*tm, p) : objects::ObjectHandle{};
+    };
+    // A combat unit through combat; any other live object of the mode (a prop with health) by the battle's store damage.
     out.take_damage = [bt, mode_for](objects::ObjectHandle u, float amount, bool cannot_die) {
         TacticalMode* tm = mode_for();
-        return tm && tm->primary().alive(u) && bt->script_damage(*tm, tm->primary().id(u), amount, cannot_die);
+        if (!tm || !tm->primary().alive(u)) return false;
+        return bt->script_damage(*tm, tm->primary().id(u), amount, cannot_die) || bt->script_object_damage(*tm, u, amount, cannot_die);
     };
     out.take_hardpoint_damage = [bt, mode_for](objects::ObjectHandle u, float amount, bool cannot_die, std::string_view hp) {  // r1b t01
         TacticalMode* tm = mode_for();

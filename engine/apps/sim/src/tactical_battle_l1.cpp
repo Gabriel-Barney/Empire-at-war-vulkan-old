@@ -273,6 +273,7 @@ std::vector<std::string> TacticalBattle::adoption_violations(const TacticalMode&
         const auto ui = std::lower_bound(units_.begin(), units_.end(), id, [](const Unit& a, objects::ObjectId v) { return a.id < v; });
         if (ui != units_.end() && ui->id == id) continue;
         if (std::any_of(containers_.begin(), containers_.end(), [id](const Container& c) { return c.id == id; })) continue;
+        if (bt_owner_neutral(st.owner(h))) continue;  // neutral mobile / selectable map objects stay unadopted (map load)
         say(id, t, "store object not adopted by the battle");
     }
     return out;

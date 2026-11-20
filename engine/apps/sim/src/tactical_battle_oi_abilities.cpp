@@ -439,8 +439,39 @@ objects::ObjectHandle TacticalBattle::script_spawn_company(TacticalMode& mode, c
 
 bool TacticalBattle::script_despawn(TacticalMode& mode, objects::ObjectHandle h) {
     if (!mode.primary().alive(h)) return false;
+    despawning_ = true;  // retail's Despawn is no loss or kill (MCX8_BINDINGS_OBJECTS §GameObjectWrapper.Despawn)
     bt_kill_silently(mode, h);
+    despawning_ = false;
     return true;
+}
+
+bool TacticalBattle::script_object_damage(TacticalMode& mode, objects::ObjectHandle h, float amount, bool cannot_die) {
+    objects::ObjectStore& st = mode.primary();
+    if (!st.alive(h) || unit_by_id(st.id(h))) return false;
+    const float cur = st.health(h);
+    float next = cur - amount;
+    const objects::GameObjectTypes& types = catalog_->types();
+    const objects::TypeIndex t = st.type(h);
+    const float max = t < types.columns().tactical_health.size() ? types.columns().tactical_health[t] : 0.0f;
+    if (max > 0.0f && next > max) next = max;
+    if (next > 0.0f) {
+        st.set_health(h, next);
+    } else if (cannot_die) {
+        st.set_health(h, cur < 1.0f ? cur : 1.0f);
+    } else {
+        st.set_health(h, 0.0f);
+        mode.destroy(h);
+    }
+    return true;
+}
+
+objects::ObjectHandle TacticalBattle::script_spawn_effect(TacticalMode& mode, const objects::SpawnParams& p) {
+    const objects::ObjectHandle h = mode.spawn(p);
+    SpawnAdopt how;
+    how.owner = p.owner;
+    how.unit = false;
+    if (h) adopt_spawned(mode, h, how);
+    return h;
 }
 
 bool TacticalBattle::script_damage(TacticalMode& mode, objects::ObjectId id, float amount, bool cannot_die) {

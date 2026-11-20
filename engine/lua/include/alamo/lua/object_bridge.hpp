@@ -300,6 +300,10 @@ public:
     // object Spawn_Unit hands to Lua; null = not handled (the binding creates the company and its members itself, each
     // through spawn_unit). Unset (default): the binding's own layout.
     std::function<objects::ObjectHandle(const objects::SpawnParams& p)> spawn_company;
+    // ref2 t04: an effect object a binding creates for presentation (detail::spawn_attached_effect: Highlight's
+    // Object_Highlight) through the host (a tactical battle: the mode's trees and the L1 systems, never a battle unit).
+    // Used only with battle_lifecycle; unset there: refused.
+    std::function<objects::ObjectHandle(const objects::SpawnParams& p)> spawn_effect;
     // q6 t12: Take_Damage(amount) without a hardpoint name through the host's damage system (a tactical battle: the
     // combat Take_Damage with kind 0, TacticalBattle::script_damage); `cannot_die` = the object's Set_Cannot_Be_Killed.
     // True = applied by the host (the death, if any, processed there); false or unset: the store-only health change.

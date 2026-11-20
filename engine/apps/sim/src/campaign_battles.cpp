@@ -2173,9 +2173,8 @@ void CampaignBattles::l1_hooks(SimHost& host) {
     k.spawn = [this, h](const objects::SpawnParams& p) {
         TacticalMode* tm = h->tactical();
         if (!tm) return objects::ObjectHandle{};
-        const objects::ObjectHandle o = tm->spawn(p);
-        if (battle_) battle_->adopt_object(*tm, o);
-        return o;
+        if (battle_) return battle_->script_spawn_effect(*tm, p);  // ref2 t04: the adopt step (L1 systems)
+        return tm->spawn(p);
     };
     // Space fields (Is_In_* / Is_Point_In_* / Find_Nearest_Space_Field): the battle's field index (kField* bits are
     // the Lua mask bits).

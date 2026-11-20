@@ -148,9 +148,9 @@ ObjectHandle detail::spawn_attached_effect(Call& c, ObjectHandle parent, TypeInd
     if (layer_z) sp.position.z += ty->get_float(type, "Layer_Z_Adjust");
     sp.facing = st->facing(parent);
     if (object_has_model(c, parent)) sp.attach_parent = parent;
-    // ref2 t04: a battle's VMs create through the battle (TacticalBattle::script_spawn: the mode's trees, the L1 systems)
+    // ref2 t04: a battle's VMs create through the battle (TacticalBattle::script_spawn_effect: the mode's trees, L1 only)
     const ObjectBridge* b = bridge(c);
-    if (b && b->battle_lifecycle) return b->spawn_unit ? b->spawn_unit(sp) : ObjectHandle{};
+    if (b && b->battle_lifecycle) return b->spawn_effect ? b->spawn_effect(sp) : ObjectHandle{};
     return st->create(sp);
 }
 

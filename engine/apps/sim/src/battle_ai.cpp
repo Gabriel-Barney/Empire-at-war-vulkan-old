@@ -351,11 +351,7 @@ BattleAi::BattleAi(TacticalBattle& battle, TacticalMode& mode, SimHost& host, co
         k.retreat_increment_frames = [bt](int32_t player) { return bt->retreat_increment_frames(player); };
         k.set_new_environment = [bt](int32_t index) { bt->set_environment(index); };  // cu8g t03
         k.set_cinematic_environment = [bt](bool on) { bt->set_cinematic_environment(on); };  // ui2 t08
-        k.spawn = [bt, md](const objects::SpawnParams& p) {
-            const objects::ObjectHandle o = md->spawn(p);
-            bt->adopt_object(*md, o);
-            return o;
-        };
+        k.spawn = [bt, md](const objects::SpawnParams& p) { return bt->script_spawn_effect(*md, p); };  // ref2 t04: the adopt step
 #ifdef ALAMO_LUA_HAVE_FOG
         // refixf t03: Find_Nearest(obj, filter, player, bool) skips objects fogged for the player (0x35f470, force = 1).
         fog_hooks_.object_hidden = [bt, bid](objects::ObjectHandle o, int32_t player, bool force) {

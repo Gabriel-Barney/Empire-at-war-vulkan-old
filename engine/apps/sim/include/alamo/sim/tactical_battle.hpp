@@ -1054,6 +1054,15 @@ public:
     // battle unit leaves its systems with no death effects (bt_kill_silently: hangars, abilities / combat, movement, the
     // unit lists), any other object leaves the mode (TacticalMode::destroy: store and trees). False when `h` is not live.
     bool script_despawn(TacticalMode& mode, objects::ObjectHandle h);
+    // ref2 t04 review: Lua Take_Damage(amount) on a live object of the mode that is no battle unit (a prop with health, e.g.
+    // a power-up crate whose script damages itself away): its store health drops, capped at the type's Tactical_Health;
+    // `cannot_die` stops it at min(current, 1); at 0 it leaves the mode (TacticalMode::destroy). False for a battle unit
+    // (live or not: script_damage's) and for a dead object.
+    bool script_object_damage(TacticalMode& mode, objects::ObjectHandle h, float amount, bool cannot_die);
+    // ref2 t04 review: an effect / script object created for a script (attached effects such as Highlight's, Spawn_Special_Weapon
+    // through TacticalScriptHooks::spawn): TacticalMode::spawn, then adopt_spawned with unit = false (the L1 systems only;
+    // never a battle unit).
+    objects::ObjectHandle script_spawn_effect(TacticalMode& mode, const objects::SpawnParams& p);
     // q6 t12: Lua Take_Damage(amount) on a battle combat unit (ObjectBridge::take_damage): CombatSystem::take_damage with
     // damage kind 0 (Debug: passes invulnerability, TACTICAL_COMBAT §3.6 step 3; OBJECT_SCRIPTS §6.1 step 4), no source,
     // at the battle frame; `cannot_die` (the script's Set_Cannot_Be_Killed) sets kUnitCannotDie for that hit. A kill is
@@ -1582,7 +1591,8 @@ public:
     std::string summary() const;
     // ref2 t04 test seam (outside the CRC, const): the adoption invariant. Every live battle unit is a live store object,
     // a combat unit, and a movement unit when movable (not while inside a garrison); every live store object of a type in the battle tables, or with a
-    // LOCOMOTOR, is a battle unit or a battle container (an object spawned around the adopt step breaks it). One line
+    // LOCOMOTOR, is a battle unit or a battle container, unless a neutral player owns it (the map load leaves neutral mobile
+    // objects unadopted on purpose) - an object spawned around the adopt step breaks it. One line
     // per breach ("<id> <type name>: <what>"), ascending store order; empty = clean.
     std::vector<std::string> adoption_violations(const TacticalMode& mode) const;
 
@@ -2331,6 +2341,7 @@ private:
     int32_t dummy_type_ = -1;           // Dummy_Barrage_Target
     std::vector<Participant> parts_;
     std::vector<Unit> units_;  // ascending object id
+    bool despawning_ = false;  // ref2 t04 review: inside script_despawn (a TEAM container leaving with it is no loss)
     std::vector<Container> containers_;
     std::vector<TimedObject> particles_;  // spawn order; frame = death frame
     std::vector<TimedObject> dummies_;    // spawn order; frame = spawn frame

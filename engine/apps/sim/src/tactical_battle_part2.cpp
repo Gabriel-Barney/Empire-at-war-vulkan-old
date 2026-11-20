@@ -1630,7 +1630,8 @@ void TacticalBattle::unit_gone(TacticalMode& mode, Unit& u) {
     if (c.alive == 0 && !c.removed) {
         c.removed = true;
         if (movement_) (void)movement_->remove_unit(c.id);  // s78n t03: a squad container's own mover
-        bt_removals_.push_back({c.owner, c.type, c.type, u.retreated});  // battle host: the container leaves with its last member
+        // battle host: the container leaves with its last member (ref2 t04 review: a Despawn is no loss)
+        bt_removals_.push_back({c.owner, c.type, c.type, u.retreated || despawning_});
         hg_unit_removed(c.id);  // hangars: a launched squadron container is gone
         abilities_->remove(c.id);
         mode.primary().destroy(c.h);

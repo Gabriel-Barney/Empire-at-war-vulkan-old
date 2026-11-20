@@ -688,6 +688,11 @@ void test_battle_ai_lifecycle() {
                 if (cs.has_unit(id)) sum += cs.health(id);
             return sum;
         };
+        auto store_health = [&] {  // a refused Take_Damage must not reach the store either
+            double sum = 0.0;
+            for (const objects::ObjectId id : troopers()) sum += st.health(st.find(id));
+            return sum;
+        };
         BattleAi ai(*b, *tm, host, ts);
         lua::ObjectBridge& br = ai.world().object_bridge();
         CHECK(br.battle_lifecycle && br.spawn_unit && br.spawn_company && br.take_damage && br.destroy_object && br.change_owner);
@@ -719,9 +724,19 @@ void test_battle_ai_lifecycle() {
         const double h1 = combat_health();
         const auto damage_hook = br.take_damage;
         br.take_damage = nullptr;
+        const double s1 = store_health();
         CHECK(run("Find_All_Objects_Of_Type('S10_Trooper')[1].Take_Damage(10)"));
-        const double h2 = combat_health();
+        const double h2 = combat_health(), s2 = store_health();
+        CHECK(s2 == s1);
         br.take_damage = damage_hook;
+        // A live object of the mode that is no battle unit (a prop with health, here a bare store object of a unit type)
+        // takes Take_Damage through the battle's store damage and leaves the mode at 0 (review: retail damages it).
+        objects::SpawnParams pp = sp;
+        pp.position.x += 50.0f;
+        const objects::ObjectHandle prop = st.create(pp);
+        const float ph0 = st.health(prop);
+        CHECK(br.take_damage(prop, 10.0f, false) && st.health(prop) < ph0);
+        CHECK(br.take_damage(prop, 1.0e6f, false) && !st.alive(prop));
         // Despawn: the battle's removal; without the hook a refusal (the object stays).
         const size_t n0 = troopers().size();
         CHECK(run("Find_All_Objects_Of_Type('S10_Trooper')[1].Despawn()"));
