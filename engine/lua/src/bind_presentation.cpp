@@ -644,7 +644,7 @@ int m_attach_particle_effect(Call& c) {
     if (t && t->cls == detail::cls_type()) {
         if (types && t->value < types->raw().type_count()) {
             r.type = static_cast<int32_t>(t->value);
-            r.type_name = std::string(types->raw().types().name[t->value]);
+            r.type_name = std::string(types->name(static_cast<objects::TypeIndex>(t->value)));
         }
     } else {
         r.type_name = std::string(c.string(1));
@@ -652,7 +652,7 @@ int m_attach_particle_effect(Call& c) {
             const objects::TypeIndex ti = types->raw().find(r.type_name);
             if (ti != objects::kNone) {
                 r.type = static_cast<int32_t>(ti);
-                r.type_name = std::string(types->raw().types().name[ti]);
+                r.type_name = std::string(types->name(ti));
             }
         }
     }

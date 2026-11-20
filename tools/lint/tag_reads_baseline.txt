@@ -1,18 +1,6 @@
 # String tag reads per sim file (tools/lint/check_tag_reads.py, ref6 t01). Only goes down; target 0.
-# total 177
+# total 70
 engine/ai/src/galactic_ai.cpp 18
 engine/ai/src/galactic_seed.cpp 1
 engine/ai/tactical/src/tactical_ai.cpp 3
 engine/apps/sim/src/battle_ai.cpp 48
-engine/apps/sim/src/object_scripts.cpp 4
-engine/apps/sim/src/story_session.cpp 11
-engine/galactic/src/galactic_rules.cpp 1
-engine/lua/src/bind_ai.cpp 1
-engine/lua/src/bind_engine.cpp 1
-engine/lua/src/bind_objects.cpp 37
-engine/lua/src/bind_players.cpp 5
-engine/lua/src/bind_presentation.cpp 2
-engine/lua/src/bind_script_gaps.cpp 12
-engine/lua/src/bind_script_remaining.cpp 26
-engine/lua/src/bind_story.cpp 4
-engine/lua/src/bindings.cpp 3

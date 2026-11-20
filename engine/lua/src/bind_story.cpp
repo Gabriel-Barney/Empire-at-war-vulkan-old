@@ -118,7 +118,7 @@ std::string story_text(const StoryModel* m, std::string_view id) {
 
 // A type's localized display name (type +0x140, from its Text_ID through the text table). [M] an empty Text_ID gives "".
 std::string type_display_name(Call& c, const StoryModel* m, objects::TypeIndex t) {
-    const std::string_view id = c.vm->host.types->get_string(t, "Text_ID");
+    const std::string_view id = c.vm->host.types->get_string(t, objects::tags::Text_ID);
     return id.empty() ? std::string() : story_text(m, id);
 }
 
@@ -144,7 +144,7 @@ int g_story_event(Call& c) {
     const bool alive = obj && detail::object_alive(*c.vm, *obj);
     if (alive && c.vm->host.types) {
         const objects::TypeIndex t = c.vm->host.store->type(detail::object_handle(*obj));
-        if (t < c.vm->host.types->raw().type_count()) type_name = std::string(c.vm->host.types->raw().types().name[t]);
+        if (t < c.vm->host.types->raw().type_count()) type_name = std::string(c.vm->host.types->name(t));
     }
     if (StoryTable* t = story_table(c.L); t && t->set_count() != 0) t->story_event(c.string(1), type_name, alive);
     else m->story_event(c.string(1), type_name, alive);
@@ -366,12 +366,12 @@ bool convert_value(Call& c, int i, std::string& out) {
         if (!detail::object_alive(*c.vm, *o)) return false;
         const objects::TypeIndex t = representative_type(c, *o);
         if (t == objects::kNone) return false;
-        out = ascii_upper(c.vm->host.types->raw().types().name[t]);
+        out = ascii_upper(c.vm->host.types->name(t));
         return true;
     }
     if (const detail::Ud* t = c.userdata(i, detail::cls_type())) {
         if (!c.vm->host.types || t->value >= c.vm->host.types->raw().type_count()) return false;
-        out = ascii_upper(c.vm->host.types->raw().types().name[static_cast<size_t>(t->value)]);
+        out = ascii_upper(c.vm->host.types->name(static_cast<objects::TypeIndex>(t->value)));
         return true;
     }
     const int lt = lua_type(c.L, c.idx(i));

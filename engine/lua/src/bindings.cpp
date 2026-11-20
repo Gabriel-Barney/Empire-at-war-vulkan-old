@@ -574,13 +574,13 @@ int mt_tostring(lua_State* L) {
         if (alive && types) {
             const uint32_t mt = member_view_type(*vm, *ud);  // refix t04: a member view prints its member type
             const objects::TypeIndex t = mt != objects::kNone ? mt : st->type(object_handle(*ud));
-            if (t < types->raw().type_count()) type_name = types->raw().types().name[t];
+            if (t < types->raw().type_count()) type_name = types->name(t);
         }
         std::snprintf(buf, sizeof buf, "GameObject %.*s (id %d)%s", static_cast<int>(type_name.size()),
                       type_name.data(), ud->id, alive ? "" : " [dead]");
     } else if (ud->cls == cls_type()) {
         std::string_view n = "?";
-        if (types && ud->value < types->raw().type_count()) n = types->raw().types().name[ud->value];
+        if (types && ud->value < types->raw().type_count()) n = types->name(static_cast<objects::TypeIndex>(ud->value));
         std::snprintf(buf, sizeof buf, "GameObjectType %.*s", static_cast<int>(n.size()), n.data());
     } else if (ud->cls == cls_player()) {
         std::snprintf(buf, sizeof buf, "Player %d", ud->id);
@@ -774,7 +774,7 @@ uint32_t member_view_type(const LuaVm::Impl& vm, const Ud& ud) {
     const objects::GameObjectTypes* types = vm.host.types;
     const objects::ObjectHandle h = object_handle(ud);
     if (!st || !types || !st->exists(h)) return objects::kNone;
-    const std::vector<objects::TypeIndex> members = types->get_type_refs(st->type(h), "Company_Units");
+    const std::vector<objects::TypeIndex> members = types->get_type_refs(st->type(h), objects::tags::Company_Units);
     const uint32_t i = member_index(ud);
     return i < members.size() ? members[i] : objects::kNone;
 }

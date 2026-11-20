@@ -502,6 +502,7 @@ struct SubObjectsTag {
     X(Float, Bombing_Run_Prevention_Radius, 0.0f)                                                                     \
     X(Text, Vehicle_Thief_Inside_Clone, "")                                                                           \
     X(List, DeployedBehavior, 0)                                                                                      \
+    X(List, GalacticBehavior, 0)                                                                                      \
     X(Text, Shield_On_Anim, "")                                                                                       \
     X(Text, Shield_Off_Anim, "")                                                                                      \
     X(Bool, Tactically_Built_Child_Object_Persists, true)                                                             \
@@ -552,7 +553,14 @@ struct SubObjectsTag {
     X(List, Reserve_Spawned_Units_Tech_2, 0)                                                                          \
     X(List, Reserve_Spawned_Units_Tech_3, 0)                                                                          \
     X(List, Reserve_Spawned_Units_Tech_4, 0)                                                                          \
-    X(List, Reserve_Spawned_Units_Tech_5, 0)
+    X(List, Reserve_Spawned_Units_Tech_5, 0)                                                                          \
+    /* Lua object / player / story bridge (LUA_API): lua bind_*.cpp, bindings.cpp; apps/sim story_session.cpp, object_scripts.cpp */ \
+    X(Bool, Has_Space_Evaluator, false)                                                                               \
+    X(Float, AI_Combat_Power, 0.0f)                                                                                   \
+    X(List, Potential_Indigenous_Power, 0)                                                                            \
+    X(Text, Enemy_Spawn_Text, "")                                                                                     \
+    X(Bool, Execute_Script_On_Type, false)                                                                            \
+    X(Text, Lua_Script, "")
 // clang-format on
 
 namespace tags {

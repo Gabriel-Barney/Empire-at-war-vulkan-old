@@ -66,7 +66,7 @@ ObjectHandle self_object(Call& c) { return detail::object_handle(*c.self); }
 std::string_view type_name(Call& c, TypeIndex t) {
     const objects::GameObjectTypes* ty = types(c);
     if (!ty || t >= ty->raw().type_count()) return {};
-    return ty->raw().types().name[t];
+    return ty->name(t);
 }
 std::string object_name(Call& c, ObjectHandle h) { return std::string(type_name(c, store(c)->type(h))); }
 
@@ -221,9 +221,9 @@ int g_spawn_special_weapon(Call& c) {
     const TypeIndex t = type_arg(c, 1, name);
     const objects::GameObjectTypes* ty = types(c);
     if (t == objects::kNone || !ty || t >= ty->size()) return c.script_error_stop("%s -- unknown object type %s", kName, name.c_str());
-    if (!ty->get_bool(t, "Is_Special_Weapon_In_Space"))
+    if (!ty->get(t, objects::tags::Is_Special_Weapon_In_Space))
         return c.script_error_stop("%s -- %s is not a space special weapon", kName, name.c_str());
-    if (ty->get_int(t, "Special_Weapon_Index") < 0)
+    if (ty->get(t, objects::tags::Special_Weapon_Index) < 0)
         return c.script_error_stop("%s -- %s has no special weapon index", kName, name.c_str());
     const Ud* player = c.userdata(2, detail::cls_player());
     if (!player || player->id < 0) return c.script_error_stop("%s -- invalid type for parameter 2. Expected player.", kName);
@@ -252,9 +252,9 @@ int m_type_is_affected_by_laser_defense(Call& c) {
     const auto t = static_cast<TypeIndex>(c.self->value);
     if (!ty || t >= ty->size()) return push_bool(c, false);
     // Projectile_Category MISSILE (1), ROCKET (4), MPTL_ROCKET (6): mask 0x52 [H]. The field's text, else its enum.
-    const std::string_view cat = ty->get_string(t, "Projectile_Category");
+    const std::string_view cat = ty->get_string(t, objects::tags::Projectile_Category);
     if (!cat.empty()) return push_bool(c, ascii_iequals(cat, "MISSILE") || ascii_iequals(cat, "ROCKET") || ascii_iequals(cat, "MPTL_ROCKET"));
-    const int32_t v = ty->get_enum(t, "Projectile_Category");
+    const int32_t v = ty->get(t, objects::tags::Projectile_Category);
     return push_bool(c, v >= 0 && v < 32 && ((0x52u >> v) & 1u) != 0);
 }
 
@@ -312,11 +312,11 @@ int g_create_cinematic_transport(Call& c) {
     const TypeIndex t = ty ? ty->raw().find(c.string(1)) : objects::kNone;
     if (t == objects::kNone || t >= ty->size()) return push_nil(c);
     // 0x2cb7a0: TRANSPORT and type byte +0x65 (Has_Space_Evaluator [M]) clear, else nothing is created.
-    if (!type_has(c, t, objects::beh::Transport) || ty->get_bool(t, "Has_Space_Evaluator")) return push_nil(c);
+    if (!type_has(c, t, objects::beh::Transport) || ty->get(t, objects::tags::Has_Space_Evaluator)) return push_nil(c);
     TacticalScriptHooks* hk = hooks(c);
     float z = pos.z;
     if (hk && hk->ground_height) z = std::max(z, hk->ground_height(pos.x, pos.y));
-    z += ty->get_float(t, "Hover_Offset");
+    z += ty->get(t, objects::tags::Hover_Offset);
     // Facing (0, 0, z_angle): a yaw in degrees [M] (shipped scripts pass 0) as the store's facing vector.
     const float yaw = z_angle * 0.017453292519943295f;
     objects::SpawnParams sp;
@@ -360,7 +360,7 @@ int g_start_cinematic_space_retreat(Call& c) {
     for (const ObjectHandle h : st->owned_by(player)) {
         if (!st->active(h) || !st->has_behavior(h, objects::beh::Locomotor) || st->attach_parent(h) || st->container(h)) continue;
         const TypeIndex t = st->type(h);
-        units.push_back({h, (ty && t < ty->size()) ? ty->get_float(t, "Max_Speed") : 0.0f, 0.0});
+        units.push_back({h, (ty && t < ty->size()) ? ty->get(t, objects::tags::Max_Speed) : 0.0f, 0.0});
     }
     // 2. Sort by speed, descending (0x3727a0 [M]: Max_Speed), stable.
     std::stable_sort(units.begin(), units.end(), [](const Entry& a, const Entry& b) { return a.speed > b.speed; });
@@ -617,7 +617,7 @@ int detail::task_force_fire_special_weapon(Call& c, bool space, const std::vecto
     const TypeIndex t = type_arg(c, 1, name);
     ObjectHandle target;
     (void)target_arg(c, 2, target);
-    if (t == objects::kNone || !ty || t >= ty->size() || !ty->get_bool(t, "Is_Special_Weapon_In_Space"))
+    if (t == objects::kNone || !ty || t >= ty->size() || !ty->get(t, objects::tags::Is_Special_Weapon_In_Space))
         return c.script_error_stop("%s -- %s is not a space special weapon", kName, name.c_str());
     if (!target) return c.script_error_stop("%s -- Expected game object", kName);
     if (player < 0)
@@ -632,11 +632,11 @@ int detail::task_force_fire_special_weapon(Call& c, bool space, const std::vecto
     }
     const TypeIndex tt = st->type(target);
     // Special_Weapon_Valid_Targets (+0x1df0): a list of GameObjectCategoryType names -> CategoryMask bits.
-    uint64_t valid = ty->get_mask(t, "Special_Weapon_Valid_Targets");
+    uint64_t valid = ty->get(t, objects::tags::Special_Weapon_Valid_Targets);
     if (valid == 0)
-        for (const std::string_view n : ty->get_list(t, "Special_Weapon_Valid_Targets"))
+        for (const std::string_view n : ty->get_list(t, objects::tags::Special_Weapon_Valid_Targets))
             if (const auto m = ty->enums().get(objects::EnumId::GameObjectCategory).convert(n)) valid |= static_cast<uint64_t>(*m);
-    if (tt >= ty->size() || (ty->get_mask(tt, "CategoryMask") & valid) == 0) return push_bool(c, false);
+    if (tt >= ty->size() || (ty->get(tt, objects::tags::CategoryMask) & valid) == 0) return push_bool(c, false);
     for (const ObjectHandle u : units) {
         if (!st->alive(u) || st->type(u) != t || !st->has_behavior(u, kBehSpecialWeapon) || readiness(hk, u) < 1.0f) continue;
         if (!(hk && hk->begin_targeting && hk->begin_targeting(u))) return c.script_error_stop("%s -- unable to begin targeting", kName);

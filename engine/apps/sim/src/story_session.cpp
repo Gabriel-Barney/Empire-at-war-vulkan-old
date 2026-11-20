@@ -82,7 +82,7 @@ constexpr double kDefaultServiceRate = 0.2;  // PGStateMachine Base_Definitions:
 // The galactic rules' type index `ty` names the same type in the object type database (they share one
 // index space when the rules were extracted from it; hand-made test rules may not).
 bool same_type(const objects::GameObjectTypes& types, const galactic::GalacticRules& rules, uint32_t ty) {
-    return ty < rules.types.size() && ty < types.raw().type_count() && ascii_iequals(types.raw().types().name[ty], rules.types[ty].name);
+    return ty < rules.types.size() && ty < types.raw().type_count() && ascii_iequals(types.name(ty), rules.types[ty].name);
 }
 
 // Wave 2b: player -> faction index (StoryModel::faction_of; FILTER_* compare factions, SCRIPT_GAPS.md §4.5).
@@ -96,16 +96,16 @@ std::function<int32_t(int32_t)> faction_resolver(const galactic::GalacticSim& si
 }
 
 std::string type_name_of(const objects::GameObjectTypes& types, objects::TypeIndex t) {
-    return t < types.raw().type_count() ? std::string(types.raw().types().name[t]) : std::string();
+    return t < types.raw().type_count() ? std::string(types.name(t)) : std::string();
 }
 
 // Named hero type names of a type (wave 1 rule): the type itself and its Company_Units members.
 std::vector<std::string> hero_names(const objects::GameObjectTypes& types, objects::TypeIndex t) {
     std::vector<std::string> out;
     if (t >= types.raw().type_count()) return out;
-    if (types.get_bool(t, "Is_Named_Hero")) out.push_back(type_name_of(types, t));
-    for (const objects::TypeIndex m : types.get_type_refs(t, "Company_Units"))
-        if (m != objects::kNone && m < types.raw().type_count() && types.get_bool(m, "Is_Named_Hero"))
+    if (types.get(t, objects::tags::Is_Named_Hero)) out.push_back(type_name_of(types, t));
+    for (const objects::TypeIndex m : types.get_type_refs(t, objects::tags::Company_Units))
+        if (m != objects::kNone && m < types.raw().type_count() && types.get(m, objects::tags::Is_Named_Hero))
             out.push_back(type_name_of(types, m));
     return out;
 }
@@ -378,7 +378,7 @@ void StorySession::add_unit_names(objects::ObjectHandle h, std::vector<std::stri
     if (ty >= sim_->rules().types.size()) return;
     out.push_back(sim_->rules().types[ty].name);
     if (same_type(*types_, sim_->rules(), ty))
-        for (const objects::TypeIndex m : types_->get_type_refs(ty, "Company_Units"))
+        for (const objects::TypeIndex m : types_->get_type_refs(ty, objects::tags::Company_Units))
             if (m != objects::kNone && m < sim_->rules().types.size()) out.push_back(sim_->rules().types[m].name);
 }
 
@@ -755,7 +755,7 @@ std::vector<std::pair<std::string, lua::StoryNotification>> StorySession::notifi
             all.push_back(u);
             const uint32_t ty = sim_->rules().find_type(u);
             if (same_type(*types_, sim_->rules(), ty))
-                for (const objects::TypeIndex m : types_->get_type_refs(ty, "Company_Units"))
+                for (const objects::TypeIndex m : types_->get_type_refs(ty, objects::tags::Company_Units))
                     if (m != objects::kNone && m < sim_->rules().types.size()) all.push_back(sim_->rules().types[m].name);
         }
         v = std::move(all);
@@ -826,9 +826,9 @@ std::vector<std::pair<std::string, lua::StoryNotification>> StorySession::notifi
             // auto-resolve kill (value 1: retail's Die skips 0x3a01f0, MCX4_GAL2_RE_ANSWERS Q4).
             if (e.value != 1 && same_type(*types_, sim_->rules(), e.type)) {
                 std::vector<std::string> heroes;
-                auto hero = [this](objects::TypeIndex ty) { return types_->get_bool(ty, "Is_Named_Hero"); };
+                auto hero = [this](objects::TypeIndex ty) { return types_->get(ty, objects::tags::Is_Named_Hero); };
                 if (hero(static_cast<objects::TypeIndex>(e.type))) heroes.push_back(t.type);
-                for (const objects::TypeIndex m : types_->get_type_refs(static_cast<objects::TypeIndex>(e.type), "Company_Units"))
+                for (const objects::TypeIndex m : types_->get_type_refs(static_cast<objects::TypeIndex>(e.type), objects::tags::Company_Units))
                     if (m != objects::kNone && m < sim_->rules().types.size() && hero(m)) heroes.push_back(sim_->rules().types[m].name);
                 for (const std::string& h : heroes) {
                     lua::StoryNotification d = n;
@@ -1695,7 +1695,7 @@ void StorySession::record_battle_composition(PlanetIndex planet) {
         for (const objects::ObjectHandle h : fl.contents) {
             if (!st.exists(h)) continue;
             const objects::TypeIndex t = st.type(h);
-            side.push_back(t < types_->raw().type_count() ? types_->get_int(t, "Ship_Class") : -1);
+            side.push_back(t < types_->raw().type_count() ? types_->get(t, objects::tags::Ship_Class) : -1);
         }
     }
 }
@@ -2090,8 +2090,8 @@ bool StorySession::begin_battle(const StoryBattleStart& s, uint64_t frame, std::
             const objects::TypeIndex t = gst.type(h);
             if (t >= types_->raw().type_count()) return;
             b->names.emplace_back(owner, type_name_of(*types_, t));
-            for (const char* tag : {"Company_Units", "Squadron_Units"})  // team members [inferred]
-                for (const objects::TypeIndex m : types_->get_type_refs(t, tag))
+            for (const objects::ListTag* tag : {&objects::tags::Company_Units, &objects::tags::Squadron_Units})  // team members [inferred]
+                for (const objects::TypeIndex m : types_->get_type_refs(t, *tag))
                     if (m != objects::kNone && m < types_->raw().type_count()) b->names.emplace_back(owner, type_name_of(*types_, m));
         };
         for (const galactic::BattleForces& f : r->forces) {
@@ -2513,7 +2513,7 @@ void StorySession::service_sandbox(uint64_t frame) {
             if (std::find(seen.begin(), seen.end(), t) != seen.end()) continue;
             seen.push_back(t);
             if (sim_->relation(tac.sandbox_player, st.owner(h)) != galactic::Relation::Enemy) continue;
-            if (t >= types_->raw().type_count() || ascii_trim(types_->get_string(t, "Enemy_Spawn_Text")).empty()) continue;
+            if (t >= types_->raw().type_count() || ascii_trim(types_->get(t, objects::tags::Enemy_Spawn_Text)).empty()) continue;
             tac.sandbox_types.push_back(t);
         }
         tac.sandbox_paid.assign(tac.sandbox_types.size(), 0);
