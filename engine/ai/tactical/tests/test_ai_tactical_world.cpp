@@ -1458,9 +1458,6 @@ bool g_original_timing = false;  // a1k t01: TacticalAiConfig::stagger / pp_stre
 bool g_plan_retest = false;  // skai t15: TacticalAiConfig::plan_retest (test_plan_retest)
 bool g_log_decisions = true;  // REF1 t04: TacticalAiConfig::log_decisions (test_logging_off)
 bool g_no_starbase = false;  // skm1 t03: MockHost::base_alive false (test_space_reinforce_needs_starbase)
-// bkx1 t01: the tactical goal systems run the retail cadence since b0123; the scenario checks written for the earlier
-// [port] cadence (group orders, Prepare_Ambush: which plan instance reports first) keep it.
-bool g_port_cadence = false;
 bool g_empty_tf_tolerance = false;  // ref5 t05: the variant 5 plan with MinContrastScale 0.5 (test_no_units_remaining_heroes)
 bool syn_object_types(MemoryFiles& tf, objects::ObjectTypeDatabase& raw, objects::GameObjectTypes& types, bool abilities) {
     const char* names[] = {"Syn_Frigate", "Syn_Corvette", "Syn_Station", "Syn_Pad", "UC_Syn_Turret"};
@@ -1563,7 +1560,6 @@ RunResult run(int32_t frames, int32_t difficulty0, int variant = 0, std::vector<
     cfg.map = {-4000.0f, -4000.0f, 4000.0f, 4000.0f};
     cfg.plan_retest = g_plan_retest;  // skai t15
     cfg.log_decisions = g_log_decisions;  // REF1 t04
-    if (g_port_cadence) cfg.retail_cadence = false;  // bkx1 t01
     if (g_original_timing) {  // a1k t01: the OPT2 t01 / t10 timing knobs off (test_replan_and_priority_lifetime)
         cfg.stagger = false;
         cfg.pp_streams = false;
@@ -2827,10 +2823,11 @@ void test_damage_tracking_save() {
 // bus was never saved, continues identically) this is the whole contract of the bus.
 // refixf t06: a task force's Attack_Move is ONE PortExtension order carrying all its movable units (MOVEMENT §6.3: one
 // coordinator), and Attack_Target(x, "Shield_Generator") orders hard-point type 1 (ref2 = 1 + type) [M: short name form].
+// tst2 t05 (b0210): the battle runs the retail goal cadence (TacticalAiConfig::retail_cadence, the default since bkx1 t01);
+// it reaches Attack_Target(Shield_Generator) at both difficulties. The earlier [port]-cadence run was dropped: it
+// tested the same plan under a knob no host uses.
 void test_group_orders() {
-    g_port_cadence = true;
     const RunResult r = run(30 * 120, 1, 4);
-    g_port_cadence = false;
     size_t groups = 0, single = 0, shield = 0;
     for (const std::string& e : r.executed) {
         if (e.find("PortExtension sub 2 units ") != std::string::npos) {
@@ -2865,6 +2862,16 @@ void test_group_orders() {
     CHECK(r.errors.empty());
     CHECK(groups > 0);
     CHECK(shield > 0);
+    // Easy (difficulty 0): its own goal-cadence timing, the same orders reached.
+    const RunResult easy = run(30 * 120, 0, 4);
+    size_t easy_groups = 0, easy_shield = 0;
+    for (const std::string& e : easy.executed) {
+        if (e.find("PortExtension sub 2 units ") != std::string::npos && std::atoi(e.c_str() + e.find(" units ") + 7) >= 2) ++easy_groups;
+        if (e.find(" Attack ref2 2") != std::string::npos) ++easy_shield;
+    }
+    std::printf("group orders (Easy): %zu attack-move group orders, %zu Shield_Generator attacks, %zu Lua errors\n", easy_groups,
+                easy_shield, easy.errors.size());
+    CHECK(easy.errors.empty() && easy_groups > 0 && easy_shield > 0);
 }
 
 // skm1 t03 (AI_TACTICAL §7.4, 0x6e8620): a space skirmish TF.Reinforce with no live allied DUMMY_STAR_BASE (the host's
@@ -3140,9 +3147,10 @@ void test_replan_and_priority_lifetime() {
 // S7 t21 (AI_TACTICAL §7.3.1): Prepare_Ambush through the space task force. The first ambush order goes to the target's
 // position - 1000 x facing (+x: "back" = -x), every unit of the force; while flying it re-plans (> 150 frames since
 // the last plan, polled by BlockOnCommand); the block finishes (movement finished for every mover, or a death rule).
+// tst2 t05 (b0210): under the retail goal cadence (the default since bkx1 t01) an Empire instance's movers arrive
+// (Unit_Move_Finished) before its report; the earlier [port]-cadence run was dropped.
 void test_prepare_ambush() {
     bool checked = false, point_ok = false;
-    g_port_cadence = true;  // bkx1 t01
     const RunResult r = run(30 * 120, 1, 6, nullptr, false, [&](int32_t, MockHost& host, TacticalAiWorld& world) {
         if (checked) return;
         for (const TacticalAiDecision& d : world.decision_log()) {
@@ -3182,7 +3190,6 @@ void test_prepare_ambush() {
         arrived = arrived || (e.find("AMBUSH player=0 ") != std::string::npos && e.find(" moved=0") == std::string::npos);
     CHECK(arrived);
     const RunResult again = run(30 * 120, 1, 6);
-    g_port_cadence = false;
     CHECK(again.crc == r.crc && again.decisions == r.decisions);
 }
 

@@ -631,6 +631,35 @@ function MainForce_Thread()
   ScriptExit()
 end
 )";
+// tst2 t01 (b0137): a plan thread that calls Find_All_Objects_Of_Type through ParityWorld, whose GameObjectTypes is
+// empty (never built). The player filter walks the store; a type-name string finds no type in the empty table, so the
+// binding logs "unknown filter parameter" and returns nothing (before t01 the name lookup dereferenced a null raw()).
+inline const char* kPlanFindAll = R"(
+require("SynAICommands")
+ScriptPoolCount = 1
+function Definitions()
+  Category = "Build_Space_Forces"
+  IgnoreTarget = true
+  MagicPlan = true
+  MagicPlanStealing = false
+  TaskForce = { { "FindForce", "Corvette = 1" } }
+end
+function FindForce_Thread()
+  FindForce.Set_As_Goal_System_Removable(false)
+  local mine = Find_All_Objects_Of_Type(PlayerObject)
+  local n = -1
+  if mine then
+    n = 0
+    for _, o in pairs(mine) do n = n + 1 end
+  end
+  GlobalValue.Set("tst2_find_player", n)
+  if Find_All_Objects_Of_Type("HeroShip") == nil then GlobalValue.Set("tst2_find_name_nil", 1) end
+  if Find_All_Objects_Of_Type(PlayerObject, "No_Such_Type") == nil then GlobalValue.Set("tst2_find_both_nil", 1) end
+  GlobalValue.Set("tst2_find_done", 1)
+  FindForce.Set_Plan_Result(true)
+  ScriptExit()
+end
+)";
 struct ParityWorld {
     MemoryFiles files;
     AiDefinitions defs;
@@ -675,6 +704,7 @@ struct ParityWorld {
         files.add("Data\\Scripts\\AI\\A2mStage.lua", kPlanA2mStage);
         files.add("Data\\Scripts\\AI\\A2mCancel.lua", kPlanA2mCancel);
         files.add("Data\\Scripts\\AI\\A2mT03Plain.lua", kPlanA2mT03Plain);
+        files.add("Data\\Scripts\\AI\\Tst2FindAll.lua", kPlanFindAll);
         plan_files = list_plan_files([this](std::string_view glob) {
             const std::string g(glob);
             return files.list(g.substr(0, g.find('*')));
@@ -758,6 +788,7 @@ void test_produce_force_stage_launch();
 void test_land_units_owner_rule();
 void test_plain_produce_hands_back();
 void test_ended_production_cancel();
+void test_find_all_objects_empty_types();
 void test_no_units_remaining_counted_entries();
 void test_production_disabled_and_delivery();
 void test_ground_structure_slots();

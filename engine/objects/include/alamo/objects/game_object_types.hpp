@@ -120,7 +120,9 @@ public:
     bool build(const ObjectTypeDatabase& raw, const FileProvider* provider = nullptr,
                std::vector<std::string>* diagnostics = nullptr, AnimTypeLookup anim_types = nullptr);
 
-    const ObjectTypeDatabase& raw() const { return *raw_; }
+    // Before build() (a default-constructed table, as the synthetic test worlds pass) this is an empty database, so a
+    // type lookup answers "none" instead of dereferencing null (tst2 t01, b0137).
+    const ObjectTypeDatabase& raw() const { return raw_ ? *raw_ : empty_raw(); }
     size_t size() const { return state_.size(); }
     const TypeLoadStats& stats() const { return stats_; }
 
@@ -247,6 +249,7 @@ private:
     void warn(std::string message);
 
     const ObjectTypeDatabase* raw_ = nullptr;
+    static const ObjectTypeDatabase& empty_raw();
     std::vector<State> state_;
     std::vector<FieldValue> defaults_;
     std::vector<uint8_t> resolved_, resolve_pass_, company_member_, squadron_member_, placed_at_markers_;

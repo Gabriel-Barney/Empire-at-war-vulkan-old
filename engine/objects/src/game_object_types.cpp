@@ -442,12 +442,12 @@ std::string_view GameObjectTypes::variant_name(TypeIndex t) const {
 
 TypeIndex GameObjectTypes::resolve_name(std::string_view name) const {
     if (name.empty() || iequals(name, "None")) return kNone;
-    return raw_->find(name);
+    return raw().find(name);
 }
 
 TypeIndex GameObjectTypes::variant_parent(TypeIndex t) const {
     const std::string_view n = variant_name(t);
-    return n.empty() ? kNone : raw_->find(n);
+    return n.empty() ? kNone : raw().find(n);
 }
 
 bool GameObjectTypes::try_resolve(TypeIndex t, uint8_t pass) {
@@ -840,6 +840,11 @@ bool GameObjectTypes::build(const ObjectTypeDatabase& raw, const FileProvider* p
     icol(c.population_value, I.population);
     diag_ = nullptr;
     return true;
+}
+
+const ObjectTypeDatabase& GameObjectTypes::empty_raw() {
+    static const ObjectTypeDatabase kEmpty;  // immutable after construction
+    return kEmpty;
 }
 
 const FieldValue* GameObjectTypes::value(TypeIndex t, FieldId f) const {
