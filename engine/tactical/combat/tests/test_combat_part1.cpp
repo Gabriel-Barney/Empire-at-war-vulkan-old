@@ -1,4 +1,5 @@
 // Part 1 of test_combat (bo3 t03: split by position; see test_combat_common.hpp).
+#include "alamo/test/engagement_fns.hpp"
 #include "test_combat_common.hpp"
 
 namespace bo3split {
@@ -1736,7 +1737,7 @@ void test_s78n_can_hit() {
         int calls = 0;
         Vec3 qa{}, qb{};
         bool qd = true;
-        w.sys->set_shield_sides_query([&](Vec3 f, Vec3 to, bool shield_damage) {
+        alamo::test::engagement_of(*w.sys).shield_sides_fn = ([&](Vec3 f, Vec3 to, bool shield_damage) {
             ++calls;
             qa = f;
             qb = to;

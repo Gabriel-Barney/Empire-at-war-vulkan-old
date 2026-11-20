@@ -39,8 +39,8 @@ std::array<float, 4> TacticalBattle::chase_ranges(uint32_t ty) const {
     const objects::GameObjectTypes& types = catalog_->types();
     if (ty >= types.size()) return {};
     const auto ti = static_cast<objects::TypeIndex>(ty);
-    return {types.get_float(ti, "Guard_Chase_Range"), types.get_float(ti, "Idle_Chase_Range"),
-            types.get_float(ti, "Attack_Move_Response_Range"), types.get_float(ti, "Autonomous_Move_Extension_Vs_Attacker")};
+    return {types.get(ti, objects::tags::Guard_Chase_Range), types.get(ti, objects::tags::Idle_Chase_Range),
+            types.get(ti, objects::tags::Attack_Move_Response_Range), types.get(ti, objects::tags::Autonomous_Move_Extension_Vs_Attacker)};
 }
 
 void TacticalBattle::chase_ranges_fill(uint32_t ty) {

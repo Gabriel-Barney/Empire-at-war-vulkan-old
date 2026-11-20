@@ -27,9 +27,8 @@
     SAVED(coll_, hashed) \
     SAVED(stats_, unhashed) \
     DERIVED(attack_failed_, "records of one tick, cleared by the battle at the tick start") \
-    REBUILT(hostile_, "host callback") \
+    REBUILT(eng_, "host engagement queries (set_engagement), set again by the battle") \
     REBUILT(scatters_, "host callback") \
-    REBUILT(locked_, "host callback") \
     REBUILT(model_bound_, "host callback") \
     SAVED(crush_, hashed) \
     SAVED(push_kills_, hashed) \
@@ -55,16 +54,12 @@
     REBUILT(deferred_compose_, "host setup (the host runs coordinator_update)") \
     SAVED(form_serial_, unhashed) \
     SAVED(coord_serial_, unhashed) \
-    REBUILT(fire_test_, "host callback") \
-    REBUILT(attack_range_fn_, "host callback") \
-    REBUILT(min_attack_fn_, "host callback") \
     REBUILT(fhooks_, "host callbacks, set again by the loader") \
     REBUILT(fly_hooks_, "host callbacks") \
     REBUILT(deploy_clip_, "host callback") \
     REBUILT(undeploy_block_, "host callback") \
     REBUILT(deploy_block_, "host callback") \
     REBUILT(turret_rest_, "host callback") \
-    REBUILT(turret_aim_, "host callback") \
     DERIVED(devents_, "records of one tick, drained by the battle (take_deploy_events) in the same tick") \
     DERIVED(exit_arrivals_, "records of one tick, drained by the battle (take_exit_arrivals) in the same tick") \
     DERIVED(tevents_, "records of one tick, drained by the battle (take_turn_clip_events) in the same tick")

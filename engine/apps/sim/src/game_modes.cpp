@@ -188,8 +188,8 @@ TacticalMode::TacticalMode(ModeKind kind, const objects::GameObjectTypes& types,
         float sc = types.columns().scale_factor[t];
         if (!(sc > 0.0f) || !finite(sc)) sc = 1.0f;
         scale_[t] = sc;
-        const float hx = types.get_float(t, "Custom_Hard_XExtent");
-        const float hy = types.get_float(t, "Custom_Hard_YExtent");
+        const float hx = types.get(t, objects::tags::Custom_Hard_XExtent);
+        const float hy = types.get(t, objects::tags::Custom_Hard_YExtent);
         float e = hx > hy ? hx : hy;
         if (!(e > 0.0f) || !finite(e)) e = base * sc;
         half_extent_[t] = e;

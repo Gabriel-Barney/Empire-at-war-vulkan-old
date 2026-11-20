@@ -70,7 +70,7 @@ bool land_obstacle_footprint(const objects::GameObjectTypes& types, uint32_t t, 
     const bool proxied = f != t;
     const float w = types.get_float(f, "Obstacle_Width"), hgt = types.get_float(f, "Obstacle_Height");
     const float xo = types.get_float(f, "Obstacle_X_Offset"), yo = types.get_float(f, "Obstacle_Y_Offset");
-    const float scale = types.get_float(f, "Scale_Factor") > 0.0f ? types.get_float(f, "Scale_Factor") : 1.0f;
+    const float scale = types.scale_factor(f);
     const bool fine = types.get_bool(f, "Fine_Tune_Occupied_Passability");
     const StampRayModel rm = hooks && hooks->ray_model ? hooks->ray_model(f) : StampRayModel::Unknown;
     // S8 t13 (§1.3 "A type without Land_Model_Name"): fine-tune on, no proxy, no land model -> the stamper returns before
@@ -176,7 +176,7 @@ bool space_obstacle_footprint(const objects::GameObjectTypes& types, uint32_t t,
         r = std::max(std::fabs(hx), std::fabs(hy));
         if (!(r > 0.0f)) return false;
     }
-    const float scale = types.get_float(t, "Scale_Factor") > 0.0f ? types.get_float(t, "Scale_Factor") : 1.0f;
+    const float scale = types.scale_factor(t);
     radius = r * scale;
     bits = kSpaceStatic;
     if (types.get_bool(t, "Is_Impassable_Asteroid")) bits |= kSpaceImpassableAsteroid;

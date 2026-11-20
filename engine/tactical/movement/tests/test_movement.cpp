@@ -21,6 +21,7 @@
 #include <thread>
 #include <vector>
 
+#include "alamo/test/engagement_fns.hpp"
 #include "alamo/core/sim_crc.hpp"
 #include "alamo/core/sim_rng.hpp"
 #include "alamo/tactical/movement/movement_system.hpp"
@@ -2599,7 +2600,7 @@ static void test_space_rank_key() {
         d.space_layer_type = 0;
         CHECK(sys.add_unit(d));
     }
-    sys.set_attack_range_query([](ObjectId id) { return id == 2 ? 80.0f : 200.0f; });
+    alamo::test::engagement_of(sys).attack_range_fn = ([](ObjectId id) { return id == 2 ? 80.0f : 200.0f; });
     SimRng rng(31);
     MoveOrder o;
     o.units = {1, 2};
@@ -2927,7 +2928,7 @@ static void test_oi_land() {
         const V2 p11 = sys.view(11).pos;
         CHECK(std::fabs(p11.y - cell_center(30, 20).y) > 5.0f);
         // Hostility comes from the host (combat relations).
-        sys.set_hostility([](int32_t, int32_t) { return true; });
+        alamo::test::engagement_of(sys).hostile_fn = ([](int32_t, int32_t) { return true; });
         sys.set_owner(1, 5);
         MoveOrder back = o;
         const V2 from = sys.view(1).pos;

@@ -178,9 +178,8 @@ fw::FogObject TacticalBattle::fog_object_of(const objects::ObjectStore& store, o
 void TacticalBattle::fog_footprint_samples(const objects::ObjectStore& store, objects::ObjectHandle h, float* xy) const {
     const objects::GameObjectTypes& types = catalog_->types();
     const objects::TypeIndex t = store.type(h);
-    const float sf = types.get_float(t, "Scale_Factor");
-    const float scale = sf > 0.0f ? sf : 1.0f;
-    const float ex = types.get_float(t, "Custom_Hard_XExtent"), ey = types.get_float(t, "Custom_Hard_YExtent");
+    const float scale = types.scale_factor(t);
+    const float ex = types.get(t, objects::tags::Custom_Hard_XExtent), ey = types.get(t, objects::tags::Custom_Hard_YExtent);
     float hx = scale * ex, hy = scale * ey;
     std::vector<tactical::abilities::SquadSlot> squad;
     float jiggle = 0.0f;

@@ -6,6 +6,7 @@
 #include <cstdio>
 #include <vector>
 
+#include "alamo/test/engagement_fns.hpp"
 #include "alamo/core/sim_crc.hpp"
 #include "alamo/core/sim_rng.hpp"
 #include "alamo/tactical/movement/land_path.hpp"
@@ -273,8 +274,8 @@ void test_engagement_recruit() {
         land_system(sys, 60);
         for (const ObjectId id : {ObjectId{1}, ObjectId{2}, ObjectId{3}})
             CHECK(sys.add_unit(vehicle(id, {200.0f + 30.0f * static_cast<float>(id - 1), 400.0f})));
-        sys.set_attack_range_query([](ObjectId id) { return id == 2 ? 200.0f : 500.0f; });
-        if (query) sys.set_min_attack_distance_query([](ObjectId id) { return id == 1 ? 220.0f : 0.0f; });
+        alamo::test::engagement_of(sys).attack_range_fn = ([](ObjectId id) { return id == 2 ? 200.0f : 500.0f; });
+        if (query) alamo::test::engagement_of(sys).min_attack_distance_fn = ([](ObjectId id) { return id == 1 ? 220.0f : 0.0f; });
         SimRng rng(3);
         MoveOrder o;
         o.units = {1, 2, 3};
@@ -302,7 +303,7 @@ void test_member_stop() {
     land_system(sys, 60);
     const V2 start[4] = {cell_center(10, 19), cell_center(10, 21), cell_center(8, 19), cell_center(8, 21)};
     for (ObjectId id = 1; id <= 4; ++id) CHECK(sys.add_unit(vehicle(id, start[id - 1])));
-    sys.set_attack_range_query([](ObjectId id) { return id <= 2 ? 100.0f : 300.0f; });  // two ranks: two rows
+    alamo::test::engagement_of(sys).attack_range_fn = ([](ObjectId id) { return id <= 2 ? 100.0f : 300.0f; });  // two ranks: two rows
     SimRng rng(5);
     MoveOrder o;
     o.units = {1, 2, 3, 4};

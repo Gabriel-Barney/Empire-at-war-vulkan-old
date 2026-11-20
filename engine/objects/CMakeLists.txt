@@ -48,4 +48,9 @@ if(ALAMO_LINT_PYTHON)
   add_test(NAME alamo_objects_tag_ledger_lint_selftest
            COMMAND ${ALAMO_LINT_PYTHON} -I ${PROJECT_SOURCE_DIR}/tools/lint/check_tag_ledger.py --selftest)
   set_tests_properties(alamo_objects_tag_ledger_lint alamo_objects_tag_ledger_lint_selftest PROPERTIES TIMEOUT 120)
+  # ref6 t01: string tag reads in sim code may only go down (tools/lint/tag_reads_baseline.txt; read through type_tags.hpp)
+  add_test(NAME alamo_objects_tag_reads_lint COMMAND ${ALAMO_LINT_PYTHON} -I ${PROJECT_SOURCE_DIR}/tools/lint/check_tag_reads.py)
+  add_test(NAME alamo_objects_tag_reads_lint_selftest
+           COMMAND ${ALAMO_LINT_PYTHON} -I ${PROJECT_SOURCE_DIR}/tools/lint/check_tag_reads.py --selftest)
+  set_tests_properties(alamo_objects_tag_reads_lint alamo_objects_tag_reads_lint_selftest PROPERTIES TIMEOUT 60)
 endif()

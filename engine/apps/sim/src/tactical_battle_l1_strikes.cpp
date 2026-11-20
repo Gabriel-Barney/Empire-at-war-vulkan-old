@@ -142,7 +142,7 @@ int32_t TacticalBattle::l1_projectile_of_type(int32_t type) const {
     for (const auto& [t, p] : l1_extra_projectiles_)
         if (t == type) return p;
     if (type < 0) return -1;
-    const std::string_view name = catalog_->types().raw().types().name[static_cast<size_t>(type)];
+    const std::string_view name = catalog_->types().name(static_cast<objects::TypeIndex>(type));
     for (size_t i = 0; i < tables_->combat.projectiles.size(); ++i)
         if (ascii_iequals(tables_->combat.projectiles[i].name, name)) return static_cast<int32_t>(i);
     return -1;
@@ -205,7 +205,7 @@ void TacticalBattle::l1_strikes_setup(TacticalMode& mode) {
         const L1Faction& f = l1_factions_[faction];
         bool any = false;
         for (const uint32_t t : orbit_types)
-            for (const std::string& s : f.bombard_ships) any = any || ascii_iequals(types.raw().types().name[t], s);
+            for (const std::string& s : f.bombard_ships) any = any || ascii_iequals(types.name(t), s);
         if (any && !f.bombard_projectiles.empty()) {
             L1Bombard r;
             r.player = player;

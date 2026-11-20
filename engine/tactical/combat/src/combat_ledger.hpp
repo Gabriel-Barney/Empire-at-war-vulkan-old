@@ -41,9 +41,8 @@
     DERIVED(bshield_sets_, "r3h t06: this tick's Set_State calls") \
     SAVED(repairs_, hashed) \
     REBUILT(obstacle_cell_, "host callback") \
-    REBUILT(shield_sides_, "host callback") \
+    REBUILT(eng_, "host engagement queries (set_engagement), set again by the battle") \
     REBUILT(precise_hit_, "host callback") \
-    REBUILT(scan_range_, "host callback") \
     REBUILT(garrison_host_, "host callback") \
     REBUILT(credits_get_, "host callback") \
     REBUILT(credits_add_, "host callback") \

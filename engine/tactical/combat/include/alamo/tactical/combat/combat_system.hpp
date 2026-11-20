@@ -80,6 +80,7 @@
 #include <utility>
 #include <vector>
 
+#include "alamo/tactical/engagement.hpp"
 #include "alamo/core/parallel.hpp"
 #include "alamo/core/sim_rng.hpp"
 #include "alamo/tactical/combat/formulas.hpp"
@@ -467,7 +468,9 @@ struct UnitDesc {
     bool damaged_smoke = false;             // Damaged_Smoke_Asset_Name set: smoke events at 75 % / 50 %
     std::vector<DeathCloneEntry> death_clones;    // Death_Clone
     std::vector<int32_t> death_projectiles;       // Death_Projectiles (ProjectileDesc indices)
-    float ranged_target_z_adjust = 0.0f;          // Ranged_Target_Z_Adjust
+    // Ranged_Target_Z_Adjust. ref6 t01: 0 is the synthetic-table default only; the battle catalog fills the type value,
+    // whose one default (6.0, LOB_SOLVER §1.1) lives in objects::tags::Ranged_Target_Z_Adjust.
+    float ranged_target_z_adjust = 0.0f;
     float converted_die_time = 0.0f;              // Converted_To_Enemy_Die_Time_Seconds
     // s78n t05 (TACTICAL_COMBAT §3.5 "Convert and its team rule", 0x395c10 steps 3-5): the convert victim test refuses a
     // type with the PROXIMITY_MINE behaviour, a Friendly_Damage_Amount (+0x23ec) > 0 or Is_Named_Hero (+0x13).
@@ -494,7 +497,9 @@ struct UnitDesc {
     int32_t min_survivors = 1, max_survivors = 1;
     float tactical_respawn_secs = 0.0f;           // Tactical_Respawn_Time_In_Secs (+0x21d0)
     bool stunnable = false;                       // has STUNNABLE (0x38)
-    bool shield_requires_base_power = false;      // Shield_Requires_Base_Power (+0x8c)
+    // Shield_Requires_Base_Power (+0x8c). ref6 t01: false is the synthetic-table default only; the catalog fills the type
+    // value (default true, objects::tags::Shield_Requires_Base_Power) here and in base_shield_requires_power below.
+    bool shield_requires_base_power = false;
     // ---- tru1 t02 (docs/re/TRU1_A_RE_ANSWERS.md A1 - A5): base shields ----
     // BASE_SHIELD (0x39) with Base_Shield_Radius (+0x21f4) > 0: a shield generator; its state machine runs every 15
     // frames (CombatSystem::service_base_shields). Always_Off types never join the shield list. requires_power is
@@ -707,7 +712,7 @@ using PreciseHitFn = std::function<PreciseOutcome(const PreciseQuery&, PreciseRe
 // formation (its squadron's, or its own). candidate = kNoObject: c = none (the scan cube). `range` = the unit's own
 // Get_Max_Attack_Range R. Returns 0 (no response) or non-zero with rr = the response range Rr. Called from the parallel
 // gather phase: must be read-only and thread-safe.
-using ScanRangeFn = std::function<uint8_t(ObjectId unit, ObjectId candidate, float range, float& rr)>;
+// ref6 t02: asked through EngagementQueries::has_scan_range / scan_range (CombatSystem::set_engagement).
 
 // S8 t01 (TACTICAL_GAPS 3.1 slot 43): answer of the host's obstacle-cell query for a LAND_OBSTACLE target.
 enum class ObstacleCell : uint8_t {
@@ -725,7 +730,7 @@ enum class CanHit : uint8_t { Yes = 0, NoTarget, OutOfMaxRange, InsideMinRange, 
 // The land line-of-fire test 0x3b5ad0 (L1_S4_REMAINING §1.2): an active base shield holds exactly one of the two
 // points. `shield_damage` false: one of the attacker's projectiles does no shield damage (only shields whose pack +0xc
 // is set count [port: none]). Called from serial host code only.
-using ShieldSidesFn = std::function<bool(Vec3 from, Vec3 to, bool shield_damage)>;
+// ref6 t02: asked through EngagementQueries::has_shield_sides / opposite_shield_sides.
 
 // mcx4 t23 (MCX4_T10_RE_ANSWERS §12 / §12a): the projectile behind a Take_Damage hit, for the damage listeners. `flight`:
 // the shot's impact point, unit flight direction and damage are known (a direct hit); a queued Damage_Delay hit and a
@@ -916,7 +921,7 @@ enum UnitFlag : uint32_t {
     kUnitRocketAttack = 1u << 17,
     // S8 t17 (FIGHTER_FLYING §4.10 A, TACTICAL_COMBAT §2.2): the unit's formation answers the response-range test
     // 0x4160a0 (a space fighter / squadron member with a formation record; cmb1 t03: a land unit or squad container with a
-    // land formation record, not deployed): its scan asks set_scan_range_query for the cube R + Rr (land: else R with a
+    // land formation record, not deployed): its scan asks the engagement scan_range for the cube R + Rr (land: else R with a
     // TURRET, else 0) and for candidates beyond R. Mirrored by the host before every tick; derived state, not hashed.
     kUnitScanQuery = 1u << 18,
     // S8 t25 (LOB_SOLVER §3.5 apply / release): TARGETING alone disabled (slot 9) - the Grenade_Attack / Remote_Bomb throw
@@ -1340,7 +1345,7 @@ public:
     CanHit line_of_fire_from(ObjectId attacker, Vec3 from, ObjectId target, const Vec3* to = nullptr) const;  // (no TARGETING: NoTarget)
     // The position can_hit measures from (the unit's, or its land team container's).
     Vec3 can_hit_origin(ObjectId attacker) const;
-    void set_shield_sides_query(ShieldSidesFn fn) { shield_sides_ = std::move(fn); }
+    // ref6 t02: the land shield-sides test is EngagementQueries::opposite_shield_sides (set_engagement).
     // s78n t02 (TACTICAL_COMBAT §5.4.4 item 1, slot 46 steps 6 / 7): the centre distance D (XY) from `from` to the target
     // and the min-range target term E: 0 for a LAND_OBSTACLE target (no aim walk, no sqrt(200)); else the X footprint
     // half-extent, or the Y half-extent when U's offset along X's facing (unnormalised, |f . (from - X)|) is <= 0.7071.
@@ -1648,7 +1653,11 @@ public:
     // the cube R + Rr, and accepts a candidate beyond R (filter 9) when fn(unit, candidate) != 0. cmb1 t03 (BKR1 Q8 [H]):
     // a land kUnitScanQuery unit whose formation answers 0 scans R with a TURRET slot (UnitDesc::turret), else nothing (a
     // cube of 0: a valid current target is kept). Every other unit: R. Unset: R. Not saved (the host installs it at setup).
-    void set_scan_range_query(ScanRangeFn fn) { scan_range_ = std::move(fn); }
+    // ref6 t02: the scan-range query and the shield-sides test come from the battle host's EngagementQueries (one object,
+    // also handed to movement); null = the defaults of a world without a host (no_engagement: R for every unit, no
+    // shield). The object must outlive the system. Not saved (the host installs it at setup).
+    void set_engagement(const tactical::EngagementQueries* q) { eng_ = q ? q : &tactical::no_engagement(); }
+    const tactical::EngagementQueries& engagement() const { return *eng_; }
     // Shared team target 0x406370: the squadron (container id) a member belongs to, kNoObject for none. Set by the host
     // before every tick (derived state: not saved, not hashed). A member whose due scan picks a target while its own
     // target is empty sets that target on every member (index order) that holds no live ordered target; Order_Attack on
@@ -2294,9 +2303,8 @@ private:
     std::vector<BaseShieldSetState> bshield_sets_;  // r3h t06: this tick's Set_State calls (base_shield_set_states)
     std::vector<Repairer> repairs_;
     ObstacleCellFn obstacle_cell_;                              // OI tactical / S8 t01: LAND_OBSTACLE aim walk
-    ShieldSidesFn shield_sides_;                                // s78n t20: line of fire 0x3b5ad0 (not saved: host query)
+    const tactical::EngagementQueries* eng_ = &tactical::no_engagement();  // ref6 t02: scan range, shield sides (host)
     PreciseHitFn precise_hit_;                                  // refixf t07: projectile segment entry test
-    ScanRangeFn scan_range_;                                    // S8 t17: formation response range 0x4160a0
     std::function<ObjectId(ObjectId)> garrison_host_;           // S8 t10: garrison host query
     std::function<float(int32_t)> credits_get_;
     std::function<void(int32_t, float)> credits_add_;

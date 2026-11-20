@@ -71,6 +71,7 @@
     SAVED(types_used_, state) \
     SAVED(descs_, state) \
     REBUILT(tables_build_, "made by setup() from the battle inputs, the same on a rebuild") \
+    REBUILT(engagement_, "ref6 t02: the battle's EngagementQueries; setup() sets its mode pointer") \
     SAVED(movement_, part) \
     DERIVED(clr_types_, "per-type cache (filled from type data on first use)") \
     DERIVED(clr_known_, "per-type cache (filled from type data on first use)") \
