@@ -3090,6 +3090,7 @@ int reinforce_location(Call& c, int i, Vec3& pos, ObjectHandle& loc) {
 
 // Reinforce_Unit(type, location | false, player [, ignore_rules [, obey_zones]]) -> BlockingStatus whose
 // Result() is the table of new units (PGSpawnUnits' Process_Reinforcements, SandCrawler.lua).
+// binding-effect: Reinforce_Unit partial no host sets ObjectBridge::reinforce (transports, reinforcement points): the [inferred] stand-in creates the units at the location at once (ref5 t04)
 int g_reinforce_unit(Call& c) {
     if (c.nargs < 3 || c.nargs > 5) return c.script_error_stop("LuaReinforceCommandClass::Reinforce -- Invalid number of parameters.");
     const TypeArg t = type_arg(c, 1);
@@ -3135,6 +3136,7 @@ int g_reinforce_unit(Call& c) {
 }
 
 // Spawn_From_Reinforcement_Pool(type, position, player) -> table of the spawned units.
+// binding-effect: Spawn_From_Reinforcement_Pool partial no host takes the unit out of the reinforcement pool (ObjectBridge::spawn_from_pool unset): the [inferred] stand-in spawns it like Spawn_Unit (ref5 t04)
 int g_spawn_from_reinforcement_pool(Call& c) {
     if (c.nargs != 3)
         return c.script_error_stop("Spawn_From_Reinforcement_Pool -- Invalid number of parameters. Expected 3, got %d", c.nargs);

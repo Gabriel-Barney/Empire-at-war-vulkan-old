@@ -17,6 +17,10 @@ struct StoryRun {
     std::vector<std::string> lua;
     uint32_t activations = 0;
     bool fog_on_seen = false, fog_off_seen = false;  // fog follow-up: the battle's FOW-active flag over the run
+    // ref5 t04: the Full bindings reading a hook that neither the galactic story's bridge nor the battle's script / AI hook
+    // sets wire (taken once the battle runs); hooks_checked = the sets were seen.
+    std::vector<std::string> unwired;
+    bool hooks_checked = false;
 };
 StoryRun run_story_battle(const Data& d, const FileProvider& files, int32_t workers) {
     StoryRun out;
@@ -25,7 +29,9 @@ StoryRun run_story_battle(const Data& d, const FileProvider& files, int32_t work
     cfg.seed = 2026;
     cfg.players = 4;
     cfg.story_crc = true;
+    cfg.object_scripts = true;  // ref5 t04: the object-script hooks of the battle bridge are wired too (no type has a script)
     SimHost host(d.types, js, cfg);
+    host.set_object_script_files(&files);
     galactic::GalacticSim* gs = host.start_galactic(d.rules, make_setup(d, false));
     CHECK(gs != nullptr);
     if (!gs) return out;
@@ -52,6 +58,12 @@ StoryRun run_story_battle(const Data& d, const FileProvider& files, int32_t work
     for (uint64_t t = 0; t < 2500; ++t) {
         host.tick_once();
         if (battles.battle()) out.activations = battles.battle()->stats().activations;
+        if (battles.battle() && !out.hooks_checked && host.story() && host.story()->tactical_model() && battles.battle()->frame() > 30) {
+            lua::BridgeHookSets sets = battles.script_hook_sets();
+            sets.objects.push_back(host.story()->object_bridge());
+            out.unwired = lua::unwired_full_binding_hooks(sets);
+            out.hooks_checked = true;
+        }
         if (battles.battle())
             if (const tactical::fog::FogOfWar* f = battles.battle()->fog()) {
                 out.fog_on_seen = out.fog_on_seen || f->fow_active();
@@ -896,6 +908,15 @@ void test_story_battle(const Data& d) {
     std::printf("  story battle: %zu log bytes, Lua activations %u, identical for 0 / 4 workers: %s\n", a.log.size(), a.activations,
                 a.log == b.log ? "yes" : "NO");
     CHECK(a.lua.empty() && a.activations > 0);
+    // ref5 t04: no Full binding reads a hook the real story / object-script / AI bridges leave unset.
+    // Pending: ship names wait for docs/re/REF5_T04_RE_QUESTIONS.md (the only allowed entry; remove it with the wiring).
+    size_t unexpected = 0;
+    for (const std::string& u : a.unwired) {
+        const bool pending = u == "GameObjectWrapper.Get_Name reads ObjectBridge.ship_name";
+        std::printf("  unwired%s: %s\n", pending ? " (pending ref5 t04 RE answer)" : "", u.c_str());
+        unexpected += pending ? 0u : 1u;
+    }
+    CHECK(a.hooks_checked && unexpected == 0);
     // L1/S4 wave 2b feeds: movement transitions (UNIT_ARRIVED / FULL_STOP) and reserve deployments (REINFORCE).
     auto count = [&a](const char* k) {
         size_t n = 0;

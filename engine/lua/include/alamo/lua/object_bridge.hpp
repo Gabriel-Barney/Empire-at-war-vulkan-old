@@ -273,6 +273,7 @@ public:
     // (any order, may over-report: the binding re-tests the 3D distance and sorts by id). Hosts with a
     // spatial tree (engine/tactical TreeSet) plug a radius query in here. Without a hook every live
     // object of the store is tested.
+    // hook-optional: a speed-up only; without it the binding tests every live object and answers the same.
     std::function<void(Vec3 center, float radius, std::vector<objects::ObjectId>& out)> objects_in_range;
     // Reinforce_Unit: true = the host accepted request `r` and calls finish_reinforcement(r.id, units)
     // when the units have arrived; false = refused (the block finishes with no units). Without a hook
@@ -375,9 +376,10 @@ public:
     std::function<uint64_t()> anim_frame;
     // Object -> world transform for Get_Bone_Position (ANIM_PARTICLES §A: "position, facing, Scale_Factor; the
     // caller's"). Unset [port]: translation = store position, rotation = yaw of the store facing (XY, x forward,
-    // z up), uniform scale = the type's Scale_Factor (0 -> 1).
+    // z up), uniform scale = the type's Scale_Factor (0 -> 1). hook-optional: that default is the spec's transform.
     std::function<bool(objects::ObjectHandle, anim::Mat34& out)> object_to_world;
-    // Generic bone read (hosts without an AnimWorld, tests). Checked first. True = `out` written.
+    // Generic bone read (hosts without an AnimWorld, tests). Checked first. True = `out` written. hook-optional: a host
+    // with an AnimWorld (`anim`) answers through it.
     std::function<bool(objects::ObjectHandle, std::string_view bone, Vec3& out)> bone_position;
 
     // ---- L1/S4 wave 2b (script_gaps.hpp): special weapons, TSW, engines, cinematic transport / retreat ----
