@@ -383,6 +383,10 @@ TABLE = [
     Entry("StoryModel", ENG + "lua/include/alamo/lua/story_model.hpp",
           ENG + "lua/src/story_model_ledger.hpp", [ENG + "lua/src/story_model.cpp"],
           save=["write"], read=["read"], hash_fns=[r"hash\w*", "register_crc"]),
+    Entry("CampaignBattles", ENG + "apps/sim/include/alamo/sim/campaign_battles.hpp",
+          ENG + "apps/sim/src/campaign_battles_ledger.hpp", [ENG + "apps/sim/src"],
+          save=[r"write_\w+", r"register_\w+_chunks"], read=[r"read_\w+", r"register_\w+_chunks"],
+          hash_fns=[r"hash_\w+", "register_crcs"]),
 ]
 
 
