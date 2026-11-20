@@ -24,6 +24,7 @@
 #include "alamo/core/file_provider.hpp"
 #include "alamo/core/host_fs.hpp"
 #include "alamo/data/game_database.hpp"
+#include "alamo/game/open_game_data.hpp"  // ref4 t05
 #include "alamo/data/values.hpp"
 #include "alamo/galactic/campaign.hpp"
 #include "alamo/galactic/conflicts.hpp"
@@ -68,22 +69,6 @@ bool is_retail_lua_error(std::string_view e) {
     for (const std::string_view r : kRetailLuaErrors)
         if (e == r) return true;
     return false;
-}
-
-std::string env_value(const char* name) {
-#ifdef _MSC_VER
-    char* v = nullptr;
-    size_t len = 0;
-    std::string out;
-    if (_dupenv_s(&v, &len, name) == 0 && v) {
-        out = v;
-        std::free(v);
-    }
-    return out;
-#else
-    const char* v = std::getenv(name);
-    return v ? std::string(v) : std::string();
-#endif
 }
 
 // ---- synthetic data (S10 battle test types + tactical evaluator flags / UNIT_AI) ----
@@ -429,23 +414,19 @@ bool synthetic_session(Session& s, std::vector<std::string>& diag) {
 
 // The FoC data (+ MODPATH=) through the VFS: game data, AI definitions, equations, tactical plans and difficulties.
 bool foc_load(Session& s, const MapRunOptions& opt, std::vector<std::string>& diag, bool& skipped) {
-    const std::string root = opt.game_dir.empty() ? env_value("ALAMO_FOC_DATA") : opt.game_dir;
+    const std::string root = game::game_data_root(opt.game_dir);
     std::error_code ec;
     if (root.empty() || !fs::is_directory(path_from_utf8(root) / "Data", ec)) {
         skipped = true;
         return false;
     }
-    std::string err;
     IssueSink issues;  // ums2: the VFS findings (nothing reads them here yet)
-    std::unique_ptr<vfs::ModEnvironment> env = vfs::ModEnvironment::open(root, opt.game_args, issues, &err, vfs::ModEnvironmentOptions{std::nullopt, {}, false});
-    if (!env) {
-        diag.push_back(err);
+    game::OpenedGameData opened = game::open_game_data(root, opt.game_args, issues);  // ref4 t05
+    if (!opened.ok()) {  // the VFS error or the D1 base-EaW refusal
+        diag.push_back(opened.error);
         return false;
     }
-    if (env->refused()) {  // D1: a base-EaW mod in the stack
-        diag.push_back(env->refusal());
-        return false;
-    }
+    std::unique_ptr<vfs::ModEnvironment> env = std::move(opened.env);
     vfs::Vfs* vp = &env->vfs();
     s.files = std::move(env);
     if (!load_game(s, diag)) return false;
