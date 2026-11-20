@@ -1112,4 +1112,9 @@ std::vector<float> load_retreat_flight_increments(const galactic::GalacticRules&
     return out;
 }
 
+// ref3 t06: StoryHooks::station_fire (the tactical story VMs' space-station special weapon).
+bool TacticalBattle::station_special_weapon_fire(objects::ObjectId station, objects::ObjectId target) {
+    return abilities_->combat().special_weapon_fire(station, target);
+}
+
 }  // namespace alamo::sim

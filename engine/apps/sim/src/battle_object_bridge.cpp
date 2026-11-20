@@ -18,6 +18,7 @@ namespace alamo::sim {
 void make_object_bridge(TacticalBattle& battle, std::function<TacticalMode*()> mode, lua::ObjectBridge& out,
                         std::function<bool()> allowed) {
     TacticalBattle* bt = &battle;
+    battle.bind_script_abilities(out);  // ref3 t06
     // The mode the call may act on: null when refused (no mode yet, or the gate says no).
     auto ctx = std::make_shared<std::pair<std::function<TacticalMode*()>, std::function<bool()>>>(std::move(mode), std::move(allowed));
     auto mode_for = [ctx]() -> TacticalMode* {
@@ -57,8 +58,15 @@ void make_object_bridge(TacticalBattle& battle, std::function<TacticalMode*()> m
         return tm && bt->script_despawn(*tm, o);
     };
 }
+
+void TacticalBattle::bind_script_abilities(lua::ObjectBridge& out) {
+    out.abilities = &*abilities_;
+    TacticalBattle* bt = this;
+    out.ability_frame = [bt] { return bt->frame(); };
+}
 #else
 void make_object_bridge(TacticalBattle&, std::function<TacticalMode*()>, lua::ObjectBridge&, std::function<bool()>) {}
+void TacticalBattle::bind_script_abilities(lua::ObjectBridge&) {}
 #endif
 
 }  // namespace alamo::sim

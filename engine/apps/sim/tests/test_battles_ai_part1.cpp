@@ -1,5 +1,6 @@
 // Part 1 of test_battles_ai (bo3 t03: split by position; see test_battles_ai_common.hpp).
 #include "test_battles_ai_common.hpp"
+#include "tactical_battle_test_access.hpp"  // ref3 t06
 
 namespace bo3split {
 #ifdef ALAMO_SIM_HAVE_TACTICAL_AI
@@ -987,7 +988,7 @@ void test_battle_attack_team() {
         if (!ordered) {
             // s78n t26 review round 3: the test data has no reveal source, so the target would be hidden (FIGHTER_FLYING §4.11 C / E: no
             // land stop, no re-path while moving); this scenario is about a visible target (fog: test_land_attack_unseen)
-            if (b->fog()) b->fog()->reveal_all(1);  // the attackers are player 1's
+            if (b->fog()) alamo::sim::TacticalBattleTestAccess::fog(*b)->reveal_all(1);  // the attackers are player 1's
             for (const objects::ObjectHandle h : st.all_objects()) {
                 if (!st.alive(h)) continue;
                 if (st.type(h) == team && st.owner(h) == 0 && target == objects::kNoObjectId && members_of(st.id(h)).size() >= 2) {
@@ -1213,7 +1214,7 @@ void test_team_speed_and_owner() {
             CHECK(team_id != objects::kNoObjectId);
             if (team_id == objects::kNoObjectId) break;
             CHECK(st.alive(st.find(team_id)) && st.type(st.find(team_id)) == team_t);
-            CHECK(b->abilities().set_unit_ability_active(members[0], sprint, true, b->frame()));
+            CHECK(alamo::sim::TacticalBattleTestAccess::abilities(*b).set_unit_ability_active(members[0], sprint, true, b->frame()));
             stage = 1;
             stage_frame = b->frame();
             continue;
@@ -1227,7 +1228,7 @@ void test_team_speed_and_owner() {
             break;
         }
         if (stage == 1) {
-            CHECK(b->abilities().is_active(members[0], sprint) && !b->abilities().is_active(members[1], sprint));
+            CHECK(alamo::sim::TacticalBattleTestAccess::abilities(*b).is_active(members[0], sprint) && !alamo::sim::TacticalBattleTestAccess::abilities(*b).is_active(members[1], sprint));
             CHECK(tm_speed == 1.0f);  // the non-sprinting members cap the team
             CHECK(ms.speed_factor(members[0]) == 1.5f);  // s78k t03: the sprinter keeps its own product
             for (size_t k = 1; k < members.size(); ++k) CHECK(ms.speed_factor(members[k]) == 1.0f);
@@ -1236,7 +1237,7 @@ void test_team_speed_and_owner() {
             for (const auto id : members) CHECK(ms.view(id).team_speed == cap && ms.view(id).speed <= cap);
             CHECK(ms.view(members[0]).max_speed > cap);
             if (++stage_ticks < 20) continue;  // watch the sprinter stay within the cap for a while
-            for (size_t k = 1; k < members.size(); ++k) CHECK(b->abilities().set_unit_ability_active(members[k], sprint, true, b->frame()));
+            for (size_t k = 1; k < members.size(); ++k) CHECK(alamo::sim::TacticalBattleTestAccess::abilities(*b).set_unit_ability_active(members[k], sprint, true, b->frame()));
             stage = 2;
             stage_frame = b->frame();
             continue;
@@ -1453,7 +1454,7 @@ void test_land_squad_container() {
                 hy = std::max(hy, sl.y + 3.0f);
             }
             float ex = 0.0f, ey = 0.0f;
-            CHECK(b->squad_joint_box(st, team_id, ex, ey));
+            CHECK(alamo::sim::TacticalBattleTestAccess::squad_joint_box(*b, st, team_id, ex, ey));
             const float wx = (hx - lx) * 0.5f + 0.75f, wy = (hy - ly) * 0.5f + 0.75f;
             CHECK(std::fabs(ex - wx) < 1e-4f && std::fabs(ey - wy) < 1e-4f && ex >= 3.75f && ey >= 3.75f);
             {  // s78n t18 review: the movement system's joint box (team_joint_box: the squad's collision footprint) is
@@ -1462,7 +1463,7 @@ void test_land_squad_container() {
                 CHECK(ms.team_joint_box(team_id, mx, my) && std::fabs(mx - ex) < 1e-4f && std::fabs(my - ey) < 1e-4f);
             }
             float nx = 0.0f, ny = 0.0f;
-            CHECK(!b->squad_joint_box(st, members[0], nx, ny));  // a member is no squad container
+            CHECK(!alamo::sim::TacticalBattleTestAccess::squad_joint_box(*b, st, members[0], nx, ny));  // a member is no squad container
             std::printf("  land squad: team %d, %zu members, slots", static_cast<int>(team_id), slots.size());
             for (const auto& [id, sl] : slots) std::printf(" (%.2f, %.2f)", static_cast<double>(sl.x), static_cast<double>(sl.y));
             std::printf("; joint box E_T %.3f x %.3f\n", static_cast<double>(ex), static_cast<double>(ey));
@@ -1540,7 +1541,7 @@ void test_land_squad_container() {
                 // LandTeamContainer code uses a collision vector; Repulsion / Repulse leave it at full speed on its path)
                 {  // s78n t18 review: on the march too (the slots are re-laid at the move start and at waypoints)
                     float ex = 0.0f, ey = 0.0f, mx = 0.0f, my = 0.0f;
-                    CHECK(b->squad_joint_box(st, team_id, ex, ey) && ms.team_joint_box(team_id, mx, my));
+                    CHECK(alamo::sim::TacticalBattleTestAccess::squad_joint_box(*b, st, team_id, ex, ey) && ms.team_joint_box(team_id, mx, my));
                     if (std::fabs(mx - ex) > 1e-4f || std::fabs(my - ey) > 1e-4f) ++box_mismatch;
                 }
                 bool rec_now = false;
@@ -1730,7 +1731,7 @@ void test_land_squad_garrison() {
             CHECK(ms.is_land_team_container(team_id) && cs.owner(walker) == 0);
             slots = ms.land_team_slots(team_id);
             CHECK(slots.size() == members.size());
-            CHECK(b->squad_joint_box(st, team_id, box_x, box_y) && box_x > 0.0f && box_y > 0.0f);
+            CHECK(alamo::sim::TacticalBattleTestAccess::squad_joint_box(*b, st, team_id, box_x, box_y) && box_x > 0.0f && box_y > 0.0f);
             {  // s78n t18 review: the movement system's joint box agrees
                 float mx = 0.0f, my = 0.0f;
                 CHECK(ms.team_joint_box(team_id, mx, my) && std::fabs(mx - box_x) < 1e-4f && std::fabs(my - box_y) < 1e-4f);
@@ -1781,7 +1782,7 @@ void test_land_squad_garrison() {
             inside_ok = ms.has_unit(team_id);
             for (const auto id : members) inside_ok = inside_ok && !ms.has_unit(id) && ms.team_member_parked(id);
             float ex = -1.0f, ey = -1.0f;
-            inside_ok = inside_ok && ms.land_team(team_id).empty() && b->squad_joint_box(st, team_id, ex, ey) && ex == 0.0f && ey == 0.0f;
+            inside_ok = inside_ok && ms.land_team(team_id).empty() && alamo::sim::TacticalBattleTestAccess::squad_joint_box(*b, st, team_id, ex, ey) && ex == 0.0f && ey == 0.0f;
             {  // s78n t18 review: the absent members stay TEAM entries of the movement system - its box is the one they
                // went in with - and the container is hidden from the entry on (no wait for the next tick's feed)
                 float mx = 0.0f, my = 0.0f;
@@ -1825,7 +1826,7 @@ void test_land_squad_garrison() {
                 }
             }
             float ex = 0.0f, ey = 0.0f;
-            CHECK(b->squad_joint_box(st, team_id, ex, ey) && ex > 0.0f && ey > 0.0f);
+            CHECK(alamo::sim::TacticalBattleTestAccess::squad_joint_box(*b, st, team_id, ex, ey) && ex > 0.0f && ey > 0.0f);
             {  // s78n t18 review: out again, every member steers: the two boxes agree (inside, the host's box is empty -
                // it reads the live steering members - while the movement system keeps the absent members' entries)
                 float mx = 0.0f, my = 0.0f;
@@ -2095,14 +2096,14 @@ void test_team_hack_bribe(bool bribe) {
                 }
             CHECK(slicer != objects::kNoObjectId && team_id != objects::kNoObjectId);
             if (slicer == objects::kNoObjectId || team_id == objects::kNoObjectId) break;
-            CHECK(b->abilities().has_ability(slicer, kind));
+            CHECK(alamo::sim::TacticalBattleTestAccess::abilities(*b).has_ability(slicer, kind));
             victim = members.front();
             CHECK(st.owner(st.find(team_id)) == 1 && b->container_owner(team_id) == 1);
             for (const auto& [tid, m] : teams_now(cs))
                 if (static_cast<objects::ObjectId>(tid) != team_id)
                     for (const auto id : m) others.emplace_back(id, cs.owner(id));
             const objects::ObjectId users[] = {slicer};
-            ordered = b->abilities().targeted_ability(users, kind, victim, -1, b->frame()) == 1u;
+            ordered = alamo::sim::TacticalBattleTestAccess::abilities(*b).targeted_ability(users, kind, victim, -1, b->frame()) == 1u;
             CHECK(ordered);
             if (!ordered) break;
             order_frame = b->frame();
@@ -2263,11 +2264,11 @@ void test_vehicle_thief(int variant) {
             }
             CHECK(thief != objects::kNoObjectId && speeder != objects::kNoObjectId);
             if (thief == objects::kNoObjectId || speeder == objects::kNoObjectId) break;
-            CHECK(cs.owner(thief) == 1 && cs.owner(speeder) == 0 && b->abilities().has_ability(thief, kind));
-            CHECK(b->abilities().has_ability(speeder, eject) == (variant == 2));
+            CHECK(cs.owner(thief) == 1 && cs.owner(speeder) == 0 && alamo::sim::TacticalBattleTestAccess::abilities(*b).has_ability(thief, kind));
+            CHECK(alamo::sim::TacticalBattleTestAccess::abilities(*b).has_ability(speeder, eject) == (variant == 2));
             units0 = cs.unit_count();
             const objects::ObjectId users[] = {thief};
-            const bool ordered = b->abilities().targeted_ability(users, kind, speeder, -1, b->frame()) == 1u;
+            const bool ordered = alamo::sim::TacticalBattleTestAccess::abilities(*b).targeted_ability(users, kind, speeder, -1, b->frame()) == 1u;
             CHECK(ordered);
             if (!ordered) break;
             order_frame = b->frame();
@@ -2284,8 +2285,8 @@ void test_vehicle_thief(int variant) {
             CHECK(cs.unit_count() == units0);                                                                 // nothing spawned
             CHECK(st.owner(st.find(speeder)) == 1 && cs.owner(speeder) == 1);
             CHECK((cs.flags(speeder) & tc::kUnitStolenVehicle) != 0 && (cs.flags(speeder) & tc::kUnitIncognito) != 0);
-            CHECK(b->abilities().is_active(thief, kind));                         // CAPTURE_VEHICLE on for the thief
-            CHECK(b->abilities().is_active(speeder, eject) == (variant == 2));    // 46 on only when the vehicle has it
+            CHECK(alamo::sim::TacticalBattleTestAccess::abilities(*b).is_active(thief, kind));                         // CAPTURE_VEHICLE on for the thief
+            CHECK(alamo::sim::TacticalBattleTestAccess::abilities(*b).is_active(speeder, eject) == (variant == 2));    // 46 on only when the vehicle has it
             CHECK((cs.flags(thief) & tc::kUnitGarrisoned) != 0);
             stage = 2;
             continue;
@@ -2304,7 +2305,7 @@ void test_vehicle_thief(int variant) {
             CHECK(st.owner(st.find(stolen)) == 1 && cs.owner(stolen) == 1);
             CHECK((cs.flags(stolen) & tc::kUnitStolenVehicle) != 0 && (cs.flags(stolen) & tc::kUnitIncognito) != 0);
             CHECK(b->garrison_holder_of(thief) == stolen);
-            CHECK(b->abilities().is_active(thief, kind) && !b->abilities().is_active(stolen, eject));  // the clone has no 46
+            CHECK(alamo::sim::TacticalBattleTestAccess::abilities(*b).is_active(thief, kind) && !alamo::sim::TacticalBattleTestAccess::abilities(*b).is_active(stolen, eject));  // the clone has no 46
             stage = 2;
             continue;
         }
@@ -2422,7 +2423,7 @@ HeroClashRun run_hero_clash_battle(const Data& d, uint32_t workers, bool save_lo
                 if (!cs.has_unit(h) || !cs.alive(h)) continue;
                 if (!(cs.flags(h) & tc::kUnitHeroClash)) out.flagged = false;
                 if (!b->movement_locked(h)) out.locked = false;
-                if (b->abilities().can_activate(h, ta::kHunt, false, false, b->frame())) out.hunt_locked = false;
+                if (alamo::sim::TacticalBattleTestAccess::abilities(*b).can_activate(h, ta::kHunt, false, false, b->frame())) out.hunt_locked = false;
                 if (cs.current_target(h) != tc::kNoObject) out.untargeted = false;
                 for (size_t i = 0; i < cs.unit_count(); ++i) {
                     const auto id = cs.unit_id_at(i);
@@ -2445,7 +2446,7 @@ HeroClashRun run_hero_clash_battle(const Data& d, uint32_t workers, bool save_lo
             const objects::ObjectId survivor = cs.alive(ha) ? ha : hb;
             out.released = (cs.alive(ha) != cs.alive(hb)) && !(cs.flags(survivor) & tc::kUnitHeroClash) &&
                            !b->movement_locked(survivor);
-            out.hunt_after = b->abilities().can_activate(survivor, ta::kHunt, false, false, b->frame());
+            out.hunt_after = alamo::sim::TacticalBattleTestAccess::abilities(*b).can_activate(survivor, ta::kHunt, false, false, b->frame());
         }
         if (queue && out.ended && cs.alive(ha) && goal_at(b->movement().view(ha), queued_at)) out.queue_moved = true;
         if (out.ended) ++after_end;

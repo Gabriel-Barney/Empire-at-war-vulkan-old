@@ -7,6 +7,7 @@
 // teleport. Per-tick CRC logs + an L1 event trace identical for 0 / 1 / 4 / 15 workers.
 // With ALAMO_FOC_DATA: the FoC special-weapon types join space / land battle tables; retreat increments from FactionFiles.
 #include <algorithm>
+#include "tactical_battle_test_access.hpp"  // ref3 t06
 #include <cinttypes>
 #include <cmath>
 #include <cstdio>
@@ -1241,7 +1242,7 @@ ScriptSpawnRun run_script_spawn(const Data& d, int32_t workers) {
                         mids.push_back(st.id(h));
                 out.members += static_cast<uint32_t>(mids.size());
                 bool ok = ch && mids.size() == 2;
-                if (team) ok = ok && st.type(ch) == team_t && b->abilities().has_object(st.id(ch));  // the ability TEAM container
+                if (team) ok = ok && st.type(ch) == team_t && alamo::sim::TacticalBattleTestAccess::abilities(*b).has_object(st.id(ch));  // the ability TEAM container
                 else ok = ok && (st.id(ch) == mids[0] || st.id(ch) == mids[1]);
                 out.company_units = out.company_units && ok;
                 out.company_moves = out.company_moves && !mids.empty() &&
@@ -1512,7 +1513,7 @@ DeployRun run_deploy(const Data& d) {
         objects::ObjectStore& st = tm->primary();
         const uint32_t f = b->frame();
         if (dep != objects::kNoObjectId && out.on_frame != 0 && b->combat().has_unit(dep)) {  // the clip ends: Is_Active flips
-            const bool act = b->abilities().is_active(dep, ab::kDeploy);
+            const bool act = alamo::sim::TacticalBattleTestAccess::abilities(*b).is_active(dep, ab::kDeploy);
             if (act && out.deployed_at == 0) out.deployed_at = f;
             if (out.off_frame != 0 && !act && out.undeployed_at == 0) out.undeployed_at = f;
         }
@@ -1536,18 +1537,18 @@ DeployRun run_deploy(const Data& d) {
         // S8 t11: with the Walk locomotor Is_Active(DEPLOY) follows the walk state (0x19 Deployed), so it is read after the
         // clip end (this model has no clip data: the clip ends in the next tick), not right after the request.
         if (f == 10) {  // applied in the next tick's ability phase: the signal is in frame 11's events
-            out.deployed = b->abilities().set_unit_ability_mode(ids, ab::kDeploy, true, f) == 1;
+            out.deployed = alamo::sim::TacticalBattleTestAccess::abilities(*b).set_unit_ability_mode(ids, ab::kDeploy, true, f) == 1;
             out.on_frame = f;
         }
         if (f == 20) {
-            out.deployed = out.deployed && b->abilities().is_active(dep, ab::kDeploy);
-            out.repeat_refused = b->abilities().set_unit_ability_mode(ids, ab::kDeploy, true, f) == 0;
+            out.deployed = out.deployed && alamo::sim::TacticalBattleTestAccess::abilities(*b).is_active(dep, ab::kDeploy);
+            out.repeat_refused = alamo::sim::TacticalBattleTestAccess::abilities(*b).set_unit_ability_mode(ids, ab::kDeploy, true, f) == 0;
         }
         if (f == 30) {
-            out.undeployed = b->abilities().set_unit_ability_mode(ids, ab::kDeploy, false, f) == 1;
+            out.undeployed = alamo::sim::TacticalBattleTestAccess::abilities(*b).set_unit_ability_mode(ids, ab::kDeploy, false, f) == 1;
             out.off_frame = f;
         }
-        if (f == 40) out.undeployed = out.undeployed && !b->abilities().is_active(dep, ab::kDeploy);
+        if (f == 40) out.undeployed = out.undeployed && !alamo::sim::TacticalBattleTestAccess::abilities(*b).is_active(dep, ab::kDeploy);
         if (f >= 60) break;
     }
     return out;
@@ -1664,7 +1665,7 @@ void test_deploy_extents(const Data& d) {
         const auto half = [&](objects::ObjectId id, float& hx, float& hy) {
             const objects::ObjectHandle h = st.find(id);
             float xy[16] = {};
-            b->fog_footprint(st, h, xy);
+            alamo::sim::TacticalBattleTestAccess::fog_footprint(*b, st, h, xy);
             const Vec3 p = st.position(h);
             hx = std::hypot(xy[8] - p.x, xy[9] - p.y);    // c + hx a
             hy = std::hypot(xy[10] - p.x, xy[11] - p.y);  // c - hy b
@@ -1696,8 +1697,8 @@ void test_deploy_extents(const Data& d) {
             bare_ok = bx == 0.0f && by == 0.0f;
         }
         const objects::ObjectId ids[] = {dep};
-        if (f == 10) on = b->abilities().set_unit_ability_mode(ids, ab::kDeploy, true, f) == 1;
-        if (f == 40) off = b->abilities().set_unit_ability_mode(ids, ab::kDeploy, false, f) == 1;
+        if (f == 10) on = alamo::sim::TacticalBattleTestAccess::abilities(*b).set_unit_ability_mode(ids, ab::kDeploy, true, f) == 1;
+        if (f == 40) off = alamo::sim::TacticalBattleTestAccess::abilities(*b).set_unit_ability_mode(ids, ab::kDeploy, false, f) == 1;
         if (f >= 80) break;
     }
     std::printf("  deploy extents: fog half / free drop points - undeployed (%.1f, %.1f) / %d, deploying (%.1f, %.1f) / %d, deployed "

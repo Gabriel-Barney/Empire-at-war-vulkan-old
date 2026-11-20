@@ -4,6 +4,7 @@
 // Split out of test_battles.cpp (WF1b t01); the fixture (synthetic data, maps, run_campaign) is battle_test_fixture.hpp.
 
 #include "battle_test_fixture.hpp"
+#include "tactical_battle_test_access.hpp"  // ref3 t06
 #include "alamo/core/host_fs.hpp"
 #include "alamo/core/sim_crc.hpp"
 
@@ -191,7 +192,7 @@ struct ThiefScene {
     }
     bool order_theft() {
         const objects::ObjectId users[] = {thief};
-        return b->abilities().targeted_ability(users, steal, speeder, -1, b->frame()) == 1u;
+        return alamo::sim::TacticalBattleTestAccess::abilities(*b).targeted_ability(users, steal, speeder, -1, b->frame()) == 1u;
     }
     // Ticks until the thief sits in the capture clone (60 ticks at most).
     bool wait_boarded() {
@@ -287,7 +288,7 @@ inline void test_landing_drop(bool timed, uint32_t destroy_at = 0) {
             key = reserves[0].galactic_id;
             squad = reserves[0].type;
             spawned_before = b->stats().spawned;
-            if (b->fog()) b->fog()->reveal_all(1);  // the drop test needs unfogged cells
+            if (b->fog()) alamo::sim::TacticalBattleTestAccess::fog(*b)->reveal_all(1);  // the drop test needs unfogged cells
             size_t valid = 0, refused = 0;
             for (int32_t cy = 6; cy < 58 && !dropped; cy += 2)
                 for (int32_t cx = 6; cx < 58 && !dropped; cx += 2) {
@@ -527,7 +528,7 @@ inline void test_vehicle_landing_exit() {
             CHECK(!reserves.empty());
             if (reserves.empty()) break;
             const objects::ObjectId key = reserves[0].galactic_id;
-            if (b->fog()) b->fog()->reveal_all(1);
+            if (b->fog()) alamo::sim::TacticalBattleTestAccess::fog(*b)->reveal_all(1);
             for (int32_t cy = 6; cy < 58 && !dropped; cy += 2)
                 for (int32_t cx = 6; cx < 58 && !dropped; cx += 2) {
                     const mv::V2 c = mv::cell_center(cx, cy);
@@ -905,7 +906,7 @@ inline LandAttackBlockRun run_land_attack_block(const Data& d, bool blockers, bo
         if (stage == 0) {
             // s78n t26 review round 3: the test data has no reveal source, so the target would be hidden (FIGHTER_FLYING §4.11 C / E: no
             // land stop, no re-path while moving); this scenario is about a visible target (fog: test_land_attack_unseen)
-            if (b->fog()) b->fog()->reveal_all(0);
+            if (b->fog()) alamo::sim::TacticalBattleTestAccess::fog(*b)->reveal_all(0);
             // the human's squads (ascending container id) and the invader's lowest-id squad member
             std::map<uint32_t, std::vector<objects::ObjectId>> teams;
             for (size_t i = 0; i < cs.unit_count(); ++i) {
@@ -1096,7 +1097,7 @@ inline LandReachRun run_land_reach(const Data& d, bool min_range) {
         if (stage == 0) {
             // s78n t26 review round 3: the test data has no reveal source, so the target would be hidden (FIGHTER_FLYING §4.11 C / E: no
             // land stop, no re-path while moving); this scenario is about a visible target (fog: test_land_attack_unseen)
-            if (b->fog()) b->fog()->reveal_all(0);
+            if (b->fog()) alamo::sim::TacticalBattleTestAccess::fog(*b)->reveal_all(0);
             std::map<uint32_t, std::vector<objects::ObjectId>> teams;
             for (size_t i = 0; i < cs.unit_count(); ++i) {
                 const auto id = cs.unit_id_at(i);
@@ -1405,7 +1406,7 @@ inline LandAttackTwoRun run_land_attack_two(const Data& d) {
         if (stage == 0) {
             // s78n t26 review round 3: the test data has no reveal source, so the target would be hidden (FIGHTER_FLYING §4.11 C / E: no
             // land stop, no re-path while moving); this scenario is about a visible target (fog: test_land_attack_unseen)
-            if (b->fog()) b->fog()->reveal_all(0);
+            if (b->fog()) alamo::sim::TacticalBattleTestAccess::fog(*b)->reveal_all(0);
             std::map<uint32_t, std::vector<objects::ObjectId>> teams;
             for (size_t i = 0; i < cs.unit_count(); ++i) {
                 const auto id = cs.unit_id_at(i);
@@ -2054,7 +2055,7 @@ inline LandAttackFormationStopRun run_land_attack_formation_stop(const Data& d) 
             // bkm2 t08 (b0048): the test data has no reveal source, so without this the target is hidden for player 0 and
             // the hidden term (FIGHTER_FLYING §4.11 C 1 / C 4, s78n t26 review round 3) suppresses every land stop - the
             // check then passed on the per-mover stop too. The scenario is about a visible target.
-            if (b->fog()) b->fog()->reveal_all(0);
+            if (b->fog()) alamo::sim::TacticalBattleTestAccess::fog(*b)->reveal_all(0);
             std::map<uint32_t, std::vector<objects::ObjectId>> teams;
             for (size_t i = 0; i < cs.unit_count(); ++i) {
                 const auto id = cs.unit_id_at(i);
@@ -2215,7 +2216,7 @@ inline LandAttackUnseenRun run_land_attack_unseen(const Data& d, bool stealth) {
             }
             CHECK(sq != objects::kNoObjectId && target != objects::kNoObjectId && b->fog() != nullptr);
             if (sq == objects::kNoObjectId || target == objects::kNoObjectId || !b->fog()) break;
-            b->fog()->reveal_all(0);  // nothing hidden for player 0
+            alamo::sim::TacticalBattleTestAccess::fog(*b)->reveal_all(0);  // nothing hidden for player 0
             const Vec3 tp = st.position(st.find(target)), ap = st.position(st.find(sq));
             const float dx = ap.x - tp.x, dy = ap.y - tp.y, dl = std::sqrt(dx * dx + dy * dy);
             dir = dl > 1.0f ? Vec3{dx / dl, dy / dl, 0.0f} : Vec3{1.0f, 0.0f, 0.0f};
@@ -2242,7 +2243,7 @@ inline LandAttackUnseenRun run_land_attack_unseen(const Data& d, bool stealth) {
         }
         if (stage == 2) {  // hidden: the fog back 2 frames into the chase; the squad hides once its memory lapses (~7 s)
             if (b->frame() < stage_frame + 2) continue;
-            if (!b->fog()->reveal_all_players().empty()) b->fog()->undo_reveal_all(0);
+            if (!alamo::sim::TacticalBattleTestAccess::fog(*b)->reveal_all_players().empty()) alamo::sim::TacticalBattleTestAccess::fog(*b)->undo_reveal_all(0);
             out.hidden = b->fog_object_hidden(0, tcid, true);
             if (!out.hidden) {
                 if (b->frame() > stage_frame + 600 || !v.has_goal) stage = 9;
@@ -2308,8 +2309,8 @@ inline LandAttackUnseenRun run_land_attack_unseen(const Data& d, bool stealth) {
             if (!v.has_goal && v.speed == 0.0f && b->frame() > stage_frame + 30) {
                 out.arrived = b->attack_blocks() == 1 && v.atk_target != -1;
                 std::vector<objects::ObjectId> on(tmem.begin(), tmem.end());
-                (void)b->abilities().set_unit_ability_mode(on, tactical::abilities::kStealth, true, b->frame());
-                out.stealthed = b->abilities().is_stealthed(target, b->frame());
+                (void)alamo::sim::TacticalBattleTestAccess::abilities(*b).set_unit_ability_mode(on, tactical::abilities::kStealth, true, b->frame());
+                out.stealthed = alamo::sim::TacticalBattleTestAccess::abilities(*b).is_stealthed(target, b->frame());
                 stops0 = b->stats().attack_unseen_drops;
                 pos0 = v.pos;
                 stage = 6;

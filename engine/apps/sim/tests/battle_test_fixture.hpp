@@ -5,6 +5,7 @@
 #pragma once
 
 #include <algorithm>
+#include "tactical_battle_test_access.hpp"  // ref3 t06
 #include <bit>
 #include <cinttypes>
 #include <cmath>
@@ -973,7 +974,7 @@ inline void battles_budget_hook(CampaignBattleOptions& opt, std::vector<ai::tact
 
 // Fog of war probe after each tick (owner: fog agent): player 0 = human Empire, 1 = AI Underworld, 2 = neutral.
 inline void fog_probe(TacticalBattle& b, TacticalMode& tm, Run& out, StateHasher& acc, bool& refog_set) {
-    tactical::fog::FogOfWar* f = b.fog();
+    tactical::fog::FogOfWar* f = alamo::sim::TacticalBattleTestAccess::fog(b);
     if (!f) return;
     if (!refog_set) {
         b.set_fog_refog([&out](int32_t, uint32_t, float, float) { ++out.fog_refogs; });
@@ -1037,10 +1038,10 @@ inline void fog_probe(TacticalBattle& b, TacticalMode& tm, Run& out, StateHasher
     if (out.fog_ability_frame && b.frame() == out.fog_ability_frame + 1) {
         out.fog_probe_after = !b.fog_point_fogged(0, out.fog_probe_x, out.fog_probe_y, false);
         const auto user = static_cast<tactical::abilities::ObjectId>(out.fog_ability_user);
-        out.fog_effect_cleared = std::none_of(b.abilities().events().begin(), b.abilities().events().end(), [&](const auto& e) {
+        out.fog_effect_cleared = std::none_of(alamo::sim::TacticalBattleTestAccess::abilities(b).events().begin(), alamo::sim::TacticalBattleTestAccess::abilities(b).events().end(), [&](const auto& e) {
             return e.kind == tactical::abilities::AbilityEventKind::EffectOn && e.id == user && e.frame == out.fog_ability_frame;
         });
-        out.fog_effect_kept = std::any_of(b.abilities().activation_events().begin(), b.abilities().activation_events().end(),
+        out.fog_effect_kept = std::any_of(alamo::sim::TacticalBattleTestAccess::abilities(b).activation_events().begin(), alamo::sim::TacticalBattleTestAccess::abilities(b).activation_events().end(),
                                           [&](const auto& e) { return e.id == user && e.frame == out.fog_ability_frame; });
     }
     StateHasher h;
@@ -1054,7 +1055,7 @@ inline void fog_probe(TacticalBattle& b, TacticalMode& tm, Run& out, StateHasher
 // of a 1.5 x sight circle (on a copy read back from FogOfWar::write, so the copy also checks the list survives a save),
 // and the battle's Fog save part reads back into the running battle unchanged. Read-only otherwise.
 inline void fog_bm_probe(TacticalBattle& b, TacticalMode& tm, Run& out) {
-    tactical::fog::FogOfWar* f = b.fog();
+    tactical::fog::FogOfWar* f = alamo::sim::TacticalBattleTestAccess::fog(b);
     if (!f) return;
     const objects::ObjectStore& st = tm.primary();
     const objects::TypeIndex corvette = tm.types().resolve_name("S10_Corvette");
@@ -1093,7 +1094,7 @@ inline void fog_bm_probe(TacticalBattle& b, TacticalMode& tm, Run& out) {
             ByteReader r2(part.bytes());
             StateHasher after;
             const bool loaded = b.read_part(TacticalBattle::SavePart::Fog, r2);
-            f = b.fog();
+            f = alamo::sim::TacticalBattleTestAccess::fog(b);
             if (f) f->hash(after);
             out.bm_save_ok = read && copy.player_reveal_bonus(0) == 0.5f && copied.digest() == before.digest() && loaded && f &&
                              f->player_reveal_bonus(0) == 0.5f && after.digest() == before.digest();
@@ -1110,7 +1111,7 @@ inline void fog_use_ability(TacticalBattle& b, TacticalMode& tm, bool land, Run&
     const uint8_t type = land ? 52 : 28;  // FORCE_SIGHT / FOW_REVEAL_PING
     for (objects::ObjectHandle h : st.owned_by(0)) {
         const objects::ObjectId id = st.id(h);
-        if (!st.alive(h) || !b.abilities().has_ability(id, type)) continue;
+        if (!st.alive(h) || !alamo::sim::TacticalBattleTestAccess::abilities(b).has_ability(id, type)) continue;
         const Vec3 p = st.position(h);
         // Mirrored halfway through the playable box centre: 1.5 x the unit's distance from the centre, inside the box.
         const float cx = 0.5f * (tm.bounds().min.x + tm.bounds().max.x);
@@ -1118,7 +1119,7 @@ inline void fog_use_ability(TacticalBattle& b, TacticalMode& tm, bool land, Run&
         out.fog_probe_y = p.y;
         out.fog_probe_before = b.fog_point_fogged(0, out.fog_probe_x, out.fog_probe_y, false);
         const tactical::combat::ObjectId ids[] = {id};
-        if (b.abilities().set_unit_ability_mode(ids, type, true, b.frame()) == 1) {
+        if (alamo::sim::TacticalBattleTestAccess::abilities(b).set_unit_ability_mode(ids, type, true, b.frame()) == 1) {
             out.fog_ability_frame = b.frame();
             out.fog_ability_user = static_cast<uint32_t>(id);
         }

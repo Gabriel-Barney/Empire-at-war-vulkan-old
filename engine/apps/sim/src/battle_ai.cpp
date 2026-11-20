@@ -161,9 +161,7 @@ BattleAi::BattleAi(TacticalBattle& battle, TacticalMode& mode, SimHost& host, co
     world_ = std::make_unique<at::TacticalAiWorld>(mode.primary(), &mode.types(), setup.files, host.random(), *setup.defs,
                                                    *setup.equations, *this, std::move(cfg));
     lua::ObjectBridge& br = world_->object_bridge();
-    br.abilities = &b_->abilities();
-    TacticalBattle* bt = b_;
-    br.ability_frame = [bt] { return bt->frame(); };
+    TacticalBattle* bt = b_;  // abilities / ability_frame: make_object_bridge below (ref3 t06)
     br.is_enemy = [this, bt](int32_t x, int32_t y) {  // sp3 slice 4e: the view with the lane on
         if (!lane_view()) return bt->combat().is_enemy(x, y);
         return x >= 0 && x < 256 && view_hostile(static_cast<uint8_t>(x), y);
@@ -367,7 +365,7 @@ BattleAi::BattleAi(TacticalBattle& battle, TacticalMode& mode, SimHost& host, co
         // battle's fog, as the story VMs' (CampaignBattles::story_begin); before, `fog` stayed null and every call was a
         // "Command only valid in a tactical game" SCRIPT ERROR. Null when the battle runs without fog (BattleConfig::fog).
         // [port] the AI VMs' FOWCells handles are not in the save (none of the shipped AI scripts keeps one).
-        fog_hooks_.fog = bt->fog();
+        bt->bind_script_fog(fog_hooks_);  // ref3 t06
         fog_hooks_.object = [bt, bid](objects::ObjectHandle o, tactical::fog::FogObject& out) { return bt->fog_object(bid(o), out); };
         k.fog = &fog_hooks_;
 #endif
@@ -796,16 +794,16 @@ void BattleAi::apply_host_write(const lua::LaneWrite& w) {
         case kHostSetEnvironment: if (k.set_new_environment) k.set_new_environment(w.value); break;
         case kHostSetCinematicEnvironment: if (k.set_cinematic_environment) k.set_cinematic_environment(w.on != 0); break;
         case kHostFogRevealAll:
-            if (tactical::fog::FogOfWar* fog = b_->fog()) fog->reveal_all(w.owner);
+            if (tactical::fog::FogOfWar* fog = b_->fog_rw()) fog->reveal_all(w.owner);
             break;
         case kHostFogTempReveal:
-            if (tactical::fog::FogOfWar* fog = b_->fog()) {
+            if (tactical::fog::FogOfWar* fog = b_->fog_rw()) {
                 tactical::fog::FogObject o;
                 if (b_->fog_object(id, o)) fog->temporary_reveal(w.owner, o, w.seconds);
             }
             break;
         case kHostFogDisableRendering:
-            if (tactical::fog::FogOfWar* fog = b_->fog()) fog->disable_rendering(w.seconds != 0.0f);
+            if (tactical::fog::FogOfWar* fog = b_->fog_rw()) fog->disable_rendering(w.seconds != 0.0f);
             break;
         default: break;
     }
@@ -1072,7 +1070,7 @@ void BattleAi::apply_lane_write(const cmd::Command& c) {
     lua::LaneWrite w;
     if (b_->finished_ || !lua::decode_lane_write(c.payload.bytes_view("data"), w)) return;
     if (static_cast<uint8_t>(w.op) >= static_cast<uint8_t>(lua::LaneWriteOp::HostFirst)) return apply_host_write(w);  // slice 4e
-    const int32_t n = lua::apply_lane_write(b_->abilities(), b_->frame(), w, world_->object_bridge());
+    const int32_t n = lua::apply_lane_write(*b_->abilities_, b_->frame(), w, world_->object_bridge());
     if (n >= 0 && n != w.value) ++lane_mismatch_;
 }
 

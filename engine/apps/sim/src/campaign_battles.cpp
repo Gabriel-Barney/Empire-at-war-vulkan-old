@@ -1500,8 +1500,7 @@ void CampaignBattles::story_bridge_begin(SimHost& host, GameMode& mode) {
     if ((!s && !scripts) || !battle_) return;
     story_bridge_ = std::make_unique<lua::ObjectBridge>();
     lua::ObjectBridge& b = *story_bridge_;
-    b.abilities = &battle_->abilities();
-    b.ability_frame = [this] { return battle_ ? battle_->frame() : 0u; };
+    // ref3 t06: abilities / ability_frame come from make_object_bridge below (TacticalBattle::bind_script_abilities).
 #ifdef ALAMO_SIM_HAVE_ANIM
     if (opt_.animation) b.anim = &opt_.animation->world(mode);
 #endif
@@ -1857,11 +1856,12 @@ void CampaignBattles::story_fog_begin() {
         TacticalMode* tm = host_->tactical();
         if (!battle_ || !tm) return false;
         const objects::ObjectStore& s = tm->primary();
-        return battle_->abilities().combat().special_weapon_fire(s.id(h), s.id(t));
+        return battle_->station_special_weapon_fire(s.id(h), s.id(t));
     };
 #ifdef ALAMO_LUA_HAVE_FOG
     // L1: FogOfWar.* / Undo_Reveal of the tactical story VMs on the battle's fog (null when BattleConfig::fog is off).
-    story_fog_.fog = battle_ ? battle_->fog() : nullptr;
+    story_fog_.fog = nullptr;
+    if (battle_) battle_->bind_script_fog(story_fog_);  // ref3 t06
     // modc t32 review: inside setup (the early object bridge) ++fought_ has not run yet; the epoch is this battle's number
     // either way, so a reveal made by a map object's Base_Definitions can be undone later in the battle.
     story_fog_.epoch = fought_ + (bridge_before_spawn_ ? 1u : 0u);
@@ -1885,11 +1885,7 @@ void CampaignBattles::story_fog_begin() {
 }
 
 void CampaignBattles::story_fog_reward(bool has_param, int32_t value) {
-    if (battle_)
-        if (tactical::fog::FogOfWar* f = battle_->fog()) {
-            f->reward_enable_fow(has_param, value);
-            return;
-        }
+    if (battle_ && battle_->fog_reward_enable(has_param, value)) return;  // ref3 t06
     // No battle running (or its fog off): the carried global flags, same rule as FogOfWar::reward_enable_fow.
     if (!has_param) {
         fog_active_ = false;

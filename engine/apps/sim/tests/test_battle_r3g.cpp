@@ -7,6 +7,7 @@
 //     a crusher whose Squash_Damage_Type names another tDamageType kills with that kind.
 //   * t06 (TACTICAL_GAPS §6.2): a trooper under SPREAD_OUT idles on Idle Crouch (71); off again, on Idle.
 #include "battle_test_fixture.hpp"
+#include "tactical_battle_test_access.hpp"  // ref3 t06
 #include "alamo/tactical/abilities/ability_types.hpp"
 #include "alamo/tactical/combat/combat_system.hpp"
 #include "alamo/tactical/movement/movement_system.hpp"
@@ -117,7 +118,7 @@ void test_landing_clips() {
             if (reserves.empty()) return false;
             const objects::ObjectId key = reserves[0].galactic_id;
             spawned_before = b.stats().spawned;
-            if (b.fog()) b.fog()->reveal_all(1);
+            if (b.fog()) alamo::sim::TacticalBattleTestAccess::fog(b)->reveal_all(1);
             for (int32_t cy = 6; cy < 58 && !dropped; cy += 2)
                 for (int32_t cx = 6; cx < 58 && !dropped; cx += 2) {
                     const mv::V2 c = mv::cell_center(cx, cy);
@@ -187,7 +188,7 @@ void test_crush_kind() {
             }
             CHECK(victim != objects::kNoObjectId && crusher != objects::kNoObjectId);
             if (victim == objects::kNoObjectId || crusher == objects::kNoObjectId) return false;
-            CHECK(b.test_crush(crusher, victim));
+            CHECK(alamo::sim::TacticalBattleTestAccess::crush(b, crusher, victim));
             // The kill is reported at once (combat deaths() of this frame; the next tick clears them).
             for (const tactical::combat::DeathEvent& e : b.combat().deaths())
                 if (e.id == victim) {
@@ -245,8 +246,8 @@ void test_crouch() {
             CHECK(unit != objects::kNoObjectId);
             if (unit == objects::kNoObjectId) return false;
             const objects::ObjectId ids[] = {unit};
-            CHECK(b.abilities().set_unit_ability_mode(ids, tactical::abilities::kSpreadOut, true, b.frame()) == 1);
-            CHECK(b.abilities().spread_out(unit));
+            CHECK(alamo::sim::TacticalBattleTestAccess::abilities(b).set_unit_ability_mode(ids, tactical::abilities::kSpreadOut, true, b.frame()) == 1);
+            CHECK(alamo::sim::TacticalBattleTestAccess::abilities(b).spread_out(unit));
             on_frame = b.frame();
             phase = 1;
             return true;
@@ -263,8 +264,8 @@ void test_crouch() {
             if (type != anim::kAnimIdle && type != anim::kAnimMove && !crouch_clip) other = true;  // only the four clips
             if (type == anim::kAnimIdleCrouch) {  // stopped and crouching: SPREAD_OUT off
                 const objects::ObjectId ids[] = {unit};
-                CHECK(b.abilities().set_unit_ability_mode(ids, tactical::abilities::kSpreadOut, false, b.frame()) == 1);
-                CHECK(!b.abilities().spread_out(unit));
+                CHECK(alamo::sim::TacticalBattleTestAccess::abilities(b).set_unit_ability_mode(ids, tactical::abilities::kSpreadOut, false, b.frame()) == 1);
+                CHECK(!alamo::sim::TacticalBattleTestAccess::abilities(b).spread_out(unit));
                 off_frame = b.frame();
                 phase = 2;
             }
@@ -296,7 +297,7 @@ bool drop_reserve(TacticalBattle& b, TacticalMode& tm, SimHost& host) {
     const auto reserves = b.reserves(1);
     if (reserves.empty()) return false;
     const objects::ObjectId key = reserves[0].galactic_id;
-    if (b.fog()) b.fog()->reveal_all(1);
+    if (b.fog()) alamo::sim::TacticalBattleTestAccess::fog(b)->reveal_all(1);
     for (int32_t cy = 6; cy < 58; cy += 2)
         for (int32_t cx = 6; cx < 58; cx += 2) {
             const mv::V2 c = mv::cell_center(cx, cy);
@@ -460,7 +461,7 @@ void test_death_persistence_override() {
                 if (victim == objects::kNoObjectId && st.type(h) == trooper) victim = st.id(h);
                 else if (crusher == objects::kNoObjectId) crusher = st.id(h);
             }
-            const bool ok = victim != objects::kNoObjectId && crusher != objects::kNoObjectId && b.test_crush(crusher, victim);
+            const bool ok = victim != objects::kNoObjectId && crusher != objects::kNoObjectId && alamo::sim::TacticalBattleTestAccess::crush(b, crusher, victim);
             if (!ok) std::printf("  mcx4 death persistence override: victim %d crusher %d, crush refused\n", victim, crusher);
             if (!ok) return false;
             crushed = b.frame();
@@ -529,7 +530,7 @@ void test_space_reinforcement_vulnerability() {
         objects::ObjectStore& st = tm->primary();
         auto& cs = const_cast<tactical::combat::CombatSystem&>(b->combat());
         if (!killed) {
-            if (b->fog()) b->fog()->reveal_all(1);  // the space drop validity refuses a fogged point
+            if (b->fog()) alamo::sim::TacticalBattleTestAccess::fog(*b)->reveal_all(1);  // the space drop validity refuses a fogged point
             for (const objects::ObjectHandle h : st.owned_by(1))
                 if (st.alive(h) && cs.has_unit(st.id(h)) && cs.alive(st.id(h))) {
                     killed = b->script_damage(*tm, st.id(h), 1.0e9f, false);

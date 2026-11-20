@@ -11,6 +11,7 @@
 // With ALAMO_FOC_DATA (FoC "corruption" folder) a real FoC space map battle runs as well.
 
 #include "battle_test_fixture.hpp"
+#include "tactical_battle_test_access.hpp"  // ref3 t06
 #include "alamo/core/parallel.hpp"
 #include "alamo/core/sim_crc.hpp"
 #include "alamo/core/host_fs.hpp"
@@ -240,7 +241,7 @@ QueueRun run_orders(const Data& d, int32_t workers, uint64_t ticks) {
             } else if (n == 1) {  // the attack on hard point 0
                 out.attack_ok = b->combat().ordered_target(fid) == eid && b->combat().ordered_hardpoint(fid) == 0;
             } else if (n == 0) {  // hard point 0 (or the target) gone: POWER_TO_WEAPONS
-                out.ability_ok = b->abilities().is_active(fid, 29);
+                out.ability_ok = alamo::sim::TacticalBattleTestAccess::abilities(*b).is_active(fid, 29);
             }
         }
         trace.u64(b->frame());
@@ -1390,22 +1391,22 @@ void test_attack_idle_clip_order() {
         for (size_t i = 0; i < cs.unit_count() && id == objects::kNoObjectId; ++i) {
             const auto u = cs.unit_id_at(i);
             if (!cs.alive(u) || (cs.flags(u) & tc::kUnitMoving) || st.type(st.find(u)) != trooper_t) continue;
-            if (b->test_play_clip(u, anim::kAnimIdle)) id = u;
+            if (alamo::sim::TacticalBattleTestAccess::play_clip(*b, u, anim::kAnimIdle)) id = u;
         }
         if (id == objects::kNoObjectId) continue;  // every trooper walking this tick: try the next one
         ran = true;
         CHECK(w->current_type(id) == anim::kAnimIdle);
         SimRng r1(77);
-        CHECK(b->test_attack_idle(id, false, r1));
+        CHECK(alamo::sim::TacticalBattleTestAccess::attack_idle(*b, id, false, r1));
         CHECK(r1.draws() == 1u);  // Idle: one Get_Float(0.2, 0.75) for the blend
         CHECK(w->current_type(id) == anim::kAnimAttackIdle);
         SimRng r2(77);
-        CHECK(b->test_attack_idle(id, false, r2));
+        CHECK(alamo::sim::TacticalBattleTestAccess::attack_idle(*b, id, false, r2));
         CHECK(r2.draws() == 0u);  // clip 6 plays: the clip test returns before the draw
         CHECK(w->current_type(id) == anim::kAnimAttackIdle);
-        CHECK(b->test_play_clip(id, anim::kAnimAttack));
+        CHECK(alamo::sim::TacticalBattleTestAccess::play_clip(*b, id, anim::kAnimAttack));
         SimRng r3(77);
-        CHECK(b->test_attack_idle(id, false, r3));
+        CHECK(alamo::sim::TacticalBattleTestAccess::attack_idle(*b, id, false, r3));
         CHECK(r3.draws() == 0u);  // clip 5 plays: no draw, clip 5 kept
         CHECK(w->current_type(id) == anim::kAnimAttack);
         std::printf("  slot 47 on trooper %d (frame %u): idle 1 draw, attack idle %llu, attack %llu\n", static_cast<int>(id), b->frame(),
@@ -1739,8 +1740,8 @@ BmRun run_bm_campaign(const Data& d, bool bought, int32_t workers, uint64_t tick
         for (size_t p = 0; p < 2; ++p)
             for (objects::ObjectHandle h : tm->primary().owned_by(static_cast<int32_t>(p))) {
                 const objects::ObjectId id = tm->primary().id(h);
-                if (!tm->primary().alive(h) || !b->abilities().has_ability(id, kP2W)) continue;
-                if (b->abilities().black_market_allows(id, kP2W)) ++out.allowed[p];
+                if (!tm->primary().alive(h) || !alamo::sim::TacticalBattleTestAccess::abilities(*b).has_ability(id, kP2W)) continue;
+                if (alamo::sim::TacticalBattleTestAccess::abilities(*b).black_market_allows(id, kP2W)) ++out.allowed[p];
                 else ++out.gated[p];
                 if (p == 0) {
                     ids.push_back(static_cast<uint32_t>(id));
@@ -1750,7 +1751,7 @@ BmRun run_bm_campaign(const Data& d, bool bought, int32_t workers, uint64_t tick
         commands::EventData ev(commands::EventType::SetUnitAbilityMode);
         ev.set("ability", kP2W).set("on", 1).set_ids("units", ids);
         out.command = static_cast<int>(host.execute_direct(0, commands::CommandSource::Player, ev));
-        for (objects::ObjectId id : empire) out.active_after += b->abilities().is_active(id, kP2W) ? 1u : 0u;
+        for (objects::ObjectId id : empire) out.active_after += alamo::sim::TacticalBattleTestAccess::abilities(*b).is_active(id, kP2W) ? 1u : 0u;
     }
     out.crc = host.crc_log();
     out.battles = battles.log();
@@ -2577,7 +2578,7 @@ void test_station_production(float build_mult = 1.0f) {
             held = true;
             const tactical::combat::ObjectId uo = b->contents()->contents(station).front();
             std::printf("  frame %u: upgrade object %d built in the star base\n", b->frame(), uo);
-            CHECK(b->abilities().has_object(uo) && b->contents()->container_of(uo) == station);
+            CHECK(alamo::sim::TacticalBattleTestAccess::abilities(*b).has_object(uo) && b->contents()->container_of(uo) == station);
             // Tactical_Build_Time_Seconds 1 at 30 FPS; skm1 t04 (0x496f00): x the AI difficulty multiplier (Easy 1.5: 45 frames)
             const auto want = static_cast<uint32_t>(30.0f * build_mult);
             std::printf("  build time x %.2f: done at frame %u (enqueued at 2, %u frames wanted)\n", static_cast<double>(build_mult), b->frame(), want);
@@ -2787,8 +2788,8 @@ GateRun run_gate(const Data& d, bool skirmish) {
         out.br0 = b->player_gate_allows(0, PlayerGate::BombingRuns);
         out.br1 = b->player_gate_allows(1, PlayerGate::BombingRuns);
         out.bd0 = b->player_gate_allows(0, PlayerGate::Bombardment);
-        out.rt0 = b->abilities().player_list(0, PlayerList::ReinforcementTime);
-        out.rt1 = b->abilities().player_list(1, PlayerList::ReinforcementTime);
+        out.rt0 = alamo::sim::TacticalBattleTestAccess::abilities(*b).player_list(0, PlayerList::ReinforcementTime);
+        out.rt1 = alamo::sim::TacticalBattleTestAccess::abilities(*b).player_list(1, PlayerList::ReinforcementTime);
         b->set_bombardment_disabled(0, true);
         out.bd_off = b->player_gate_allows(0, PlayerGate::Bombardment);
         b->set_bombardment_disabled(0, false);
@@ -2807,8 +2808,8 @@ GateRun run_gate(const Data& d, bool skirmish) {
                 break;
             }
         out.sw1_after = b->special_weapons_allowed(1);
-        out.rt0_after = b->abilities().player_list(0, PlayerList::ReinforcementTime);
-        out.rt1_after = b->abilities().player_list(1, PlayerList::ReinforcementTime);
+        out.rt0_after = alamo::sim::TacticalBattleTestAccess::abilities(*b).player_list(0, PlayerList::ReinforcementTime);
+        out.rt1_after = alamo::sim::TacticalBattleTestAccess::abilities(*b).player_list(1, PlayerList::ReinforcementTime);
     }
     return out;
 }
@@ -3137,7 +3138,7 @@ void test_remote_bomb_marker() {
             continue;
         }
         // Applied (the pending order is consumed), not yet tossed: the marker stays.
-        if (!waited && b->abilities().pending_type(thrower) < 0 && b->combat().projectile_count() == 0) {
+        if (!waited && alamo::sim::TacticalBattleTestAccess::abilities(*b).pending_type(thrower) < 0 && b->combat().projectile_count() == 0) {
             CHECK(marker_alive());
             waited = true;
         }

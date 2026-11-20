@@ -12,6 +12,10 @@
 #include "alamo/objects/behaviors.hpp"
 #include "alamo/objects/game_object_types.hpp"
 
+#ifdef ALAMO_LUA_HAVE_FOG
+#include "alamo/lua/fog_bridge.hpp"  // ref3 t06: bind_script_fog
+#endif
+
 namespace alamo::sim {
 
 namespace fw = alamo::tactical::fog;
@@ -361,6 +365,20 @@ void TacticalBattle::set_fog_refog(std::function<void(int32_t, uint32_t, float, 
 
 bool TacticalBattle::fog_point_fogged(int32_t player, float x, float y, bool force) const {
     return fog_on_ && fog_.point_fogged(player, x, y, force);
+}
+
+// ref3 t06: the story VMs' fog handle and Reward_Enable_FOW (TacticalBattle::fog() is read-only).
+#ifdef ALAMO_LUA_HAVE_FOG
+void TacticalBattle::bind_script_fog(lua::FogScriptHooks& out) { out.fog = fog_rw(); }
+#else
+void TacticalBattle::bind_script_fog(lua::FogScriptHooks&) {}
+#endif
+
+bool TacticalBattle::fog_reward_enable(bool has_param, int32_t value) {
+    fw::FogOfWar* f = fog_rw();
+    if (!f) return false;
+    f->reward_enable_fow(has_param, value);
+    return true;
 }
 
 bool TacticalBattle::fog_object_hidden(int32_t player, objects::ObjectId id, bool force) const {

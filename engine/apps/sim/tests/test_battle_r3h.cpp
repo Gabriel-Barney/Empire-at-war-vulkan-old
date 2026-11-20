@@ -4,6 +4,7 @@
 // (105) one-shot, Force_Revel_Loop (106) from the frame Begin finishes, Force_Revel_End (107) when the 2 s run out, then
 // the IDLE behaviour's idle once End has finished.
 #include "battle_test_fixture.hpp"
+#include "tactical_battle_test_access.hpp"  // ref3 t06
 #include "alamo/tactical/abilities/ability_types.hpp"
 
 namespace {
@@ -124,7 +125,7 @@ void test_force_sight_rows() {
             CHECK(unit != objects::kNoObjectId);
             if (unit == objects::kNoObjectId) return false;
             const objects::ObjectId ids[] = {unit};
-            CHECK(b.abilities().set_unit_ability_mode(ids, tactical::abilities::kForceSight, true, b.frame()) == 1);
+            CHECK(alamo::sim::TacticalBattleTestAccess::abilities(b).set_unit_ability_mode(ids, tactical::abilities::kForceSight, true, b.frame()) == 1);
             on = b.frame();
             return true;
         }
@@ -183,7 +184,7 @@ void test_force_sight_death(bool die_clip) {
                 if (unit == objects::kNoObjectId && st.alive(h) && st.type(h) == trooper && w && w->contains(st.id(h))) unit = st.id(h);
             if (unit == objects::kNoObjectId) return false;
             const objects::ObjectId ids[] = {unit};
-            CHECK(b.abilities().set_unit_ability_mode(ids, tactical::abilities::kForceSight, true, b.frame()) == 1);
+            CHECK(alamo::sim::TacticalBattleTestAccess::abilities(b).set_unit_ability_mode(ids, tactical::abilities::kForceSight, true, b.frame()) == 1);
             on = b.frame();
             return true;
         }
@@ -237,7 +238,7 @@ void test_force_sight_no_end() {
                 if (unit == objects::kNoObjectId && st.alive(h) && st.type(h) == trooper && w && w->contains(st.id(h))) unit = st.id(h);
             if (unit == objects::kNoObjectId) return false;
             const objects::ObjectId ids[] = {unit};
-            CHECK(b.abilities().set_unit_ability_mode(ids, tactical::abilities::kForceSight, true, b.frame()) == 1);
+            CHECK(alamo::sim::TacticalBattleTestAccess::abilities(b).set_unit_ability_mode(ids, tactical::abilities::kForceSight, true, b.frame()) == 1);
             on = b.frame();
             return true;
         }

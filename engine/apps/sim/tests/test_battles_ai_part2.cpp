@@ -1,5 +1,6 @@
 // Part 2 of test_battles_ai (bo3 t03: split by position; see test_battles_ai_common.hpp).
 #include "test_battles_ai_common.hpp"
+#include "tactical_battle_test_access.hpp"  // ref3 t06
 
 namespace bo3split {
 #ifdef ALAMO_SIM_HAVE_TACTICAL_AI
@@ -24,7 +25,7 @@ void test_thief_release(const Data& d, int how) {
     const tg::HolderDesc* hd = b.garrison().holder_desc(t.clone);
     CHECK(hd && hd->kind == tg::HolderKind::VehicleThief);
     CHECK(!cs.alive(t.speeder) && cs.owner(t.clone) == 1 && (cs.flags(t.thief) & tc::kUnitGarrisoned) != 0);
-    CHECK(b.abilities().is_active(t.clone, t.eject) && b.abilities().is_active(t.thief, t.steal));
+    CHECK(alamo::sim::TacticalBattleTestAccess::abilities(b).is_active(t.clone, t.eject) && alamo::sim::TacticalBattleTestAccess::abilities(b).is_active(t.thief, t.steal));
     // not a garrison for anyone else
     const objects::ObjectId other[] = {t.thief2}, self[] = {t.thief};
     CHECK(!b.can_garrison(t.thief2, t.clone) && b.garrison().free_slots(t.clone) == 0);
@@ -53,7 +54,7 @@ void test_thief_release(const Data& d, int how) {
     const float thief_health = t.b->combat().health(t.thief);
     if (how == 0) {
         const objects::ObjectId car[] = {t.clone};
-        CHECK(t.b->abilities().set_unit_ability_mode(car, t.eject, false, t.b->frame()) == 1u);
+        CHECK(alamo::sim::TacticalBattleTestAccess::abilities(*t.b).set_unit_ability_mode(car, t.eject, false, t.b->frame()) == 1u);
     } else {
         CHECK(t.b->script_damage(*t.tm, t.clone, 1.0e9f, false));
     }
@@ -140,7 +141,7 @@ void test_thief_save_load(const Data& d, bool no_garrison_unit) {
     }
     const objects::ObjectId car[] = {a.clone};
     for (ThiefScene* x : {&a, &f})
-        if (x->b) CHECK(x->b->abilities().set_unit_ability_mode(car, x->eject, false, x->b->frame()) == 1u);
+        if (x->b) CHECK(alamo::sim::TacticalBattleTestAccess::abilities(*x->b).set_unit_ability_mode(car, x->eject, false, x->b->frame()) == 1u);
     for (int i = 0; i < 30; ++i) step();
     for (ThiefScene* x : {&a, &f}) {
         if (!x->b) continue;
@@ -176,16 +177,16 @@ void test_command_kill_save_load(const Data& d, int how) {
         if (a.clone == objects::kNoObjectId) return;
         for (int i = 0; i < 45; ++i) CHECK(a.tick());  // the eject ability's recharge runs out
         const objects::ObjectId car[] = {a.clone};
-        CHECK(a.b->abilities().set_unit_ability_mode(car, a.eject, false, a.b->frame()) == 1u);
+        CHECK(alamo::sim::TacticalBattleTestAccess::abilities(*a.b).set_unit_ability_mode(car, a.eject, false, a.b->frame()) == 1u);
         dead = a.clone;
     } else {
         for (int i = 0; i < 5; ++i) CHECK(a.tick());
         const uint8_t stim = ta::ability_type_from_name("STIM_PACK");
-        CHECK(a.b->abilities().has_ability(a.thief, stim));
+        CHECK(alamo::sim::TacticalBattleTestAccess::abilities(*a.b).has_ability(a.thief, stim));
         CHECK(a.b->script_damage(*a.tm, a.thief, a.b->combat().health(a.thief) - 100.0f, false));  // 100 left of 5000
         CHECK(a.b->combat().alive(a.thief));
         const objects::ObjectId user[] = {a.thief};
-        CHECK(a.b->abilities().set_unit_ability_mode(user, stim, true, a.b->frame()) == 1u);
+        CHECK(alamo::sim::TacticalBattleTestAccess::abilities(*a.b).set_unit_ability_mode(user, stim, true, a.b->frame()) == 1u);
         dead = a.thief;
     }
     {  // dead in combat, the host has not seen it yet
@@ -286,7 +287,7 @@ void test_thief_dies_same_tick(const Data& d) {
         CHECK(!cs.alive(t.thief) && !cs.alive(t.speeder));                                    // both gone in that tick
         CHECK(cs.alive(clone) && cs.owner(clone) == 0 && st.owner(st.find(clone)) == 0);      // the victim's owner's
         CHECK((cs.flags(clone) & (tc::kUnitStolenVehicle | tc::kUnitIncognito)) == 0);
-        CHECK(t.b->abilities().has_ability(clone, t.eject) && !t.b->abilities().is_active(clone, t.eject));
+        CHECK(alamo::sim::TacticalBattleTestAccess::abilities(*t.b).has_ability(clone, t.eject) && !alamo::sim::TacticalBattleTestAccess::abilities(*t.b).is_active(clone, t.eject));
         CHECK(!t.b->garrison().is_holder(clone) && t.b->garrison_holder_of(t.thief) == objects::kNoObjectId);
         for (int i = 0; i < 30; ++i) CHECK(t.tick());
         CHECK(t.b->combat().alive(clone) && t.b->combat().owner(clone) == 0 && t.b->garrisoned_units(clone).empty());
@@ -531,7 +532,7 @@ void test_reserve_drop_facing(bool attacker_marker) {
         CHECK(reserves.size() == 1);
         if (reserves.empty()) break;
         const objects::ObjectId key = reserves[0].galactic_id;
-        if (b->fog()) b->fog()->reveal_all(1);  // the drop test needs unfogged cells
+        if (b->fog()) alamo::sim::TacticalBattleTestAccess::fog(*b)->reveal_all(1);  // the drop test needs unfogged cells
         // The side's start facing (player 1's troopers already on the map), printed for reference.
         std::vector<objects::ObjectId> before;
         Vec3 start_face{};
@@ -657,7 +658,7 @@ void test_battle_ai_land_drop(const Data& d) {
         size_t newly = 0;
         const bool fog = b->fog() != nullptr;
         if (fog) {
-            b->fog()->reveal_all(1);  // nothing fogged for player 1 any more
+            alamo::sim::TacticalBattleTestAccess::fog(*b)->reveal_all(1);  // nothing fogged for player 1 any more
             scan(clear_ok);
             for (const auto& q : clear_ok)
                 newly += std::none_of(fog_ok.begin(), fog_ok.end(), [&q](const ai::tactical::Vec3f& e) { return e.x == q.x && e.y == q.y; });

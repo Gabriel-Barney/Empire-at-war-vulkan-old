@@ -103,6 +103,11 @@ struct IdleRecord;  // s78l t03 (alamo/anim/anim_behaviors.hpp)
 class AnimWorld;    // r3h (alamo/anim/anim_state.hpp)
 }  // namespace alamo::anim
 
+namespace alamo::lua {
+class ObjectBridge;     // ref3 t06: bind_script_abilities (alamo/lua/object_bridge.hpp)
+struct FogScriptHooks;  // ref3 t06: bind_script_fog (alamo/lua/fog_bridge.hpp)
+}  // namespace alamo::lua
+
 namespace alamo::sim {
 
 class SimAnimation;
@@ -1634,31 +1639,22 @@ public:
     // s78k t04: a TEAM container's record owner (Container::owner: loss records, replenish spawns); -1 when `id` is no
     // container of this battle.
     int32_t container_owner(objects::ObjectId id) const;
-    // s78k t05 test seams (ALAMO_SIM_HAVE_ANIM; without it both return false): the combat hook of slot 47 (the attack-idle
-    // pose, CombatHooks::attack_idle) on `id` with the caller's generator, and a clip play on the battle's animation world
-    // (index 0, looping, hard cut). False when the battle has no animation world or `id` has no row in it.
-    bool test_attack_idle(objects::ObjectId id, bool arg, SimRng& rng);
-    bool test_play_clip(objects::ObjectId id, int32_t clip_type);
-    // r3g t05 test seam (MOVEMENT §5.5): `crusher` (a battle unit) crushes `victim` now, as a movement crush event does.
-    // False when either is not a live battle unit.
-    bool test_crush(objects::ObjectId crusher, objects::ObjectId victim);
-    // s78n t09 test seam (TACTICAL_COMBAT §5.4.4 item 1, 0x404450): the joint box half-extents (along / across the
-    // facing) of movement-backed land squad container `id` - the AbilityHost::land_squad_slots input Bribe's E_T folds
-    // (abilities::squad_joint_half_extents). False: not such a container. Const read only.
-    bool squad_joint_box(const objects::ObjectStore& st, objects::ObjectId id, float& hx, float& hy) const;
-    // s78n t10 review test seam (FOG_OF_WAR §5.2, TACTICAL_COMBAT §5.4.6 port spec item 3): the 8 (x, y) points of object
-    // `h`'s fog multisample footprint 0x38de80 (the 4 corners, then c + hx a, c - hy b, c - hx a, c + hy b), whether or
-    // not its type has Multisample_FOW_Check. Const read only.
-    void fog_footprint(const objects::ObjectStore& st, objects::ObjectHandle h, float* xy16) const { fog_footprint_samples(st, h, xy16); }
+    // ref3 t06: the test seams (attack idle, clip play, crush, squad joint box, fog footprint) and mutable access to the
+    // inner systems for tests are private, reached through TacticalBattleTestAccess (engine/apps/sim/tests/
+    // tactical_battle_test_access.hpp). Read-only views of the inner systems stay public.
     const tactical::abilities::AbilitySystem& abilities() const { return *abilities_; }
-    tactical::abilities::AbilitySystem& abilities() { return *abilities_; }
+    // ref3 t06: the battle's AbilitySystem for a Lua ObjectBridge (ObjectBridge::abilities, ability_frame = this battle's
+    // frame); make_object_bridge calls it for every battle VM. Defined in battle_object_bridge.cpp.
+    void bind_script_abilities(lua::ObjectBridge& out);
+    // ref3 t06: the space-station special weapon fire of the tactical story hooks (StoryHooks::station_fire):
+    // CombatSystem::special_weapon_fire of `station` at `target`.
+    bool station_special_weapon_fire(objects::ObjectId station, objects::ObjectId target);
     const BattleTables& tables() const { return *tables_; }
     std::span<const AttachedEffect> attached_effects() const { return effects_; }
 #ifdef ALAMO_SIM_HAVE_AI_TACTICAL
     // A1 DAMAGE_TRACKING (behaviour 0x3E) per battle: objects with the behaviour are enabled at spawn and
     // serviced on their behaviour cadence (interval 30, first service at once) with AI_SpaceThreatDecayStep.
     // Fed every tick from CombatSystem::damage_events, recorded inline in TacticalBattle (S10-int).
-    ai::tactical::DamageTrackingStore& damage_tracking() { return damage_tracking_; }
     const ai::tactical::DamageTrackingStore& damage_tracking() const { return damage_tracking_; }
 #endif
     // --- fog of war (owner: fog agent; tactical_battle_fog.cpp) ---
@@ -1669,8 +1665,13 @@ public:
     // the shooter for the target's owner), battle scale (land: the defender by the attacker's Modifies_Reveal_Range
     // objects; space: the attacker by the defender's), no overrun reveal (multiplayer only, not ported),
     // land setup phase when SetupPhaseEnabled. Null when fog is off or the battle is not set up.
-    tactical::fog::FogOfWar* fog() { return fog_on_ ? &fog_ : nullptr; }
     const tactical::fog::FogOfWar* fog() const { return fog_on_ ? &fog_ : nullptr; }
+    // ref3 t06: the battle's fog for the tactical story VMs' FogOfWar.* bindings (FogScriptHooks::fog; null when fog is
+    // off). Defined in tactical_battle_fog.cpp (with engine/lua's fog bindings; otherwise a no-op).
+    void bind_script_fog(lua::FogScriptHooks& out);
+    // ref3 t06: Reward_Enable_FOW on the running battle's fog (FogOfWar::reward_enable_fow). False when fog is off (the
+    // caller then applies the rule to its carried flags).
+    bool fog_reward_enable(bool has_param, int32_t value);
     // Carried global FOW-active flag / render option (space keeps the previous battle's values). Before setup.
     void set_fog_globals(bool fow_active, bool render_option) {
         fog_global_active_ = fow_active;
@@ -1789,6 +1790,20 @@ private:
     void share_groups_sync();              // S8 t17: squadron share groups (tick start and after a load)
     friend class BattleHooks;
     friend class BattleAi;  // A1 tactical AI hookup (battle_ai.hpp): perception snapshot + AI order execution
+    friend struct TacticalBattleTestAccess;  // ref3 t06: tests only (engine/apps/sim/tests/tactical_battle_test_access.hpp)
+    tactical::fog::FogOfWar* fog_rw() { return fog_on_ ? &fog_ : nullptr; }  // ref3 t06: friends' mutable fog
+    // s78k t05 test seams (ALAMO_SIM_HAVE_ANIM; without it both return false): the combat hook of slot 47 (the attack-idle
+    // pose, CombatHooks::attack_idle) on `id` with the caller's generator, and a clip play on the battle's animation world
+    // (index 0, looping, hard cut). False when the battle has no animation world or `id` has no row in it.
+    bool test_attack_idle(objects::ObjectId id, bool arg, SimRng& rng);
+    bool test_play_clip(objects::ObjectId id, int32_t clip_type);
+    // r3g t05 test seam (MOVEMENT §5.5): `crusher` (a battle unit) crushes `victim` now, as a movement crush event does.
+    // False when either is not a live battle unit.
+    bool test_crush(objects::ObjectId crusher, objects::ObjectId victim);
+    // s78n t09 test seam (TACTICAL_COMBAT §5.4.4 item 1, 0x404450): the joint box half-extents (along / across the
+    // facing) of movement-backed land squad container `id` - the AbilityHost::land_squad_slots input Bribe's E_T folds
+    // (abilities::squad_joint_half_extents). False: not such a container. Const read only.
+    bool squad_joint_box(const objects::ObjectStore& st, objects::ObjectId id, float& hx, float& hy) const;
     struct Participant {
         objects::ObjectHandle galactic;
         objects::ObjectId galactic_id = objects::kNoObjectId;
