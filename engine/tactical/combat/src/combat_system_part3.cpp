@@ -35,6 +35,7 @@ void CombatSystem::flush() {
         // OI abilities: repairer lists of removed units go with them.
         repairs_.erase(std::remove_if(repairs_.begin(), repairs_.end(), [this](const Repairer& r) { return find(r.unit) < 0; }),
                        repairs_.end());
+        clear_removed_base_shields();  // tru3 t04: signal 0x28 of a removed generator
         if (hooks_) hooks_->units_removed();
     }
     size_t w = 0;
@@ -1175,9 +1176,10 @@ void CombatSystem::hash_extended(StateHasher& h) const {
     if (!shield_upgrade_.empty()) {  // tru1 t02: Base_Shield_Upgrade entries (format unchanged without one)
         h.u8(0x5A);
         h.u32(static_cast<uint32_t>(shield_upgrade_.size()));
-        for (const auto& [pl, src] : shield_upgrade_) {
-            h.i32(pl);
-            h.i32(src);
+        for (const ShieldUpgrade& e : shield_upgrade_) {
+            h.i32(e.player);
+            h.i32(e.source);
+            h.u32(e.crc);  // tru3 t03
         }
     }
     h.u32(static_cast<uint32_t>(repairs_.size()));

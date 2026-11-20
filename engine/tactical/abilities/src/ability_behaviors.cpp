@@ -421,8 +421,8 @@ void AbilitySystem::modifier_entries(const Obj& src, uint32_t desc, const Specia
                                                         e.crc == s.name_crc;
                                              }),
                               player_entries_.end());
-        if (s.base_shield_upgrade)  // tru1 t02: every entry of this source
-            for (int32_t p = 0; p < np; ++p) combat_->remove_base_shield_upgrade(p, src.id);
+        if (s.base_shield_upgrade)  // tru1 t02 / tru3 t03: every entry of this source and this ability
+            for (int32_t p = 0; p < np; ++p) combat_->remove_base_shield_upgrade(p, src.id, s.name_crc);
         gate_entries(src, s, false);
         return;
     }
@@ -440,7 +440,7 @@ void AbilitySystem::modifier_entries(const Obj& src, uint32_t desc, const Specia
         put(PlayerList::StealthDuration, s.stealth_duration_multiplier);
         put(PlayerList::CaptureTime, s.capture_time_multiplier);
         put(PlayerList::ReinforcementDeploy, s.reinforcement_deploy_multiplier);
-        if (s.base_shield_upgrade) combat_->add_base_shield_upgrade(p, src.id);  // tru1 t02 (A1 step 6)
+        if (s.base_shield_upgrade) combat_->add_base_shield_upgrade(p, src.id, s.name_crc);  // tru1 t02 / tru3 t03 (A1 step 6)
     }
     gate_entries(src, s, true);
 }

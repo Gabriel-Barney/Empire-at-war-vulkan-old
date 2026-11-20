@@ -1221,6 +1221,8 @@ void test_bomb_fall();               // mcx4 t18
 void test_base_shield_state();    // tru1 t02
 void test_base_shield_straddle();
 void test_base_shield_dome();
+void test_base_shield_upgrade_keys();             // tru3 t03
+void test_base_shield_straddle_until_removal();  // tru3 t04
 void test_ground_detonation_particle();  // tru1 t08
 void test_terrain_cover();  // trn1 t01 (test_combat_trn1.cpp)
 void test_surface_fx_terrain_modifiers();  // trn1 t02

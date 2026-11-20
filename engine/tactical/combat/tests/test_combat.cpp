@@ -136,6 +136,8 @@ int main(int argc, char** argv) {
     test_base_shield_state();    // tru1 t02
     test_base_shield_straddle();
     test_base_shield_dome();
+    test_base_shield_upgrade_keys();             // tru3 t03
+    test_base_shield_straddle_until_removal();  // tru3 t04
     test_ground_detonation_particle();  // tru1 t08
     test_terrain_cover();  // trn1 t01
     test_surface_fx_terrain_modifiers();  // trn1 t02
