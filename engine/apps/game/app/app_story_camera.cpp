@@ -72,9 +72,7 @@ bool App::story_object_frame(int32_t id, ObjectFrame& out) const {
     out.valid = true;
     out.position = {m.m[0][3], m.m[1][3], m.m[2][3]};
     for (int j = 0; j < 3; ++j) out.axis[j] = {m.m[0][j], m.m[1][j], m.m[2][j]};
-    static const uint32_t f = objects::find_type_field("Ranged_Target_Z_Adjust");
-    const objects::FieldValue* v = f != 0xFFFFFFFFu ? data_.types.value(it->type, f) : nullptr;
-    out.position.z += v ? v->f : 6.0f;
+    out.position.z += data_.types.get(it->type, objects::tags::Ranged_Target_Z_Adjust);  // default 6.0 (ref6 t01)
     return true;
 }
 

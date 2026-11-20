@@ -315,7 +315,7 @@ bool TacticalBattle::clearance_info(objects::ObjectId id, mv::ClearanceInfo& out
             ci.box_lo_z = am->bound_c.z;
             ci.box_hi_z = am->bound_h.z;
         }
-        ci.half = mv::clearance_half_extents(types.get_float(t, "Custom_Hard_XExtent"), types.get_float(t, "Custom_Hard_YExtent"),
+        ci.half = mv::clearance_half_extents(types.get(t, objects::tags::Custom_Hard_XExtent), types.get(t, objects::tags::Custom_Hard_YExtent),
                                              ci.scale_factor, am != nullptr || named, am ? am->bound_h.x : 0.0f,
                                              am ? am->bound_h.y : 0.0f);
         clr_types_[t] = ci;
@@ -1360,7 +1360,7 @@ void snap_move_point(const objects::ObjectStore& st, const BattleCatalog& cat, c
         const objects::TypeIndex t = st.type(h);
         if (t >= types.size() || types.value(t, kSnapField) == nullptr || !types.get_bool(t, "Snap_Movement_Orders_To_Center"))
             continue;
-        const float sc = types.get_float(t, "Scale_Factor") > 0.0f ? types.get_float(t, "Scale_Factor") : 1.0f;
+        const float sc = types.scale_factor(t);
         float r = types.get_float(t, "Custom_Soft_Footprint_Radius");
         if (!(r > 0.0f)) r = types.get_float(t, "Space_Obstacle_Radius");
         if (!(r > 0.0f)) {

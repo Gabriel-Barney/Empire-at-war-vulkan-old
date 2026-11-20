@@ -468,7 +468,9 @@ struct UnitDesc {
     bool damaged_smoke = false;             // Damaged_Smoke_Asset_Name set: smoke events at 75 % / 50 %
     std::vector<DeathCloneEntry> death_clones;    // Death_Clone
     std::vector<int32_t> death_projectiles;       // Death_Projectiles (ProjectileDesc indices)
-    float ranged_target_z_adjust = 0.0f;          // Ranged_Target_Z_Adjust
+    // Ranged_Target_Z_Adjust. ref6 t01: 0 is the synthetic-table default only; the battle catalog fills the type value,
+    // whose one default (6.0, LOB_SOLVER §1.1) lives in objects::tags::Ranged_Target_Z_Adjust.
+    float ranged_target_z_adjust = 0.0f;
     float converted_die_time = 0.0f;              // Converted_To_Enemy_Die_Time_Seconds
     // s78n t05 (TACTICAL_COMBAT §3.5 "Convert and its team rule", 0x395c10 steps 3-5): the convert victim test refuses a
     // type with the PROXIMITY_MINE behaviour, a Friendly_Damage_Amount (+0x23ec) > 0 or Is_Named_Hero (+0x13).
@@ -495,7 +497,9 @@ struct UnitDesc {
     int32_t min_survivors = 1, max_survivors = 1;
     float tactical_respawn_secs = 0.0f;           // Tactical_Respawn_Time_In_Secs (+0x21d0)
     bool stunnable = false;                       // has STUNNABLE (0x38)
-    bool shield_requires_base_power = false;      // Shield_Requires_Base_Power (+0x8c)
+    // Shield_Requires_Base_Power (+0x8c). ref6 t01: false is the synthetic-table default only; the catalog fills the type
+    // value (default true, objects::tags::Shield_Requires_Base_Power) here and in base_shield_requires_power below.
+    bool shield_requires_base_power = false;
     // ---- tru1 t02 (docs/re/TRU1_A_RE_ANSWERS.md A1 - A5): base shields ----
     // BASE_SHIELD (0x39) with Base_Shield_Radius (+0x21f4) > 0: a shield generator; its state machine runs every 15
     // frames (CombatSystem::service_base_shields). Always_Off types never join the shield list. requires_power is

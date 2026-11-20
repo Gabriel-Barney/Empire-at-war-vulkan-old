@@ -1796,6 +1796,39 @@ static void integration(const std::string& root, const char* label, bool foc) {
     std::printf("  coverage report: %s (%s)\n", path_to_utf8(out).c_str(), written ? "written" : "NOT WRITTEN (non-fatal)");
 }
 
+// ref6 t01: every typed handle (alamo/objects/type_tags.hpp) names a type field, an unset tag reads the handle's one
+// default through get(t, handle), a set one its XML value, and name(t) is the type's name.
+static void test_type_tags() {
+    const fs::path root = fs::temp_directory_path() / "alamo_objects_type_tags";
+    std::error_code ec;
+    remove_all_long(root, ec);
+    write_file(root / "Data/XML/GameObjectFiles.xml", "<L><File>S.xml</File></L>");
+    write_file(root / "Data/XML/S.xml",
+               "<R><GroundInfantry Name=\"Bare\"></GroundInfantry>\n"
+               "<GroundInfantry Name=\"Set\"><Guard_Chase_Range>250</Guard_Chase_Range><Ranged_Target_Z_Adjust>0</Ranged_Target_Z_Adjust>"
+               "<Shield_Requires_Base_Power>No</Shield_Requires_Base_Power><Custom_Hard_XExtent>12</Custom_Hard_XExtent></GroundInfantry></R>");
+    DirectoryProvider dp(root.string());
+    ObjectTypeDatabase raw;
+    CHECK(raw.load(dp));
+    GameObjectTypes types;
+    CHECK(types.build(raw));
+    const TypeIndex bare = raw.find("Bare"), set = raw.find("Set");
+    int n = 0;
+#define ALAMO_TEST_TAG(K, N, D)                                         \
+    {                                                                   \
+        ++n;                                                            \
+        CHECK(find_type_field(tags::N.tag) != 0xFFFFFFFFu);             \
+        CHECK(types.get(bare, tags::N) == tags::N.def);                 \
+    }
+    ALAMO_TYPE_TAGS(ALAMO_TEST_TAG)
+#undef ALAMO_TEST_TAG
+    CHECK(n > 0);
+    CHECK(types.get(set, tags::Guard_Chase_Range) == 250.0f && types.get(set, tags::Ranged_Target_Z_Adjust) == 0.0f);
+    CHECK(!types.get(set, tags::Shield_Requires_Base_Power) && types.get(set, tags::Custom_Hard_XExtent) == 12.0f);
+    CHECK(types.name(set) == "Set" && types.name(static_cast<TypeIndex>(types.size())).empty());
+    std::printf("  type tags: %d handles, defaults checked\n", n);
+}
+
 int main() {
     std::setvbuf(stdout, nullptr, _IONBF, 0);
     log::set_min_level(log::Level::Error);  // the loaders warn by design; tests read diagnostics
@@ -1812,6 +1845,7 @@ int main() {
     test_behavior_scheduling();
     test_store_save();
     test_carried_type();
+    test_type_tags();  // ref6 t01
     integration(env_or("ALAMO_FOC_DATA", "/home/claude/data/foc"), "FoC", true);
     integration(env_or("ALAMO_EAW_DATA", "/home/claude/data/eaw"), "EaW", false);
     std::printf(g_fail ? "alamo_objects_tests: %d failure(s)\n" : "alamo_objects_tests: OK\n", g_fail);

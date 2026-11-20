@@ -683,9 +683,8 @@ bool land_drop_radius_ok(float x, float y, std::span<const LandDropRadiusObject>
 void drop_half_extents(const objects::GameObjectTypes& types, const BattleCatalog* catalog, uint32_t type, float& hx, float& hy) {
     hx = hy = 0.0f;
     if (type >= types.size()) return;
-    float sc = types.get_float(type, "Scale_Factor");
-    if (!(sc > 0.0f)) sc = 1.0f;
-    const float cx = types.get_float(type, "Custom_Hard_XExtent"), cy = types.get_float(type, "Custom_Hard_YExtent");
+    const float sc = types.scale_factor(type);
+    const float cx = types.get(type, objects::tags::Custom_Hard_XExtent), cy = types.get(type, objects::tags::Custom_Hard_YExtent);
     if (cx > 0.0f && cy > 0.0f) {
         hx = cx * sc;
         hy = cy * sc;
@@ -705,12 +704,11 @@ void drop_half_extents(const objects::GameObjectTypes& types, const BattleCatalo
 void drop_deployed_extents(const objects::GameObjectTypes& types, const BattleCatalog* catalog, uint32_t type, float& hx, float& hy) {
     drop_half_extents(types, catalog, type, hx, hy);
     if (type >= types.size()) return;
-    const float dx = types.get_float(type, "Custom_Hard_XExtent_Deployed");
+    const float dx = types.get(type, objects::tags::Custom_Hard_XExtent_Deployed);
     if (!(dx > 0.0f)) return;  // 0x371d20: the deployed pair applies only when the deployed x extent is set
-    float sc = types.get_float(type, "Scale_Factor");
-    if (!(sc > 0.0f)) sc = 1.0f;
+    const float sc = types.scale_factor(type);
     hx = dx * sc;
-    hy = types.get_float(type, "Custom_Hard_YExtent_Deployed") * sc;  // also when <= 0
+    hy = types.get(type, objects::tags::Custom_Hard_YExtent_Deployed) * sc;  // also when <= 0
 }
 
 LandDropShape land_drop_shape(const objects::GameObjectTypes& types, const BattleCatalog* catalog, const galactic::ConflictRules& rules,
@@ -1300,8 +1298,7 @@ bool TacticalBattle::land_drop_valid(const TacticalMode& mode, int32_t player, o
         const Vec3 f = st.facing(h);
         DropBox xb;
         xb.yaw_deg = f.x == 0.0f && f.y == 0.0f ? 0.0f : yaw_of(f);
-        float sc = types.get_float(t, "Scale_Factor");
-        if (!(sc > 0.0f)) sc = 1.0f;
+        const float sc = types.scale_factor(t);
         const float ox = types.get_float(t, "Custom_Hard_XExtent_Offset") * sc, oy = types.get_float(t, "Custom_Hard_YExtent_Offset") * sc;
         float sn = 0.0f, cs = 1.0f;
         dmath::sincos(xb.yaw_deg * (dmath::kPiF / 180.0f), sn, cs);

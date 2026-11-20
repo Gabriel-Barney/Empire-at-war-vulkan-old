@@ -593,9 +593,8 @@ void TacticalBattle::type_half_extents(uint32_t type, float& hx, float& hy) cons
     hx = hy = 0.0f;
     const objects::GameObjectTypes& types = catalog_->types();
     if (type >= types.size()) return;
-    const float sf = types.get_float(type, "Scale_Factor");
-    const float sc = sf > 0.0f ? sf : 1.0f;
-    const float cx = types.get_float(type, "Custom_Hard_XExtent"), cy = types.get_float(type, "Custom_Hard_YExtent");
+    const float sc = types.scale_factor(type);
+    const float cx = types.get(type, objects::tags::Custom_Hard_XExtent), cy = types.get(type, objects::tags::Custom_Hard_YExtent);
     if (cx > 0.0f && cy > 0.0f) {
         hx = sc * cx;
         hy = sc * cy;
@@ -640,10 +639,9 @@ void TacticalBattle::deployed_half_extents(uint32_t type, objects::ObjectId id, 
     if (type >= types.size() || !types.get_bool(type, "Deploys") || !movement_ || !movement_->has_unit(id)) return;
     const mv::LocoState ds = movement_->deploy_state(id);
     if (ds != mv::LocoState::WalkDeploying && ds != mv::LocoState::WalkDeployed) return;
-    const float sf = types.get_float(type, "Scale_Factor");
-    const float sc = sf > 0.0f ? sf : 1.0f;
-    const float dx = types.get_float(type, "Custom_Hard_XExtent_Deployed");
-    const float dy = types.get_float(type, "Custom_Hard_YExtent_Deployed");
+    const float sc = types.scale_factor(type);
+    const float dx = types.get(type, objects::tags::Custom_Hard_XExtent_Deployed);
+    const float dy = types.get(type, objects::tags::Custom_Hard_YExtent_Deployed);
     if (dx > 0.0f) {
         hx = sc * dx;
         hy = sc * dy;  // with dy <= 0: 0 (the deployed y is used only together with the deployed x)
@@ -937,7 +935,7 @@ void TacticalBattle::bt_map_prepass() {
     // marker data (MULTIPLAYER_STRUCTURE_MARKERS.XML), the slot -> player map is skirmish_slot_player. The pad takes the marker's place.
     const auto& type_crcs = types.raw().types().name_crc;
     auto team_pad = [&](const terrain::ObjectPlacement& marker, objects::TypeIndex mt, terrain::ObjectPlacement& out) -> bool {
-        const int32_t slot = team_marker_slot(types.raw().types().name[mt]);
+        const int32_t slot = team_marker_slot(types.name(mt));
         // skm2 t02 (BKG3_RE_ANSWERS Q3.1, 0x295cf0): with slot teams, the marker's number is a team: the first slot player of
         // that team takes it (a team's other slots get none).
         int32_t player = -1;
@@ -2372,7 +2370,7 @@ uint8_t TacticalBattle::bt_skirmish_anchors() {
             matches.clear();
             for (const MapMarker& m : bt_markers_) {
                 if (m.type == objects::kNone || m.type >= types.size()) continue;
-                if (!iequal_trim(types.raw().types().name[m.type], *want)) continue;
+                if (!iequal_trim(types.name(m.type), *want)) continue;
                 if (want == &player_marker && (team_game || (slots ? owner_faction(m.owner) != faction : m.owner != player))) continue;
                 matches.push_back(&m);
             }

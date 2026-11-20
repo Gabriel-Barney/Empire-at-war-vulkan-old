@@ -43,6 +43,7 @@ const Def kDefaults[] = {
     {"Build_Max_Instances_Per_Planet", "-1"}, {"Tactical_Build_Cost_Campaign", "-1"},
     {"Space_Override_Population_Value", "-1"}, {"Land_Override_Population_Value", "-1"},
     {"Select_Box_Z_Adjust", "-1.0"}, {"Tactical_Sell_Percentage", "0.5"}, {"Spawned_Squadron_Delay_Seconds", "5.0"},
+    {"Ranged_Target_Z_Adjust", "6.0"},  // ref6 t01: type +0x4dc, constructor default 6.0 (LOB_SOLVER §1.1)
     {"Projectile_Fire_Pulse_Count", "1"}, {"Projectile_Fire_Pulse_Delay_Seconds", "1.0"},
     {"Projectile_Max_Flight_Distance", "50.0"}, {"Alternate_Max_Speed", "1.0"}, {"Alternate_Max_Rate_Of_Turn", "2.0"},
     {"Max_Thrust", "0.015"}, {"Max_Rate_Of_Roll", "2.0"}, {"Bank_Turn_Angle", "70.0"}, {"Max_Lift", "0.8"},

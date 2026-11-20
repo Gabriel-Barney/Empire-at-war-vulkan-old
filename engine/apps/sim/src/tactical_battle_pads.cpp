@@ -138,7 +138,7 @@ int32_t TacticalBattle::pad_build(TacticalMode& mode, objects::ObjectId pad, obj
             const uint32_t f = galaxy_->players()[static_cast<size_t>(owner)].faction;
             if (f < galaxy_->rules().factions.size()) faction = galaxy_->rules().factions[f].name;
         }
-        const std::string_view name = types.raw().types().name[type];
+        const std::string_view name = types.name(type);
         bool listed = false, in_row = false;
         for (const std::string_view tok : types.get_list(st.type(ph), pad_list_tag())) {
             if (types.raw().find(tok) == objects::kNone) {

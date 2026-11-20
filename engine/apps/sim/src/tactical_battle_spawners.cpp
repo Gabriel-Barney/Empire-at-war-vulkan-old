@@ -245,7 +245,7 @@ uint32_t TacticalBattle::reward_set_spawn(const TacticalMode& mode, SimRng& rng,
     if (key.empty()) return 0;
     const objects::GameObjectTypes& types = catalog_->types();
     const objects::TypeIndex t = types.resolve_name(key);
-    if (t == objects::kNone || t >= types.size() || ascii_upper(types.raw().types().name[t]) != key) return 0;
+    if (t == objects::kNone || t >= types.size() || ascii_upper(types.name(t)) != key) return 0;
     return sp_rebalance(mode, rng, t, chance, true);
 }
 
