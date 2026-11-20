@@ -419,6 +419,13 @@ void App::story_reward_step() {
         }
         std::stable_sort(replay.begin(), replay.end(), [](const lua::StoryFired* a, const lua::StoryFired* b) { return a->frame < b->frame; });
         for (const lua::StoryFired* f : replay) story_present_reward(*f, 0);  // in firing order across the plot sets
+        // A restored presenter already holds what a loaded story battle's tactical plot fired: its rewards are not fed again
+        // (text, flashes and camera commands would repeat). Without the saved state they are, as before.
+        if (const lua::StoryModel* tac = story->tactical_model(); restored && tac) {
+            reward_tac_model_ = tac;
+            reward_tac_battle_ = battles_seen_;
+            reward_tac_cursor_ = tac->fired().size();
+        }
     }
     std::vector<StoryMediaCue> cues;
     auto scan = [&](const lua::StoryModel& m, size_t& cursor, uint8_t mode) {

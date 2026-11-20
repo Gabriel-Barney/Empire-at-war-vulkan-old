@@ -209,7 +209,7 @@ bool App::init() {
     {  // ui1 t06: the advanced game options' defaults (GameConstants MP_Default_*) and the credits range
         const data::GameConstants& gc = data_.db.constants();
         ui::GameOptionsSetup& o = mp.game_option_defaults;
-        o.credits = gc.get_int("MP_Default_Credits", o.credits);
+        o.credits = gc.shared.mp_default_credits.value_or(o.credits);  // ref4 t06: GameConstants::shared
         o.start_tech = gc.get_int("MP_Default_Start_Tech_Level", o.start_tech);
         o.max_tech = gc.get_int("MP_Default_Max_Tech_Level", o.max_tech);
         o.auto_resolve = std::clamp(gc.get_int("MP_Default_Allow_Auto_Resolve", o.auto_resolve), 0, 3);
@@ -222,12 +222,13 @@ bool App::init() {
         k.credits = o.credits;
         k.min_credits = o.min_credits;
         k.max_credits = o.max_credits;
-        k.heroes = gc.get_bool("MP_Default_Allow_Heroes", k.heroes);
-        k.starting_units = gc.get_bool("MP_Default_Free_Starting_Units", k.starting_units);
-        k.super_weapons = gc.get_bool("MP_Default_Allow_SuperWeapons", k.super_weapons);
-        k.prebuilt_base = gc.get_bool("MP_Default_Pre_Built_Base", k.prebuilt_base);
-        const sim::BattleConfig::SkirmishOptions skd = sim::skirmish_option_defaults(gc);  // mcx4 t14: the kinds' default
-        k.land_default_win = skd.land_default_win;                                         // conditions (enum names)
+        // ref4 t06: the flags and the kinds' default win conditions (mcx4 t14, enum names) from the sim's one reader.
+        const sim::BattleConfig::SkirmishOptions skd = sim::skirmish_option_defaults(gc);
+        k.heroes = skd.heroes;
+        k.starting_units = skd.starting_units;
+        k.super_weapons = skd.super_weapons;
+        k.prebuilt_base = skd.prebuilt_base;
+        k.land_default_win = skd.land_default_win;
         k.space_default_win = skd.space_default_win;
     }
     // Video options: the primary display's modes (the current window size selected, else the largest mode under it); the

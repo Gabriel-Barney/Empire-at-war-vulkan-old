@@ -171,7 +171,7 @@ int ai_campaign_run(const MapRunOptions& opt, const AiRunOptions& aopt) {
     ai::GalacticAiConfig gcfg;
     gcfg.difficulties = difficulties;
     gcfg.contrast = &crules.contrast;  // A2 stage 2: the PGAICommands contrast table (Contrast marshaller)
-    gcfg.ai_uses_fog_galactic = db.constants().get_bool("AIUsesFogOfWarGalactic", gcfg.ai_uses_fog_galactic);  // shipped False
+    gcfg.ai_uses_fog_galactic = db.constants().shared.ai_uses_fog_of_war_galactic.value_or(gcfg.ai_uses_fog_galactic);  // ref4 t06: GameConstants::shared (shipped False)
     const data::CampaignDef* cdef = db.find_campaign(name);
     const std::vector<std::string> no_pairs;
     const std::vector<std::string>& control = cdef ? cdef->ai_player_control : no_pairs;

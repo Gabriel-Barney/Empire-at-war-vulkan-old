@@ -65,6 +65,9 @@ constexpr std::string_view kRetailLuaErrors[] = {
     "BOBAFETTFLAMEINFANTRY: SCRIPT ERROR: GameObjectWrapper::Move_To -- Target is already dead.",
 };
 
+// ref4 t06: MP_Default_Credits through GameConstants::shared (0 without a GameConstants.xml, as before).
+int32_t skirmish_credits(const alamo::data::GameConstants& gc) { return gc.shared.mp_default_credits.value_or(0); }
+
 bool is_retail_lua_error(std::string_view e) {
     for (const std::string_view r : kRetailLuaErrors)
         if (e == r) return true;
@@ -487,7 +490,7 @@ bool foc_session(Session& s, const MapRunOptions& opt, std::vector<std::string>&
         diag.push_back("FoC skirmish: unit / planet types not found");
         return false;
     }
-    const float credits = land && land_skirmish ? static_cast<float>(std::max(0, s.db.constants().get_int("MP_Default_Credits", 0))) : 0.0f;
+    const float credits = land && land_skirmish ? static_cast<float>(skirmish_credits(s.db.constants())) : 0.0f;
     s.setup = make_galaxy(s, planet, emp, reb, credits);
     // S10 skirmish follow-up: foc-land-campaign = Utapau's Land_Tactical_Map (a campaign map: Defending Forces + Attacker Entry
     // markers, REMAINING_GAPS §3.2). t50: foc-land is a skirmish on _MP_LAND_UTAPAU (explicit faction pads and Player_N_Spawn_Point_Marker).
@@ -588,7 +591,7 @@ bool skirmish_host_session(Session& s, const MapRunOptions& opt, std::vector<std
         diag.push_back("skirmish host: the data has no planet type");
         return false;
     }
-    const float credits = static_cast<float>(std::max(0, s.db.constants().get_int("MP_Default_Credits", 0)));
+    const float credits = static_cast<float>(skirmish_credits(s.db.constants()));
     s.setup = make_galaxy(s, planet, {}, {}, credits, slots);
     auto basic_ai = std::make_shared<const std::map<std::string, std::string>>(ai::load_faction_basic_ai(s.rules.factions));
     const game::SkirmishForceTable force_table = game::load_skirmish_forces(s.rules.factions);
