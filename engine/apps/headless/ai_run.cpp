@@ -26,6 +26,7 @@
 #include "alamo/core/file_provider.hpp"
 #include "alamo/core/host_fs.hpp"
 #include "alamo/data/game_database.hpp"
+#include "alamo/game/open_game_data.hpp"  // ref4 t05
 #include "alamo/galactic/campaign.hpp"
 #include "alamo/galactic/victory.hpp"  // q6 t21: campaign end report
 #include "alamo/galactic/conflicts.hpp"
@@ -51,23 +52,6 @@
 #endif
 
 namespace {
-
-std::string env_text(const char* name) {
-#ifdef _MSC_VER
-    char* v = nullptr;
-    size_t len = 0;
-    std::string out;
-    if (_dupenv_s(&v, &len, name) == 0 && v) {
-        out = v;
-        std::free(v);
-    }
-    return out;
-#else
-    const char* v = std::getenv(name);
-    return v ? std::string(v) : std::string();
-#endif
-}
-
 
 // --human-script: the scripted human's recorded command stream. One command per line ('#' starts a comment):
 //   <second> build <Type> <Planet>      Production at Planet (the human's own planet)
@@ -127,34 +111,25 @@ bool load_human_script(const std::string& path, std::vector<HumanCommand>& out, 
 
 int ai_campaign_run(const MapRunOptions& opt, const AiRunOptions& aopt) {
     using namespace alamo;
-    const std::string root = opt.game_dir.empty() ? env_text("ALAMO_FOC_DATA") : opt.game_dir;
-    if (root.empty()) {
-        std::printf("--galactic-ai: no --game <corruption dir> and ALAMO_FOC_DATA unset: skipped\n");
-        return 0;
-    }
     // Text-only data (extracted/foc_data_text.zip unzipped) has no sibling GameData to auto-detect, so the EaW tier would be
     // missing and the AI definitions (ai.goals CRC: the EaW-only Ewok / intervention / sandbox sets) would differ from the
     // goldens, which come from a full install. ALAMO_EAW_DATA (a folder with Data\XML: the install's GameData, or
     // eaw_data_text.zip unzipped) names the EaW tier explicitly. Only on the environment route; --game decides for itself.
-    std::optional<std::string> eaw_root;  // nullopt = auto-detect
-    if (opt.game_dir.empty()) {
-        const std::string eaw = env_text("ALAMO_EAW_DATA");
-        if (!eaw.empty()) eaw_root = eaw;
-    }
+    // ref4 t05: open_game_data picks --game, else ALAMO_FOC_DATA; no content hash (headless writes no GameData save).
+    game::OpenGameDataOptions gopt;
+    if (opt.game_dir.empty()) gopt.eaw_root = game::eaw_data_from_env();  // nullopt = auto-detect
     std::string err;
     IssueSink issues;  // ums2: the VFS findings (nothing reads them here yet)
-    vfs::ModEnvironmentOptions mopt;
-    mopt.hash = false;  // headless reads no content hash (saves of GameData do)
-    mopt.eaw_root = eaw_root;
-    const std::unique_ptr<vfs::ModEnvironment> env = vfs::ModEnvironment::open(root, opt.game_args, issues, &err, std::move(mopt));
-    if (!env) {
-        std::fprintf(stderr, "%s\n", err.c_str());
+    game::OpenedGameData opened = game::open_game_data(opt.game_dir, opt.game_args, issues, std::move(gopt));
+    if (opened.status == game::OpenedGameData::Status::NoData) {
+        std::printf("--galactic-ai: no --game <corruption dir> and ALAMO_FOC_DATA unset: skipped\n");
+        return 0;
+    }
+    if (!opened.ok()) {  // the VFS error or the D1 base-EaW refusal
+        std::fprintf(stderr, "%s\n", opened.error.c_str());
         return 2;
     }
-    if (env->refused()) {  // D1: a base-EaW mod in the stack
-        std::fprintf(stderr, "%s\n", env->refusal().c_str());
-        return 2;
-    }
+    const std::unique_ptr<vfs::ModEnvironment> env = std::move(opened.env);
     vfs::Vfs* const files = &env->vfs();
     std::vector<std::string> diag;
     data::GameDatabase db;

@@ -25,7 +25,7 @@
 //   participants as alamo_headless save_run: "ai" (GalacticAiWorld write / read) after the chunks CampaignBattles
 //                ("galactic.conflicts", "battles") and SimAnimation ("anim") register, then "game" = this session's own
 //                state that later ticks read (pause / pause pending, the land skirmish's Invade sent, a battle choice in
-//                flight).
+//                flight) and, from v2 (ref4 t01), the host's presentation state (set_presentation_writer).
 //   save         save_blocker() (cheap: a real game, SimHost::save_allowed) -> check_save() (a full SimHost::save: also
 //                refused when a chunk is written EMPTY - a system whose save has not landed, e.g. "anim", whose read
 //                fails, so the save could not be loaded) -> save() hands that save out (kept while nothing ticks).
@@ -329,6 +329,12 @@ public:
     // Records the drained batches from now on (call before the first tick; a loaded session's stream continues its save).
     void record_to(commands::CommandRecording* rec);
     bool loaded() const { return loaded_; }
+    // ref4 t01: host presentation state (the App's StoryPresenter, story_present.hpp) carried in the "game" chunk (v2), outside
+    // the sim and the CRC. `writer` fills it at each save; with none set the bytes the loaded save carried are written back
+    // as they were. take_loaded_presentation(): those bytes, once (nullopt: not loaded, a v1 save, a save written without
+    // presentation state, or taken already) - the host then falls back to replaying the lasting rewards.
+    void set_presentation_writer(std::function<void(ByteWriter&)> writer) { presentation_writer_ = std::move(writer); }
+    std::optional<std::vector<uint8_t>> take_loaded_presentation();
     const commands::SavePoint& load_point() const { return load_point_; }  // {save tick, save digest} of the loaded save
     const sim::LoadReport& load_report() const { return load_report_; }
 
@@ -407,6 +413,9 @@ private:
     bool save_checked_ = false;
     uint64_t save_check_frame_ = 0, save_check_submits_ = 0;
     void describe_session();             // SimHost::set_session (end of start())
+    std::function<void(ByteWriter&)> presentation_writer_;  // ref4 t01
+    std::vector<uint8_t> loaded_presentation_;               // ref4 t01: the loaded save's presentation bytes
+    bool presentation_taken_ = false;
     void write_game_state(ByteWriter& w) const;
     bool read_game_state(ByteReader& r);
     void sync_rate_lock(sim::SimHost& h);  // the cinematic rate lock -> pacing + parity, from the current story state

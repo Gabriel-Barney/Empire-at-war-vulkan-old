@@ -137,6 +137,7 @@ These settle the roadmap's "Decisions waiting on you" list. They are binding for
 | Parallel sim redesign: exception to the current focus (Gabriel 2026-11-14) | Gabriel asked for the **full sim system redesign** in `docs/SIM_PARALLEL_DESIGN.md` (steps P0-P7) to be worked now, although most of it is tier 3; the focus row above stays for all other work. Rules for it: rule 3 holds at every step (worker-count checks 0 / 1 / 4 / default, MSVC and clang, ASan for `engine/jobs`). **Every step that moves AI decisions or random draws (P3, P4, P5's streams, P7) lands behind a config flag that defaults to the old path**, so landing it moves no golden; the default is switched in its own commit only after the Q4 harness in distribution mode shows the new path inside the old path's distribution (and retail's, once q4d's retail runs exist) over at least 12 seeds per scenario, with `tools
 egen_goldens.cmd` in that commit. Reason: the a2m r4 lesson (row "Performance goal"): a 2-frame galactic AI shift moved the Underworld out of retail's range. Story / mission Lua stays in the critical lane (tier 1). Roadmap: stage Performance, box SIMP, groups sp0-sp7, at most three lanes. | engine/jobs, engine/ai, engine/lua, engine/commands, engine/tactical, engine/core (checksum), engine/apps/sim, engine/apps/game |
 | Fleet groups: exception to the current focus (Gabriel 2026-11-13) | **Fleet groups** (Total War: Warhammer 3 style persistent unit groups in tactical battles) are built although they are not retail behaviour, as a named exception to the tier 1/2 focus row above; the focus stays for all other work. Design: the claude.ai doc "Fleet groups design" (2026-11-13). Rules: **off by default** (`[port]` option); with it off, every tier-1 rule, tier-2 distribution and golden CRC is unchanged, and group state enters the tick CRC and the save only once a fleet group exists. Groups are shown inside the retail selected-unit bar (a framed run of portraits per group), not as a separate strip. A **locked** group keeps its members' offsets, moves at its slowest member's speed **and waits for stragglers** (leaders slow down when a member falls behind; Gabriel 2026-11-13). Fleet cohesion (the row above) is separate and keeps working: a locked group's move is one single-ship order per member, which Tight cohesion leaves uncapped, so the group's own cap applies. Hotkeys N / U / Y (slots 163..165; O is FleetCohesion). Roadmap: stage st8, box FLEETG, group fg1 (phase 1). |
+| REF4 exception to the current focus (Gabriel 2026-11-19) | All seven REF4 tasks (Stage 11, second architecture review) are worked, tier 3 included; t07 is kept; t02 may move AI-column goldens once in an attributed regen. The focus row above stays for all other work. | roadmap group `ref4` (lanes ref4-a, ref4-b, ref4-c) |
 | Galactic AI stagger stays off (Gabriel 2026-11-12, b0136) | Confirms the a2m r4 change: the galactic AI runs every player's AI clocks on the same frames, as retail (AI_GALACTIC §1.3; `GalacticAiConfig::stagger = false`). The OPT2 t01 per-player phase stays a benchmark knob only (`alamo_headless --ai-stagger`). This reverses the galactic part of the OPT2 t01 performance decision ("Performance goal" below) under the parity tiers. | engine/ai (galactic), OPT2 |
 | Tactical / skirmish AI matches galactic (Gabriel 2026-11-12, b0123) | The tactical and skirmish AI drop the OPT2 t01 per-player phase by default too (`TacticalAiConfig::stagger` / `BattleAiSetup::stagger` false; `alamo_headless --ai-stagger` turns it on for benchmarks). The tactical goal cadence is checked against the retail rule of A2M_R2_RE_A §2: the battle goal systems run the same Service / slice / quota code as galactic, with N = the global PlayerList (docs/re/BKX1_CADENCE_RE.md), so they take `retail_cadence` and the galactic player count. Skirmish goldens moved. | engine/ai/tactical, engine/apps/sim (BattleAi), OPT2 |
 | Multiplayer leftovers (Gabriel 2026-10-29) | Online screens (buddy, clan, validation, internet login) and network-only command details (FrameSync multiplier / deferral window, wire layouts) are out of scope with multiplayer. Player-id bits and SpecialAbility payloads were kept on 2026-10-29 and dropped on 2026-10-30 (see "Roadmap trim"). | P4 GUI, G0-3 |
@@ -265,17 +266,31 @@ Rebel retreat at 2755-11566 (12 seeds, 20000 ticks).
 Gabriel, 2026-11-16 (coordinator run, skai t15): after more retail runs, judge skai's exit as a tier-2 distribution (end
 rate and end frames) instead of "the idle-human Utapau run does not end within 36000 frames". Retail does end some of these
 games: Rebel AI vs idle Empire 1 of 4 (27265), Empire AI vs idle Underworld 3 of 5 (23746, 25707, 26522), Underworld AI vs
-idle Empire 0 of 1 (runs listed in `tools/probe_mod/q2_traces/analysis/skai_exit.py`; SKAI_T06_LAND_RUNS §9,
+idle Empire 0 of 1 (runs listed in `tools/parity/outcomes.json`, `skai_exit_*`; SKAI_T06_LAND_RUNS §9,
 SKAI_T15_PLAN_RETEST, B0418_UTAPAU_AI_RUNS).
 
-The check (`skai_exit.py`, seeds 1-10 per AI, 36000 ticks; thresholds chosen by skai-lane2 as the documented default,
+The check (`parity_harness.py outcome --scenario skai_exit_<ai>`, formerly `skai_exit.py` (ref4 t04); seeds 1-10 per AI, 36000 ticks; thresholds chosen by skai-lane2 as the documented default,
 [port]): per AI, (1) **rate**: a two-sided Fisher exact test on port ends / 10 against retail ends / runs passes while
 p >= 0.05; (2) **frames**, only when both sides have ended games: the median end frame of the port's ended games is at least
 retail's earliest end - 3000 frames. The frame test is one-sided because the 36000 cap cuts the late side and a port that ends
 too late ends too rarely, which the rate test sees; what t15 is about is the AI finishing the base too fast. The AI-against-AI
 part of the exit is unchanged (whole run, 0 Lua errors, no end needed). Port on dev dc790516 (re-test on): Rebel 1 of 10
 (33956) pass; Underworld 5 of 10 pass (retail has one run, so this proves little); **Empire 10 of 10, median 18747 < 20746:
-fails**, the open part of skai t15. More retail runs tighten the check: add them to `RETAIL` in the script.
+fails**, the open part of skai t15. More retail runs tighten the check: add them to the scenario's `retail` in `outcomes.json`.
+
+## Outcome tests over seeds (ref4 t04, Gabriel, 2026-11-19)
+
+Second architecture review (ref4, all seven tasks picked by Gabriel): the AI-vs-AI outcome ctests no longer pin a hand-picked
+seed. Each scenario (`tools/parity/outcomes.json`) is one slow ctest, `alamo_headless_outcome_<id>`, that runs seeds 1..N
+through `tools/parity/parity_harness.py outcome` and asserts the share of seeds that end, the end-frame range of the ended
+ones, no Lua error outside retail's documented ones (`kRetailLuaErrors`, entry below) and alamo_headless's own checks; a
+random-driven outcome is tier 2 ("Parity tiers"). Thresholds sit below the measured share and change only with a new
+measurement and its reason in the scenario's `why`, like a golden. Determinism stays with the CRC golden runs, one fixed seed
+each. A known port bug's Lua error may be listed under `known_lua` with its owning open group (the mdu1 MDU race, which had
+moved the pinned Empire-vs-Underworld seed eight times); it is reported, not failed, and the entry goes when the group lands.
+The skai exit test folded into the same command (`skai_exit_*` scenarios, not ctests). Before, 21 re-pin commits in two weeks
+kept ~70 lines of per-seed measurements in `engine/apps/CMakeLists.txt`, and on 262a47b1 the pinned station seed 7 and
+Empire-vs-Underworld seeds 3 and 4 were already red.
 
 ## Retail Lua errors in the skai exit test (Gabriel, 2026-11-16)
 

@@ -46,6 +46,7 @@
 #include "alamo/ai/perception_equations.hpp"
 #include "alamo/core/compat_issue.hpp"
 #include "alamo/data/game_database.hpp"
+#include "alamo/game/open_game_data.hpp"  // ref4 t05
 #include "alamo/galactic/conflicts.hpp"
 #include "alamo/sim/campaign_battles.hpp"
 #include "alamo/vfs/mod_environment.hpp"
@@ -58,22 +59,6 @@
 namespace {
 
 using namespace alamo;
-
-std::string env_text(const char* name) {
-#ifdef _MSC_VER
-    char* v = nullptr;
-    size_t len = 0;
-    std::string out;
-    if (_dupenv_s(&v, &len, name) == 0 && v) {
-        out = v;
-        std::free(v);
-    }
-    return out;
-#else
-    const char* v = std::getenv(name);
-    return v ? std::string(v) : std::string();
-#endif
-}
 
 std::string join(const std::vector<std::string>& v, const char* sep = ",") {
     std::string out;
@@ -533,24 +518,18 @@ public:
             err = "galactic: --story needs engine/lua";
             return -1;
         }
-        root_ = game_dir.empty() ? env_text("ALAMO_FOC_DATA") : game_dir;
-        if (root_.empty()) return 0;
         args_ = game_args;
-        std::optional<std::string> eaw_root;  // nullopt = auto-detect
-        if (game_dir.empty()) {  // as ai_run.cpp: the EaW tier from ALAMO_EAW_DATA on the environment route
-            const std::string eaw = env_text("ALAMO_EAW_DATA");
-            if (!eaw.empty()) eaw_root = eaw;
-        }
+        game::OpenGameDataOptions gopt;  // ref4 t05; no content hash (headless writes no GameData save)
+        if (game_dir.empty()) gopt.eaw_root = game::eaw_data_from_env();  // as ai_run.cpp: ALAMO_EAW_DATA on the environment route
         IssueSink issues;  // ums2: the VFS findings (nothing reads them here yet)
-        vfs::ModEnvironmentOptions mopt;
-        mopt.hash = false;  // headless reads no content hash (saves of GameData do)
-        mopt.eaw_root = eaw_root;
-        files_ = vfs::ModEnvironment::open(root_, args_, issues, &err, std::move(mopt));
-        if (!files_) return -1;
-        if (files_->refused()) {  // D1: a base-EaW mod in the stack (open() set err to the refusal)
-            err = files_->refusal();
+        game::OpenedGameData opened = game::open_game_data(game_dir, args_, issues, std::move(gopt));
+        root_ = opened.root;
+        if (opened.status == game::OpenedGameData::Status::NoData) return 0;
+        if (!opened.ok()) {  // the VFS error or the D1 base-EaW refusal
+            err = opened.error;
             return -1;
         }
+        files_ = std::move(opened.env);
         std::vector<std::string> diag;
         if (!db_.load(*files_, {}, &diag) || !raw_.load(*files_, &diag) || !types_.build(raw_, files_.get(), &diag) ||
             !galactic::load_galactic_rules(*files_, db_, types_, rules_, &diag)) {
@@ -792,7 +771,7 @@ public:
         sim::SessionDescriptor d;
         d.kind = "skirmish";
         d.campaign = ho_.campaign;
-        d.data_root = ho_.game_dir.empty() ? env_text("ALAMO_FOC_DATA") : ho_.game_dir;
+        d.data_root = game::game_data_root(ho_.game_dir);
         d.data_args = ho_.game_args;
         d.set_option("map", skirmish_save_map(*data_));
         d.set_option("battles", "fight-all");

@@ -404,23 +404,18 @@ void App::story_reward_step() {
         story_present_setup();
         story_present_story_ = story;
         // A loaded save has its fired rewards already. Retail saves the locks, the advisor switch and the screen text with the
-        // HUD; the port keeps no presenter state in its saves, so only the rewards that set a switch are fed again (locks,
-        // advisor, command bar, cinematic mode ...). Text, pointers, forced clicks, speech and camera moves are not replayed [port].
-        static const char* const kSwitchRewards[] = {"LOCK_CONTROLS", "SCROLL_LOCK", "LOCK_PLANET_SELECTION", "ENABLE_OBJECTIVE_DISPLAY",
-                                                     "SHOW_COMMAND_BAR", "DISABLE_MOVIES", "SET_ADVISOR", "START_CINEMATIC_MODE",
-                                                     "STOP_CINEMATIC_MODE", "HIDE_AUTORESOLVE", "ENABLE_GALACTIC_CORRUPTION_HOLOGRAM"};
+        // HUD; ref4 t01: the port saves the presenter in the game chunk (v2) and reads it back here. A save without it (v1)
+        // feeds the rewards whose state lasts again (StoryPresenter::is_lasting_reward); text, pointers, forced clicks, speech
+        // and camera moves are not replayed then [port].
+        const bool restored = story_present_restore();
         reward_cursor_.assign(story->plot_set_count(), 0);
         std::vector<const lua::StoryFired*> replay;
         for (size_t set = 0; set < story->plot_set_count(); ++set) {
             const std::vector<lua::StoryFired>& fired = story->model(set).fired();
             reward_cursor_[set] = fired.size();
-            if (story->plot_set_player(set) != local_player()) continue;
+            if (restored || story->plot_set_player(set) != local_player()) continue;
             for (const lua::StoryFired& f : fired)
-                for (const char* name : kSwitchRewards)
-                    if (f.reward_type == name) {
-                        replay.push_back(&f);
-                        break;
-                    }
+                if (StoryPresenter::is_lasting_reward(f.reward_type)) replay.push_back(&f);
         }
         std::stable_sort(replay.begin(), replay.end(), [](const lua::StoryFired* a, const lua::StoryFired* b) { return a->frame < b->frame; });
         for (const lua::StoryFired* f : replay) story_present_reward(*f, 0);  // in firing order across the plot sets
@@ -662,6 +657,13 @@ void App::session_started(const std::vector<std::string>& diag) {
     story_ui_.reset();  // L1/S4 wave 1: a new session's UI state
     reward_cursor_.clear();  // ... and its story reward media from the start
     story_present_story_ = nullptr;  // ui2: the presenter starts afresh (a reused story address must not keep the old locks)
+    // ref4 t01: every save carries the presenter (game chunk v2); a story session reads it back in story_reward_step, a
+    // loaded game without a story here.
+    session_->set_presentation_writer([this](ByteWriter& w) { story_present_.write(w, now_s_); });
+    if (session_->loaded() && !session_->story_running()) {
+        story_present_.reset();
+        story_present_restore();
+    }
     reward_tac_model_ = nullptr;
     reward_tac_cursor_ = 0;
     zoom_planet_ = 0;

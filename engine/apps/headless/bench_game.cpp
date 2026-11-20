@@ -17,6 +17,7 @@
 #include "alamo/core/sim_crc.hpp"
 #include "alamo/game/game_data.hpp"
 #include "alamo/game/game_session.hpp"
+#include "alamo/game/open_game_data.hpp"  // ref4 t05
 #include "alamo/jobs/job_system.hpp"
 #include "alamo/sim/save_session.hpp"
 #include "alamo/sim/sim_host.hpp"
@@ -25,20 +26,6 @@
 namespace {
 
 using namespace alamo;
-
-std::string env_text(const char* name) {
-#ifdef _WIN32
-    char* v = nullptr;
-    size_t n = 0;
-    if (_dupenv_s(&v, &n, name) != 0 || !v) return {};
-    std::string s(v);
-    std::free(v);
-    return s;
-#else
-    const char* v = std::getenv(name);
-    return v ? std::string(v) : std::string();
-#endif
-}
 
 // The job system outlives the session (declared first, destroyed last).
 class GameLoadedSession final : public LoadedSession {
@@ -102,7 +89,7 @@ int open_game_save_source(const std::string& save_path, const std::string& game_
     }
     // The game data: --game, else ALAMO_FOC_DATA (a committed scenario's descriptor names no folder); the VFS arguments the
     // save was made with unless given on the command line.
-    const std::string root = game_dir.empty() ? env_text("ALAMO_FOC_DATA") : game_dir;
+    const std::string root = game::game_data_root(game_dir);  // ref4 t05
     if (root.empty()) {
         err = "no --game <corruption dir> and ALAMO_FOC_DATA unset";
         return 0;

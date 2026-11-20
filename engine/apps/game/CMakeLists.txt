@@ -58,6 +58,7 @@ add_library(alamo_game_core STATIC
 target_include_directories(alamo_game_core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
 target_link_libraries(alamo_game_core PUBLIC alamo_sim alamo_vfs alamo_data alamo_core alamo_engine_flags)
 target_link_libraries(alamo_game_core PUBLIC alamo_mod_resolve)  # ums4 t05: the picker and alamo_mod_check resolve through it
+target_link_libraries(alamo_game_core PUBLIC alamo_game_open)  # ref4 t05: open_game_data (game/open)
 target_link_libraries(alamo_game_core PUBLIC alamo_game_rules)  # q6 t03: skirmish rules shared with alamo_headless (rules/)
 if(TARGET alamo_ai_galactic)  # A2 galactic AI for the AI players (needs engine/ai + engine/lua)
   target_link_libraries(alamo_game_core PUBLIC alamo_ai_galactic)
@@ -209,6 +210,11 @@ add_test(NAME alamo_game_asset_audit_tests COMMAND alamo_game_asset_audit_tests)
 # modc t07: the synthetic mod of testdata/mod_fixture (a new faction, unit, planet, campaign and a Lua override) through
 # the real MODPATH= route, no game data; read only (no fixture path shared with any other test). The second entry runs the
 # exe itself and checks its JSON summary (docs/MODS.md section 5.1).
+# ref4 t05: open_game_data on the synthetic mod fixture (accepted, refused, no data, VFS error).
+add_executable(alamo_game_open_tests tests/test_open_game_data.cpp)
+target_link_libraries(alamo_game_open_tests PRIVATE alamo_game_open alamo_test_support)
+add_test(NAME alamo_game_open_tests COMMAND alamo_game_open_tests ${CMAKE_CURRENT_SOURCE_DIR}/testdata/mod_fixture)
+set_tests_properties(alamo_game_open_tests PROPERTIES TIMEOUT 60)
 add_executable(alamo_game_mod_fixture_tests tests/test_mod_fixture.cpp)
 target_link_libraries(alamo_game_mod_fixture_tests PRIVATE alamo_core alamo_game_core alamo_test_support)
 add_test(NAME alamo_game_mod_fixture_tests COMMAND alamo_game_mod_fixture_tests ${CMAKE_CURRENT_SOURCE_DIR}/testdata/mod_fixture)

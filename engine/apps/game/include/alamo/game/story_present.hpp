@@ -27,6 +27,11 @@
 #include <utility>
 #include <vector>
 
+namespace alamo {
+class ByteReader;
+class ByteWriter;
+}  // namespace alamo
+
 namespace alamo::data {
 struct GameConstants;
 class GameDatabase;
@@ -254,6 +259,16 @@ public:
     bool hint_started() { return std::exchange(hint_started_, false); }  // a hint was shown since the last call (sound cue)
     // The count of rewards handled / ignored since reset (tests, probes).
     uint64_t handled() const { return handled_; }
+
+    // ref4 t01: the presenter's own save, carried in GameSession's "game" chunk (v2). Everything the queries above return is
+    // written (the hooks, colours and config are set up from the game data again and are not). Host times are written relative
+    // to `now` and read back relative to the loading host's `now`. read() rejects a wrong version or a short / corrupt blob
+    // and then leaves the presenter as it was.
+    void write(ByteWriter& w, double now) const;
+    bool read(ByteReader& r, double now);
+    // A save without presenter state (game chunk v1): the rewards whose state lasts (locks, switches, the per-faction /
+    // per-planet sets) are fed again in firing order; text, pointers, flashes, camera moves and queued dialogs are not [port].
+    static bool is_lasting_reward(std::string_view type);
 
 private:
     void add_text(std::string_view type, const std::vector<std::string>& p, double now);

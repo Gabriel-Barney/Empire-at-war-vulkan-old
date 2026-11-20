@@ -1,7 +1,11 @@
 // alamo_game_story_present_tests (data-free): StoryPresenter (story_present.hpp), the host side of the story presentation
 // rewards (docs/re/STORY_PRESENTATION_REWARDS.md). One block per spec section.
+#include <cstdint>
 #include <string>
+#include <utility>
 #include <vector>
+
+#include "alamo/core/bytes.hpp"
 
 #include "alamo/data/xml.hpp"
 #include "alamo/game/story_present.hpp"
@@ -352,6 +356,185 @@ void hint_queue_test() {
     CHECK(s.shown_hint() == nullptr);
 }
 
+// ref4 t01: every reward kind on_reward handles (plus the Lua / host calls) into one presenter, in an order that leaves
+// every lasting switch set.
+void feed_everything(game::StoryPresenter& s) {
+    const double t = 10.0;
+    s.config().flash_duration = 0.25;  // times that survive the save's rebase exactly (the config is not saved)
+    s.on_reward("SCREEN_TEXT", P{"TEXT_A", "30", "", "", "", "", "Hint"}, t, 0);
+    s.on_reward("SCREEN_TEXT", P{"TEXT_B", "-1", "X_WING", "", "0", "1,2,3", "System"}, t + 0.5, 0);
+    s.on_reward("MULTIMEDIA", P{"TEXT_C", "20", "", "", "", "", "Task"}, t + 1.0, 0);
+    s.on_reward("FLASH_GUI", P{"b_build", "flash_1"}, t, 0);
+    s.on_reward("FLASH_PLANET_GUI", P{"Kuat", "FLASH_TROOPS", "2", "flash_2", "1"}, t, 0);
+    s.on_reward("FLASH_FLEET_WITH_UNIT", P{"X_WING", "flash_3"}, t, 0);
+    s.on_reward("FLASH_SPECIAL_ABILITY", P{"Stealth", "flash_4"}, t, 0);
+    s.on_reward("FLASH_PRODUCTION_CHOICE", P{"Y_WING", "flash_5"}, t, 0);
+    s.on_reward("FLASH_GUI", P{"b_gone", "flash_gone"}, t, 0);
+    s.on_reward("HIDE_TUTORIAL_CURSOR", P{"flash_gone"}, t, 0);
+    s.on_reward("FLASH_ADVANCED_MAP_OBJECT", P{"Moff_Base"}, t, 0);
+    s.on_reward("FLASH_PLANET", P{"Ryloth"}, t, 0);
+    s.on_reward("FLASH_OBJECT", P{"AT_AT"}, t, 0);
+    s.on_reward("FORCE_CLICK_GUI", P{"b_ok"}, t, 0);
+    s.on_reward("HIDE_CURSOR_ON_CLICK", P{"1"}, t, 0);
+    s.on_reward("HIGHLIGHT_OBJECT", P{"Rebel_Base", "1", "7"}, t, 0);
+    s.on_reward("TUTORIAL_DIALOG", P{"TEXT_TUTORIAL", "1"}, t, 0);
+    s.on_reward("LOCK_CONTROLS", P{"1"}, t, 0);
+    s.on_reward("SCROLL_LOCK", P{"1"}, t, 0);
+    s.on_reward("LOCK_PLANET_SELECTION", P{"1"}, t, 0);
+    s.on_reward("ENABLE_OBJECTIVE_DISPLAY", P{"0"}, t, 0);
+    s.on_reward("SHOW_COMMAND_BAR", P{"0"}, t, 2);
+    s.on_reward("SHOW_COMMAND_BAR", P{"0"}, t, 2);
+    s.on_reward("STOP_CINEMATIC_MODE", P{}, t, 0);
+    s.on_reward("START_CINEMATIC_MODE", P{}, t, 0);
+    s.on_reward("DISABLE_MOVIES", P{"1"}, t, 0);
+    s.on_reward("DISABLE_RETREAT", P{"Rebel", "1"}, t, 2);
+    s.on_reward("HIDE_AUTORESOLVE", P{}, t, 2);
+    s.on_reward("USE_RETRY_DIALOG", P{}, t, 2);
+    s.on_reward("ACTIVATE_RETRY_DIALOG", P{}, t, 2);
+    s.on_reward("ENABLE_GALACTIC_CORRUPTION_HOLOGRAM", P{"Kuat", "1"}, t, 0);
+    s.on_reward("SHOW_SMUGGLE_SLOT", P{"NalHutta"}, t, 0);
+    s.on_reward("SHOW_RAID_SLOT", P{"Tatooine"}, t, 0);
+    s.on_reward("HIDE_RAID_SLOT", P{"Tatooine"}, t, 0);
+    s.on_reward("SHOW_STEAL_SLOT", P{"Kuat"}, t, 0);
+    s.on_reward("HIDE_STEAL_SLOT", P{"Corulag"}, t, 0);
+    s.on_reward("HIDE_SMUGGLE_SLOT", P{"Corulag"}, t, 0);
+    s.on_reward("SHOW_SPECIAL_SLOT", P{"NalHutta_Prologue", "CORRUPTION_SLOT", ""}, t, 0);
+    s.on_reward("SELECT_PLANET", P{"Ryloth"}, t, 0);
+    s.on_reward("ZOOM_IN", P{}, t, 0);
+    s.on_reward("ZOOM_OUT", P{}, t, 0);
+    s.on_reward("POSITION_CAMERA", P{"Bothawui", "0,-80,0"}, t, 0);
+    s.on_reward("SCROLL_CAMERA", P{"Kuat", "1,2,3"}, t, 0);
+    s.on_reward("PAUSE_GAME", P{}, t, 0);
+    s.on_reward("PAUSE_GALACTIC", P{}, t, 0);
+    s.on_reward("UNPAUSE_GALACTIC", P{}, t, 0);
+    s.on_reward("PAUSE_GALACTIC_GAME", P{"0"}, t, 0);
+    s.on_reward("SET_ADVISOR", P{"0"}, t, 1);
+    s.flash_component("b_reinforcement", 2, t);
+    s.lua_highlight(42, true, true, 3.5f);
+    s.begin_mode(2);
+    CHECK(s.tick_advisor(2, 95, {"TEXT_HINT_1", "TEXT_HINT_2"}));
+    s.game_message("TEXT_GM");
+    s.urgent_message(U"urgent", game::StoryColor{1, 2, 3, 255});
+    s.queue_message(U"later", game::StoryColor{4, 5, 6, 255});
+    s.update(t + 0.25, false);  // the urgent line shows; three wait (the flashes still run)
+}
+
+// Every query of `a` at host time `ta` equals `b`'s at `tb` (the take_* ones are drained from both).
+void same_presenter(game::StoryPresenter& a, double ta, game::StoryPresenter& b, double tb) {
+    const double d = tb - ta;
+    CHECK(a.lines().size() == b.lines().size());
+    for (size_t i = 0; i < a.lines().size() && i < b.lines().size(); ++i) {
+        const game::StoryTextLine &x = a.lines()[i], &y = b.lines()[i];
+        CHECK(x.id == y.id && x.text == y.text && x.color == y.color && x.channel == y.channel);
+        CHECK(x.start + d == y.start && x.seconds == y.seconds && x.persistent == y.persistent && x.typewriter == y.typewriter);
+    }
+    CHECK(a.lines(ta).size() == b.lines(tb).size());
+    CHECK(a.arrows() == b.arrows());
+    CHECK(a.pointers().size() == b.pointers().size());
+    for (size_t i = 0; i < a.pointers().size() && i < b.pointers().size(); ++i) {
+        game::StoryPointer p = a.pointers()[i];
+        if (p.until >= 0.0) p.until += d;
+        CHECK(p == b.pointers()[i]);
+    }
+    auto shifted = [d](auto v) {
+        for (auto& f : v) {
+            f.start += d;
+            f.until += d;
+        }
+        return v;
+    };
+    CHECK(shifted(a.flashes()) == b.flashes());
+    CHECK(shifted(a.object_flashes()) == b.object_flashes());
+    CHECK(shifted(a.map_flashes()) == b.map_flashes());
+    CHECK(a.highlights() == b.highlights());
+    CHECK(a.component_flashing("b_build", ta) == b.component_flashing("b_build", tb));
+    CHECK((a.shown_hint() == nullptr) == (b.shown_hint() == nullptr));
+    if (a.shown_hint() && b.shown_hint()) {
+        const game::StoryShownHint &x = *a.shown_hint(), &y = *b.shown_hint();
+        CHECK(x.hint.text == y.hint.text && x.hint.color == y.hint.color && x.hint.sound == y.hint.sound);
+        CHECK(x.start + d == y.start && x.seconds == y.seconds);
+    }
+    CHECK(a.hint_alpha(ta) == b.hint_alpha(tb) && a.hint_up(ta) == b.hint_up(tb));
+    CHECK(a.hint_queue_size() == b.hint_queue_size());
+    CHECK(a.controls_locked() == b.controls_locked() && a.scroll_locked() == b.scroll_locked());
+    CHECK(a.planet_selection_locked() == b.planet_selection_locked() && a.objectives_shown() == b.objectives_shown());
+    CHECK(a.command_bar_hidden() == b.command_bar_hidden() && a.cinematic_mode() == b.cinematic_mode());
+    CHECK(a.movies_disabled() == b.movies_disabled());
+    CHECK(a.retry_dialog_used() == b.retry_dialog_used() && a.retry_dialog_requested() == b.retry_dialog_requested());
+    CHECK(a.hide_cursor_on_click() == b.hide_cursor_on_click() && a.hide_autoresolve() == b.hide_autoresolve());
+    for (uint8_t m = 0; m < 3; ++m) CHECK(a.advisor_enabled(m) == b.advisor_enabled(m) && a.next_hint_index(m) == b.next_hint_index(m));
+    for (const char* f : {"REBEL", "EMPIRE"}) CHECK(a.retreat_disabled(f) == b.retreat_disabled(f));
+    for (const char* p : {"KUAT", "RYLOTH"}) CHECK(a.corruption_hologram(p) == b.corruption_hologram(p));
+    for (const char* p : {"NalHutta", "Tatooine", "Kuat", "Corulag", "NalHutta_Prologue"})
+        for (const char* sl : {"SMUGGLE", "RAID", "STEAL", "CORRUPTION"}) CHECK(a.slot_forced(p, sl) == b.slot_forced(p, sl));
+    CHECK(a.handled() == b.handled());
+    // The periodic hint clock: the next tick a hint is due (one tick before it nothing is queued, at it one is).
+    CHECK(a.tick_advisor(2, 9094, {"H"}) == b.tick_advisor(2, 9094, {"H"}));
+    CHECK(a.tick_advisor(2, 9095, {"H"}) == b.tick_advisor(2, 9095, {"H"}));
+    CHECK(a.take_objective_display() == b.take_objective_display());
+    CHECK(a.take_text_hint_sounds() == b.take_text_hint_sounds());
+    CHECK(a.take_retry_request() == b.take_retry_request());
+    CHECK(a.hint_started() == b.hint_started());
+    CHECK(a.take_camera_commands() == b.take_camera_commands());
+    CHECK(a.take_dialogs() == b.take_dialogs());
+    CHECK(a.take_forced_clicks() == b.take_forced_clicks());
+}
+
+void save_test() {
+    alamo::test::section("ref4 t01: save / read gives the same presenter");
+    game::StoryPresenter a = make();
+    feed_everything(a);
+    CHECK(a.retreat_disabled("REBEL") && a.slot_forced("Kuat", "STEAL") && a.slot_forced("NalHutta_Prologue", "CORRUPTION"));
+    CHECK(a.retry_dialog_used() && a.cinematic_mode() && a.controls_locked() && !a.advisor_enabled(1) && a.shown_hint());
+    CHECK(!a.lines().empty() && !a.arrows().empty() && !a.pointers().empty() && !a.highlights().empty());
+    CHECK(!a.flashes().empty() && !a.object_flashes().empty() && !a.map_flashes().empty());
+    CHECK(a.hint_queue_size() == 3);
+    ByteWriter w;
+    a.write(w, 20.0);
+    game::StoryPresenter b = make();
+    {
+        ByteReader r(w.bytes());
+        CHECK(b.read(r, 520.0) && r.done());
+    }
+    ByteWriter w2;  // save / load / save: the same bytes
+    b.write(w2, 520.0);
+    CHECK(w2.bytes() == w.bytes());
+    same_presenter(a, 20.0, b, 520.0);
+
+    alamo::test::section("ref4 t01: a bad blob is refused and changes nothing");
+    game::StoryPresenter c = make();
+    c.on_reward("LOCK_CONTROLS", P{"1"}, 0.0, 0);
+    std::vector<uint8_t> cut(w.bytes().begin(), w.bytes().end() - 3);
+    ByteReader rc(cut);
+    CHECK(!c.read(rc, 0.0) && c.controls_locked() && !c.scroll_locked() && c.handled() == 1);
+    std::vector<uint8_t> wrong = w.bytes();
+    wrong[0] = 99;  // the version
+    ByteReader rw(wrong);
+    CHECK(!c.read(rw, 0.0) && c.controls_locked() && c.handled() == 1);
+
+    alamo::test::section("ref4 t01: a v1 save replays the lasting rewards");
+    game::StoryPresenter full = make(), replayed = make();
+    // The same feed, recorded: the v1 fallback feeds only the lasting ones again.
+    struct Fed {
+        std::string type;
+        P p;
+        uint8_t mode;
+    };
+    for (const auto& [type, p, mode] : std::vector<Fed>{
+             {"LOCK_CONTROLS", P{"1"}, 0}, {"SCREEN_TEXT", P{"TEXT_A"}, 0}, {"DISABLE_RETREAT", P{"Rebel", "1"}, 2},
+             {"SHOW_STEAL_SLOT", P{"Kuat"}, 0}, {"SHOW_SPECIAL_SLOT", P{"NalHutta", "SABOTAGE_SLOT", "1"}, 0},
+             {"USE_RETRY_DIALOG", P{}, 2}, {"HIDE_CURSOR_ON_CLICK", P{"1"}, 0}, {"FLASH_GUI", P{"b_build"}, 0},
+             {"POSITION_CAMERA", P{"Kuat"}, 0}, {"SET_ADVISOR", P{"0"}, 1}, {"SHOW_COMMAND_BAR", P{"0"}, 2}}) {
+        full.on_reward(type, p, 1.0, mode);
+        if (game::StoryPresenter::is_lasting_reward(type)) replayed.on_reward(type, p, 0.0, mode);
+    }
+    CHECK(replayed.controls_locked() && replayed.retreat_disabled("REBEL") && replayed.slot_forced("Kuat", "STEAL"));
+    CHECK(replayed.slot_forced("NalHutta", "SABOTAGE") && replayed.retry_dialog_used() && replayed.hide_cursor_on_click());
+    CHECK(!replayed.advisor_enabled(1) && replayed.command_bar_hidden());
+    CHECK(replayed.lines().empty() && replayed.flashes().empty() && replayed.take_camera_commands().empty());
+    CHECK(!game::StoryPresenter::is_lasting_reward("SCREEN_TEXT") && game::StoryPresenter::is_lasting_reward("disable_retreat"));
+}
+
 }  // namespace
 
 int main() {
@@ -362,5 +545,6 @@ int main() {
     lock_test();
     advisor_test();
     hint_queue_test();
+    save_test();  // ref4 t01
     return alamo::test::report("alamo_game_story_present_tests");
 }

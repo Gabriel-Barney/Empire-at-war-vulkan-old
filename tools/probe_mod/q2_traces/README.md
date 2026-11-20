@@ -166,9 +166,10 @@ galaxy is running.
    **FNEAR fix (2026-11-16):** the 20261116-012157 Rebel run recorded no FNEAR at all; the BurnUnitsLand `Find_Nearest`
    wrapper is now installed again at every thread start, and each install writes an `FNHOOK fn_kind=` record
    (`docs\re\SKAI_T06_LAND_RUNS.md` §8). A run without FNHOOK records did not hook Find_Nearest.
-   **skai exit test (tier 2, 2026-11-16):** `analysis\skai_exit.py` (`--selftest`) runs the port's idle-human Utapau games
-   (Rebel / Empire / Underworld AI, seeds 1-10, 36000 ticks) and judges end rate (Fisher exact) and end frames against the
-   retail runs listed in its `RETAIL` table; a new retail run of these lobbies goes into that table
+   **skai exit test (tier 2, 2026-11-16):** `tools\parity\parity_harness.py outcome --scenario skai_exit_rebel` (also
+   `skai_exit_empire`, `skai_exit_underworld`; formerly `analysis\skai_exit.py`, folded in by ref4 t04) runs the port's
+   idle-human Utapau games (seeds 1-10, 36000 ticks) and judges end rate (Fisher exact) and end frames against the retail
+   runs listed in the scenario's `retail` in `tools\parity\outcomes.json`; a new retail run of these lobbies goes there
    (`docs\DECISIONS.md`, "skai exit test as a tier-2 distribution").
    **Story mission (story t04), about 15 min:** `run_story.cmd`, see **Story mission run** below.
 7. **Send back:** zip `out\` and send it. Leave out `out\selftest`. Each run has its own folder:

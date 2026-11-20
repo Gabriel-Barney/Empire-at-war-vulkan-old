@@ -1,5 +1,7 @@
 ﻿#include "alamo/game/game_data.hpp"
 
+#include "alamo/game/open_game_data.hpp"  // ref4 t05
+
 #include <algorithm>
 #include <chrono>
 #include <cstring>
@@ -85,17 +87,29 @@ uint32_t neutral_faction(const galactic::GalacticRules& rules) {
 }  // namespace
 
 bool load_game_data(const std::string& root, const std::vector<std::string>& args, GameData& out, std::string* err) {
-    // ums2: opened through the process's ModEnvironment (mounted exactly as alamo_headless does).
-    std::unique_ptr<vfs::ModEnvironment> env = vfs::ModEnvironment::open(root, args, out.vfs_issues, err);
-    if (!env) return false;
-    out.root = root;
+    // ums2 / ref4 t05: opened through open_game_data, as every alamo_headless runner (with the mods' content hash: saves).
+    // The caller has picked the folder (an empty one is not replaced by ALAMO_FOC_DATA here).
+    if (root.empty()) {
+        if (err) *err = "VFS: no game folder";
+        return false;
+    }
+    OpenGameDataOptions gopt;
+    gopt.hash = true;
+    OpenedGameData opened = open_game_data(root, args, out.vfs_issues, std::move(gopt));
+    if (!opened.env) {  // the VFS error
+        if (err) *err = opened.error;
+        return false;
+    }
+    out.root = opened.root;
     out.args = args;
-    out.env = env.get();
-    out.vfs = &env->vfs();
-    out.mods = env->mounted();
-    const bool refused = env->refused();  // D1: FoC mods only; *err names the mod
-    out.files = std::move(env);
-    if (refused) return false;
+    out.env = opened.env.get();
+    out.vfs = &opened.env->vfs();
+    out.mods = opened.env->mounted();
+    out.files = std::move(opened.env);
+    if (opened.status == OpenedGameData::Status::Refused) {  // D1: FoC mods only; *err names the mod
+        if (err) *err = opened.error;
+        return false;
+    }
     if (!load_common(out, err)) return false;
 #ifdef ALAMO_GAME_HAVE_GALACTIC_AI
     stage(out, "AI data", [&](std::vector<std::string>&) {  // as alamo_headless --galactic-ai: definitions, equations,

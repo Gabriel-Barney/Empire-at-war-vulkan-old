@@ -23,6 +23,7 @@
 #include "alamo/vfs/steam_workshop.hpp"
 #include "alamo/jobs/topology.hpp"  // sp1: OS hints
 
+#include "alamo/game/open_game_data.hpp"  // ref4 t05: game_data_root
 #include "alamo/game/save_export.hpp"
 #include "alamo/render/galactic/galactic_snapshot.hpp"
 #include "alamo/sim/l1_loaders.hpp"  // mcx4 t14: skirmish_option_defaults
@@ -32,7 +33,7 @@ namespace alamo_game_app {
 // Launcher support: --export-save (save_export.hpp). Loads the game data the save needs (the same --game / MODPATH= as the
 // game it was saved from), loads the save headless and writes the JSON; faction colours from Factions.xml.
 static int export_save_main(const Options& opt, const std::string& save, const std::string& out) {
-    const std::string root = opt.game.empty() ? env_or_empty("ALAMO_FOC_DATA") : opt.game;
+    const std::string root = game::game_data_root(opt.game);
     if (root.empty() || out.empty()) {
         std::fprintf(stderr, "--export-save needs --out FILE and --game <corruption dir> (or ALAMO_FOC_DATA)\n");
         return 2;
@@ -60,7 +61,7 @@ static int export_save_main(const Options& opt, const std::string& save, const s
 
 // ------------------------------------------------------------------------------------------------ init
 bool App::init() {
-    const std::string root = opt_.game.empty() ? env_or_empty("ALAMO_FOC_DATA") : opt_.game;
+    const std::string root = game::game_data_root(opt_.game);
     if (root.empty()) {
         std::fprintf(stderr, "alamo_game needs --game <corruption dir> or ALAMO_FOC_DATA\n");
         return false;
@@ -550,7 +551,7 @@ static int bench_new_main(const Options& opt) {
         std::fprintf(stderr, "benchmark: %s\n", why.c_str());
         return 2;
     }
-    const std::string root = opt.game.empty() ? env_or_empty("ALAMO_FOC_DATA") : opt.game;
+    const std::string root = game::game_data_root(opt.game);
     if (root.empty()) {
         std::printf("alamo_game --bench-new-save: ALAMO_FOC_DATA / --game not set: skipped\n");
         return 0;
@@ -579,7 +580,7 @@ static int bench_new_main(const Options& opt) {
 // command line into `--bench-make MANIFEST --bench-save <the new save>` (the other flags stay). 0 = ready, else the exit code.
 static int bench_regen_prepare(const Options& opt, const std::vector<std::string>& args, const std::string& manifest, std::string& regen_save,
                                std::vector<std::string>& scenario_args) {
-    const std::string root = opt.game.empty() ? env_or_empty("ALAMO_FOC_DATA") : opt.game;
+    const std::string root = game::game_data_root(opt.game);
     if (root.empty()) {
         std::fprintf(stderr, "alamo_game --bench-regen needs --game <corruption dir> or ALAMO_FOC_DATA\n");
         return 2;
@@ -829,7 +830,7 @@ int main(int argc, char** argv) {
     log::set_min_level(log::Level::Warn);
     if (opt.movies.empty() && opt.intro) opt.movies = {"Logo1", "Logo2"};  // Movies.xml names (MAIN_LOOP 5.1 step 13): LucasArtsLogo.bik, PetroglyphLogo.bik
     if (!opt.smoke.empty()) {
-        if ((opt.game.empty() ? env_or_empty("ALAMO_FOC_DATA") : opt.game).empty()) {
+        if (game::game_data_root(opt.game).empty()) {
             std::printf("alamo_game smoke %s: ALAMO_FOC_DATA / --game not set: skipped\n", opt.smoke.c_str());
             return 0;
         }
