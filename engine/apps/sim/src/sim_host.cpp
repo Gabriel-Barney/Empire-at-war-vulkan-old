@@ -178,6 +178,7 @@ GameMode& SimHost::start_game(ModeKind kind) {
         scoring_scaffold_ = false;  // mcx6 t07: scoring_map_battle marks the new session again
     }
     const bool new_session = modes_.empty();
+    if (ship_names_) ship_names_->start_game(new_session);  // ref5 t04: Start_Game resets the name lists' cursors
     GameMode& m = modes_.push(kind);
     // --- OI objects: behaviour Initialise draws its first due frame from the synced RNG (TACTICAL_GAPS 6.4);
     //     primary store only (the secondary store is local / cosmetic) ---
@@ -195,6 +196,17 @@ GameMode& SimHost::start_game(ModeKind kind) {
     pacing_.set_stopped(false);
     if (story_ && m.tactical()) story_->host_event(StoryHostEvent::TacticalStarted, frame_);
     return m;
+}
+
+void SimHost::set_ship_names(std::unique_ptr<ShipNames> names) {
+    ship_names_ = std::move(names);
+    remove_save_participant("ship_names");
+    if (!ship_names_) return;
+    SaveParticipant p;
+    p.name = "ship_names";
+    p.write = [this](ByteWriter& w) { ship_names_->write(w); };
+    p.read = [this](ByteReader& r) { return ship_names_->read(r); };
+    add_save_participant(std::move(p));
 }
 
 void SimHost::set_object_script_files(const FileProvider* files) {
@@ -573,6 +585,8 @@ bool SimHost::start_story(const StoryStart& start, std::vector<std::string>* dia
 #endif
         object_scripts_->set_bridge(g->primary(), story_->object_bridge());
     }
+    if (lua::ObjectBridge* ob = story_->object_bridge())  // ref5 t04: Get_Name on galactic objects
+        ob->ship_name = [this, st = &g->primary()](objects::ObjectHandle h) { return ship_name_of(*st, h); };
     story_->set_scoring_tap([this](const std::vector<galactic::GalacticEvent>& events) {
         if (scoring_vm_) scoring_events_.insert(scoring_events_.end(), events.begin(), events.end());
     });
@@ -693,6 +707,10 @@ bool SimHost::tick_once() {
 #endif
     if (object_scripts_) ctx.object_scripts = [this](GameMode& m) { object_scripts_->service(m); };  // q6
     modes_.update(ctx);
+    if (ship_names_) {  // ref5 t04: the top mode's new SELECTABLE objects get their names (the synced state is read, not drawn)
+        const objects::ObjectStore* parent = modes_.depth() > 1 ? &modes_.at(1).primary() : nullptr;
+        ship_names_->service(modes_.top()->primary(), parent, random_.synced().state());
+    }
     step("T5.gmm_update");
     if (after_mode_update_) {  // S10: tactical battle of a galactic conflict (campaign_battles.hpp)
         after_mode_update_(*this);

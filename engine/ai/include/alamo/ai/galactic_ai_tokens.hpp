@@ -42,6 +42,7 @@
 
 #include "alamo/ai/galactic_perception.hpp"
 #include "alamo/ai/perception_equations.hpp"
+#include "alamo/ai/pp_marshallers.hpp"  // ref5 t05: PpContrastEntry and the shared contrast arithmetic
 #include "alamo/core/galaxy.hpp"
 
 namespace alamo {
@@ -176,13 +177,8 @@ inline constexpr float kAiSecondsPerFrame = 1.0f / 30.0f;
 double galactic_ai_game_age(int32_t frame);
 double galactic_ai_time_since_corruption_change(int32_t frame, int32_t stamp);
 double galactic_ai_time_since_stamp(int32_t frame, int32_t stamp);
-// One entry of the PotentialPlan Contrast requirement list (0x5f1990): `row` = the EnemyContrastTypes row, -1 for a layer
-// total; `space` = layer byte 0 (space) / false = layer byte 1 (ground); `target` = the required strength.
-struct GalacticContrastEntry {
-    int32_t row = -1;
-    bool space = false;
-    double target = 0.0;
-};
+// One entry of the PotentialPlan Contrast requirement list (0x5f1990); ref5 t05: the shape tactical shares (pp_marshallers.hpp).
+using GalacticContrastEntry = PpContrastEntry;
 // 0x5f1990 (AI_GALACTIC_TOKENS §9.2 layer order, AI_GALACTIC_2 Contrast Setup A) [H]: entry 0 = the ground total (0x5f2430
 // flag 1, mask 0), entry 1 = the space total (flag 0), then one row per `row_masks` entry for ground, then one per entry for
 // space, each = galactic_ai_enemy_strength(row mask) x `scale`, or 0 when its layer total is <= 0. The totals are unscaled.
@@ -190,18 +186,22 @@ std::vector<GalacticContrastEntry> galactic_ai_contrast_list(const galactic::Gal
                                                              PlanetIndex planet, int32_t self, std::span<const uint64_t> row_masks,
                                                              double scale, const objects::EnumConverter* categories = nullptr,
                                                              const GalacticSimTokenResolver* leaves = nullptr);
-// The contrast marshaller's arithmetic (AI_GALACTIC_TOKENS §9.8, AI_GALACTIC_2 Contrast) [H]:
-// - 0x5f1990 typed-row scale: ((double)MaxContrastScale + (double)(float)(f x PerFailureContrastAdjust)) x (double)multiplier
-//   (`failure_adjust` = the float product f x PFCA).
-double galactic_contrast_scale(float max_contrast_scale, float failure_adjust, float multiplier);
-// - 0x72ac70 satisfied test, in float: total = Σ (float)target over the layer's typed entries (row >= 0); residual =
-//   Σ (rem / target) x (target / total) over those with target > 0 and rem > 0; satisfied <=> residual <= tolerance.
-bool galactic_contrast_layer_satisfied(std::span<const GalacticContrastEntry> entries, std::span<const double> remaining,
-                                       bool space, float tolerance);
-// - 0x72b940 "still allowed" rule after v <= 0: an untyped total (row -1) still has remaining > 0 and the candidate covers
-//   that entry's layer (layer byte 1 ground -> rec+0x90, byte 0 space -> rec+0x91). Found by layer byte, not position.
-bool galactic_contrast_total_open(std::span<const GalacticContrastEntry> entries, std::span<const double> remaining,
-                                  bool covers_space, bool covers_ground);
+// The contrast marshaller's arithmetic (AI_GALACTIC_TOKENS §9.8, AI_GALACTIC_2 Contrast) [H], shared with tactical since
+// ref5 t05 (pp_marshallers.hpp pp_contrast_*; the rules are in their comments):
+// - 0x5f1990 typed-row scale.
+inline double galactic_contrast_scale(float max_contrast_scale, float failure_adjust, float multiplier) {
+    return pp_contrast_scale(max_contrast_scale, failure_adjust, multiplier);
+}
+// - 0x72ac70 satisfied test, in float.
+inline bool galactic_contrast_layer_satisfied(std::span<const GalacticContrastEntry> entries, std::span<const double> remaining,
+                                              bool space, float tolerance) {
+    return pp_contrast_layer_satisfied(entries, remaining, space, tolerance);
+}
+// - 0x72b940 "still allowed" rule after v <= 0: an open untyped total of a layer the candidate covers.
+inline bool galactic_contrast_total_open(std::span<const GalacticContrastEntry> entries, std::span<const double> remaining,
+                                         bool covers_space, bool covers_ground) {
+    return pp_contrast_total_open(entries, remaining, covers_space, covers_ground);
+}
 // - 0x72b940 gate: the "still allowed" checks run only when the plan-wide flag 0x140b3a528 (every active layer satisfied,
 //   0x6bff00) is set and the candidate has a non-escort team (rec+0xB0), or 0x140b3a529 and an escort team (rec+0xB1);
 //   otherwise v <= 0 is a veto.

@@ -175,6 +175,12 @@ end
 )";
 // Destroy a unit: free-store units + pool reinforcements, the goal equation re-checked with the AI target, then
 // Attack_Target(Target, "Random") (space: one Get_Int(0, 13) draw).
+// ref5 t05: under the retail contrast rules (AI_GALACTIC_TOKENS 9.8a) a typed row that is met no longer scores, so after
+// the first frigate the picks follow the free store / pool scores and a 3-unit team of this synthetic world can miss the
+// untyped enemy total (default tolerance 0.27). Scenarios that need SYNDESTROY to run early with a given force set
+// MinContrastScale = 0.5 (tolerance 2/3): kPlanGroupAttack, kPlanAmbush, and kPlanEmptyTf in test_no_units_remaining_heroes
+// (g_empty_tf_tolerance). kPlanAbility names its frigate and corvette teams instead, which its tests need (frigates fail
+// SPRINT, corvettes activate it); test_landing_wait gives the mock a population cap of 10. Fixture data, not retail.
 const char* kPlanDestroy = R"(
 require("SynAICommands")
 ScriptPoolCount = 2
@@ -324,6 +330,7 @@ require("SynAICommands")
 ScriptPoolCount = 1
 function Definitions()
   Category = "Syn_Destroy_Unit"
+  MinContrastScale = 0.5  -- ref5 t05: fixture tolerance 2/3 (see kPlanDestroy)
   TaskForce = { { "MainForce", "Frigate | Corvette = 2,3" } }
 end
 function MainForce_Thread()
@@ -487,6 +494,7 @@ function Report(m) error(m) end
 ScriptPoolCount = 1
 function Definitions()
   Category = "Syn_Destroy_Unit"
+  MinContrastScale = 0.5  -- ref5 t05: fixture tolerance 2/3 (see kPlanDestroy)
   TaskForce = { { "MainForce", "Frigate | Corvette = 1,3" } }
 end
 function MainForce_Thread()
@@ -527,7 +535,7 @@ function Report(m) error(m) end
 ScriptPoolCount = 1
 function Definitions()
   Category = "Syn_Destroy_Unit"
-  TaskForce = { { "MainForce", "Frigate | Corvette = 2,3" } }
+  TaskForce = { { "MainForce", "Frigate = 1,1", "Corvette = 1,2" } }
 end
 function MainForce_Thread()
   MainForce.Set_As_Goal_System_Removable(false)
@@ -712,6 +720,7 @@ int g_landing = 0;
 // the Defensive BudgetAllocation, Tactical_Untargeted -2) and a Tactical_Budget_Allowance-only Hero entry.
 bool g_budget = false;
 constexpr uint32_t kLandingDelay = 60;
+float g_pop_cap = 6.0f;  // ref5 t05: MockHost::population_cap
 
 class MockHost final : public TacticalAiHost {
 public:
@@ -1038,7 +1047,7 @@ public:
     }
     std::vector<TacticalReinforcement> reinforcement_pool(int32_t player) override { return pool_[player]; }
     bool can_reinforce(int32_t) override { return true; }
-    float population_cap(int32_t) override { return 6.0f; }
+    float population_cap(int32_t) override { return g_pop_cap; }
     float population_used(int32_t player) override {
         float n = 0.0f;
         for (const MockUnit& u : units_)
@@ -1371,6 +1380,7 @@ bool g_no_starbase = false;  // skm1 t03: MockHost::base_alive false (test_space
 // bkx1 t01: the tactical goal systems run the retail cadence since b0123; the scenario checks written for the earlier
 // [port] cadence (group orders, Prepare_Ambush: which plan instance reports first) keep it.
 bool g_port_cadence = false;
+bool g_empty_tf_tolerance = false;  // ref5 t05: the variant 5 plan with MinContrastScale 0.5 (test_no_units_remaining_heroes)
 bool syn_object_types(MemoryFiles& tf, objects::ObjectTypeDatabase& raw, objects::GameObjectTypes& types, bool abilities) {
     const char* names[] = {"Syn_Frigate", "Syn_Corvette", "Syn_Station", "Syn_Pad", "UC_Syn_Turret"};
     std::string xml = "<SpaceUnits>";
@@ -1394,7 +1404,14 @@ RunResult run(int32_t frames, int32_t difficulty0, int variant = 0, std::vector<
     syn_data(files, defs, eqs, variant == 3);
     if (variant == 2) files.add("Data\\Scripts\\AI\\SpaceMode\\SynBuild.lua", kPlanProduce);
     if (variant == 4) files.add("Data\\Scripts\\AI\\SpaceMode\\SynDestroy.lua", kPlanGroupAttack);
-    if (variant == 5) files.add("Data\\Scripts\\AI\\SpaceMode\\SynDestroy.lua", kPlanEmptyTf);
+    if (variant == 5) {
+        std::string plan = kPlanEmptyTf;
+        if (g_empty_tf_tolerance) {  // ref5 t05 (test_no_units_remaining_heroes): MinContrastScale 0.5, see kPlanDestroy
+            const std::string at = "  Category = \"Syn_Destroy_Unit\"\n";
+            plan.insert(plan.find(at) + at.size(), "  MinContrastScale = 0.5\n");
+        }
+        files.add("Data\\Scripts\\AI\\SpaceMode\\SynDestroy.lua", plan);
+    }
     if (variant == 6) {
         std::string plan = kPlanAmbush;
         if (g_land) {
@@ -1945,6 +1962,38 @@ void test_potential_plan() {
         TacticalPpResult r;
         CHECK(solve(true, r) && r.picks.size() == 1);
         CHECK(!solve(false, r) && r.last_veto == "Contrast");
+    }
+    // 9. ref5 t05 slice 2 (AI_GALACTIC_TOKENS §9.8a): a pair counts only with P > 0, w > 0 and R > 0, and after v <= 0 the
+    //    plan-wide gate lets a candidate in only while an untyped total of its layer is still open. Frigates (1000 x
+    //    weight 1.5) against a corvette row of 400 and an untyped enemy total of 2000: frigate 1 meets the row (scores),
+    //    frigate 2 is allowed by the open total (1000 left), frigate 3 is vetoed (row met, total met) although the team
+    //    takes 3. The old rules scored the met row at full weight and took all three.
+    {
+        PpFixture f;
+        f.plan({{"MainForce", "Syn_Frigate = 1,3"}});
+        galactic::ContrastTable ct;
+        galactic::ContrastRow row;
+        row.enemy = "Corvette";
+        row.enemy_mask = f.mask("Corvette");
+        row.friendly.push_back({"Frigate", f.mask("Frigate"), 1.5f});
+        ct.rows.push_back(row);
+        const uint64_t corvettes = f.mask("Corvette");
+        TacticalPpInput in = f.input(TacticalMode::Space);
+        in.has_target = true;
+        in.target_object = 900;
+        in.target_position = {0.0f, 0.0f, 0.0f};
+        in.contrast = &ct;
+        in.enemy_strength = [corvettes](uint64_t m) { return m == corvettes ? 400.0 : 2000.0; };
+        in.free_units = {{11, 0, {100.0f, 0.0f, 0.0f}, 1.0f, false},
+                         {12, 0, {200.0f, 0.0f, 0.0f}, 1.0f, false},
+                         {13, 0, {300.0f, 0.0f, 0.0f}, 1.0f, false}};
+        TacticalPpResult r;
+        const bool solved = solve_tactical_pp(in, r);
+        std::printf("  retail contrast rules: solved %d, %zu picks (row met by 1, total by 2)\n", solved, r.picks.size());
+        CHECK(solved && r.picks.size() == 2);
+        // The untyped total is what lets frigate 2 in: with the total at the row's strength only frigate 1 is taken.
+        in.enemy_strength = [](uint64_t) { return 400.0; };
+        CHECK(solve_tactical_pp(in, r) && r.picks.size() == 1);
     }
     // 6. Team expansion: category masks over types (mask overlap), names, exclusions.
     {
@@ -3113,7 +3162,11 @@ void test_ability_finished() {
 void test_landing_wait(bool lost) {
     g_land = true;
     g_landing = lost ? 2 : 1;
+    // ref5 t05: under the retail contrast rules MainForce is accepted only after the free units fought (one of them dies
+    // during the wait at the cap 6); with room for 10 its force is all pool landings, so the counts measure only them.
+    g_pop_cap = 10.0f;
     const RunResult r = run(30 * 60, 1, 8);
+    g_pop_cap = 6.0f;
     g_land = false;
     g_landing = 0;
     const std::string rep_line = report_of(r, "LANDING");
@@ -3281,10 +3334,14 @@ void test_no_units_remaining_heroes() {
         };
     };
     int32_t k_plain = -1, k_hero = -1;
+    // ref5 t05: under the retail contrast rules MainForce at the default tolerance is accepted after the sweep plans took
+    // the corvettes (it holds only the frigate, so no member dies); MinContrastScale 0.5 lets it take all three first.
+    g_empty_tf_tolerance = true;
     const RunResult plain = run(30 * 20, 1, 5, nullptr, false, kill_corvettes(k_plain));
     g_hero_frigate = true;
     const RunResult hero = run(30 * 20, 1, 5, nullptr, false, kill_corvettes(k_hero));
     g_hero_frigate = false;
+    g_empty_tf_tolerance = false;
     int32_t lost_frame = -1;
     for (const std::string& d : hero.decisions)
         if (lost_frame < 0 && d.find("p0 tf MainForce no units remaining") != std::string::npos) lost_frame = decision_frame(d);
@@ -3624,52 +3681,74 @@ void test_logging_off() {
 }
 
 int main(int argc, char** argv) {
-    for (int i = 1; i < argc; ++i)
+    // --only <name>: run only the scenarios whose name contains <name> (ref5 t05: one scenario per run while iterating;
+    // --list prints the names). ctest runs them all.
+    const char* only = nullptr;
+    bool list = false;
+    for (int i = 1; i < argc; ++i) {
         if (std::strcmp(argv[i], "--write-golden") == 0) g_write_golden = true;
-    test_potential_plan();
-    test_mod_category_enum();  // q6 t03
-    test_space_layer_categories();  // q6 t03
-    test_nominal_allowed_time();  // A2g t06
-    test_skirmish();
-    test_battle_budget();  // q6 (AI_GALACTIC_TOKENS 9.3)
-    test_opportunity_and_hijack();
-    test_group_orders();
-    test_space_reinforce_needs_starbase();  // skm1 t03 / t04
-    test_tactical_production();
-    test_reinforce_landing();
-    test_script_evaluators();
+        if (std::strcmp(argv[i], "--only") == 0 && i + 1 < argc) only = argv[++i];
+        if (std::strcmp(argv[i], "--list") == 0) list = true;
+    }
+    size_t ran = 0;
+    const auto scenario = [&](const char* name, const std::function<void()>& fn) {
+        if (list) {
+            std::printf("%s\n", name);
+            return;
+        }
+        if (only && !std::strstr(name, only)) return;
+        ++ran;
+        fn();
+    };
+    scenario("potential_plan", test_potential_plan);
+    scenario("mod_category_enum", test_mod_category_enum);  // q6 t03
+    scenario("space_layer_categories", test_space_layer_categories);  // q6 t03
+    scenario("nominal_allowed_time", test_nominal_allowed_time);  // A2g t06
+    scenario("skirmish", test_skirmish);
+    scenario("battle_budget", test_battle_budget);  // q6 (AI_GALACTIC_TOKENS 9.3)
+    scenario("opportunity_and_hijack", test_opportunity_and_hijack);
+    scenario("group_orders", test_group_orders);
+    scenario("space_reinforce_needs_starbase", test_space_reinforce_needs_starbase);  // skm1 t03 / t04
+    scenario("tactical_production", test_tactical_production);
+    scenario("reinforce_landing", test_reinforce_landing);
+    scenario("script_evaluators", test_script_evaluators);
     // N1 stage 2: save / load mid-battle
-    test_damage_tracking_save();
-    test_save_load(0, 30 * 35, 30 * 120);  // the golden skirmish (2 plans running at frame 1050)
-    test_save_load(1, 30 * 30, 30 * 60);   // opportunity-fire subscriptions, HIJACK spawns
-    test_save_load(3, 30 * 40, 30 * 80);   // Script_ evaluator VMs
-    test_pp_pending_save();               // OPT2 t10
-    test_ai_lane_save();                  // sp3
-    test_order_results_bounded(0, 30 * 120);
-    test_order_results_bounded(1, 30 * 60);  // with the opportunity-fire and HIJACK plans
+    scenario("damage_tracking_save", test_damage_tracking_save);
+    scenario("save_load_0", [] { test_save_load(0, 30 * 35, 30 * 120); });  // the golden skirmish (2 plans running at frame 1050)
+    scenario("save_load_1", [] { test_save_load(1, 30 * 30, 30 * 60); });   // opportunity-fire subscriptions, HIJACK spawns
+    scenario("save_load_3", [] { test_save_load(3, 30 * 40, 30 * 80); });   // Script_ evaluator VMs
+    scenario("pp_pending_save", test_pp_pending_save);  // OPT2 t10
+    scenario("ai_lane_save", test_ai_lane_save);        // sp3
+    scenario("order_results_bounded_0", [] { test_order_results_bounded(0, 30 * 120); });
+    scenario("order_results_bounded_1", [] { test_order_results_bounded(1, 30 * 60); });  // with the opportunity-fire and HIJACK plans
     // S7 t20 / t21 / t15 A1
-    test_empty_task_force();
-    test_prepare_ambush();
-    test_land_ambush_step();     // S7 t27
-    test_prepare_ambush_land();  // S7 t33
-    test_ability_order_replaced();  // S7 t26
-    test_story_world();             // aitac t01
-    test_block_new_order_signals();  // aitac t05
-    test_explore_area();             // aitac t07
-    test_no_units_remaining_heroes();  // S7 t26
-    test_ability_finished();
-    test_save_load(6, 30 * 4, 30 * 40);  // an ambush block in flight (member / moving lists, plan frame)
-    test_landing_wait(false);  // a1j t01
-    test_landing_wait(true);
-    test_landing_save();
-    test_replan_and_priority_lifetime();  // a1k t01
-    test_plan_retest();  // skai t15
-    test_logging_off();  // REF1 t04
-    test_outside_owner_lists();  // skai t22
-    test_attack_move_result();            // q6 t19
-    test_attack_positioning();            // mcx6 t06
-    test_attack_positioning_save();       // mcx6 t06
-    test_plan_discovery_lua_only();       // mcx6 t07
+    scenario("empty_task_force", test_empty_task_force);
+    scenario("prepare_ambush", test_prepare_ambush);
+    scenario("land_ambush_step", test_land_ambush_step);  // S7 t27
+    scenario("prepare_ambush_land", test_prepare_ambush_land);  // S7 t33
+    scenario("ability_order_replaced", test_ability_order_replaced);  // S7 t26
+    scenario("story_world", test_story_world);  // aitac t01
+    scenario("block_new_order_signals", test_block_new_order_signals);  // aitac t05
+    scenario("explore_area", test_explore_area);  // aitac t07
+    scenario("no_units_remaining_heroes", test_no_units_remaining_heroes);  // S7 t26
+    scenario("ability_finished", test_ability_finished);
+    scenario("save_load_6", [] { test_save_load(6, 30 * 4, 30 * 40); });  // an ambush block in flight (member / moving lists, plan frame)
+    scenario("landing_wait_unloaded", [] { test_landing_wait(false); });  // a1j t01
+    scenario("landing_wait_lost", [] { test_landing_wait(true); });
+    scenario("landing_save", test_landing_save);
+    scenario("replan_and_priority_lifetime", test_replan_and_priority_lifetime);  // a1k t01
+    scenario("plan_retest", test_plan_retest);  // skai t15
+    scenario("logging_off", test_logging_off);  // REF1 t04
+    scenario("outside_owner_lists", test_outside_owner_lists);  // skai t22
+    scenario("attack_move_result", test_attack_move_result);  // q6 t19
+    scenario("attack_positioning", test_attack_positioning);  // mcx6 t06
+    scenario("attack_positioning_save", test_attack_positioning_save);  // mcx6 t06
+    scenario("plan_discovery_lua_only", test_plan_discovery_lua_only);  // mcx6 t07
+    if (list) return 0;
+    if (only && ran == 0) {
+        std::printf("alamo_ai_tactical_world_tests: no scenario matches --only %s (--list prints the names)\n", only);
+        return 1;
+    }
     std::printf(g_fail ? "alamo_ai_tactical_world_tests: %d FAILED\n" : "alamo_ai_tactical_world_tests: OK\n", g_fail);
     return g_fail ? 1 : 0;
 }
