@@ -563,7 +563,6 @@ struct SubObjectsTag {
     X(Bool, Execute_Script_On_Type, false)                                                                            \
     X(Text, Lua_Script, "")                                                                                           \
     /* AI facts (AI_GALACTIC, AI_TACTICAL): ai galactic_ai.cpp, galactic_seed.cpp, tactical_ai.cpp; apps/sim battle_ai.cpp */ \
-    X(Bool, IsDeathClone, false)                                                                                      \
     X(Mask, Space_Or_Garrison_Category, 0)                                                                            \
     X(Bool, Planet_Retains_Residual_Influence, true)                                                                  \
     X(Bool, Is_Stealth_Company, false)                                                                                \

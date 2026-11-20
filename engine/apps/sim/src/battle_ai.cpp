@@ -1392,7 +1392,7 @@ void BattleAi::fill(at::PerceptionWorld& w, std::vector<at::TacticalAiObject>& o
         for (size_t t = 0; t < types.size(); ++t) {
             const auto ti = static_cast<objects::TypeIndex>(t);
             at::PerceptionType& pt = w.types[t];
-            pt.name = t < types.raw().types().name.size() ? std::string(types.name(t)) : std::string();
+            pt.name = t < types.raw().types().name.size() ? std::string(types.name(ti)) : std::string();
             pt.category = types.get(ti, objects::tags::CategoryMask);
             if (pt.category == 0)
                 for (const std::string_view n : types.get_list(ti, objects::tags::CategoryMask)) pt.category |= mask(n);

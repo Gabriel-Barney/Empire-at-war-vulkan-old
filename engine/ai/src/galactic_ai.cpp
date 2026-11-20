@@ -3213,7 +3213,7 @@ std::vector<GalacticAiTypeInfo> make_galactic_ai_type_info(const objects::GameOb
         for (const std::string_view c : types.get_list(ti, objects::tags::CategoryMask)) o.categories.push_back(ai_upper_copy(c));
         o.hero = types.get(ti, objects::tags::Is_Named_Hero);
         o.transport = o.has_category("Transport");
-        o.death_clone = types.get(ti, objects::tags::IsDeathClone);
+        o.death_clone = false;  // "IsDeathClone" is no type field (no schema row): the string read always gave false
         // A2 galactic (AI_GALACTIC_3 Â§2, Â§3, Â§6, Â§8)
         o.create_team = types.get(ti, objects::tags::Create_Team);
         o.cinematic_only = types.get(ti, objects::tags::Cinematic_Object_Only);
