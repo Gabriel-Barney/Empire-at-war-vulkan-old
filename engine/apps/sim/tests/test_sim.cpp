@@ -52,6 +52,7 @@
 #include "alamo/test/support.hpp"
 #ifdef ALAMO_SIM_HAVE_STORY
 #include "alamo/lua/story_model.hpp"  // dialog_log (L1/S4 wave 1 test)
+#include "alamo/lua/presentation.hpp"  // tst2 t02: the movie state of the Esc test
 #include "alamo/galactic/conflicts.hpp"  // BattleRequest (L1/S4 wave 2a test)
 #include "alamo/lua/script_remaining.hpp"  // GlobalValueStore (q6 object-script test)
 #endif
@@ -1681,6 +1682,47 @@ static void test_story_handle_esc(const World& w) {
     CHECK(story.lua_messages().empty());
     std::printf("  story handle esc: 2 plots called, After_A at frame %" PRIu64 " (Esc after frame %" PRIu64 ")\n", after,
                 esc_frame);
+    remove_all_long(root, ec);
+}
+
+// tst2 t02: a Lua Bink movie takes the Esc only while it plays. Play_Bink_Movie leaves the movie's name in the presentation
+// state after its block has run out (no Stop_Bink_Movie), as the Kessel UM01 intro does (BlockOnCommand on its Binks, then
+// the cinematic camera): from then on the cinematic camera hands the key to the story again.
+static void test_story_esc_after_movie(const World& w) {
+    const fs::path root = fs::temp_directory_path() / "alamo_sim_story_esc_movie";
+    std::error_code ec;
+    remove_all_long(root, ec);
+    write_file(root / "Data/XML/Story_Plots_EscM.xml",
+               "<Story_Mode_Plots><Lua_Script>Story_EscM</Lua_Script><Active_Plot>Story_EscM.xml</Active_Plot></Story_Mode_Plots>\n");
+    write_file(root / "Data/XML/Story_EscM.xml",
+               "<Story><Event Name=\"Idle\"><Event_Type>STORY_AI_NOTIFICATION</Event_Type><Event_Param2>NEVER</Event_Param2></Event></Story>\n");
+    write_file(root / "Data/Scripts/Story/Story_EscM.lua",
+               "function Base_Definitions() ServiceRate = 0.01 end\n"
+               "function main() Start_Cinematic_Camera() Play_Bink_Movie(\"Intro\") end\n"
+               "function Story_Handle_Esc() end\n");
+    DirectoryProvider files(path_to_utf8(root));
+    jobs::JobSystem js(jobs::JobSystemConfig{0});
+    SimConfig cfg;
+    cfg.seed = 3;
+    SimHost host(w.types, js, cfg);
+    const GalacticRules r = rules();
+    GalacticSim* gs = host.start_galactic(r, setup());
+    CHECK(gs != nullptr);
+    if (!gs) return;
+    StoryStart st;
+    st.files = &files;
+    st.plot_sets = {{pEmpire, "Story_Plots_EscM.xml"}};
+    std::vector<std::string> diag;
+    CHECK(host.start_story(st, &diag) && host.story());
+    if (!host.story()) return;
+    StorySession& story = *host.story();
+    CHECK(!story.esc_goes_to_story());  // main ran at load: the movie's block (1 frame headless) has not run out yet
+    for (int t = 0; t < 5; ++t) host.tick_once();
+    const lua::PresentationLog* pl = story.presentation();
+    CHECK(pl && pl->state().movie == "Intro");  // the name stays: no Stop_Bink_Movie
+    CHECK(story.esc_goes_to_story());           // but the movie has ended, so the cinematic camera takes the key
+    CHECK(story.handle_esc() == 1);
+    CHECK(story.lua_messages().empty());
     remove_all_long(root, ec);
 }
 }  // namespace story_test
@@ -3544,6 +3586,7 @@ int main(int argc, char** argv) {
     story_test::test_scoring_story(*world);    // q6 t09
     story_test::test_scoring_deaths(*world);   // storyb t14
     story_test::test_story_handle_esc(*world);  // bkc1 t01
+    story_test::test_story_esc_after_movie(*world);  // tst2 t02
     story_test::test_q6_story_chain(*world);   // q6: load-time resume, Perpetual ELAPSED, SWITCH_CONTROL hook
     object_script_test::test_object_scripts();  // q6: game-object Lua scripts
 #else

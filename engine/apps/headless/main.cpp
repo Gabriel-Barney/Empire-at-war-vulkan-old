@@ -61,6 +61,10 @@
 //       [--tactical-trace-out FILE] (storyb t03): in --galactic-ai runs, the same tactical trace of every battle while it is
 //       on top (story missions: tools/parity story_kessel).
 //       [--story]: also run the campaign's story plot sets, as the retail sandbox does (q2f t03).
+//       [--story-esc-at F] (tst2 t02, with --story and --human): the human's Esc after the tick in which the battle on top
+//       reaches battle frame F; sent as the story Esc command when the cinematic camera takes it (ai_run.hpp).
+//       [--eval-equations "A,B,..." --eval-player FACTION] (tst2 t07): after the last tick, those perception equations on
+//       every planet the faction owns (Self = it, Target = the planet), one "galactic-ai: eval frame ..." line per planet.
 //       [--ai-latency F] [--no-ai-stagger | --ai-stagger] (also --skirmish-ai): OPT2 t02 / t01 parity knobs - the AI path
 //       recompute latency (default 15 frames, 0 = the original timing) and every AI player planning on the same frames (the
 //       original; the default of the galactic AI since a2m r4 and of the tactical / skirmish AI since bkx1 t01 (b0123);
@@ -233,6 +237,8 @@ struct Options {
     std::vector<std::string> ai_types;      // q6 t07: --ai-type FACTION=TYPE (repeatable)
     std::string trace_out;                  // q2f t05: --trace-out FILE (Q2TRACE 1 state trace, galactic AI runs; q4hf t02: --skirmish-ai)
     std::string tactical_trace_out;         // storyb t03: --tactical-trace-out FILE (galactic AI runs: the battles on top)
+    int64_t story_esc_at = -1;              // tst2 t02: --story-esc-at F (galactic AI story runs, ai_run.hpp)
+    std::string eval_equations, eval_player;  // tst2 t07: --eval-equations LIST --eval-player FACTION (ai_run.hpp)
     int64_t ai_latency = -1;                // OPT2 t02: --ai-latency F (galactic / tactical AI path recomputes)
     int8_t ai_stagger = -1;                 // OPT2 t01: --no-ai-stagger 0, --ai-stagger 1, -1 = the mode's default
     bool pp_streams = true;                 // OPT2 t10: --no-pp-streams
@@ -244,6 +250,7 @@ struct Options {
     bool expect_battle_end = false;  // S10 land outcome: --expect-battle-end
     bool expect_skirmish_base = false;  // t50: --expect-skirmish-base
     bool fail_on_lua_errors = false;  // a1j t07: --fail-on-lua-errors
+    bool report_fielded = false;  // tst2 t04: --report-fielded
     // N1 save / load (save_run.hpp)
     std::string save_session, save_file, load_file;
     std::string save_when = "any";  // N1 stage 2: --save-when any|battle|galactic|pending|scheduled
@@ -935,6 +942,7 @@ static int headless_main(int argc, char** argv) {
         else if (a == "--expect-battle-end") opt.expect_battle_end = true;  // S10 land outcome
         else if (a == "--expect-skirmish-base") opt.expect_skirmish_base = true;  // t50
         else if (a == "--fail-on-lua-errors") opt.fail_on_lua_errors = true;  // a1j t07
+        else if (a == "--report-fielded") opt.report_fielded = true;  // tst2 t04
         else if (a == "--ai-log") opt.ai_log = next();
         else if (a == "--ai-golden") opt.ai_golden = next();
         else if (a == "--human") opt.ai_human = next();                // A2 galactic
@@ -942,6 +950,9 @@ static int headless_main(int argc, char** argv) {
         else if (a == "--ai-type") opt.ai_types.push_back(next());        // q6 t07
         else if (a == "--trace-out") opt.trace_out = next();            // q2f t05
         else if (a == "--tactical-trace-out") opt.tactical_trace_out = next();  // storyb t03
+        else if (a == "--story-esc-at") opt.story_esc_at = std::strtoll(next().c_str(), nullptr, 10);  // tst2 t02
+        else if (a == "--eval-equations") opt.eval_equations = next();  // tst2 t07
+        else if (a == "--eval-player") opt.eval_player = next();        // tst2 t07
         else if (a == "--ai-latency") opt.ai_latency = std::strtoll(next().c_str(), nullptr, 10);  // OPT2 t02
         else if (a == "--no-ai-stagger") opt.ai_stagger = 0;                                       // OPT2 t01
         else if (a == "--ai-stagger") opt.ai_stagger = 1;                                          // a2m r4
@@ -1129,6 +1140,7 @@ static int headless_main(int argc, char** argv) {
             m.human = opt.ai_human;  // skai: --skirmish-ai skirmish --human FACTION
             m.ai_factions = opt.skirmish_factions;  // q6 t02
             m.fail_on_lua_errors = opt.fail_on_lua_errors;
+            m.report_fielded = opt.report_fielded;  // tst2 t04
             m.control_points = opt.control_points;  // ccpgt t02
             return skirmish_ai_run(m, opt.skirmish_ai, opt.ai_log, opt.trace_out);  // q4hf t02: --trace-out
         }
@@ -1148,6 +1160,9 @@ static int headless_main(int argc, char** argv) {
             a.trace_out = opt.trace_out;           // q2f t05
             a.tactical_trace_out = opt.tactical_trace_out;  // storyb t03
             a.story = opt.story;                   // q2f t03
+            a.story_esc_at = opt.story_esc_at;     // tst2 t02
+            a.eval_equations = opt.eval_equations;  // tst2 t07
+            a.eval_player = opt.eval_player;
             a.verbose = !opt.quiet;
             return ai_campaign_run(m, a);
         }

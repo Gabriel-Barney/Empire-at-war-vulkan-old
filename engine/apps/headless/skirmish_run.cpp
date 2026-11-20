@@ -948,6 +948,15 @@ int skirmish_ai_run(const MapRunOptions& opt, const std::string& kind, const std
         // state line, per victim and source type (never hashed, no sim reads).
         std::map<std::pair<objects::ObjectId, std::string>, std::pair<uint32_t, double>> base_damage;
         bool credits_set = !s.map_host;
+        // tst2 t04 (--report-fielded): every slot-player object with a locomotor seen in the battle, its type and the 2-D
+        // distance it walked (sum of per-tick steps). Read after each tick, never hashed; ordered by object id.
+        struct Fielded {
+            int32_t owner = -1;
+            std::string type;  // type name, taken when first seen (the battle's type table goes with its mode)
+            float x = 0.0f, y = 0.0f;
+            double walked = 0.0;
+        };
+        std::map<objects::ObjectId, Fielded> fielded;
         for (; t < max_ticks; ++t) {
             host.tick_once();
             if (!credits_set && battles.battle()) {  // skai: the skirmish starts at MP_Default_Credits (the scaffold galaxy's
@@ -965,6 +974,28 @@ int skirmish_ai_run(const MapRunOptions& opt, const std::string& kind, const std
             }
             if (const sim::TacticalBattle* tb = battles.battle()) {
                 const sim::BattleStats& bs = tb->stats();
+                if (opt.report_fielded)
+                    if (const sim::TacticalMode* tmode = host.tactical()) {
+                        const objects::ObjectStore& fst = tmode->primary();
+                        for (int32_t p = 0; p < 2; ++p)
+                            for (const objects::ObjectHandle h : fst.owned_by(p)) {
+                                if (!fst.active(h) || !fst.has_behavior(h, objects::beh::Locomotor)) continue;
+                                const auto pos = fst.position(h);
+                                auto [it, added] = fielded.try_emplace(fst.id(h));
+                                Fielded& f = it->second;
+                                if (added) {
+                                    f.owner = p;
+                                    const objects::TypeIndex ti = fst.type(h);
+                                    f.type = ti < tmode->types().size() ? std::string(tmode->types().name(ti)) : std::to_string(ti);
+                                } else {
+                                    const double dx = static_cast<double>(pos.x) - static_cast<double>(f.x);
+                                    const double dy = static_cast<double>(pos.y) - static_cast<double>(f.y);
+                                    f.walked += std::sqrt(dx * dx + dy * dy);
+                                }
+                                f.x = pos.x;
+                                f.y = pos.y;
+                            }
+                    }
                 prebuilt = bs.skirmish_prebuilt;
                 pads = bs.skirmish_pads;
                 structures = bs.pad_builds;
@@ -1064,6 +1095,21 @@ int skirmish_ai_run(const MapRunOptions& opt, const std::string& kind, const std
         out.pads = pads;
         out.structures = structures;
         out.shots = shots;
+        if (opt.report_fielded) {  // tst2 t04: "  fielded p<slot> <faction> <TYPE> x<count> walked <distance>", type name order
+            std::map<std::pair<int32_t, std::string>, std::pair<uint32_t, double>> by_type;
+            for (const auto& [id, f] : fielded) {
+                auto& acc = by_type[{f.owner, f.type}];
+                ++acc.first;
+                acc.second += f.walked;
+            }
+            for (const auto& [k, v] : by_type) {
+                const size_t fi = static_cast<size_t>(k.first) < s.setup.players.size() ? s.setup.players[static_cast<size_t>(k.first)].faction : s.rules.factions.size();
+                const std::string fac = fi < s.rules.factions.size() ? s.rules.factions[fi].name : std::string("?");
+                std::snprintf(buf, sizeof buf, "  fielded p%d %s %s x%u walked %.0f\n", k.first, fac.c_str(), k.second.c_str(), v.first,
+                              v.second);
+                out.text += buf;
+            }
+        }
         for (const std::string& e : error_list) {
             const bool retail = is_retail_lua_error(e);
             if (retail) ++out.retail_lua_errors;

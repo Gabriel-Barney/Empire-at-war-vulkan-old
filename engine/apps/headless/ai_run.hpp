@@ -27,6 +27,18 @@ struct AiRunOptions {
     // from the start (what a SWITCH_CONTROL story reward at frame 0 would do; Thrawn's Revenge sets its AI types that way).
     std::vector<std::string> ai_types;
     bool story = false;            // q2f t03: also run the campaign's story plot sets (--story), as the retail sandbox does
+    // tst2 t02 (b0143; BKC1_RE_ANSWERS Q1): --story-esc-at F, the --human player's Esc key after the tick in which the tactical
+    // battle on top reaches battle frame F (TacticalBattle::stats().frames, the frame of the tactical trace). When
+    // StorySession::esc_goes_to_story() holds then, the run submits the story Esc command (sim::kStoryEscSubtype) as
+    // alamo_game's GameSession::story_esc does: scheduled, applied at the next tick's command phase (frame F + 1), where
+    // StorySession::handle_esc calls Story_Handle_Esc. Otherwise the key does nothing (retail would open the pause menu).
+    // Needs --story and --human. -1 = no Esc.
+    int64_t story_esc_at = -1;
+    // tst2 t07 (b0441; docs/re/A2M_R3_RE_A.md §7.2): --eval-equations "A,B,..." --eval-player FACTION: after the last tick,
+    // one "galactic-ai: eval frame F pN PLANET: A=v B=v ..." line per planet that faction's player owns. Evaluated after the
+    // run, so the AI's leaf cache entries it fills change nothing that was simulated (no CRC moves).
+    std::string eval_equations;
+    std::string eval_player;
     bool verbose = true;
 };
 

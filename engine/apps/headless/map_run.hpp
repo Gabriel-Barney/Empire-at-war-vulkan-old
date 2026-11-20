@@ -26,6 +26,10 @@ struct MapRunOptions {
     // slot 0, slot 1 (--human may name one of them); one name: the AI slot (slot 1) beside the --human faction (slot 0).
     std::string ai_factions;
     bool fail_on_lua_errors = false;  // --skirmish-ai: fail on any tactical AI Lua error (foc-station always does), a1j t07
+    // tst2 t04 (b0188): --skirmish-ai --report-fielded: after the run, per slot player and unit type (objects with a locomotor)
+    // the number fielded in the battle and the 2-D distance they walked, one "  fielded ..." line each (read-only, never hashed;
+    // tools/parity outcome sweeps judge it with their "fielded" key).
+    bool report_fielded = false;
     // OPT2 t01 / t02 parity knobs (--galactic-ai, --skirmish-ai): --ai-latency F (AI path recompute latency, default
     // galactic::kDefaultAllPairsLatency; 0 = the original timing) and --no-ai-stagger (every AI player plans on the same
     // frames, as the original). Not recorded in saves.

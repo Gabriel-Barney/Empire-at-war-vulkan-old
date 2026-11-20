@@ -13,6 +13,10 @@ hold over those seeds:
   end_frames      [lo, hi]: the end frame of every ended seed lies in this range;
   max_lua_seeds   seeds allowed to log a Lua error that is not one of retail's documented errors (default 0;
                   skirmish_run.cpp kRetailLuaErrors, docs/DECISIONS.md "Retail Lua errors in the skai exit test");
+  fielded         [{"label", "types", "min_seeds", "why"} (+ "min_walked", default 1)]: the run's --report-fielded lines
+                  (skirmish_run.cpp, tst2 t04): at least min_seeds seeds must field one of `types` (unit type names, any
+                  case, either slot) whose units walk min_walked or more in all (2-D distance summed over those types), so a
+                  movement scenario keeps the unit kinds it was made for (Walk_Transition walkers, Destroyer droids);
   known_lua       [{"text", "group", "why"}]: a Lua error containing text is a known port bug that the open roadmap
                   group owns: reported with its group, not counted against max_lua_seeds; drop the entry when the
                   group lands its fix (any other non-retail error still fails);
@@ -33,11 +37,13 @@ import subprocess
 
 ALPHA = 0.05
 FRAME_MARGIN = 3000
-KEYS = {"args", "seeds", "why", "min_end_share", "end_frames", "max_lua_seeds", "known_lua", "retail"}
+KEYS = {"args", "seeds", "why", "min_end_share", "end_frames", "max_lua_seeds", "known_lua", "retail", "fielded"}
+FIELDED_KEYS = {"label", "types", "min_seeds", "why", "min_walked"}
 
 SUMMARY_RE = re.compile(r"^skirmish-ai \S+ workers -?\d+: (\d+) ticks .*?, (\d+) Lua errors, final CRC", re.M)
 OUTCOME_RE = re.compile(r"^battle outcome: (ended|NOT ENDED), winner (\S+), victory (\S+), (\d+) of (\d+) frames", re.M)
 BATTLE_RE = re.compile(r"^  (?:land|space) battle [^:]*: (\d+) frames.*?, winner (\S+?), victory (\S+?)(?:,|$)", re.M)
+FIELDED_RE = re.compile(r"^  fielded p\d+ \S+ (\S+) x(\d+) walked (\d+)", re.M)
 RETAIL_LUA = "  Lua error (retail, documented): "
 OTHER_LUA = "  Lua error: "
 
@@ -67,7 +73,20 @@ def parse_run(text, ticks, rc=0):
     if not r["ended"]:
         r["frame"] = None
     r["lua_other"] = max(0, r["lua_total"] - r["lua_retail"])
+    r["fielded"] = {}  # TYPE (upper case) -> [units fielded, distance walked], both slots summed (--report-fielded)
+    for m in FIELDED_RE.finditer(text):
+        acc = r["fielded"].setdefault(m.group(1).upper(), [0, 0])
+        acc[0] += int(m.group(2))
+        acc[1] += int(m.group(3))
     return r
+
+
+def walked(r, types):
+    """Units fielded and distance walked of `types` in one run (parse_run result)."""
+    n = d = 0
+    for t in types:
+        n, d = n + r["fielded"].get(t.upper(), [0, 0])[0], d + r["fielded"].get(t.upper(), [0, 0])[1]
+    return n, d
 
 
 def fisher_two_sided(a, n1, b, n2):
@@ -95,11 +114,18 @@ def known_count(scen, r):
     return sum(1 for t in r["lua_texts"] if any(k in t for k in texts))
 
 
-def seed_text(seed, r):
+def seed_text(seed, r, fielded=()):
     if not r["ran"]:
         return "seed %d: CRASHED or no summary (exit %s)" % (seed, r["rc"])
     t = "seed %d: %s" % (seed, ("ended %d, winner %s, victory %s" % (r["frame"], r["winner"], r["victory"]))
                          if r["ended"] else "no end")
+    if r.get("fielded") and fielded:
+        parts = []
+        for f in fielded:
+            n, d = walked(r, f["types"])
+            if n:
+                parts.append("%s x%d walked %d" % (f["label"], n, d))
+        t += ", fielded: " + ("; ".join(parts) if parts else "none")
     if r["lua_total"]:
         t += ", Lua errors %d (%d retail)" % (r["lua_total"], r["lua_retail"])
     return t
@@ -138,6 +164,11 @@ def judge(sid, scen, runs):
         hit = [s for s, r in runs if any(k["text"] in t for t in r["lua_texts"])]
         lines.append("  known %s, port bug of %s: seeds %s" % (k["text"][:70], k["group"], hit or "none"))
     verdict(not other, "seeds failing another check of the run: %s" % (other or "none"))
+    for f in scen.get("fielded", []):
+        need_walk = int(f.get("min_walked", 1))
+        hit = [s for s, r in runs if r["ran"] and walked(r, f["types"])[1] >= need_walk]
+        verdict(len(hit) >= int(f["min_seeds"]), "fielded %s (%s, walked >= %d): seeds %s (need >= %d)" % (
+            f["label"], "/".join(f["types"]), need_walk, hit or "none", int(f["min_seeds"])))
     if "retail" in scen:
         retail = [f for _, f in scen["retail"]]
         r_end = [f for f in retail if f is not None]
@@ -151,7 +182,7 @@ def judge(sid, scen, runs):
                 med, min(r_end), FRAME_MARGIN, floor))
         else:
             lines.append("  n/a   retail frames (no ended game on one side)")
-    lines += ["    " + seed_text(s, r) for s, r in runs]
+    lines += ["    " + seed_text(s, r, scen.get("fielded", [])) for s, r in runs]
     lines.append("outcome %s: %s" % (sid, "PASS" if ok else "FAIL"))
     return ok, lines
 
@@ -174,6 +205,11 @@ def check_scenarios(scens):
         for k in s.get("known_lua", []):
             if set(k) != {"text", "group", "why"}:
                 bad.append("%s: known_lua entry needs text, group and why" % sid)
+        for f in s.get("fielded", []):
+            if set(f) - FIELDED_KEYS or not {"label", "types", "min_seeds", "why"} <= set(f):
+                bad.append("%s: fielded entry needs label, types, min_seeds and why (min_walked optional)" % sid)
+        if s.get("fielded") and "--report-fielded" not in s.get("args", []):
+            bad.append("%s: fielded needs --report-fielded in args" % sid)
     return bad
 
 
@@ -247,6 +283,23 @@ def selftest(check):
     sk = {"args": ["--ticks", "36000"], "seeds": 10, "why": "t", "retail": rt}
     check(not judge("x", sk, runs([18000] * 10))[0], "outcome: retail frames - every port end too early fails")
     check(judge("x", sk, runs([24000] * 6 + [None] * 4))[0], "outcome: retail rate and frames pass")
+    # tst2 t04: --report-fielded lines and the fielded judgement.
+    fl = "  fielded p0 Empire AT_ST_WALKER x2 walked 950\n  fielded p1 Underworld Destroyer_Droid x3 walked 40\n"
+    r = parse_run(head % 0 + fl, 36000)
+    check(r["fielded"] == {"AT_ST_WALKER": [2, 950], "DESTROYER_DROID": [3, 40]}, "outcome: fielded lines")
+    check(walked(r, ["at_st_walker", "AT_AA_WALKER"]) == (2, 950), "outcome: fielded types any case, summed")
+    fs = dict(sc, args=["--ticks", "36000", "--report-fielded"],
+              fielded=[{"label": "walkers", "types": ["AT_ST_WALKER"], "min_seeds": 1, "min_walked": 100, "why": "w"},
+                       {"label": "droids", "types": ["DESTROYER_DROID"], "min_seeds": 1, "min_walked": 100, "why": "w"}])
+    fr = runs([12000, 13000, None, None])
+    fr[0] = (1, parse_run(head % 0 + land.replace("18429", "12000") + fl, 36000))
+    check(not judge("x", fs, fr)[0], "outcome: droids walking 40 < 100 fail the fielded check")
+    fr[1] = (2, parse_run(head % 0 + land.replace("18429", "13000") + fl.replace("walked 40", "walked 400"), 36000))
+    ok_f, fl_lines = judge("x", fs, fr)
+    check(ok_f and any("fielded: walkers x2 walked 950; droids x3 walked 400" in ln for ln in fl_lines),
+          "outcome: one seed each passes, seed lines list the fielded types")
+    check(check_scenarios({"a": dict(fs, seeds=4)}) == [], "outcome: a good fielded scenario")
+    check(len(check_scenarios({"a": dict(fs, args=["--ticks", "1"])})) == 1, "outcome: fielded without --report-fielded")
     check(check_scenarios({"a": {"args": ["--ticks", "1"], "seeds": 1, "why": "w"}}) == [], "outcome: a good scenario")
     check(len(check_scenarios({"a": {"args": ["--seed", "1"], "seeds": 1, "bogus": 1}})) == 4,
           "outcome: unknown key, no why, --seed, no --ticks")

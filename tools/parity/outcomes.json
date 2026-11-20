@@ -29,7 +29,7 @@
  },
  "foc_land_empire_underworld": {
   "args": ["--skirmish-ai", "foc-land", "--ai", "Empire,Underworld", "--ticks", "70000", "--workers", "0", "--quiet",
-           "--fail-on-lua-errors"],
+           "--fail-on-lua-errors", "--report-fielded"],
   "seeds": 10,
   "known_lua": [
    {"text": "Underworld_Mobile_Defense_Unit is not a valid build location", "group": "mdu1",

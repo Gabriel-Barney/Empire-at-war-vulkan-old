@@ -329,3 +329,57 @@ Notes on the table:
 
 Port check: evaluate the same five equations on the port's seed-0 HotM state at the same frames. Agreement here
 removes the infrastructure ranking as a cause of the gai3 t03 spending difference.
+
+**Port check (tst2 t07, 2026-11-20).** Command, one run per frame F (the run ends at galactic frame F and the equations are
+evaluated after its last tick, so the AI leaf-cache entries they fill change no simulated state and no CRC):
+
+```
+alamo_headless --economy --galactic-ai --campaign Sandbox_Heart_Of_The_Maw_Empire --human Empire --seed 0 --story
+  --workers 4 --quiet --ticks F --eval-player Underworld
+  --eval-equations "Should_Build_Underworld_Barracks,Should_Underworld_Save_For_Desirable_Structures,Should_Save_For_Corruption,Needs_Groundbase_Upgrade,Should_Underworld_Build_Starbase"
+```
+
+`--eval-equations` also takes `NAME=EXPRESSION` entries (separated by `;`), which is how the token inputs below were read.
+Context as Lua `EvaluatePerception`: Self = the Underworld (player 6), Target = Location = the planet, Human = the Empire.
+Port values (dev `1d7a7d74` + tst2), at frames 1, 30, 690, 720, 780, 960, 990, 1770, 1800, 2970, 3000, 4200, 5700, 10800, 11700
+and 12000:
+
+| Frames | Felucia | Nal Hutta | Shola | The_Maw |
+|---|---|---|---|---|
+| 1, 30 | SBB 34.92, NGU 0.88, SBS 17 | SSD 1, NGU 0.914, SBS 34 | SBB 24.89, NGU 0.766, SBS 17 | SBB 18, NGU 0, SBS 27 |
+| 690–5700 | SSD 1, NGU 0.851, SBS 17 | SSD 1, NGU 0.914, SBS 34 | SSD 1, NGU 0.737, SBS 34 | SBB 18, SBS 27 |
+| 10800 | as above | NGU 0.886 | SBB 18, SSD 0, NGU 0, SBS 0 | as above |
+| 11700, 12000 | as above | NGU 0 | as 10800 | as above |
+
+SSC is 0 at every sampled frame on every planet.
+
+**Agreement.**
+- Frame 0: all 20 values equal retail's.
+- 690 onward, outside retail's SSC = 1 windows: SBB, SSD and SBS are equal on every planet up to 3000. Nal Hutta and The_Maw
+  stay equal to 5700. The one-sample SSD 2 at retail 690 (Felucia, Shola) is the frame the palaces finished. The port's palaces
+  finish between 660 and 690, so a sample at 690 already shows SSD 1, as retail's 720 does.
+- So, given the same planet state, the five equations and their closures (Should_Build_Underworld_Vehicle_Factory,
+  Should_Build_Underworld_Palace, Needs_Starbase_Upgrade) give retail's values. **The equations do not cause the gai3 t03
+  spending gap.**
+
+**Differences: all come from the AI's trajectory, not from an equation.**
+1. **SSC is never 1.** Its inputs in the port: palaces complete = 3 (> 1) from 690; Game.PlanetsCorrupted 0.33, 0.42 from
+   780, 0.5 by 10800, 0.58 by 11700 (always < 0.67). `Variable_Self.HasUnit {Underworld_Saboteur}` is 1 at every frame from 100
+   to 2970. HasUnit counts queued builds too (AI_GALACTIC_TOKENS §3). The port does consume the saboteur: the complete-only
+   count is 0 at 620 (after the Naboo corruption at 601) and at 1800. But a replacement is already queued (Saboteur_Team
+   ordered at 140, 1542, 1635, 1790 by the DeploySaboteur plans). So the port's Underworld always owns or queues a
+   saboteur, and retail had none in 780–960, 1800–2970 and from 11700. In those windows SSC = 1 zeroes SBB, SSD and SBS (and
+   the vehicle-factory and palace desires), so retail holds infrastructure money back for about 1700 of the first 3000 frames.
+   The port never does.
+2. **Shola after 4200.** Retail upgraded Shola's starbase at 4183 (SBS 34 → 17 at 5700, 0 at 10800). The port has not
+   upgraded it by 5700 (SBS 34). By 10800, Shola has lost its starbase and ground base: StarbaseLevel 0 and
+   GroundbaseLevel 0, so SBS 0 because `StarbaseLevel > 0` fails, SBB 18 and SSD 0. Nal Hutta's NGU change at 10800 is
+   more structures built there.
+3. **NGU after the palaces: open.** The port's Needs_Groundbase_Upgrade drops by 0.2 / 7 on Felucia and Shola when their
+   palace finishes (GroundbaseLevel 0.2 → 0.4: one more live ground structure). Retail's note above says NGU stayed constant.
+   But retail's own SSD rising at 690 needs `GroundBaseLevelUnnormalized > 1`, and both tokens read D +0x130 (lifetime 0). So
+   the "constant" note and the SSD row cannot both hold unless MaxGroundbaseLevel moved too. `uw_infra.tsv` is not on disk to
+   settle it. The effect on SBB and the factory / palace desires is about 0.5 (18 × 0.029): no ranking changes.
+
+Filed: item 1 is an S2 task of gai3, the owner of t03: the Underworld rebuys a saboteur at once, so it never saves for
+corruption. Item 3 is an S3 backlog entry: re-read the NGU row in the next a2f_budget `--uw-infra` run.

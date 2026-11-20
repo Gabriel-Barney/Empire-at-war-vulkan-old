@@ -293,6 +293,14 @@ if(_alamo_sim)
                      -DQ2TRACE=${CMAKE_SOURCE_DIR}/tools/probe_mod/q2_traces/q2trace.py
                      -P ${CMAKE_CURRENT_SOURCE_DIR}/headless/check_port_trace.cmake)
     set_tests_properties(alamo_headless_galactic_trace PROPERTIES TIMEOUT 600)
+    # tst2 t02 (b0143): --story-esc-at, the UM01 Esc run of retail (20261108-234224) replayed: the Kessel mission's
+    # Story_Handle_Esc runs IntroCineCleanup within one story service of the Esc (headless/check_story_esc.cmake). 200 ticks.
+    add_test(NAME alamo_headless_story_esc
+             COMMAND ${CMAKE_COMMAND} -DEXE=$<TARGET_FILE:alamo_headless>
+                     -DTRACE=${CMAKE_CURRENT_BINARY_DIR}/tst2_story_esc/kessel_esc.q2t -DPY=${ALAMO_PYTHON}
+                     -DREADER=${CMAKE_SOURCE_DIR}/tools/parity/story_battle.py
+                     -P ${CMAKE_CURRENT_SOURCE_DIR}/headless/check_story_esc.cmake)
+    set_tests_properties(alamo_headless_story_esc PROPERTIES TIMEOUT 600)
   endif()
   # --- end A2 ---
   # --- A1 stage 2 (owner: A1 agent): --skirmish-ai synthetic|foc (headless/skirmish_run.cpp). Goldens: regenerate

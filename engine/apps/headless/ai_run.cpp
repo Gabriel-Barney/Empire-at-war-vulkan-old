@@ -219,6 +219,10 @@ int ai_campaign_run(const MapRunOptions& opt, const AiRunOptions& aopt) {
             return 2;
         }
     }
+    if (aopt.story_esc_at >= 0 && (!aopt.story || human < 0)) {  // tst2 t02: the Esc is the human's key in a story run
+        std::fprintf(stderr, "galactic-ai: --story-esc-at needs --story and --human\n");
+        return 2;
+    }
     std::printf("galactic-ai: campaign %s, %zu planets, %zu AI players, human %d (%zu scripted commands), %zu goal types, %zu plan files, "
                 "%zu equations\n",
                 name.c_str(), setup.map.planets.size(), gcfg.players.size(), human, human_cmds.size(), defs.goals.size(), plan_files.size(),
@@ -481,6 +485,27 @@ int ai_campaign_run(const MapRunOptions& opt, const AiRunOptions& aopt) {
                     human_log.push_back(std::to_string(frame) + " human p" + std::to_string(p) + " " + what + " x" + std::to_string(evs.size()));
                 }
             });
+        // tst2 t02 (--story-esc-at, ai_run.hpp): the human's story Esc. The command is applied at a command phase like
+        // alamo_game's (GameSession::port_event): StorySession::handle_esc for the issuing human. The hook is installed only
+        // for this option, so runs without it keep every other port event path unchanged.
+        struct EscState {
+            bool pressed = false;           // the key was pressed (at most once)
+            bool sent = false;              // the story took it: the command was submitted
+            uint32_t pressed_at = 0;        // battle frame of the press
+            uint64_t applied_host = 0;      // host frame of the tick whose command phase applied it (0 = not applied)
+            uint32_t calls = 0;             // Story_Handle_Esc calls made (StorySession::handle_esc)
+        } esc;
+#ifdef ALAMO_SIM_HAVE_STORY
+        if (aopt.story_esc_at >= 0)
+            host.set_port_event_hook([&esc, human](sim::SimHost& h, uint8_t p, const commands::EventData& ev) {
+                if (ev.type() != commands::EventType::PortExtension || ev.u("subtype") != sim::kStoryEscSubtype)
+                    return commands::RejectReason::Unhandled;
+                if (static_cast<int32_t>(p) != human) return commands::RejectReason::NotAllowed;
+                if (sim::StorySession* st = h.story()) esc.calls += st->handle_esc();
+                esc.applied_host = h.frame();
+                return commands::RejectReason::None;
+            });
+#endif
         // Players without an AI still get a perception refresh through the first AI player's call.
         const auto t0 = std::chrono::steady_clock::now();
         uint64_t n = 0;
@@ -507,6 +532,17 @@ int ai_campaign_run(const MapRunOptions& opt, const AiRunOptions& aopt) {
             ++n;
 #if defined(ALAMO_SIM_HAVE_STORY) && defined(ALAMO_HEADLESS_HAVE_SPEECH)
             if (speech && host.story()) speech->step(*host.story(), human);
+#endif
+#ifdef ALAMO_SIM_HAVE_STORY
+            // tst2 t02: the Esc key between ticks, once the battle on top has reached battle frame --story-esc-at.
+            if (aopt.story_esc_at >= 0 && !esc.pressed && host.story() && battles.battle() && host.tactical() &&
+                host.modes().top() == host.tactical() &&
+                static_cast<int64_t>(battles.battle()->stats().frames) >= aopt.story_esc_at) {
+                esc.pressed = true;
+                esc.pressed_at = battles.battle()->stats().frames;
+                if (host.story()->esc_goes_to_story())
+                    esc.sent = host.submit(static_cast<uint8_t>(human), commands::ev::port_extension(sim::kStoryEscSubtype, {})).ok();
+            }
 #endif
             if (trace.is_open()) {
                 const sim::GameMode* top = host.modes().top();
@@ -555,6 +591,63 @@ int ai_campaign_run(const MapRunOptions& opt, const AiRunOptions& aopt) {
             }
         }
         const double ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count();
+        // tst2 t07 (--eval-equations, ai_run.hpp): the named perception equations for the --eval-player faction on each planet
+        // it owns, evaluated once after the last tick (as the Lua EvaluatePerception: Self = that player, Target = Location =
+        // the planet, Human = the --human player). The leaf cache this may fill is never read again: the run is over.
+        if (print && !aopt.eval_equations.empty()) {
+            int32_t self = -1;
+            for (size_t p = 0; p < setup.players.size() && self < 0; ++p) {
+                const uint32_t f = setup.players[p].faction;
+                if (f < rules.factions.size() && ai::ai_iequal(rules.factions[f].name, aopt.eval_player)) self = static_cast<int32_t>(p);
+            }
+            // Entries: equation names, or NAME=EXPRESSION (an inline equation, e.g. one token of a shipped equation). Separated by
+            // ';' when the list has one, else by ','. Inline equations go into a private copy of the set (the AI's stays as it is).
+            const char sep = aopt.eval_equations.find(';') != std::string::npos ? ';' : ',';
+            std::vector<std::string> names;
+            std::optional<ai::EquationSet> own;
+            for (size_t a = 0; a <= aopt.eval_equations.size();) {
+                const size_t b = std::min(aopt.eval_equations.find(sep, a), aopt.eval_equations.size());
+                const std::string item(ai::ai_trim(std::string_view(aopt.eval_equations).substr(a, b - a)));
+                a = b + 1;
+                if (item.empty()) continue;
+                const size_t eq = item.find('=');
+                if (eq == std::string::npos || item.find_first_of("=<>!", eq + 1) == eq + 1 || eq == 0) {
+                    names.push_back(item);
+                    continue;
+                }
+                if (!own) own.emplace(eqs);
+                const std::string inline_name(ai::ai_trim(std::string_view(item).substr(0, eq)));
+                ai::LoadReport rep;
+                if (own->add(inline_name, ai::ai_trim(std::string_view(item).substr(eq + 1)), &rep) == ai::kUnresolved)
+                    for (const std::string& m : rep.messages) std::printf("galactic-ai: eval: %s: %s\n", inline_name.c_str(), m.c_str());
+                names.push_back(inline_name);
+            }
+            if (own) own->link();
+            const ai::EquationSet& set = own ? *own : eqs;
+            if (self < 0) std::printf("galactic-ai: eval: no player of faction %s\n", aopt.eval_player.c_str());
+            for (size_t pl = 0; self >= 0 && pl < gs->planets().size(); ++pl) {
+                if (gs->planets()[pl].owner != self) continue;
+                std::string line = "galactic-ai: eval frame " + std::to_string(gs->frame()) + " p" + std::to_string(self) + " " +
+                                   gs->map().planets.name[pl] + ":";
+                for (const std::string& eq_name : names) {
+                    const uint32_t e = set.find(eq_name);
+                    if (e == ai::kUnresolved) {
+                        line += " " + eq_name + "=UNKNOWN";
+                        continue;
+                    }
+                    ai::EvalContext c;
+                    c.self = self;
+                    c.target = c.location = static_cast<int32_t>(pl);
+                    c.human = human;
+                    c.game_seed = static_cast<uint32_t>(cfg.seed);
+                    const ai::EvalResult r = ai::evaluate(set, e, c, world.resolver());
+                    char v[64];
+                    std::snprintf(v, sizeof v, "%.6g", r.value);
+                    line += " " + eq_name + "=" + (r.ok ? std::string(v) : "FAIL(" + ai::eval_failure_site(set, r) + ")");
+                }
+                std::printf("%s\n", line.c_str());
+            }
+        }
         if (trace.is_open()) {
             std::string terr;
             if (!trace.finish("ticks_reached", terr)) {
@@ -606,6 +699,17 @@ int ai_campaign_run(const MapRunOptions& opt, const AiRunOptions& aopt) {
         if (print && aopt.story && host.story()) {  // q6: the plot scripts' Lua notes (errors, load failures)
             const sim::StorySession& st = *host.story();
             std::printf("galactic-ai: story: %zu events fired, %zu Lua notes\n", st.log().size(), st.lua_messages().size());
+            if (aopt.story_esc_at >= 0) {  // tst2 t02: read by the alamo_headless_story_esc ctest
+                if (!esc.pressed)
+                    std::printf("galactic-ai: story esc: not pressed (no battle reached frame %" PRId64 ")\n", aopt.story_esc_at);
+                else if (!esc.sent)
+                    std::printf("galactic-ai: story esc: pressed at battle frame %u, not taken (no story cinematic camera)\n",
+                                esc.pressed_at);
+                else
+                    std::printf("galactic-ai: story esc: pressed at battle frame %u, applied at host frame %" PRIu64
+                                ", %u Story_Handle_Esc calls\n",
+                                esc.pressed_at, esc.applied_host, esc.calls);
+            }
             if (aopt.verbose)
                 for (const auto& m : st.lua_messages()) std::printf("  story lua: %s\n", m.c_str());
             if (aopt.verbose) std::fputs(st.log_text("galactic-ai: story event log").c_str(), stdout);  // storyb t17

@@ -2008,8 +2008,14 @@ bool StorySession::battle_attached() const { return tactical_ != nullptr; }
 
 // bkc1 t01 (BKC1_RE_ANSWERS Q1: controller key-down 0x2cbd00 / the Esc tail of 0x61fe0 -> 0x328440).
 bool StorySession::esc_goes_to_story() const {
-    const lua::PresentationState& p = lua_->presentation.state();
-    return p.camera == lua::CameraMode::Cinematic && p.movie.empty();
+    const lua::PresentationLog& log = lua_->presentation;
+    const lua::PresentationState& p = log.state();
+    // tst2 t02: a Bink movie plays until Stop_Bink_Movie or until its block finishes (PresentationConfig::movie_frames);
+    // Play_Bink_Movie's name stays in the state after a natural end, so the block decides. Blocks count in the frames of the
+    // story VMs, the host frame of the last service (frame_). Without this the Kessel UM01 intro (BlockOnCommand on two
+    // Binks, then Start_Cinematic_Camera) never handed an Esc to Story_Handle_Esc.
+    const bool movie_playing = !p.movie.empty() && !(p.movie_block != 0 && log.block_finished(p.movie_block, static_cast<uint32_t>(frame_)));
+    return p.camera == lua::CameraMode::Cinematic && !movie_playing;
 }
 
 uint32_t StorySession::handle_esc() {

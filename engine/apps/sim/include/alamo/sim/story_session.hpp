@@ -204,6 +204,11 @@ struct StoryStart {
 // Host events (not from the galactic stream).
 enum class StoryHostEvent : uint8_t { TacticalStarted = 0, TacticalEnded = 1 };
 
+// bkc1 t01: the PortExtension subtype of the local player's story Esc (no payload; StorySession::handle_esc). Defined
+// here so every host applies the same command: alamo_game (game story_ui.hpp story_esc_event) and alamo_headless's
+// --story-esc-at (tst2 t02).
+inline constexpr uint16_t kStoryEscSubtype = 0x5345;  // "SE"
+
 // UI / player-action notifications (StorySession::notify_ui). Story type and evaluator (STORY.md 0.1, 5):
 //   SelectUnit       STORY_SELECT_UNIT (SingleObjectName: name = the object's type, filter on its owner)
 //   SelectPlanet     STORY_SELECT_PLANET   } SelectPlanet class: Param1 planet names, compared with the
