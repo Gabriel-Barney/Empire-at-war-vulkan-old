@@ -140,9 +140,65 @@ Clears the global pad vector 0x140b3a6a8 and fills it through 0x4d3830 from the 
 ### 1.11 What Produce_Force does with tactical build tasks [H branch, M state names]
 
 `TaskForce.Produce_Force` (0x5fe240) creates one AIBuildTask (0x524ee0) per entry of the TF's to-produce list. In the BUILD_TASK_LIST state (0x648980), outside galactic mode:
-- **Skirmish and AllowFreeStoreUnits = false:** the task takes the next global tactical queue id (0x140b3995c); for each builder in free store +0x120, in order, 0x496a20(build manager, T, builder, id) tries to start production. On the first success it registers the unit with the PP (0x6c1e80), listens to player signals 0x22 and 3, increments the counter and waits. No builder accepts → FAILED (Production_Failed).
+- **Skirmish and AllowFreeStoreUnits = false:** the task takes the next global tactical queue id (0x140b3995c); for each builder in free store +0x120, in order, 0x496a20(build manager, T, builder, id) tries to start production. On the first success it registers the unit with the PP (0x6c1e80), listens to player signals 0x22 and 3, increments the global queue id and waits (it stays in BUILD_TASK_LIST; §1.11.1). No builder accepts → FAILED (Production_Failed).
 - **Otherwise** (campaign battle, or AllowFreeStoreUnits = true): if AllowFreeStoreUnits and the free store can supply the unit (0x4d2bd0) → wait for the free-store allocation; else **FAILED**.
 - So **campaign battles never buy units through the AI**: units come from the free store, the pool (Reinforce) or MagicPlan.
+
+#### 1.11.1 Tactical build signals 0x22 and 3 (aitac t05 RE, 2026-11-19) [H unless tagged]
+
+Functions: BUILD_TASK_LIST enter 0x648980, the task's signal handler 0x649be0 (AIBuildTaskClass SignalListener
+vtable 0x8b3bd0, listener at task +0x40), task FSM 0x64aec0, task end 0x64ad00, `Production_Failed` dispatch 0x5fdd90,
+tactical build queue service 0x498170, queue cancel 0x498820, ProduceForceBlockStatus IsFinished 0x6c6720.
+
+**State while building.** After a builder accepts (0x496a20 returns true) the task registers the type with the PP
+(0x6c1e80: lowers the plan's escrow by the type's cost, BKG1_RE_ANSWERS §3), subscribes its listener to **signals 0x22
+and 3 on the AI player** (the player object that owns the build manager, 0x5f7020), stores the queue id at task +0x78
+and increments the global id. It sets no new state: the task **stays in BUILD_TASK_LIST (0x12)** with no timer until a
+signal (or a task-end path of A2M_R2_RE_B §1.4) arrives. Signals 2 / 4 (galactic production begin / end) are not
+subscribed in tactical.
+
+**Who raises them.** Both come from the player's tactical build manager, with the queue entry (ObjectUnderConstruction:
++0x08 type, +0x20 player id, +0x24 queue id, +0x2c builder id) as data:
+- **0x22 = production finished.** The queue service 0x498170, when the head entry completes (0x498f70), raises 0x22 on
+  the player, **then** (same call) credits the type as built (0x2821b0), puts a non-DUMMY_UPGRADE type into the player's
+  reinforcement pool (0x27fad0, which also admits it to the AI free store) or spawns a DUMMY_UPGRADE at the builder, and
+  pops the entry (SKIRMISH_SETUP §3). So the task sees 0x22 **before** the unit is in the pool.
+- **3 = production cancelled.** 0x498820 raises 3 on the player for any removed entry:
+  - the queue service's per-frame re-validation (0x497140, entries last to first) fails: the builder is gone (builder
+    id resolves to nothing) or no longer allied to the player, the builder can no longer build T for its faction, a
+    `Build_Limit_*` is reached (in-progress counts included), price or build time invalid, prerequisites lost
+    (§1.8 item 4 lists the tests) → auto-cancel, refunded for a non-human player;
+  - a `ProductionEventClass` cancel (0x524130) [M: whether any AI code issues one for its own tactical builds].
+
+**What the task does** (handler 0x649be0; it ignores everything once the task has ended, task +0xa8):
+- **0x22**: the data must be a queue entry; when entry +0x24 equals the task's queue id (+0x78) the task **ends**
+  (0x64ad00). The type and player are not compared (queue ids are unique). End = +0xa8 := 1, state 0x15
+  (BUILD_STATE_ALL_FINISHED), every subscription of the task dropped (0x220ef0), its bid record freed, and a claimed unit
+  (+0x68) re-admitted to the free store unless +0xd8 (none in this path).
+- **3**: when the entry's type id (type +0xec), player id (+0x20, against the plan player's +0x4c) **and** queue id all
+  match: unsubscribe 2, 4 and 3, set the change flag (+0x28) and state **7 (BUILD_STATE_PRODUCTION_FAILED)**. On the
+  next FSM step, entering state 7: `Production_Failed`(TF, T) (0x5fdd90), the free store drops the task's claims
+  (0x4d4ee0), then the task ends (0x64ad00).
+- No retry with another builder, no counter other than the global queue id: one task, one production, one outcome.
+
+**What the TF / plan sees.**
+- **Finished (0x22): nothing from the task.** No Lua event; the TF's wanted-type entry (TF +0x60) stays. The unit is in
+  the player's reinforcement pool and reaches the task force only through a `Reinforce` drop (AI_TACTICAL §7.4) or the
+  free store.
+- **Cancelled (3):** 0x5fdd90 walks TF +0x60 by index and erases each entry of type T (with its index in TF +0x90);
+  after an erase the index still advances, so the entry that moved into the erased slot is skipped (of two adjacent T
+  entries only the first goes, of three the first and third) [H loop]. Then it fires TF event
+  **4 `Production_Failed`** with T's type wrapper (`<TF>_Production_Failed(tf, type)` in the plan script), and, when TF
+  +0x60 is now empty, TF event **7 `No_Units_Remaining`** (no argument) (AI_GALACTIC_2 §5.2 event table).
+- The `Produce_Force` block (`ProduceForceBlockStatus`, IsFinished 0x6c6720) drops every task whose +0xa8 is set and
+  reports finished when none is left; its Result is the base 0x245ca0 (**true**) either way. So a `BlockOnCommand` on
+  it ends when every build either finished or was cancelled, and cannot tell which.
+
+**Port** (`tactical_ai.cpp`, StatusKind::ProduceForce): on completion of a task's queue id (the existing
+`production_completed`, signal 0x22) end the task without an event; on a cancel of that queue id (builder destroyed,
+limit or prerequisite lost, re-validation failure) drop the TF's wanted entries of that type (rule above), fire
+`Production_Failed(tf, type)`, fire
+`No_Units_Remaining` when the list empties, and end the task. The block finishes when all its tasks have ended.
 
 ---
 

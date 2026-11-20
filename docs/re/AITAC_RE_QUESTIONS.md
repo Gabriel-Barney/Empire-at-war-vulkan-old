@@ -14,6 +14,8 @@ on and read / inferred kept apart. Lane `sim-queue` implements from those specs.
   behaviour fields, the current weapon index); whether it draws a random number; what it returns (bool / nil) for a dead
   target, a unit without SWAP_WEAPONS, a team container.
 - Spec: `docs/re/AI_TACTICAL.md` (new subsection under §8, and close §12 item 6).
+- **Answered 2026-11-19:** `AI_TACTICAL.md` §8.1 (0x580c50; §12 item 6 closed for this method). Scores the current
+  `Projectile_Types` entry against the others on damage × `Damage_To_Armor_Mod` for the target's current layer; no RNG.
 
 ## Q2 (aitac t07) Explore_Area's point pick: 0x6558b0 / 0x655be0
 
@@ -27,6 +29,8 @@ on and read / inferred kept apart. Lane `sim-queue` implements from those specs.
   made, when 1e18 is returned; and the status's service: does it re-pick points (when, how often), IsFinished, Result,
   any timeout. Also what the object-target variant adds over the position one.
 - Spec: `docs/re/L1_S4_REMAINING.md` §2.3 (replace the [M] guesses).
+- **Answered 2026-11-19:** `L1_S4_REMAINING.md` §2.3.1. Oldest-stamped fogged threat cell of the target's rectangle or
+  hint zone (0x6558b0 / 0x655be0); re-pick on each arrival (signal 10); finished when no cell qualifies; no RNG.
 
 ## Q4 (aitac t05) Tactical build signals 0x22 and 3 on the AIBuildTask
 
@@ -41,6 +45,9 @@ on and read / inferred kept apart. Lane `sim-queue` implements from those specs.
   (finish, fail, decrement a counter, retry with the next builder), and what the TF / plan sees (Lua events such as
   Production_Failed / Unit_Produced?).
 - Spec: `docs/re/AI_GALACTIC_3.md` §1.11.
+- **Answered 2026-11-19:** `AI_GALACTIC_3.md` §1.11.1 (handler 0x649be0). 0x22 = queue entry finished → task ends, no
+  event; 3 = entry cancelled → PRODUCTION_FAILED → `Production_Failed(tf, type)` (+ `No_Units_Remaining` if the TF's
+  wanted list empties).
 
 ## Q5 (aitac t05) Space reinforcement arrival time (signal 0x19)
 
@@ -52,6 +59,9 @@ on and read / inferred kept apart. Lane `sim-queue` implements from those specs.
   unit is targetable / counted before it arrives), and which code raises signal 0x19 at the end (the frame relative to the
   spawn). Is this the same arrival the start fleet uses (cu8l t03, `docs/re/CU8K_T03_T08_T09_RE.md` §1.9 / §4)?
 - Spec: `docs/re/AI_TACTICAL.md` §7.4.
+- **Answered 2026-11-19:** `AI_TACTICAL.md` §7.4.1. vf82(1): state 4 from timer 0, no draw, INVULNERABLE until timer
+  35; signal 0x19 on the 150th update after the spawn (squadron: after the last fighter). Same state machine as the
+  start fleet (vf82(0) → state 5, one draw), different entry.
 
 ## Q6 (aitac t05) The space movement block's signal handler
 
@@ -64,3 +74,5 @@ on and read / inferred kept apart. Lane `sim-queue` implements from those specs.
 - Asked: the space movement block status's signal handler - which signals it subscribes on the object and on the units
   (0xb, 0x10, 0x1a, 10), and what each does (finish, remove the unit, the hostile tests), compared with the land table.
 - Spec: `docs/re/A1_READINGS.md` §33.2 (a space row or subsection).
+- **Answered 2026-11-19:** `A1_READINGS.md` §33.2.3 (handler 0x739890). Same unit rows as land; object listened on
+  0x1a / 0x10 only; the object's death also fires `Current_Target_Destroyed` on every TF of the plan.

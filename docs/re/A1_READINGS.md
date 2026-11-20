@@ -1835,6 +1835,59 @@ its break function and `BreakBlock`.
   pending once when it stops moving and is never re-added (AI save version 12). Space still returns true on the
   target's death [port, unchanged].
 
+#### 33.2.3 SpaceMovementBlockStatus: subscriptions and signal handler (aitac t05 RE, 2026-11-19) [H unless tagged]
+
+Functions: primary vtable 0x8cee80 (IsFinished vf19 0x7394f0, Result vf20 0x6af930), SignalListener vtable 0x8cef30 at
+status +0x30 with the handler **0x739890**, object init 0x7390e0 (callers 0x6e4fc0 `Attack_Move`, 0x6e54d0, 0x6e72c0),
+issue / re-target 0x738b90, unit collector 0x739200. Status offsets below are from the status (handler offset + 0x30).
+
+**Fields.** +0x40 finished byte, +0x41 attack flag (issueAttack), +0x42 repeat flag, +0x50 target object, +0x58 the
+chosen target hard point, +0x60 threat, +0x64 move flags (bit 0x02 = guard, as on land), +0x68 avoidance, +0x70
+pending (moving) list, +0x78 all-units list (TACTICAL_COMBAT §2.8 A).
+
+**Subscriptions** [H]:
+- On the **object** (0x7390e0): **0x1a and 0x10 only**. Land also listens to the object's 0xb (§33.2 table); space does
+  not.
+- On each **unit** (0x739200): signal 0xb is first raised on the unit, then the status subscribes to **9, 10, 0xb, 0x10
+  and 0x1a** (the 0x1a argument read in the bytes at 0x739425; TACTICAL_COMBAT §2.8 A step 2 lists only four). Units
+  whose representative type has +0x1e set (`Is_Special_Weapon_In_Space`, AI_TACTICAL §12 item 3), movement-locked units
+  (0x39ad40) and units the coordinator manager refuses (0x425e30) are not collected.
+
+**Handler 0x739890** (it holds a reference on the status for the call):
+
+| Signal | From | Effect |
+|---|---|---|
+| 9 | any | ignored |
+| 10 (movement finished) | a unit | Pending list missing → **finish**. Else remove the unit from pending and fire TF event 0x12 (`Unit_Move_Finished`) with the unit wrapped for the TF's player, for the unit itself (no team-container step as on land). If pending is now empty, run the pending-empty test |
+| 0xb, 0x10, 0x1a | the block's object | Unsubscribe 9 / 10 / 0xb / 0x10 / 0x1a on it. **0x1a**: hostile = 0x39a4e0(object, TF player); attack flag set and not hostile → finish; guard bit set and hostile → finish (each finish releases the object and clears the hard point +0x58). **0xb or 0x10**: finish, release the object, clear +0x58, and fire plan event **0xb = 11 `Current_Target_Destroyed`** (no argument) on **every task force of the owning TF's plan** (0x5f6c60(plan, 11, null); event table AI_GALACTIC_2 §5.2) |
+| 0xb, 0x10, 0x1a | a unit | Unsubscribe the five signals. Pending or all-units list missing → **finish**. Else remove the unit from both lists; if pending is now empty run the pending-empty test; then **finish when the all-units list is empty** |
+
+**Pending-empty test** (same as land without the zone-route step; space has no zone route):
+- no object → finish;
+- an object: guard bit clear → finish when the object is no longer hostile (0x39a4e0) or fails 0x5680b0 (§33.2.1);
+  every mode → finish when its type has neither `Last_State_Visible_Under_FOW` (+0x88) nor
+  `Initial_State_Visible_Under_FOW` (+0x89) and it is fogged for the TF's player (0x35f470, force 1);
+- otherwise the block stays open after arrival.
+
+**IsFinished 0x7394f0** (the space-only part): when a target hard point is held (+0x58) and its record says it is
+destroyed (hard-point record +0x20 → +0x4d == 1 and health +0x28 ≤ 0): with the repeat flag clear → finish; with it set
+→ re-target 0x738b90(object, collect = 0, same hard-point type): the next hard point of that type with the lowest health
+fraction, or, if none is left, release the object and finish. Then return finished **or** the task force has no members
+(0x5fca10 = 0).
+
+**Compared with land (0x73ce80, §33.2)** [H both]:
+- same: 9 ignored; the unit rows (remove from both lists, pending-empty test, finish on an empty all-units list); the
+  0x1a rules on the object; the pending-empty object tests; a missing pending list finishes the block;
+- space only: the object's 0x10 (and a 0xb, which reaches the handler only when the object is also one of the status's
+  units, since 0xb is not subscribed on the object) fires `Current_Target_Destroyed` on every TF of the plan and clears
+  the hard-point target; `Unit_Move_Finished` is per unit with no team-container dedupe; the hard-point re-target in
+  IsFinished; no zone-route leg;
+- land only: the object's 0xb subscription (a new order given to the object finishes a land block), the zone route.
+
+**Port** (`tactical_ai.cpp`, `step_object_block` / `movement_block_signal`): space blocks should take the same unit
+rows and pending-empty test as land; on the object's death fire `Current_Target_Destroyed` on all the plan's task forces
+and end; do not end a space block on the object receiving a new order (no 0xb subscription on the object).
+
 ### 33.3 Superseded statuses
 
 **Who raises signal 0xb.** The signal means "a new order replaces this unit's order" [M: name]. It is raised on a unit
