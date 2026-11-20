@@ -573,6 +573,40 @@ ModifierSet* CombatSystem::unit_modifiers(ObjectId id) {
 
 ModifierSet& CombatSystem::player_modifiers(int32_t p) { return player_mods_.at(static_cast<size_t>(p)); }
 
+const ModifierSet* CombatSystem::modifiers_of(ObjectId id) const {
+    const Unit* u = unit(id);
+    return u ? &u->mods : nullptr;
+}
+
+void CombatSystem::insert_player_modifier(int32_t player, ModList list, int32_t category, float value, uint32_t expiry,
+                                          uint32_t source_crc, int32_t source_id) {
+    player_modifiers(player).insert(list, category, value, expiry, source_crc, source_id);
+}
+
+bool CombatSystem::insert_unit_modifier(ObjectId id, ModList list, int32_t category, float value, uint32_t expiry,
+                                        uint32_t source_crc, int32_t source_id) {
+    Unit* u = unit(id);
+    if (u) u->mods.insert(list, category, value, expiry, source_crc, source_id);
+    return u != nullptr;
+}
+
+bool CombatSystem::set_unit_modifier(ObjectId id, ModList list, int32_t category, float value, uint32_t expiry,
+                                     uint32_t source_crc, int32_t source_id) {
+    Unit* u = unit(id);
+    if (u) u->mods.set_by_source(list, category, value, expiry, source_crc, source_id);
+    return u != nullptr;
+}
+
+uint32_t CombatSystem::remove_unit_modifiers(ObjectId id, int32_t source_id, uint32_t source_crc) {
+    Unit* u = unit(id);
+    return u ? u->mods.remove_source(source_id, source_crc) : 0;
+}
+
+uint32_t CombatSystem::remove_unit_modifiers_in_list(ObjectId id, ModList list, int32_t source_id, uint32_t source_crc) {
+    Unit* u = unit(id);
+    return u ? u->mods.remove_source_in_list(list, source_id, source_crc) : 0;
+}
+
 void CombatSystem::set_health(ObjectId id, float h) {
     if (Unit* u = unit(id)) u->health = h;
 }

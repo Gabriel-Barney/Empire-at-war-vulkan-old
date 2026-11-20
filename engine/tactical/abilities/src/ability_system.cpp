@@ -397,7 +397,7 @@ bool AbilitySystem::can(const Obj& o, uint32_t t, bool check_recharge, bool chec
 float AbilitySystem::own_recharge_bonus(const Obj& o) const {
     // list 9 of the object's own ModifierSet only (owner player's set not merged), with its clamps.
     if (!o.combat_unit) return 0.0f;
-    const combat::ModifierSet* set = combat_->unit_modifiers(o.id);
+    const combat::ModifierSet* set = combat_->modifiers_of(o.id);
     return set ? combat::reduce_list(nullptr, set, ModList::AbilityRecharge) : 0.0f;
 }
 
@@ -1056,8 +1056,7 @@ bool AbilitySystem::apply(Obj& o, SpecialState& sp, ObjectId target, int32_t hp,
             const combat::UnitDesc& td = combat_->data().units[combat_->desc_index(target)];
             const bool hero = to && desc(*to).hero;
             if ((td.category_mask & cfg_.corvette_category) && !hero) v = v * 2.0f;  // corvettes x2
-            if (combat::ModifierSet* m = combat_->unit_modifiers(target))
-                m->set_by_source(ModList::MaxSpeed, s.stacking_category, v, combat::kPermanent, crc, o.id);
+            combat_->set_unit_modifier(target, ModList::MaxSpeed, s.stacking_category, v, combat::kPermanent, crc, o.id);
             sp.applied = 1;
             sp.target = target;
             sp.hp = -1;
@@ -1122,8 +1121,8 @@ bool AbilitySystem::apply(Obj& o, SpecialState& sp, ObjectId target, int32_t hp,
             }
             if (!set_active(o, kConcentrateFire, true, frame, target)) return false;
             start_active(o, kConcentrateFire);
-            if (combat::ModifierSet* m = combat_->unit_modifiers(target))
-                m->set_by_source(ModList::MaxSpeed, s.stacking_category, -s.target_speed_decrease, combat::kPermanent, crc, o.id);
+            combat_->set_unit_modifier(target, ModList::MaxSpeed, s.stacking_category, -s.target_speed_decrease, combat::kPermanent,
+                                       crc, o.id);
             sp.applied = 1;
             sp.target = target;
             event(AbilityEventKind::EffectOn, kConcentrateFire, o.id, target, frame);
@@ -1215,7 +1214,7 @@ void AbilitySystem::remove_special(Obj& o, SpecialState& sp, uint32_t frame) {
     switch (s.cls) {
         case SpecialClass::TractorBeam:  // 0x710880
             set_active(o, kTractorBeam, false, frame, kNoObject);
-            if (combat::ModifierSet* m = combat_->unit_modifiers(target)) m->remove_source_in_list(ModList::MaxSpeed, o.id, crc);
+            combat_->remove_unit_modifiers_in_list(target, ModList::MaxSpeed, o.id, crc);
             if (Obj* to = obj(target)) to->tractored = 0;
             deactivate_early(o, kTractorBeam, frame);
             break;
@@ -1254,7 +1253,7 @@ void AbilitySystem::remove_special(Obj& o, SpecialState& sp, uint32_t frame) {
         }
         case SpecialClass::ConcentrateFire:  // 0x6f5d50
             if (active_state(o, kConcentrateFire)) set_active(o, kConcentrateFire, false, frame, kNoObject);
-            if (combat::ModifierSet* m = combat_->unit_modifiers(target)) m->remove_source_in_list(ModList::MaxSpeed, o.id, crc);
+            combat_->remove_unit_modifiers_in_list(target, ModList::MaxSpeed, o.id, crc);
             break;
         case SpecialClass::EnergyWeapon:
             if (active_state(o, kEnergyWeapon)) {

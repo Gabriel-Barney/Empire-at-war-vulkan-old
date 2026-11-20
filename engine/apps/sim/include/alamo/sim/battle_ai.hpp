@@ -146,6 +146,8 @@ public:
     const ai::tactical::TacticalAiWorld& world() const { return *world_; }
     bool controls(int32_t player) const;
     std::string summary() const;
+    // The CRC "battle.ai": the world's digest (the last collected job's with the AI lane), then the saved fields in their
+    // save order (visit_saved; REF4 t02: one list for write() and hash(), the statistics left out).
     void hash(StateHasher& h) const;
     // N1 stage 2 (owner: n2-host; CampaignBattles chunk "battle.ai"): u32 version, a section with the TacticalAiWorld
     // (TacticalAiWorld::write / read, then relink() - battle.ai is the last battle chunk read), the AI sides
@@ -154,6 +156,12 @@ public:
     void write(ByteWriter& w) const;
     bool read(ByteReader& r);
 
+private:
+    // REF4 t02: the fields after the world section, for save_io::Out (write) and save_io::Hash (hash). battle_ai.cpp.
+    template <class A>
+    void visit_saved(A& a) const;
+
+public:
     // ---- TacticalAiHost ----
     void fill(ai::tactical::PerceptionWorld& w, std::vector<ai::tactical::TacticalAiObject>& objects) override;
     commands::RejectReason execute(uint8_t player, const commands::EventData& ev) override;

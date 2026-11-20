@@ -158,6 +158,10 @@ struct Scenario {
     Driver drive;
     size_t full_prefix_limit = 0;  // truncation test: every prefix up to this save size, else ~600 samples
     bool expect_conflicts = true;  // synthetic: the scripted Vote / InBattle save points must be hit
+
+    // REF4 t02: digest of every tick's galactic CRC, conflict CRC and save bytes (0: printed, not checked). Pinned before the
+    // galactic / conflict records were walked by one field list for the save and the CRC, so that change moved no byte.
+    uint64_t pin = 0;
 };
 
 // Host side of the conflict manager (re-attached after a load like any host callback): tactical battles are accepted
@@ -295,6 +299,14 @@ void run_scenario(const Scenario& sc) {
             rec[static_cast<size_t>(t)] = digest_of(s, cm, store, rng);
         }
         log_entries = cm.log().size();
+        StateHasher pin;
+        for (const TickDigest& d : rec) {
+            pin.u64(d.galactic);
+            pin.u64(d.conflicts);
+            pin.u64(d.save);
+        }
+        std::printf("    pin 0x%016llxull\n", static_cast<unsigned long long>(pin.digest()));
+        if (sc.pin != 0) CHECK(pin.digest() == sc.pin);
         size_t how[3] = {0, 0, 0};
         for (const ConflictLogEntry& e : cm.log()) ++how[std::min<size_t>(e.how, 2)];
         std::printf("    original: frame %d, day %d, fleets %zu, objects %zu, conflicts logged %zu (dropped %zu, auto %zu, battle %zu)\n",
@@ -726,6 +738,7 @@ void test_synthetic() {
     };
     sc.drive = drive_synthetic;
     sc.full_prefix_limit = 1u << 20;  // every prefix
+    sc.pin = 0x67e4152092046d2eull;  // REF4 t02: before the records' field lists
     run_scenario(sc);
 }
 
@@ -1095,6 +1108,7 @@ void test_foc() {
         }
         drive_conflicts(s, cm, st, t);
     };
+    sc.pin = 0x3823a3d7aeba6b5eull;  // REF4 t02: before the records' field lists (FoC data)
     run_scenario(sc);
 }
 

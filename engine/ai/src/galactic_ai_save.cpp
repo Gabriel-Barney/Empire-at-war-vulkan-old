@@ -38,6 +38,8 @@
 #include <array>
 #include <cassert>
 #include <span>
+#include <string>
+#include <type_traits>
 
 #include "ai_save_io.hpp"
 #include "galactic_ai_impl.hpp"
@@ -56,19 +58,68 @@ namespace {
 // 9 (mcx4 t05): + each build task's claim frame; 10 (mcx8 t12): + each pending desire bonus's blocking status.
 constexpr uint32_t kWorldVersion = 10;
 // 2: logic frame, player conflict stamps, conflict observer (q6 t03); 3: leaf cache keyed by (leaf, instance, system player,
-// parameter set) with each entry's parameters, the 0xE visible flags and the last seen surface units (q6 t18)
-constexpr uint32_t kResolverVersion = 3;
+// parameter set) with each entry's parameters, the 0xE visible flags and the last seen surface units (q6 t18); 4 (ref4
+// t02): + each cached parameter's converted enum value (ParamValue::enum_value: the category mask a 0xE recompute reads).
+// Version 3 still loads, its parameters' enum values 0 as before.
+constexpr uint32_t kResolverVersion = 4;
+constexpr uint32_t kResolverVersionNoEnumValue = 3;
+
+// REF4 t02: ByteWriter's calls into a StateHasher, so a write list is also a CRC list (GalacticSimTokenResolver).
+class HashWriter {
+public:
+    explicit HashWriter(StateHasher& h) : h_(h) {}
+    HashWriter& u8(uint8_t v) {
+        h_.u8(v);
+        return *this;
+    }
+    HashWriter& u32(uint32_t v) {
+        h_.u32(v);
+        return *this;
+    }
+    HashWriter& i32(int32_t v) {
+        h_.i32(v);
+        return *this;
+    }
+    HashWriter& u64(uint64_t v) {
+        h_.u64(v);
+        return *this;
+    }
+    HashWriter& f64(double v) {
+        h_.f64(v);
+        return *this;
+    }
+    HashWriter& boolean(bool v) {
+        h_.boolean(v);
+        return *this;
+    }
+    HashWriter& str(const std::string& v) {
+        h_.str(v);
+        return *this;
+    }
+
+private:
+    StateHasher& h_;
+};
+template <class W>
+constexpr bool kHashing = std::is_same_v<W, HashWriter>;
+// A field written by the save and left out of the CRC (the lint reads save_only's arguments as saved, not hashed).
+template <class W>
+void save_only(W& w, uint64_t v) {
+    if constexpr (!kHashing<W>) w.u64(v);
+}
 
 // ---- perception parameters (a leaf cache entry's bindings copy) ----
-void put_param(ByteWriter& w, const Param& p) {
+template <class W>
+void put_param(W& w, const Param& p) {
     w.str(p.name);
     w.u8(static_cast<uint8_t>(p.value.kind));
     w.f64(p.value.number);
     w.str(p.value.text);
     w.u32(static_cast<uint32_t>(p.value.enum_values.size()));
     for (const std::string& e : p.value.enum_values) w.str(e);
+    w.u64(static_cast<uint64_t>(p.value.enum_value));  // version 4
 }
-bool get_param(ByteReader& r, Param& p) {
+bool get_param(ByteReader& r, Param& p, uint32_t version) {
     p.name = r.str();
     const uint8_t kind = r.u8();
     if (kind > static_cast<uint8_t>(ParamValue::Kind::Identifier)) r.fail();
@@ -77,6 +128,7 @@ bool get_param(ByteReader& r, Param& p) {
     p.value.text = r.str();
     p.value.enum_values.resize(save::count(r, 4));
     for (std::string& e : p.value.enum_values) e = r.str();
+    if (version != kResolverVersionNoEnumValue) p.value.enum_value = static_cast<int64_t>(r.u64());
     return r.ok();
 }
 // limit: guard save decode: nested AI global value depth, refuses
@@ -315,8 +367,19 @@ bool valid_planet_or_none(PlanetIndex p, size_t planets) { return p == kInvalidP
 
 // ================================================================ GalacticSimTokenResolver
 
+// REF4 t02: write() and hash() walk one list (visit_saved); before, the resolver (its leaf cache included) had no CRC.
 void GalacticSimTokenResolver::write(ByteWriter& w) const {
     w.u32(kResolverVersion);
+    visit_saved(w);
+}
+
+void GalacticSimTokenResolver::hash(StateHasher& h) const {
+    HashWriter hw(h);
+    visit_saved(hw);
+}
+
+template <class W>
+void GalacticSimTokenResolver::visit_saved(W& w) const {
     w.i32(frame_);
     w.u32(static_cast<uint32_t>(stamp_space_.size()));
     for (const auto* v : {&stamp_space_, &stamp_ground_, &stamp_conversion_, &stamp_corruption_, &last_owner_})
@@ -335,7 +398,7 @@ void GalacticSimTokenResolver::write(ByteWriter& w) const {
         w.u32(static_cast<uint32_t>(e.params.size()));
         for (const Param& p : e.params) put_param(w, p);
     }
-    w.u64(hits_);
+    save_only(w, hits_);  // a statistic (cache_hits)
     // version 2 (q6 t03)
     w.i32(logic_frame_);
     for (const std::vector<int32_t>& s : player_stamps_) {
@@ -365,7 +428,7 @@ void GalacticSimTokenResolver::write(ByteWriter& w) const {
 
 bool GalacticSimTokenResolver::read(ByteReader& r) {
     const uint32_t version = r.u32();
-    if (!r.ok() || version != kResolverVersion) return false;
+    if (!r.ok() || (version != kResolverVersion && version != kResolverVersionNoEnumValue)) return false;
     const int32_t frame = r.i32();
     const uint32_t n = save::count(r, 22);
     if (!r.ok() || (n != 0 && n != sim_->planets().size())) return false;
@@ -394,7 +457,7 @@ bool GalacticSimTokenResolver::read(ByteReader& r) {
         e.stamp = r.i32();
         e.params.resize(save::count(r, 18));
         for (Param& p : e.params)
-            if (!get_param(r, p)) break;
+            if (!get_param(r, p, version)) break;
         if (!cache.empty() && !(cache.rbegin()->first < k)) r.fail();
         cache.emplace_hint(cache.end(), std::move(k), std::move(e));
     }

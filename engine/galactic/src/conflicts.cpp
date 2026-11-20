@@ -1,4 +1,5 @@
 #include "alamo/galactic/conflicts.hpp"
+#include "galactic_records.hpp"
 #include "alamo/core/sim_crc.hpp"
 
 #include <algorithm>
@@ -1675,19 +1676,10 @@ void ConflictManager::rewrite_defenders(int32_t loser, int32_t winner) {
 // ---- CRC ----
 
 void ConflictManager::hash(StateHasher& h) const {
-    const auto& store = sim_->store();
-    auto id_of = [&store](ObjectHandle o) { return store.exists(o) ? store.id(o) : objects::kNoObjectId; };
+    records::Hasher rec(h, sim_->store());  // REF4 t02: the save's field lists (galactic_records.hpp)
     for (const std::vector<ConflictInfo>* q : {&space_q_, &land_q_}) {
         h.u32(static_cast<uint32_t>(q->size()));
-        for (const ConflictInfo& c : *q) {
-            h.u8(static_cast<uint8_t>(c.kind));
-            h.u32(c.planet);
-            h.i32(c.attacker);
-            h.i32(c.defender);
-            h.u32(static_cast<uint32_t>(c.units.size()));
-            for (ObjectHandle u : c.units) h.i32(id_of(u));
-            h.str(c.map);
-        }
+        for (const ConflictInfo& c : *q) records::visit(rec, c);
     }
     h.value(static_cast<int8_t>(state_));
     h.u8(static_cast<uint8_t>(active_));
@@ -1701,16 +1693,7 @@ void ConflictManager::hash(StateHasher& h) const {
     h.u32(static_cast<uint32_t>(planet_map_.size()));
     for (const std::string& m : planet_map_) h.str(m);
     h.u32(static_cast<uint32_t>(log_.size()));
-    for (const ConflictLogEntry& e : log_) {
-        h.u64(e.tick);
-        h.u32(e.planet);
-        h.u8(e.how);
-        h.i32(e.winner);
-        h.i32(e.loser);
-        h.i32(e.retreating);
-        h.u32(e.attacker_losses);
-        h.u32(e.defender_losses);
-    }
+    for (const ConflictLogEntry& e : log_) records::visit(rec, e);
     last_ar_.hash(h);
 }
 

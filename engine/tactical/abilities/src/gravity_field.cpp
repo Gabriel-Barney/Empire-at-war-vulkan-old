@@ -84,10 +84,9 @@ void AbilitySystem::gravity_apply(Obj& g, uint32_t frame) {
             if (!desc(v).affected_by_gravity_field || desc(v).garrison_style) continue;
             if (hostile ? v.in_gravity_field != 0 : v.in_gravity_field == 0) continue;
             if (!in_range(v)) continue;
-            combat::ModifierSet* m = combat_->unit_modifiers(v.id);
-            if (!m) continue;
+            if (!combat_->modifiers_of(v.id)) continue;
             if (hostile) {
-                m->set_by_source(ModList::MaxSpeed, 0, slow, combat::kPermanent, gd.name_crc, g.id);
+                combat_->set_unit_modifier(v.id, ModList::MaxSpeed, 0, slow, combat::kPermanent, gd.name_crc, g.id);
                 v.in_gravity_field = 1;
                 g.gravity_list.push_back(v.id);
                 AbilityEvent e;
@@ -97,7 +96,7 @@ void AbilitySystem::gravity_apply(Obj& g, uint32_t frame) {
                 e.value = 1;
                 e.frame = frame;
                 events_.push_back(e);
-            } else if (m->remove_source_in_list(ModList::MaxSpeed, g.id, gd.name_crc) > 0) {
+            } else if (combat_->remove_unit_modifiers_in_list(v.id, ModList::MaxSpeed, g.id, gd.name_crc) > 0) {
                 gravity_release(g, v, frame);
             }
         }
@@ -127,8 +126,7 @@ void AbilitySystem::gravity_release_all(Obj& g, uint32_t frame) {
         Obj* v = obj(id);
         if (!v) continue;
         v->in_gravity_field = 0;
-        if (combat::ModifierSet* m = v->combat_unit ? combat_->unit_modifiers(id) : nullptr)
-            m->remove_source_in_list(ModList::MaxSpeed, g.id, crc);
+        if (v->combat_unit) combat_->remove_unit_modifiers_in_list(id, ModList::MaxSpeed, g.id, crc);
         AbilityEvent e;
         e.kind = AbilityEventKind::GravitySlow;
         e.id = g.id;

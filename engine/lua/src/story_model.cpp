@@ -1495,80 +1495,6 @@ size_t StoryModel::deliver_script_triggers(uint32_t plot, LuaVm& vm, std::string
     return n;
 }
 
-void StoryModel::hash(StateHasher& h) const {
-    h.u32(frame_);
-    h.f64(time_);
-    h.boolean(paused_);
-    h.i32(player_);
-    h.u32(static_cast<uint32_t>(plots_.size()));
-    for (const StoryPlot& plot : plots_) {
-        h.boolean(plot.active);
-        h.u32(static_cast<uint32_t>(plot.events.size()));
-        for (size_t i = 0; i < plot.events.size(); ++i) {
-            const StoryEventState& st = plot.state[i];
-            h.boolean(st.enabled);
-            h.boolean(st.fired);
-            h.boolean(st.armed);
-            h.u32(st.fire_count);
-            h.u32(st.last_fire_frame);
-            h.f64(st.activation_time);
-            h.f64(st.timeout_at);
-            h.f64(st.inactive_start);
-            h.boolean(st.timer_init);
-            h.f64(st.timer_last);
-            h.f64(st.timer_acc);
-            h.u32(static_cast<uint32_t>(st.countdowns.size()));
-            for (const int32_t c : st.countdowns) h.i32(c);
-            h.i32(st.count);
-            h.i32(st.seen_level);
-            h.u32(st.lua_edits);
-            if (st.lua_edits) {
-                const StoryEventDef& def = plot.events[i];
-                h.str(def.reward_type);
-                h.u32(static_cast<uint32_t>(def.event_params.size()));
-                for (const StoryParam& p : def.event_params) hash_param(h, p);
-                h.u32(static_cast<uint32_t>(def.reward_params.size()));
-                for (const StoryParam& p : def.reward_params) hash_param(h, p);
-                h.u32(static_cast<uint32_t>(def.dialog.size()));
-                for (const std::string& s : def.dialog) h.str(s);
-            }
-        }
-        h.u32(static_cast<uint32_t>(plot.pending_script_triggers.size()));
-    }
-    h.u32(static_cast<uint32_t>(flags_->size()));
-    for (const auto& [name, value] : *flags_) {
-        h.str(name);
-        h.i32(value);
-    }
-    h.u32(static_cast<uint32_t>(objectives_.size()));
-    for (const StoryObjective& o : objectives_) {
-        h.str(o.text);
-        h.u8(static_cast<uint8_t>(o.state));
-        h.boolean(o.battle_info);
-    }
-    h.u32(static_cast<uint32_t>(blips_.size()));
-    for (const StoryBlip& b : blips_) {
-        h.str(b.name);
-        h.i32(b.object_id);
-        if (b.object_id < 0) {  // mcx8 t12: a fixed-position blip (object blips hash as before)
-            h.f32(b.x);
-            h.f32(b.y);
-            h.f32(b.z);
-        }
-    }
-    h.u32(static_cast<uint32_t>(highlights_.size()));
-    for (const StoryHighlight& b : highlights_) {
-        h.str(b.name);
-        h.i32(b.object_id);
-    }
-    h.u32(static_cast<uint32_t>(ai_flags_.size()));
-    for (const auto& [key, count] : ai_flags_) {
-        h.str(key);
-        h.u32(count);
-    }
-    h.u32(static_cast<uint32_t>(fired_.size()));
-}
-
 // ------------------------------------------------------------------------------------------ save / load (OI lua)
 
 namespace {
@@ -1634,39 +1560,179 @@ bool get_bool(ByteReader& r) { return r.u8() != 0; }
 // Layout (little endian): u32 version, clock (frame, time, paused), player; flags, objectives, blips, highlights, AI flags;
 // u32 plot count, per plot (load order): name (checked), active, u32 event count, per event (index order): name (checked),
 // state (the hash() fields in order), Lua-edited definition fields; pending script triggers; then the fired log.
+// REF4 t02: the record lists write() and hash() share (the event state of each event, then the flag / objective / blip /
+// highlight / AI flag tables and the fired log). Each archive keeps its stream's encoding (the save's put_str strings and
+// bytes for bools, StateHasher's own strings); a field marked Save is saved, not hashed. read() decodes the save layout
+// (with its versions) on its own.
+namespace story_records {
+
+enum class In : uint8_t { Both, Save };
+
+class Writer {
+public:
+    explicit Writer(ByteWriter& w) : w_(w) {}
+    void b(bool v, In = In::Both) { w_.u8(v ? 1 : 0); }
+    void u8(uint8_t v, In = In::Both) { w_.u8(v); }
+    void u32(uint32_t v, In = In::Both) { w_.u32(v); }
+    void i32(int32_t v, In = In::Both) { w_.i32(v); }
+    void f32(float v, In = In::Both) { w_.f32(v); }
+    void f64(double v, In = In::Both) { w_.f64(v); }
+    void str(const std::string& v, In = In::Both) { put_str(w_, v); }
+    void params(const std::vector<StoryParam>& v, In = In::Both) { put_params(w_, v); }
+    void count(size_t n, In = In::Both) { w_.u32(static_cast<uint32_t>(n)); }
+
+private:
+    ByteWriter& w_;
+};
+
+class Hasher {
+public:
+    explicit Hasher(StateHasher& h) : h_(h) {}
+    void b(bool v, In in = In::Both) {
+        if (in == In::Both) h_.boolean(v);
+    }
+    void u8(uint8_t v, In in = In::Both) {
+        if (in == In::Both) h_.u8(v);
+    }
+    void u32(uint32_t v, In in = In::Both) {
+        if (in == In::Both) h_.u32(v);
+    }
+    void i32(int32_t v, In in = In::Both) {
+        if (in == In::Both) h_.i32(v);
+    }
+    void f32(float v, In in = In::Both) {
+        if (in == In::Both) h_.f32(v);
+    }
+    void f64(double v, In in = In::Both) {
+        if (in == In::Both) h_.f64(v);
+    }
+    void str(const std::string& v, In in = In::Both) {
+        if (in == In::Both) h_.str(v);
+    }
+    void params(const std::vector<StoryParam>&, In) {}  // saved only (the fired log's reward parameters)
+    void count(size_t n, In in = In::Both) {
+        if (in == In::Both) h_.u32(static_cast<uint32_t>(n));
+    }
+
+private:
+    StateHasher& h_;
+};
+
+// One event's state (plot order, event index order): every field in the save and the CRC.
+template <class Ar>
+void visit(Ar& a, const StoryEventState& st) {
+    a.b(st.enabled);
+    a.b(st.fired);
+    a.b(st.armed);
+    a.u32(st.fire_count);
+    a.u32(st.last_fire_frame);
+    a.f64(st.activation_time);
+    a.f64(st.timeout_at);
+    a.f64(st.inactive_start);
+    a.b(st.timer_init);
+    a.f64(st.timer_last);
+    a.f64(st.timer_acc);
+    a.count(st.countdowns.size());
+    for (const int32_t c : st.countdowns) a.i32(c);
+    a.i32(st.count);
+    a.i32(st.seen_level);
+    a.u32(st.lua_edits);
+}
+
+// The tables after the plots in the CRC (before them in the save): flags, objectives, blips (a fixed position in the CRC
+// only for a blip with no object, mcx8 t12), highlights, AI flags.
+template <class Ar>
+void visit_tables(Ar& a, const std::map<std::string, int32_t>& flags, const std::vector<StoryObjective>& objectives,
+                  const std::vector<StoryBlip>& blips, const std::vector<StoryHighlight>& highlights,
+                  const std::map<std::string, uint32_t>& ai_flags) {
+    a.count(flags.size());
+    for (const auto& [name, value] : flags) {
+        a.str(name);
+        a.i32(value);
+    }
+    a.count(objectives.size());
+    for (const StoryObjective& o : objectives) {
+        a.str(o.text);
+        a.u8(static_cast<uint8_t>(o.state));
+        a.b(o.battle_info);
+    }
+    a.count(blips.size());
+    for (const StoryBlip& bl : blips) {
+        a.str(bl.name);
+        a.i32(bl.object_id);
+        const In at = bl.object_id < 0 ? In::Both : In::Save;  // v3
+        a.f32(bl.x, at);
+        a.f32(bl.y, at);
+        a.f32(bl.z, at);
+    }
+    a.count(highlights.size());
+    for (const StoryHighlight& hl : highlights) {
+        a.str(hl.name);
+        a.i32(hl.object_id);
+    }
+    a.count(ai_flags.size());
+    for (const auto& [key, count] : ai_flags) {
+        a.str(key);
+        a.u32(count);
+    }
+}
+
+// The fired log, last in both: its count in the CRC, the records saved only.
+template <class Ar>
+void visit_fired(Ar& a, const std::vector<StoryFired>& fired) {
+    a.count(fired.size());
+    for (const StoryFired& f : fired) {
+        a.u32(f.sequence, In::Save);
+        a.u32(f.frame, In::Save);
+        a.u32(f.plot, In::Save);
+        a.u32(f.event, In::Save);
+        a.str(f.plot_name, In::Save);
+        a.str(f.event_name, In::Save);
+        a.str(f.event_type, In::Save);
+        a.str(f.reward_type, In::Save);
+        a.params(f.reward_params, In::Save);
+    }
+}
+
+}  // namespace story_records
+
+void StoryModel::hash(StateHasher& h) const {
+    story_records::Hasher a(h);
+    h.u32(frame_);
+    h.f64(time_);
+    h.boolean(paused_);
+    h.i32(player_);
+    h.u32(static_cast<uint32_t>(plots_.size()));
+    for (const StoryPlot& plot : plots_) {
+        h.boolean(plot.active);
+        h.u32(static_cast<uint32_t>(plot.events.size()));
+        for (size_t i = 0; i < plot.events.size(); ++i) {
+            story_records::visit(a, plot.state[i]);
+            if (plot.state[i].lua_edits) {
+                const StoryEventDef& def = plot.events[i];
+                h.str(def.reward_type);
+                h.u32(static_cast<uint32_t>(def.event_params.size()));
+                for (const StoryParam& p : def.event_params) hash_param(h, p);
+                h.u32(static_cast<uint32_t>(def.reward_params.size()));
+                for (const StoryParam& p : def.reward_params) hash_param(h, p);
+                h.u32(static_cast<uint32_t>(def.dialog.size()));
+                for (const std::string& s : def.dialog) h.str(s);
+            }
+        }
+        h.u32(static_cast<uint32_t>(plot.pending_script_triggers.size()));
+    }
+    story_records::visit_tables(a, *flags_, objectives_, blips_, highlights_, ai_flags_);
+    story_records::visit_fired(a, fired_);
+}
+
 void StoryModel::write(ByteWriter& w) const {
     w.u32(kSaveVersion);
     w.u32(frame_);
     w.f64(time_);
     w.u8(paused_ ? 1 : 0);
     w.i32(player_);
-    w.u32(static_cast<uint32_t>(flags_->size()));
-    for (const auto& [name, value] : *flags_) {
-        put_str(w, name);
-        w.i32(value);
-    }
-    w.u32(static_cast<uint32_t>(objectives_.size()));
-    for (const StoryObjective& o : objectives_) {
-        put_str(w, o.text);
-        w.u8(static_cast<uint8_t>(o.state));
-        w.u8(o.battle_info ? 1 : 0);
-    }
-    w.u32(static_cast<uint32_t>(blips_.size()));
-    for (const StoryBlip& b : blips_) {
-        put_str(w, b.name);
-        w.i32(b.object_id);
-        w.f32(b.x).f32(b.y).f32(b.z);  // v3
-    }
-    w.u32(static_cast<uint32_t>(highlights_.size()));
-    for (const StoryHighlight& b : highlights_) {
-        put_str(w, b.name);
-        w.i32(b.object_id);
-    }
-    w.u32(static_cast<uint32_t>(ai_flags_.size()));
-    for (const auto& [key, count] : ai_flags_) {
-        put_str(w, key);
-        w.u32(count);
-    }
+    story_records::Writer a(w);  // REF4 t02: the record lists hash() walks too
+    story_records::visit_tables(a, *flags_, objectives_, blips_, highlights_, ai_flags_);
     w.u32(static_cast<uint32_t>(plots_.size()));
     for (const StoryPlot& plot : plots_) {
         put_str(w, plot.name);
@@ -1676,22 +1742,7 @@ void StoryModel::write(ByteWriter& w) const {
             const StoryEventDef& def = plot.events[i];
             const StoryEventState& st = plot.state[i];
             put_str(w, def.name);
-            w.u8(st.enabled ? 1 : 0);
-            w.u8(st.fired ? 1 : 0);
-            w.u8(st.armed ? 1 : 0);
-            w.u32(st.fire_count);
-            w.u32(st.last_fire_frame);
-            w.f64(st.activation_time);
-            w.f64(st.timeout_at);
-            w.f64(st.inactive_start);
-            w.u8(st.timer_init ? 1 : 0);
-            w.f64(st.timer_last);
-            w.f64(st.timer_acc);
-            w.u32(static_cast<uint32_t>(st.countdowns.size()));
-            for (const int32_t c : st.countdowns) w.i32(c);
-            w.i32(st.count);
-            w.i32(st.seen_level);
-            w.u32(st.lua_edits);
+            story_records::visit(a, st);
             if (st.lua_edits) {
                 put_str(w, def.reward_type);
                 put_params(w, def.event_params);
@@ -1702,18 +1753,7 @@ void StoryModel::write(ByteWriter& w) const {
         }
         put_strs(w, plot.pending_script_triggers);
     }
-    w.u32(static_cast<uint32_t>(fired_.size()));
-    for (const StoryFired& f : fired_) {
-        w.u32(f.sequence);
-        w.u32(f.frame);
-        w.u32(f.plot);
-        w.u32(f.event);
-        put_str(w, f.plot_name);
-        put_str(w, f.event_name);
-        put_str(w, f.event_type);
-        put_str(w, f.reward_type);
-        put_params(w, f.reward_params);
-    }
+    story_records::visit_fired(a, fired_);
 }
 
 bool StoryModel::read(ByteReader& r) {

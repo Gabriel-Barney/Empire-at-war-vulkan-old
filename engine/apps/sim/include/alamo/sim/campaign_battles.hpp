@@ -392,6 +392,17 @@ private:
     void write_linked(ByteWriter& w) const;
     static void read_linked(ByteReader& r, LinkedState& out);
     void hash_linked(StateHasher& h) const;
+    // ref4 t02: attach()'s CRC registrations ("galactic.conflicts", "battle.state", ".movement", ".combat",
+    // ".abilities", ".ai") and session save participants ("galactic.conflicts", "battles"), and the CRC chunks.
+    void register_crcs(CrcRegistry& reg) const;
+    void register_session_chunks();
+    void hash_state(StateHasher& h) const;
+    void hash_movement(StateHasher& h) const;
+    void hash_combat(StateHasher& h) const;
+    void hash_abilities(StateHasher& h) const;
+#ifdef ALAMO_SIM_HAVE_TACTICAL_AI
+    void hash_ai(StateHasher& h) const;
+#endif
     // --- end story t07 / t08 ---
     CorruptionMission corruption_active_;               // the running battle's mission (player -1: none)
     CorruptionStart last_corruption_ = CorruptionStart::Refused;  // Int-final: result of the last corruption command

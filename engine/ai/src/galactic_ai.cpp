@@ -3104,6 +3104,7 @@ void GalacticAiWorld::hash(StateHasher& h) const {
         lua::hash_global_value(h, v);  // L1 final: same bytes for non-table values
     }
     h.u64(w.orders);
+    w.res.hash(h);  // REF4 t02: the token resolver's saved state (leaf cache, stamps, observer)
 }
 
 void GalacticAiWorld::register_crc(CrcRegistry& registry, const std::string& name) const {
