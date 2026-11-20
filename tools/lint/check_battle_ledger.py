@@ -387,6 +387,9 @@ TABLE = [
           ENG + "apps/sim/src/campaign_battles_ledger.hpp", [ENG + "apps/sim/src"],
           save=[r"write_\w+", r"register_\w+_chunks"], read=[r"read_\w+", r"register_\w+_chunks"],
           hash_fns=[r"hash_\w+", "register_crcs"]),
+    Entry("BattleAi", ENG + "apps/sim/include/alamo/sim/battle_ai.hpp",
+          ENG + "apps/sim/src/battle_ai_ledger.hpp", [ENG + "apps/sim/src/battle_ai.cpp"],
+          save=["write", "visit_saved"], read=["read"], hash_fns=["hash", "visit_saved"]),
 ]
 
 
@@ -458,6 +461,18 @@ def generic_entries(ledger_text):
     return entries
 
 
+def drop_save_only(body):
+    """The body without the argument lists of save_only*(...) calls (written, not hashed)."""
+    out, i = [], 0
+    for m in re.finditer(r"\bsave_only\w*\s*\(", body):
+        if m.start() < i:
+            continue
+        out.append(body[i:m.end()])
+        i = matching_paren(body, m.end()) - 1
+    out.append(body[i:])
+    return "".join(out)
+
+
 def named(bodies, mset):
     """Members of mset each body mentions: {member: [function names]}."""
     out = {}
@@ -478,6 +493,8 @@ def generic_usage(entry, header_text, texts):
     for key, fns in (("save", entry.save), ("read", entry.read), ("hash", entry.hash)):
         bodies = function_bodies(texts, entry.cls, fns, body)
         found[key] = bool(bodies)
+        if key == "hash":  # a field list shared with the save: save_only(...) arguments are not hashed
+            bodies = [(fn, drop_save_only(b)) for fn, b in bodies]
         use[key] = named(bodies, mset)
     return members, use, found
 
@@ -596,6 +613,9 @@ void Thing::hash_more(StateHasher& h) const { (void)h; }
     assert len(r) == 1 and "SAVED(names_, unhashed)" in r[0] and "hash_more" in r[0], r
     r = run(ld=ledger.replace("    REBUILT(setup_, \"setup\")\n", "    REBUILT(setup_, \"setup\") \\\n    SAVED(gone_, hashed)\n"))
     assert len(r) == 1 and "gone_ is not a Thing data member" in r[0], r
+    # a field list shared by the save and the CRC: save_only(...) arguments are saved, not hashed
+    assert drop_save_only("a(x_); a.save_only(y_, f(z_)); a.save_only_seq(v_, g); a(w_);") == \
+        "a(x_); a.save_only(); a.save_only_seq(); a(w_);", drop_save_only("a(x_); a.save_only(y_, f(z_)); a(w_);")
     print("check_battle_ledger selftest (generic rules): ok")
 
 

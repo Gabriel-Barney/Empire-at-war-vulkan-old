@@ -1103,39 +1103,6 @@ std::string BattleAi::summary() const {
            }();
 }
 
-void BattleAi::hash(StateHasher& h) const {
-    if (world_->ai_lane()) h.u64(lane_digest_);  // sp3 t02: the last collected job's world digest
-    else world_->hash(h);
-    h.u32(static_cast<uint32_t>(follows_.size()));  // a1h t02
-    for (const ObjectFollow& f : follows_) {
-        h.u32(static_cast<uint32_t>(f.units.size()));
-        for (const objects::ObjectId id : f.units) h.i32(id);
-        h.i32(f.target);
-        h.f32(f.gx);
-        h.f32(f.gy);
-        h.f32(f.r);
-        h.f32(f.threat);
-        h.u32(f.next);
-        if (f.guard) h.u8(0xA6);  // s78n t25.4: only when set (space and the other follows hash as before)
-    }
-    if (world_->ai_lane()) {  // sp3 t04: the queued orders (canonical command bytes) and the sequence counter
-        h.u32(lane_seq_);
-        h.u32(static_cast<uint32_t>(lane_locks_.size()));  // slice 4e
-        for (const lua::ScriptLockFact& f : lane_locks_) {
-            h.i32(f.id);
-            h.u8(static_cast<uint8_t>(f.locked | (f.diverted << 1)));
-            h.f32(f.goal.x);
-            h.f32(f.goal.y);
-            h.f32(f.goal.z);
-        }
-        h.u32(static_cast<uint32_t>(lane_batch_.size()));
-        for (const cmd::Command& c : lane_batch_) {
-            const std::vector<uint8_t> bytes = cmd::encode_command(c);
-            h.bytes(bytes.data(), bytes.size());
-        }
-    }
-}
-
 // ---- N1 stage 2 save / load (owner: n2-host): chunk "battle.ai" ---------------------------------------------------
 namespace {
 // 2: UnitAI re-projection stamps; 3: a1h t02 object-goal follow records; 4: s78n t25.4 ObjectFollow::guard
@@ -1146,10 +1113,6 @@ constexpr uint32_t kBattleAiLaneSaveVersion5 = 5;  // sp3 t04: version 4 + the A
 constexpr uint32_t kBattleAiLaneSaveVersion6 = 6;  // sp3 slice 4e: version 5 + the movement-lock facts (published, job)
 constexpr uint32_t kBattleAiSaveVersion = 7;
 constexpr uint32_t kBattleAiLaneSaveVersion = 8;
-void put_locks(ByteWriter& w, const std::vector<lua::ScriptLockFact>& v) {
-    w.u32(static_cast<uint32_t>(v.size()));
-    for (const lua::ScriptLockFact& f : v) w.i32(f.id).u8(f.locked).u8(f.diverted).f32(f.goal.x).f32(f.goal.y).f32(f.goal.z);
-}
 bool get_locks(ByteReader& r, std::vector<lua::ScriptLockFact>& v) {
     uint32_t n = 0;
     if (!r.count(n, 18)) return false;
@@ -1170,33 +1133,40 @@ void follow_fields(A& a, F& f) {
 }
 }
 
+// REF4 t02: one field list for the save (save_io::Out) and the CRC (save_io::Hash). Before, hash() kept its own list and
+// left out ai_side_, opp_prev_, unit_ai_stamps_ and unit_ai_second_ (opportunity filtering, attack positioning).
+template <class A>
+void BattleAi::visit_saved(A& a) const {
+    a(ai_side_);
+    a.save_only(stale_, executed_);  // statistics (summary())
+    a(opp_prev_, unit_ai_stamps_);
+    a.seq(follows_, [](A& x, const ObjectFollow& f) { follow_fields(x, f); });
+    a(unit_ai_second_);  // version 7 / 8
+    if (!world_->ai_lane()) return;
+    // sp3: the host waited for the running job (lane_sync); a finished job not yet collected is saved as it is
+    const auto command = [](A& x, const cmd::Command& c) { x.blob(cmd::encode_command(c)); };
+    const auto lock = [](A& x, const lua::ScriptLockFact& f) { x(f.id, f.locked, f.diverted, f.goal); };
+    a.save_only(lane_digest_);  // hash() takes it in the world's place
+    a(lane_seq_);
+    a.seq(lane_batch_, command);
+    a.save_only(lane_job_.pending, lane_job_.frame, lane_job_.digest);
+    a.save_only_seq(lane_job_.batch, command);
+    a.seq(lane_locks_, lock);  // version 6
+    a.save_only_seq(lane_job_.locks, lock);
+}
+
 void BattleAi::write(ByteWriter& w) const {
-    const bool lane = world_->ai_lane();
-    w.u32(lane ? kBattleAiLaneSaveVersion : kBattleAiSaveVersion);
+    w.u32(world_->ai_lane() ? kBattleAiLaneSaveVersion : kBattleAiSaveVersion);
     put_section(w, [this](ByteWriter& sub) { write_system(*world_, sub); });
     save_io::Out o(w);
-    o(ai_side_, stale_, executed_, opp_prev_, unit_ai_stamps_);
-    o.seq(follows_, [](save_io::Out& a, const ObjectFollow& f) { follow_fields(a, f); });
-    o(unit_ai_second_);  // version 7 / 8
-    if (!lane) return;
-    // sp3: the host waited for the running job (lane_sync); a finished job not yet collected is saved as it is
-    const auto put_batch = [&w](const std::vector<cmd::Command>& batch) {
-        w.u32(static_cast<uint32_t>(batch.size()));
-        for (const cmd::Command& c : batch) {
-            const std::vector<uint8_t> bytes = cmd::encode_command(c);
-            w.u32(static_cast<uint32_t>(bytes.size()));
-            w.raw(bytes);
-        }
-    };
-    w.u64(lane_digest_);
-    w.u32(lane_seq_);
-    put_batch(lane_batch_);
-    w.boolean(lane_job_.pending);
-    w.u64(lane_job_.frame);
-    w.u64(lane_job_.digest);
-    put_batch(lane_job_.batch);
-    put_locks(w, lane_locks_);  // version 6
-    put_locks(w, lane_job_.locks);
+    visit_saved(o);
+}
+
+void BattleAi::hash(StateHasher& h) const {
+    if (world_->ai_lane()) h.u64(lane_digest_);  // sp3 t02: the last collected job's world digest
+    else world_->hash(h);
+    save_io::Hash a(h);
+    visit_saved(a);
 }
 
 bool BattleAi::read(ByteReader& r) {
