@@ -2016,7 +2016,7 @@ const BattleAi::LaneView::Reserve* BattleAi::view_reserve(int32_t player, int32_
 // capture. [port] tier 2, lane only: the footprint and reinforcement-radius tests (3-4) run at the Reinforce's apply
 // (lane_drop_valid), so a spot they refuse fails the drop instead of moving it to the next ring spot.
 bool BattleAi::view_land_drop_ok(int32_t player, int32_t key, const at::Vec3f& p) const {
-    if (b_->space_) return true;
+    if (b_->space_ || !b_->movement_) return true;  // land only (as land_drop_valid)
     if (!std::isfinite(p.x) || !std::isfinite(p.y)) return false;
     const LaneView::Reserve* r = view_reserve(player, key);
     if (!r) return false;

@@ -490,7 +490,7 @@ How P5 is built; status and open items are on the roadmap (group `sp5`), checks 
   the full test (`land_drop_valid` / `space_drop_ok`, refused = InvalidPosition, the AI then gets an empty unload
   record). HIJACK_UNIT fails with the lane on (it writes the parent galaxy). **Tier 2, lane only** (the drop and hijack
   forms). `lane_view()` is true only inside lane code (`think()` and the lane start scripts), so the critical lane
-  (fill at publish, the batch apply) reads the battle. Every live path of a host answer calls
+  (fill at publish, the batch apply) reads the battle. The live path of every host answer without a lane branch calls
   `BattleAi::lane_live_read`, which counts a read made from lane code (debug builds assert); `alamo_headless` exits 3
   when the count is not 0, so every `--ai-lane` test checks it (`alamo_headless_skirmish_ai_foc_ai_lane` /
   `_foc_land_ai_lane` worker-count checks, the two lane save checks). `think()` still runs inline (t03).
