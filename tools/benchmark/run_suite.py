@@ -137,6 +137,19 @@ def main(argv: list[str]) -> int:
     if not os.environ.get("ALAMO_FOC_DATA"):
         print("run_suite: ALAMO_FOC_DATA is not set (tools\\benchmark\\run_suite.cmd sets it)", file=sys.stderr)
         return 2
+    # wr1 t06: each scene runs from the scenario made from its recipe for this build (tools/goldens/bench_scenarios.py,
+    # cached per engine source), never from a committed save; results of two commits with different engine sources are
+    # timed on different scenarios, so compare them as "not comparable" unless the scene files match.
+    sys.path.insert(0, os.path.join(ROOT, "tools", "goldens"))
+    import bench_scenarios  # noqa: E402
+    made = []
+    for n, p, h in chosen:
+        try:
+            made.append((n, bench_scenarios.materialize(n, bd) or p, h))
+        except RuntimeError as e:
+            print(f"run_suite: {e}", file=sys.stderr)
+            return 2
+    chosen = made
     out = args.out if os.path.isabs(args.out) else os.path.join(ROOT, args.out)
     os.makedirs(out, exist_ok=True)
     env = dict(os.environ)

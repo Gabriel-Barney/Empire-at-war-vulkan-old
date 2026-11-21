@@ -456,12 +456,13 @@ function(alamo_game_add_exe)
   alamo_label_slow(alamo_game_bench_scenario_taa)
   # bm3: the committed rendered scenes (tests/benchmark/*.abench with `host game`): each runs 120 ticks hidden and its fingerprint
   # matches (bench_scene_check.cmake; skipped without ALAMO_FOC_DATA). One entry per scene, each with its own output folder.
+  # wr1 t06: the scene is the one made from its recipe for this build (fixture alamo_bench_scenario_<scene>, engine/apps).
   foreach(_scene space_battle_game nebula_battle water_battle)
     if(EXISTS ${PROJECT_SOURCE_DIR}/tests/benchmark/${_scene}.abench)
       add_test(NAME alamo_game_bench_scene_${_scene}
-               COMMAND ${CMAKE_COMMAND} -DGAME=$<TARGET_FILE:alamo_game> -DSCENE=${PROJECT_SOURCE_DIR}/tests/benchmark/${_scene}.abench
+               COMMAND ${CMAKE_COMMAND} -DGAME=$<TARGET_FILE:alamo_game> -DSCENE=${CMAKE_BINARY_DIR}/bench_scenarios/${_scene}.abench
                        -DOUT=${CMAKE_BINARY_DIR}/smoke_out/bench/scene_${_scene} -P ${PROJECT_SOURCE_DIR}/engine/apps/game/bench_scene_check.cmake)
-      set_tests_properties(alamo_game_bench_scene_${_scene} PROPERTIES TIMEOUT 600)
+      set_tests_properties(alamo_game_bench_scene_${_scene} PROPERTIES TIMEOUT 600 FIXTURES_REQUIRED alamo_bench_scenario_${_scene})
       alamo_label_slow(alamo_game_bench_scene_${_scene})
     endif()
   endforeach()
