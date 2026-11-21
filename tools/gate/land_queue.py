@@ -12,7 +12,13 @@ a deleted worktree. State: waiting -> building -> landed | rejected (with the su
   python -I tools/gate/land_queue.py submit [REV] [--note TEXT]     queue REV (default HEAD) of this checkout
   python -I tools/gate/land_queue.py status [ID]                    the queue, newest last (or one entry in full)
   python -I tools/gate/land_queue.py withdraw ID                    your own waiting entry
+  python -I tools/gate/land_queue.py audit SINCE                    every commit SINCE..origin/dev belongs to a landed entry
   python -I tools/gate/land_queue.py --selftest
+
+`audit` walks the landed entries in landing order and counts the first-parent commits each landing added to origin/dev:
+more commits than its entries hold (fewer is normal: a rebase drops commits already on dev) means something reached dev without the verifier (exit 1, the range is named). It also
+prints how long each landing took from the start of its check. The wr2 exit test (seven days of verifier-only dev) is
+`audit <dev commit of the first day>`.
 
 `submit` refuses uncommitted tracked edits and a tip already on origin/dev, and prints the entry id and where the result
 will appear. Exit 0 on success. Standard library only.
@@ -135,6 +141,58 @@ class Queue:
         return n
 
 
+def landed_at(e: dict) -> str:
+    return next((h["at"] for h in reversed(e.get("history", [])) if h["to"] == "landed"), "")
+
+
+def audit_ranges(groups: list[tuple[str, int]], count) -> list[tuple[str, str, int, int]]:
+    """groups: (landed_as, commits the entries of that landing hold) in landing order, starting after `since`;
+    count(a, b) = first-parent commits in a..b. Returns the (from, to, found, expected) of each landing whose range holds
+    more commits than its entries (fewer is normal: the rebase drops a commit that is already on dev)."""
+    out = []
+    prev = None
+    for tip, expected in groups:
+        found = count(prev, tip)
+        if found > expected:
+            out.append((prev or "SINCE", tip, found, expected))
+        prev = tip
+    return out
+
+
+def audit(q: "Queue", repo: str, since: str, dev: str = "origin/dev") -> int:
+    def is_anc(a: str, b: str) -> bool:
+        return subprocess.run(["git", "-C", repo, "merge-base", "--is-ancestor", a, b], capture_output=True).returncode == 0
+
+    def count(a: str | None, b: str) -> int:
+        return int(git(repo, "rev-list", "--first-parent", "--count", f"{a or since}..{b}").strip())
+
+    since_sha, dev_sha = git(repo, "rev-parse", since).strip(), git(repo, "rev-parse", dev).strip()
+    by_tip: dict[str, list[dict]] = {}
+    for e in sorted(q.entries(("landed",)), key=landed_at):
+        tip = e.get("landed_as", "")
+        if len(tip) == 40 and is_anc(since_sha, tip) and tip != since_sha and is_anc(tip, dev_sha):
+            by_tip.setdefault(tip, []).append(e)
+    groups = [(tip, sum(len(e["commits"]) for e in es)) for tip, es in by_tip.items()]
+    bad = audit_ranges(groups, count)
+    last = groups[-1][0] if groups else since_sha
+    extra = count(last, dev_sha) if last != dev_sha else 0
+    for tip, es in by_tip.items():
+        start = next((h["at"] for h in es[0]["history"] if h["to"] == "building"), "")
+        took = ""
+        if start and landed_at(es[0]):
+            took = f"  check {int(time.mktime(time.strptime(landed_at(es[0]), '%Y-%m-%dT%H:%M:%S')) - time.mktime(time.strptime(start, '%Y-%m-%dT%H:%M:%S')))} s"
+        print(f"{landed_at(es[0])}  {tip[:8]}  {len(es)} entr{'y' if len(es) == 1 else 'ies'}, {sum(len(e['commits']) for e in es)} commit(s){took}  {', '.join(e['id'] for e in es)}")
+    for a, b, found, expected in bad:
+        print(f"land_queue audit: {a[:8]}..{b[:8]} holds {found} commit(s), its landing {expected}")
+    if extra:
+        print(f"land_queue audit: {extra} commit(s) on {dev} after the last landing {last[:8]}")
+    total = count(None, dev_sha)
+    ok = not bad and not extra
+    print(f"land_queue audit {since_sha[:8]}..{dev_sha[:8]}: {total} commit(s), {len(groups)} landing(s): "
+          + ("every commit was landed by the verifier" if ok else "NOT every commit came through the queue"))
+    return 0 if ok else 1
+
+
 def fmt(e: dict) -> str:
     extra = e.get("summary") or e.get("landed_as") or ""
     return (f"{e['id']}  {e['state']:<9} {e['tip'][:8]} ({len(e['commits'])} commit{'s' if len(e['commits']) != 1 else ''})"
@@ -221,6 +279,13 @@ def selftest() -> int:
         except RuntimeError:
             pass
 
+    # audit: each landing's range holds exactly its entries' commits; a direct push shows as extra commits
+    dist = {(None, "a"): 2, ("a", "b"): 1, ("b", "c"): 3}
+    check(audit_ranges([("a", 2), ("b", 1), ("c", 3)], lambda x, y: dist[(x, y)]) == [], "audit: clean history")
+    check(audit_ranges([("a", 3), ("b", 1), ("c", 3)], lambda x, y: dist[(x, y)]) == [], "audit: a commit dropped by the rebase is fine")
+    check(audit_ranges([("a", 2), ("b", 1), ("c", 2)], lambda x, y: dist[(x, y)]) == [("b", "c", 3, 2)],
+          "audit: a commit pushed past the verifier is found in its range")
+
     for b in bad:
         print("land_queue selftest FAIL: " + b)
     if bad:
@@ -232,7 +297,7 @@ def selftest() -> int:
 def main(argv: list[str]) -> int:
     import argparse
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
-    ap.add_argument("command", nargs="?", choices=("submit", "status", "withdraw"))
+    ap.add_argument("command", nargs="?", choices=("submit", "status", "withdraw", "audit"))
     ap.add_argument("arg", nargs="?")
     ap.add_argument("--note", default="")
     ap.add_argument("--selftest", action="store_true")
@@ -246,6 +311,11 @@ def main(argv: list[str]) -> int:
             print(f"queued {e['id']}: {len(e['commits'])} commit(s) of {e['branch']} at {e['tip'][:8]}")
             print(f"result: python -I tools/gate/land_queue.py status {e['id']}  (summary file named there when done)")
             return 0
+        if a.command == "audit":
+            if not a.arg:
+                raise RuntimeError("audit needs the dev commit to start from")
+            git(q.main, "fetch", "-q", "origin", check=False)
+            return audit(q, q.main, a.arg)
         if a.command == "withdraw":
             print(fmt(q.withdraw(a.arg, ROOT)))
             return 0
