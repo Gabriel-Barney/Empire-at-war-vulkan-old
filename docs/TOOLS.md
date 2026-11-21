@@ -45,7 +45,8 @@ How it is wired:
 | Benchmarks, worker sweeps, build times | `tools\benchmark\` (`run_suite.cmd`, `worker_sweep.py`, `build_times.py`) |
 | Workflow figures (builds per day, failed share, test hours, golden-touching and merge commits) | `python -I tools\analysis\workflow_stats.py --from <day> [--to <day>] [--markdown]`; baseline in `docs/PERFORMANCE.md`, "Workflow baseline" |
 | Nightly dev gate: install, missed nights | `tools\install_gate_task.cmd`; history `logs\gate_history.txt`, missed nights `python -I tools\lint\gate_nights.py missed logs\gate_history.txt` (`docs/BUILD.md`, "Scheduled gate") |
-| Land on `dev` | `tools\land_on_dev.cmd` |
+| Land on `dev` | `python -I tools\gate\land_queue.py submit`, then `status <id>` (the verifier lands it; `docs/BUILD.md`, "Landing queue and verifier"); fallback `tools\land_on_dev.cmd` until wr2 t04 is applied |
+| Computed goldens: behaviour check, scenario results, benchmark scenarios | `python -I tools\goldens\behaviour_check.py commit\|range\|workers\|compilers`, `scenario_results.py`, `bench_scenarios.py` (`docs/status/golden-checkpoints.md`, "Computed results") |
 | Worktrees | `tools\new_worktree.cmd <name>`, `worktree_tool.py link`, `tools\clean_worktrees.cmd` |
 | Stop a hung test exe / delete a merged branch | `python -I tools\worktree\stop_tree_procs.py`, `delete_merged_branch.py` |
 | PR check without hosted CI | `tools\pr_check.cmd` |

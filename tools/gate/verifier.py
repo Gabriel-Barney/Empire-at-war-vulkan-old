@@ -21,7 +21,7 @@ rejected (t03). The verifier never edits code.
   python -I tools/gate/verifier.py --selftest
 
 `tools\gate\install_verifier_task.cmd` copies this file and land_queue.py to `<main checkout>\logs\verifier_task\` and
-registers the per-user logon task AlamoVerifier that runs it. Standard library only.
+registers the per-user task AlamoVerifier that runs `run --once` every 5 minutes. Standard library only.
 """
 
 from __future__ import annotations

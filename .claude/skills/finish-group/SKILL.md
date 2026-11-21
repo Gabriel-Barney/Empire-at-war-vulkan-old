@@ -1,6 +1,6 @@
 ---
 name: finish-group
-description: Finish a roadmap group - tests, code review of the branch diff, roadmap write (group-done and box-done rule), docs, commit and land on dev with tools\land_on_dev.cmd. Use whenever a group's work is done, when asked to "finish", "close", "wrap up" or "land" a group, or as the last step of a lane.
+description: Finish a roadmap group - tests, code review of the branch diff, roadmap write (group-done and box-done rule), docs, commit and submit to the landing queue (tools/gate/land_queue.py; the verifier lands it on dev). Use whenever a group's work is done, when asked to "finish", "close", "wrap up" or "land" a group, or as the last step of a lane.
 argument-hint: <group-id>
 ---
 Finish roadmap group `$ARGUMENTS` in this worktree. Work through the checklist and report each line as done or not applicable:
@@ -43,8 +43,10 @@ Finish roadmap group `$ARGUMENTS` in this worktree. Work through the checklist a
    regression test (or the filed missing-seam finding) and a commit message naming the right hypothesis.
 6. **Commit and land on `dev`.** `git add` the work and commit; the message lists changes, build and test results per compiler,
    skips, goldens changed or "none", tasks closed, whether the group and box are now `done`, open items, and ends with
-   the `Co-Authored-By:` line the session's attribution reminder gives. Then `tools\land_on_dev.cmd` (merges `origin/dev` in, fast-forward
-   pushes `dev`, deletes the branch on origin; rerun if `dev` moved). No PR: `main` is released from `dev` by Gabriel.
+   the `Co-Authored-By:` line the session's attribution reminder gives. Every commit that touches sim code carries a `Behaviour:` trailer
+   (`none`, or the CRC system columns it changes). Then `python -I tools/gate/land_queue.py submit`; finished when
+   `land_queue.py status <id>` says `landed` (rejected: read its summary file, fix, commit, submit again). No PR:
+   `main` is released from `dev` by Gabriel.
 7. **Friction.** Put the lane's one `friction` line (runs wasted and what would have prevented them, or "none") in the final report.
    When the group had three or more repeat-refused or identical failing runs, or the same prompt or search came up again and
    again, say so and suggest Gabriel runs `/retro <id>`; do not run it yourself.

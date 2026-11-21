@@ -1,7 +1,8 @@
 @echo off
-rem Registers (or replaces) the per-user logon task AlamoVerifier that runs the verifier (wr2 t02, tools\gate\verifier.py):
+rem Registers (or replaces) the per-user task AlamoVerifier (every 5 minutes) that runs the verifier (wr2 t02, tools\gate\verifier.py):
 rem the one process that advances dev from the landing queue (tools\gate\land_queue.py submit). No admin; it runs while you
-rem are logged on. Usage: tools\gate\install_verifier_task.cmd [--no-register]
+rem are logged on; each run handles what is waiting (run --once) and exits, and Task Scheduler never starts a second
+rem copy while one runs (an ONLOGON trigger would need admin). Usage: tools\gate\install_verifier_task.cmd [--no-register]
 rem It copies verifier.py and land_queue.py to <main checkout>\logs\verifier_task\ (so a checkout or merge never changes
 rem the running code; logs\ is gitignored) and writes verifier_task.cmd beside them, which logs to verifier_log.txt there.
 rem Never under %LOCALAPPDATA% / %APPDATA% (the Claude app redirects those writes; docs/BUILD.md, "Scheduled gate").
@@ -25,11 +26,11 @@ set "PYX=%MAIN%\toolchain\venv\Scripts\python.exe"
   echo @echo off
   echo rem Written by tools\gate\install_verifier_task.cmd for the AlamoVerifier task; rerun the installer instead of editing it.
   echo echo %%DATE%% %%TIME%% verifier start: "%MAIN%" ^>^> "%%~dp0verifier_log.txt"
-  echo "%PYX%" -I "%%~dp0verifier.py" run --main "%MAIN%" ^>^> "%%~dp0verifier_log.txt" 2^>^&1
+  echo "%PYX%" -I "%%~dp0verifier.py" run --once --main "%MAIN%" ^>^> "%%~dp0verifier_log.txt" 2^>^&1
   echo echo %%DATE%% %%TIME%% verifier exit %%ERRORLEVEL%% ^>^> "%%~dp0verifier_log.txt"
 )
 if errorlevel 1 (echo install_verifier_task: writing %DEST%\verifier_task.cmd failed.& exit /b 1)
 echo install_verifier_task: %DEST%\verifier_task.cmd runs the verifier for %MAIN%; log %DEST%\verifier_log.txt
 if not defined REG exit /b 0
-schtasks /Create /F /SC ONLOGON /TN AlamoVerifier /TR "\"%DEST%\verifier_task.cmd\""
+schtasks /Create /F /SC MINUTE /MO 5 /TN AlamoVerifier /TR "\"%DEST%\verifier_task.cmd\""
 exit /b %ERRORLEVEL%
