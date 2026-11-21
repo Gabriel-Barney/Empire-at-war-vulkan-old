@@ -70,17 +70,18 @@ headless multithreaded simulation core first, then a Vulkan 1.3 renderer. Any Cl
    Process or Research), the heading it is listed under inside its group; set it when adding a task by hand (`tag-tasks --apply`
    fills missing ones). `roadmap_store.py lint` shows what is wrong; rules:
    `docs/ROADMAP_PROTOCOL.md`, "Backlog and group exit tests".
-   **Exception: Stage 6 · Parity, Stage 9 · Mod system and Stage 10 · Unified mod system refactor keep their
-   follow-ups** (Gabriel, 2026-11-12, box Q4; Stage 9, boxes MCX1-MCX6, added 2026-11-17, and Q5, Q6, moved there from
-   Stage 6 on 2026-11-19, MODC folded into MCX6 on 2026-11-20; Stage 10, boxes UMS1-UMS2, added 2026-11-18): a follow-up of a group in these stages becomes a new task of the group it came from, not a backlog entry (`backlog add ... --from <group>` adds it there
+   **Exception: Stage 6 · Parity and full QA pass and Stage 9 · Mod system keep their
+   follow-ups** (Gabriel, 2026-11-12, box Q4; box QAFULL since the old Stage 7 was merged in on 2026-11-21; Stage 9, boxes MCX1-MCX6, added 2026-11-17, and Q5, Q6, moved there from
+   Stage 6 on 2026-11-19, MODC folded into MCX6 on 2026-11-20): a follow-up of a group in these stages becomes a new task of the group it came from, not a backlog entry (`backlog add ... --from <group>` adds it there
    and reopens the group and its box if they are done; no task cap). Such a group closes only when its exit test passes and no task
-   is open (finish or `--drop` each one), and its S3 follow-ups stay tasks too. Tier-3 findings still go to the backlog, except in
-   Stage 10, where every follow-up, tier 3 included, stays a task (`meta/backlog` `keep_all_followups`). Rules: `docs/ROADMAP_PROTOCOL.md`, "Follow-ups
+   is open (finish or `--drop` each one), and its S3 follow-ups stay tasks too. Tier-3 findings still go to the backlog. Rules: `docs/ROADMAP_PROTOCOL.md`, "Follow-ups
    stay in Stage 6 groups".
+   Stage numbers are fixed (each lane's `num`): the finished Stages 1, 3, 10 and 11 were removed on 2026-11-21 (their groups stay
+   in the data) and Stage 8 · Port features was emptied into Stages 4 and 5, so the numbers have gaps.
    **Current focus (Gabriel, 2026-11-10, until he lifts it): parity tier 1 and tier 2 work only.** Tasks and backlog entries carry a `tier`; tier-3
    work (internals, draw order, performance, save format) is paused: do not start it, drop it or file it as S3 (`backlog add ... --tier 3`).
-   Crashes, hangs and save corruption are still fixed. Exception: Stage 10 (the unified mod system refactor) is tier 1 by Gabriel's
-   choice (2026-11-18). Record: `docs/DECISIONS.md` ("Current focus", "Unified mod system refactor"), `docs/ROADMAP_PROTOCOL.md` ("Parity tier").
+   Crashes, hangs and save corruption are still fixed. Exception: the unified mod system refactor (finished; its stage was removed
+   2026-11-21) was tier 1 by Gabriel's choice (2026-11-18). Record: `docs/DECISIONS.md` ("Current focus", "Unified mod system refactor"), `docs/ROADMAP_PROTOCOL.md` ("Parity tier").
 7. In-game probes: prepare them under `tools/probe_mod/` with run and cleanup scripts, then run them yourself, driving retail
    `StarWarsG.exe` with computer use (Gabriel, 2026-11-14: Claude runs all probe kit runs; `docs/DECISIONS.md`). Never drive
    the port's `alamo_game.exe`. Unknown retail behaviour that the binary can answer: the `re-question` skill first (the

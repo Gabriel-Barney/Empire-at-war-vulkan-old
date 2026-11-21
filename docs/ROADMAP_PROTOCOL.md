@@ -30,9 +30,9 @@ The claude.ai page https://claude.ai/artifact/56dGptBoT3JcDH4rHZ6BjT is retired:
 | Collection | Document id | Fields |
 |---|---|---|
 | `meta` | `page` | `eyebrow`, `title`, `lede`, `build` (last verified build line), `updated` |
-| `meta` | `backlog` | The backlog's settings: `cats` (category id → `label`, `parent`, `order`, `desc`, `node`: the flowchart box its entries belong to), `rules` (ordered category filters), `sevs`, `backlog_sevs` (the severities the backlog takes: `["S3"]` since 2026-11-15, see "S1 and S2 are group tasks"), (severity meanings), the limits `cap`, `wip`, `inbox_days`, and `keep_followups` (the stage ids whose groups keep their follow-ups as tasks: `["st6", "st9", "st10"]`) and `keep_all_followups` (those of them that keep tier-3 follow-ups too: `["st10"]`). See "Backlog and group exit tests" |
+| `meta` | `backlog` | The backlog's settings: `cats` (category id → `label`, `parent`, `order`, `desc`, `node`: the flowchart box its entries belong to), `rules` (ordered category filters), `sevs`, `backlog_sevs` (the severities the backlog takes: `["S3"]` since 2026-11-15, see "S1 and S2 are group tasks"), (severity meanings), the limits `cap`, `wip`, `inbox_days`, and `keep_followups` (the stage ids whose groups keep their follow-ups as tasks: `["st6", "st9"]`) and `keep_all_followups` (those of them that keep tier-3 follow-ups too: `[]` since 2026-11-21). See "Backlog and group exit tests" |
 | `backlog` | `b0001`… | One finding that is not part of an open group: `t` (text), `cat` (category id), `node` (flowchart box, and so the stage, the work belongs to), `sev` (`S1`/`S2`/`S3`), `kind`, `s` (`open`/`promoted`/`dropped`), `from` (group it was found in), `task`, `ref`, `g` (only Gabriel can do it), `added`, `by`, and when closed `promoted` (`group/task`) or `why` |
-| `lanes` | short id (`st1`…) | One stage of the plan: `title`, `goal` (what the stage is for), `exit` ("done when" condition), `order`. Stages run in `order`, top to bottom in both the plan and the flowchart |
+| `lanes` | short id (`st1`…) | One stage of the plan: `title`, `goal` (what the stage is for), `exit` ("done when" condition), `order`, `num` (the fixed "Stage N" number; without it a stage counts on from the one before, so removing a stage does not renumber the rest, 2026-11-21). Stages run in `order`, top to bottom in both the plan and the flowchart |
 | `nodes` | box id (`N1`, `MOVE`…) | `label`, `sub`, `lane`, `status`, `shape` (`box`/`pill`), `order`, `to` (map of target box id → `solid` "do before" or `dash` "feeds into") |
 | `items` | group id (`s7`, `n1`…) | `title`, `tag`, `node` (box id), `status`, `preset`, `mod`, `why`, `order`, `after` (list of group ids that must finish first), `updated` (date), `by` (session name), `tasks` (key `t01`… → `t` text, `s` `todo`/`done`/`oos`, `o` order, optional `sev`, `tier`, `g`, `sub` (sub-category: `Parity`, `Engine`, `Process` or `Research`), `moved`, `why`), `eta`, `exit` (the exit test: the metric or test that says the group is done), `cap` (most tasks the group may hold; default `meta/backlog` `cap`, 8), `closed` (set by `close-group`: `at`, `passed`, `moved`, `dropped`); claim fields, all optional, set by `claim` (below): `claimed_by` (session), `claimed_at` (ISO time), `touches` (list of module folders/files the work edits; default: `mod` split on `·` `,` `;`) |
 | `log` | `yyyymmdd-hhmmss-<session>` | `at` (ISO time), `by`, `text` |
@@ -205,14 +205,15 @@ leave the group.
   (refused without it), or drops the named ones, sets the group
   `done` (preset and claim cleared, `closed` recorded), sets its box `done` when it was the box's last open group, and adds a
   log line. It replaces the "follow-up group" step. A Stage 6 group is closed differently (next point).
-- **Follow-ups stay in Stage 6 groups** (Gabriel, 2026-11-12, to help development there). Stage 6 · Parity (lane `st6`:
-  box Q4 and any box added to it later; `meta/backlog` `keep_followups` lists the stages this applies to) is the
+- **Follow-ups stay in Stage 6 groups** (Gabriel, 2026-11-12, to help development there). Stage 6 · Parity and full QA pass (lane `st6`:
+  box Q4, box QAFULL since the old Stage 7 · Full QA pass was merged in on 2026-11-21, and any box added to it later; `meta/backlog`
+  `keep_followups` lists the stages this applies to) is the
   exception to the backlog rule. Since 2026-11-17 (Gabriel) Stage 9 · Mod system (lane `st9`: boxes MCX1-MCX6,
-  groups `mcx0`-`mcx9`, and since 2026-11-19 the former Stage 6 mod boxes Q5, Q6; MODC was folded into MCX6 on 2026-11-20) follows the same rule, and since 2026-11-18 (Gabriel) Stage 10 · Unified mod system refactor (lane `st10`:
-  boxes UMS1-UMS2, groups `ums0`-`ums5`) too: `keep_followups` is `["st6", "st9", "st10"]`, and everything below says "Stage 6" for
-  all three. Stage 10 goes one step further: it is also in `meta/backlog` `keep_all_followups`, so its tier-3 findings and tasks stay
-  group tasks as well (`backlog add --from` adds them, `trim-group --move` and `close-group` refuse them like any other open task;
-  `--drop` or `close-group --force` are the only ways out). A follow-up of a Stage 6 group (a finding that does not block its exit test, or a task still open
+  groups `mcx0`-`mcx9`, and since 2026-11-19 the former Stage 6 mod boxes Q5, Q6; MODC was folded into MCX6 on 2026-11-20) follows
+  the same rule: `keep_followups` is `["st6", "st9"]`, and everything below says "Stage 6" for both. A stage listed in `meta/backlog`
+  `keep_all_followups` (empty since Stage 10 · Unified mod system refactor was finished and removed on 2026-11-21) also keeps its
+  tier-3 findings and tasks as group tasks (`backlog add --from` adds them, `trim-group --move` and `close-group` refuse them like any
+  other open task; `--drop` or `close-group --force` are the only ways out). A follow-up of a Stage 6 group (a finding that does not block its exit test, or a task still open
   when the test passes) becomes a new task of the group it came from, in that group's box, so the next session on the box finds it
   there:
   - `backlog add "<text>" --by S --from <group> [--sev S1|S2|S3] [--tier 1|2] [--ref PATH] [--g]` does it: it adds the group's next
@@ -224,7 +225,7 @@ leave the group.
     not tier 3 (`--force` sends those to the backlog as elsewhere). `trim-group --move` is refused for them too; `--drop` works.
   - Since 2026-11-15 every group takes its S1 / S2 findings as tasks ("S1 and S2 are group tasks"); what stays special to Stage 6
     is that `--from <group>` adds them to the group they came from even above the cap, and its S3 follow-ups stay tasks too.
-  - Unchanged outside Stage 10: a tier-3 finding is still dropped or filed in the backlog as S3 (`--tier 3` keeps it there; current focus), and the
+  - Unchanged outside a `keep_all_followups` stage: a tier-3 finding is still dropped or filed in the backlog as S3 (`--tier 3` keeps it there; current focus), and the
     triage still decides whether a finding is worth recording at all. A finding that is not Stage 6 work (for example a movement bug
     a mod test happens to show) can still be filed in its own box's backlog by naming the box: `--node <box>`.
   - The open backlog entries filed from Stage 6 groups before this rule were moved back on 2026-11-12: b0014-b0017 are modc
