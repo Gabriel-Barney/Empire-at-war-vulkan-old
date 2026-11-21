@@ -1,6 +1,10 @@
 ## Golden checkpoints (Q1 goldens, 2026-11-06)
 
-Why: a golden CRC file (`engine/apps/headless/testdata/*.crc`, `engine/apps/game/testdata/game_smoke_*.crc`, the sim and module goldens) held one
+**Since wr1 t07 (2026-11-21) no derived golden is stored in git.** The CRC log formats below are still what the programs write
+and compare (worker-count entries, `--compare`, scenario results); stored-golden regeneration is gone. How behaviour changes are
+checked now: "Computed results and the `Behaviour:` check" below; what replaced each former file: `golden-inventory.md`.
+
+Why (2026-11-06): a golden CRC file (`engine/apps/headless/testdata/*.crc`, `engine/apps/game/testdata/game_smoke_*.crc`, the sim and module goldens) held one
 line of per-system CRCs per tick (8198 lines for `skirmish_ai_foc_golden.crc`), so every behaviour change rewrote thousands of lines and the PRs
 conflicted in git. A checkpoint golden stores every 64th tick: the same check, about 1.5 % of the size, and a change moves a few lines.
 
@@ -42,41 +46,22 @@ byte, `--compare`, the game smoke compare).
 |---|---|
 | `--crc-out F --crc-checkpoint N [--crc-keep T,T,...]` | any `alamo_headless` run writes the checkpoint log instead of the full one |
 | `alamo_headless --crc-convert IN OUT [--crc-checkpoint N] [--crc-keep T,...]` | rewrites a CRC log as a checkpoint log (default N 64) |
-| `python tools/goldens/convert_goldens.py [--all] (--in-place \| --out-dir D) --check FILE...` | the same rule in Python for a list of files (or every tracked ALAMO_CRC file under `engine/` with `--all`); `--check` proves each converted file equals its source on every checkpoint; `--verify GOLDEN SOURCE` compares two files; a ctest checks the two writers agree byte for byte |
-| `tools\regen_goldens.cmd [--only headless\|game\|all] [--dry-run] [--force]` | after an intended behaviour change: runs the golden-backed ctest commands of `build-msvc` through the program's own writer (`--crc-out ... --crc-checkpoint N`), stores the checkpoint goldens (headless; with `--only game` also the three game smoke runs, which need the GPU and the game data) and prints a diff summary: files changed, first changed checkpoint, window, differing columns. It refuses to run when tracked files have uncommitted edits unless `--force` |
-| `tools\regen_goldens.cmd --bench-check` / `--no-bench` / `--only bench` | BM1f: the benchmark scenarios (`tests/benchmark/*.abench`) carry a CRC fingerprint, so a sim behaviour change makes them stale. `regen_goldens` (with `--only headless` or `all`) checks each scenario (`alamo_headless --bench X --runs 1 --warmup 0`, exit 3 = stale) and remakes a stale one through `tools\benchmark\regen_scenario.cmd`; the summary shows `version 1 -> 2`. BM3: a `host game` scenario is checked with a 120-tick hidden `alamo_game --bench-scenario` run (exit 3 = stale) and remade with `alamo_game --hidden --bench-regen` (the tree needs `alamo_game.exe`). `--dry-run` and `--bench-check` only report (exit 4 from `--bench-check` when a scenario is stale); `--no-bench` skips them |
+| `alamo_headless --compare EXPECTED ACTUAL` | compares two logs with the rules above (exact tick of a difference: two full logs) |
+| `python tools/goldens/convert_goldens.py` | the same format rules in Python (the parser `behaviour_check.py` uses; a ctest checks the two writers agree byte for byte) |
 
-### Workflow
+`tools\regen_goldens.cmd`, `tools\lint\golden_merge.py` and `tools\benchmark\regen_scenario.cmd` were retired by wr1 t07: nothing is
+regenerated. Benchmark scenarios are made per build from their recipe (`tools/goldens/bench_scenarios.py`, wr1 t06); the mod
+scenarios run from `tests/goldens/mods/<name>.json` (`tools/goldens/mod_golden.py`, nightly tier).
 
-1. Change behaviour, build (`build_msvc.cmd`); the golden tests fail with the first bad checkpoint and its window.
-2. Commit the code, run `tools\regen_goldens.cmd`; the summary names the first changed checkpoint per file: state the intended behaviour change in
-   the PR from it. Commit the goldens (a few lines each) and any remade `tests/benchmark/*` scenario files (the version bump shows in the PR; say "scenario regenerated" there).
-3. Clang must reproduce the MSVC goldens (`build_clang.cmd`).
+## Computed results and the `Behaviour:` check (wr1, 2026-11-21; authoritative since t07)
 
-Mod goldens (mcx7 t04, `docs/MOD_COMPAT_DESIGN.md` §13.3): `tests/goldens/mods/<name>.crc`, a 600-tick space skirmish of each
-reference mod (the run in `<name>.json`), ctest `alamo_headless_mod_golden_<name>` (slow) through `tools/goldens/mod_golden.py`, which
-skips when the workshop item is not installed or its data changed since the golden (the spec's `fingerprint`). `tools\regen_goldens.cmd`
-remakes them with the headless goldens (`--no-mods` leaves them alone, `--mods` does only them) and sets the fingerprint; name every moved
-mod golden in the commit message as for a base golden.
+Stage 12 replaced stored derived goldens with results computed from builds (`docs/DECISIONS.md`, "Workflow redesign"). Skill:
+`behaviour-check`.
 
-Goldens the regen script does not cover (the apps/sim goldens written by `alamo_sim_tests --regen`, the module goldens of combat / abilities /
-galactic written by their own `--write-golden` options) are still written as full logs; they compare as they are, and `convert_goldens.py
---in-place --check <files>` thins them afterwards.
-
-### Converting the checked-in goldens (once, after the PRs that edit them have merged)
-
-`python tools/goldens/convert_goldens.py --all --in-place --check` (or only the files you want), run the fast tier, commit. Files that were
-converted keep their `checkpoint` / `keep` settings on later runs.
-
-## Computed results and the `Behaviour:` check (wr1, 2026-11-21: expand phase)
-
-Stage 12 replaces stored derived goldens with results computed from builds (`docs/DECISIONS.md`, "Workflow redesign").
-Until wr1 t07 removes them, the stored goldens above stay in force and the tools below run beside them.
-
-- Inventory: `docs/status/golden-inventory.md` lists every stored expected-result file as derived (to be computed) or
-  reference (stays tracked).
-- `tools/goldens/scenario_results.py` (t02): a scenario is a golden-backed headless ctest entry; its result is the full
-  CRC log of the same command, stored under the main checkout's `.cache/scenario-results/` (gitignored) and keyed by
+- Inventory: `docs/status/golden-inventory.md` lists every former stored expected-result file as derived (removed by t07,
+  now a scenario) or reference (stays tracked).
+- `tools/goldens/scenario_results.py` (t02): a scenario is an entry of `tools/goldens/scenarios.json`; its result folder
+  (the run's CRC log with `--crc-out`, or the files a test exe writes into `<out>`) is stored under the main checkout's `.cache/scenario-results/` (gitignored) and keyed by
   the commit's `engine/`, `CMakeLists.txt` and `tests/benchmark` trees, the command, the game-data identity, compiler and
   worker count. A docs or tools commit keeps every key. `result --commit C` builds another commit in the locked worktree
   `.claude/worktrees/scenario-base` (tree `build-base-<compiler>`) when no entry exists. Nothing is stored from a tree with
@@ -86,15 +71,18 @@ Until wr1 t07 removes them, the stored goldens above stay in force and the tools
   over all ticks and judges the commit's `Behaviour:` trailer (`none`, or the CRC system columns it changes); a sim commit
   without the trailer fails. `workers` and `compilers` compare worker counts with the 0-worker run and the clang tree with
   the MSVC tree for one commit, with no stored file (the cross-compiler check stored goldens gave for free).
-  `--parity-before/--parity-after` (or `parity A B`) add which parity-harness metrics moved.
-- Write-kind scenarios (t05): `tools/goldens/scenarios.json` covers the derived goldens that are not headless `--golden`
-  runs (module and sim test exes, galactic AI logs, game smoke runs, mod goldens). Each runs its test program so that it
+  `--parity-before/--parity-after` (or `parity A B`) add which parity-harness metrics moved. `range BASE HEAD` is the
+  verifier's landing check (every commit's trailers together); for sim landings the verifier also runs `compilers` on its
+  two trees. `nightly` runs the scenarios marked `nightly` from the last gated night (`tools\gate_scheduled.cmd`).
+- Scenarios (t05, t07): `tools/goldens/scenarios.json` holds every former derived golden's run (headless skirmishes and
+  replay, module and sim test exes, galactic AI logs, game smoke runs, mod scenarios). Each runs its test program so that it
   writes into a result folder (`--write-golden <out>/...`, `--golden-dir <out>`, `--golden-out <out>` for the exes that
   used to rewrite tracked files in place, `--png-dir <out>`, `--ai-log`, `--crc-out`). The checker compares a result
   folder file by file: CRC logs by column; other text and binary outputs byte for byte (registry `ignore` lines left out),
   a difference charged to the scenario's `system`; screenshots with `png_diff.py` tolerances, reported but never judged.
-  `goldens` checks that each scenario reproduces the tracked files it replaces (run before t07 deletes any). A scenario
-  whose needs are missing (game data, GPU, workshop item) is a SKIP.
+  A scenario whose needs are missing (game data, GPU, workshop item) is a SKIP; one the parent's registry lacks or runs
+  differently has no parent result (its first landing). Before t07 deleted the stored files, the `goldens` command showed
+  28 of 29 scenarios reproducing them (the 29th, `skirmish_ai_foc_land`, was stale on dev: ngt1 t04).
 - Screenshots: `tools\visual\visual_check.cmd parent [REV]` diffs REV's smoke screenshots against its parent's
   (`tools/visual/visual_builds.py`), the replacement for `tests/visual_baselines`.
 

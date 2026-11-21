@@ -33,5 +33,5 @@ Classify each dependency of a candidate; the category decides how the deepened m
   ctest entry per worker count (`alamo_add_worker_count_check`) and the `slow` label over about 5 s.
 - Tests assert on observable outcomes through the interface, not internal state, so they survive internal refactors. A test that
   has to change when the implementation changes is testing past the interface.
-- Goldens are the outer net: a deepening that is meant to keep behaviour moves no golden. A moved golden is a behaviour change to
-  explain, never to regenerate away (`regen-goldens` skill).
+- The behaviour check is the outer net: a deepening that is meant to keep behaviour lands with `Behaviour: none`, and a
+  scenario that moves is a behaviour change to explain, never to declare away (`behaviour-check` skill).

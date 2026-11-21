@@ -41,7 +41,7 @@ How it is wired:
 | Which tests cover my change | `python -I tools\lint\affected_tests.py <tree> <out file>` (build graph; `--evaluate N`) |
 | Build-tree name or exe path | `python -I tools\lint\build_trees.py name agent wt msvc`, `exe alamo_headless.exe` (Python: `import build_trees`) |
 | Static checks | `python tools\lint\run_tidy.py` (clang-tidy), `check_mod_names.py`, `check_limits.py` (limit tags, §8), `check_mod_system.py` (mod-system shims, ums4), `check_string_literals.py`, `compile_check.py` (edit-time hook, both compilers; `--repro`) |
-| Goldens | `tools\regen_goldens.cmd` (skill `regen-goldens` first; `--mods` for the mod goldens of `tests/goldens/mods`) |
+| Behaviour check | `python -I tools/goldens/behaviour_check.py commit\|range\|workers\|compilers\|nightly` (skill `behaviour-check`); scenarios `tools/goldens/scenarios.json`, results `tools/goldens/scenario_results.py`; screenshots `tools\visual\visual_check.cmd parent` (no stored goldens since wr1 t07) |
 | Grade every installed mod and stack (G0-G3) | `tools\modcorpus\run_corpus.cmd` (`tools/modcorpus/README.md`); weekly ASan sweep `tools\modcorpus\asan_sweep.cmd` |
 | Parity against retail baselines | `tools\parity\parity_harness.py` (`tools/parity/README.md`) |
 | Benchmarks, worker sweeps, build times | `tools\benchmark\` (`run_suite.cmd`, `worker_sweep.py`, `build_times.py`) |
@@ -98,7 +98,7 @@ pinned setup step in `toolchain\2_setup.cmd` (rule 5), then a row here.
 | Ticking the roadmap outside `finish-group` | `phase-status` |
 | Sim code, parallel code, CRC difference | `determinism-check` |
 | Unexplained failure, before a second fix attempt | `diagnosing-bugs` |
-| Golden drift | `regen-goldens` |
+| A moved scenario / the `Behaviour:` trailer | `behaviour-check` |
 | Original-game behaviour not in `docs/re/` | `re-question` (binary), then `probe-kit` (running game) |
 | Question about a technique, API or format | `research` |
 | Editing CLAUDE.md, a skill, an agent or memory | `writing-for-agents` |

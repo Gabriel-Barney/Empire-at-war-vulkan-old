@@ -1,3 +1,0 @@
-perception f1d00dbb1898aca7
-matrices 60678008c7fd9b1f
-nonzero_costs 2492

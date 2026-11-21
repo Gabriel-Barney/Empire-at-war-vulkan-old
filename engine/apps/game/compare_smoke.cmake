@@ -1,9 +1,9 @@
-# Int-final: cross-build check of an alamo_game smoke run. Compares the run's dumped per-tick CRC log (comment lines '#'
-# ignored) and command recording (byte for byte) with the checked-in goldens (MSVC-generated; clang must match).
-#   cmake -DACTUAL=<dir>/game_smoke_<name> -DGOLDEN=<testdata>/game_smoke_<name> -P compare_smoke.cmake
-# No dumped files (no ALAMO_FOC_DATA: the smoke skipped) -> "skipped", success. Regenerate after an intended sim change:
-# copy the MSVC build's <build>/smoke_out/game_smoke_<name>.crc / .rec over the goldens (tools\regen_goldens.cmd does it and
-# stores the .crc as a checkpoint golden). -DHEADLESS=<alamo_headless> is needed only for a checkpoint golden (below).
+# Compares two dumped smoke outputs: a run's per-tick CRC log (comment lines '#' ignored) and command recording (byte for
+# byte) with another run's (wr1 t07: no checked-in goldens; the screens smoke against the campaign smoke, and
+# check_crc_checkpoint.cmake on its own logs).
+#   cmake -DACTUAL=<dir>/game_smoke_<name> -DGOLDEN=<other dir>/game_smoke_<name> -P compare_smoke.cmake
+# No dumped files (no ALAMO_FOC_DATA: the smoke skipped) -> "skipped", success. -DHEADLESS=<alamo_headless> is needed only
+# when GOLDEN is a checkpoint log (below).
 if(NOT EXISTS "${ACTUAL}.crc")
   message(STATUS "smoke compare: ${ACTUAL}.crc not written (no game data): skipped")
   return()

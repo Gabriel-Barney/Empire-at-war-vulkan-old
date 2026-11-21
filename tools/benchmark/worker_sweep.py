@@ -96,6 +96,17 @@ def main(argv: list[str]) -> int:
     if want and len(todo) != len(want):
         print(f"worker_sweep: unknown scene in {want}", file=sys.stderr)
         return 2
+    # wr1 t07: no committed scenario saves; each scene is made from its recipe for this build (as run_suite.py does).
+    sys.path.insert(0, os.path.join(ROOT, "tools", "goldens"))
+    import bench_scenarios  # noqa: E402
+    try:
+        todo = [(n, bench_scenarios.materialize(n, os.path.join(ROOT, a.build_dir))) for n, _ in todo]
+    except RuntimeError as e:
+        print(f"worker_sweep: {e}", file=sys.stderr)
+        return 2
+    if any(not p for _, p in todo):
+        print("worker_sweep: a scene could not be made (ALAMO_FOC_DATA not set?)", file=sys.stderr)
+        return 2
     out = a.out or os.path.join(ROOT, "logs", "worker_sweep", datetime.datetime.now().strftime("%Y-%m-%d_%H%M%S"))
     os.makedirs(out, exist_ok=True)
     results: dict = {n: {} for n, _ in todo}

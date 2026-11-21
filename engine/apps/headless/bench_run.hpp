@@ -29,7 +29,7 @@
 //       otherwise. The arguments are recorded in the manifest's "make" line.
 //   --bench-regen SCENARIO.abench
 //       Remakes the scenario with the arguments its manifest recorded (one command after a save-format or game-data change;
-//       tools/benchmark/regen_scenario.cmd).
+//       tools/goldens/bench_scenarios.py materialize runs it per build, wr1 t06 / t07).
 #pragma once
 #include <cstdint>
 #include <memory>

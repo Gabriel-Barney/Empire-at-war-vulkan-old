@@ -80,9 +80,8 @@ if("vfs" IN_LIST ALAMO_ENGINE_MODULES AND "terrain" IN_LIST ALAMO_ENGINE_MODULES
   target_link_libraries(alamo_ai_tactical_tests PRIVATE alamo_vfs)
   target_compile_definitions(alamo_ai_tactical_tests PRIVATE ALAMO_AI_TACTICAL_HAVE_DATA=1)
 endif()
-# Scenario CRC golden (written by MSVC with --write-golden <file>; clang must match).
-add_test(NAME alamo_ai_tactical_tests
-         COMMAND alamo_ai_tactical_tests --golden ${CMAKE_CURRENT_SOURCE_DIR}/tests/golden/ai_tactical_scenario_crc.txt)
+# Scenario CRC across commits and compilers: the scenario ai_tactical_scenario (tools/goldens/scenarios.json, wr1 t07).
+add_test(NAME alamo_ai_tactical_tests COMMAND alamo_ai_tactical_tests)
 set_tests_properties(alamo_ai_tactical_tests PROPERTIES TIMEOUT 600)
 
 # Stage 1b perception tests: leaf cache rules, every token, threat-grid projection / re-projection /
@@ -95,5 +94,5 @@ if(TARGET alamo_vfs)
   target_compile_definitions(alamo_ai_tactical_perception_tests PRIVATE ALAMO_AI_TACTICAL_HAVE_VFS=1)
 endif()
 add_test(NAME alamo_ai_tactical_perception_tests
-         COMMAND alamo_ai_tactical_perception_tests --golden ${CMAKE_CURRENT_SOURCE_DIR}/tests/golden/ai_tactical_perception_crc.txt)
+         COMMAND alamo_ai_tactical_perception_tests)  # scenario CRC: ai_tactical_perception (scenarios.json)
 set_tests_properties(alamo_ai_tactical_perception_tests PROPERTIES TIMEOUT 600)

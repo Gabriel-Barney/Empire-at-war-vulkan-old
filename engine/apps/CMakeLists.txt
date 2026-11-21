@@ -224,8 +224,9 @@ if(TARGET alamo_objects AND TARGET alamo_commands AND TARGET alamo_tactical AND 
   endif()
 
   # Tests: pacing, mode stack (only the top mode ticks), per-tick step order, synthetic map with a
-  # recorded command stream at 0/1/4/N workers + checked-in golden (no game data needed), and the
-  # real FoC space / land maps when ALAMO_FOC_DATA is set (skipped otherwise).
+  # live-recorded command stream replayed at 0/1/4/N workers (no game data needed), and the real FoC space / land maps when
+  # ALAMO_FOC_DATA is set (skipped otherwise). No stored golden (wr1 t07): --golden-out DIR writes the results for the
+  # scenario sim_tests of tools/goldens/scenarios.json; ALAMO_SIM_TESTDATA is only the --regen default folder.
   add_executable(alamo_sim_tests sim/tests/test_sim.cpp)
   target_link_libraries(alamo_sim_tests PRIVATE alamo_sim alamo_vfs alamo_test_support)
   target_compile_definitions(alamo_sim_tests PRIVATE "ALAMO_SIM_TESTDATA=\"${CMAKE_CURRENT_SOURCE_DIR}/sim/testdata\"")
@@ -279,19 +280,19 @@ if(_alamo_sim)
     target_link_libraries(alamo_headless PRIVATE alamo_ai_galactic)
     target_compile_definitions(alamo_headless PRIVATE ALAMO_HEADLESS_HAVE_GALACTIC_AI=1)
     # FoC Heart of the Maw, 10 min of galactic time, every faction an AI; skipped (exit 0) without
-    # ALAMO_FOC_DATA. Regenerate after an intended change: same command with --ai-log <golden path>.
+    # ALAMO_FOC_DATA. Its AI log and CRC are the scenario galactic_ai_hotm (tools/goldens/scenarios.json; wr1 t07).
     add_test(NAME alamo_headless_galactic_ai
-             COMMAND alamo_headless --economy --galactic-ai --ticks 18000 --workers 4 --quiet
-                     --ai-golden ${CMAKE_CURRENT_SOURCE_DIR}/headless/testdata/galactic_ai_hotm_golden.txt)
+             COMMAND alamo_headless --economy --galactic-ai --ticks 18000 --workers 4 --quiet)
     set_tests_properties(alamo_headless_galactic_ai PROPERTIES TIMEOUT 1200)
     # A2 galactic: the same campaign with the Rebel player a scripted human (fixed recorded command stream
     # headless/testdata/galactic_human_hotm.txt), so the Human-rooted conquest desires run; CRC compared across worker
-    # counts (OPT3 t07 worker-count check, one entry per count) and every count's AI log against the golden.
-    # Regenerate after an intended change: same command with --workers 0 --ai-log <golden path> (MSVC).
+    # counts (OPT3 t07 worker-count check, one entry per count) and every count's AI log against the 0-worker entry's
+    # (wr1 t07: no stored AI log; the scenario galactic_ai_hotm_human diffs it against the parent commit).
     alamo_add_worker_count_check(alamo_headless_galactic_ai_human
         COMMAND alamo_headless --economy --galactic-ai --ticks 36000 --quiet --human Rebel
                 --human-script ${CMAKE_CURRENT_SOURCE_DIR}/headless/testdata/galactic_human_hotm.txt
-                --ai-golden ${CMAKE_CURRENT_SOURCE_DIR}/headless/testdata/galactic_ai_hotm_human_golden.txt
+        SETUP_ARGS --ai-log ${CMAKE_CURRENT_BINARY_DIR}/alamo_headless_galactic_ai_human_w0_ai.txt
+        CHECK_ARGS --ai-golden ${CMAKE_CURRENT_BINARY_DIR}/alamo_headless_galactic_ai_human_w0_ai.txt
         TIMEOUT 1800 SLOW)
     # q2f t05: --trace-out (headless/port_trace.hpp), the Q2TRACE 1 state trace read by tools/probe_mod/q2_traces/q2trace.py.
     # 300 HotM ticks across worker counts (the trace changes nothing), then q2trace.py validate (headless/check_port_trace.cmake).
@@ -321,18 +322,16 @@ if(_alamo_sim)
     set_tests_properties(alamo_headless_eval_uw_infra PROPERTIES TIMEOUT 300)
   endif()
   # --- end A2 ---
-  # --- A1 stage 2 (owner: A1 agent): --skirmish-ai synthetic|foc (headless/skirmish_run.cpp). Goldens: regenerate
-  # after an intended change with the same command and --crc-out <golden path> (MSVC); clang must match. ---
+  # --- A1 stage 2 (owner: A1 agent): --skirmish-ai synthetic|foc (headless/skirmish_run.cpp). Results: the scenarios
+  # skirmish_ai_* of tools/goldens/scenarios.json (wr1 t07: no stored goldens). ---
   target_sources(alamo_headless PRIVATE headless/skirmish_run.cpp headless/tactical_trace.cpp)
   target_link_libraries(alamo_headless PRIVATE alamo_game_rules)  # q6 t03: AI types, default forces, map planet type
   if(TARGET alamo_ai_tactical_world)
     add_test(NAME alamo_headless_skirmish_ai_synthetic
-             COMMAND alamo_headless --skirmish-ai synthetic --check-workers --quiet
-                     --golden ${CMAKE_CURRENT_SOURCE_DIR}/headless/testdata/skirmish_ai_synthetic_golden.crc)
+             COMMAND alamo_headless --skirmish-ai synthetic --check-workers --quiet)
     # FoC _MP_SPACE_KUAT, Empire vs Rebel; skipped (exit 0) without ALAMO_FOC_DATA.
     add_test(NAME alamo_headless_skirmish_ai_foc
-             COMMAND alamo_headless --skirmish-ai foc --workers 4 --quiet
-                     --golden ${CMAKE_CURRENT_SOURCE_DIR}/headless/testdata/skirmish_ai_foc_golden.crc)
+             COMMAND alamo_headless --skirmish-ai foc --workers 4 --quiet)
     set_tests_properties(alamo_headless_skirmish_ai_synthetic alamo_headless_skirmish_ai_foc PROPERTIES TIMEOUT 1200)
     # skai (q2f t04): the skirmish host on _MP_SPACE_GEONOSIS with an idle human Empire (the retail Geonosis trace's setup): stations
     # from the team markers, both slots' default squadrons, MP_Default_Credits, the per-frame station income; skipped without ALAMO_FOC_DATA.
@@ -389,7 +388,6 @@ if(_alamo_sim)
     add_test(NAME alamo_headless_skirmish_trace
              COMMAND ${CMAKE_COMMAND} -DEXE=$<TARGET_FILE:alamo_headless>
                      -DTRACE=${CMAKE_CURRENT_BINARY_DIR}/q4hf_tactical_trace/synthetic.q2t -DPY=${ALAMO_PYTHON}
-                     -DGOLDEN=${CMAKE_CURRENT_SOURCE_DIR}/headless/testdata/skirmish_ai_synthetic_golden.crc
                      -DQ2TRACE=${CMAKE_SOURCE_DIR}/tools/probe_mod/q2_traces/q2trace.py
                      -P ${CMAKE_CURRENT_SOURCE_DIR}/headless/check_tactical_trace.cmake)
     # Both synthetic runs write their data to the one %TEMP%\alamo_a1_skirmish_ai folder: never at the same time (ctest -j).
@@ -417,12 +415,10 @@ if(_alamo_sim)
     # pre-built Command Center + Barracks, the skirmish pad lists / prices / pop-cap curve, the shipped skirmish equations), 2 min of battle;
     # skipped (exit 0) without ALAMO_FOC_DATA.
     add_test(NAME alamo_headless_skirmish_ai_foc_land
-             COMMAND alamo_headless --skirmish-ai foc-land --ticks 3600 --workers 4 --quiet
-                     --golden ${CMAKE_CURRENT_SOURCE_DIR}/headless/testdata/skirmish_ai_foc_land_golden.crc)
-    # The old land invasion (Utapau, _Land_Planet_Utapau_01, a campaign map) under the campaign rules: its golden is the pre-t50 one.
+             COMMAND alamo_headless --skirmish-ai foc-land --ticks 3600 --workers 4 --quiet)
+    # The old land invasion (Utapau, _Land_Planet_Utapau_01, a campaign map) under the campaign rules.
     add_test(NAME alamo_headless_skirmish_ai_foc_land_campaign
-             COMMAND alamo_headless --skirmish-ai foc-land-campaign --ticks 3600 --workers 4 --quiet
-                     --golden ${CMAKE_CURRENT_SOURCE_DIR}/headless/testdata/skirmish_ai_foc_land_campaign_golden.crc)
+             COMMAND alamo_headless --skirmish-ai foc-land-campaign --ticks 3600 --workers 4 --quiet)
     set_tests_properties(alamo_headless_skirmish_ai_foc_land alamo_headless_skirmish_ai_foc_land_campaign PROPERTIES TIMEOUT 1200)
     # S10 land outcome, t50: the land skirmish played on (0/1/4/16/N workers identical); skipped (exit 0) without ALAMO_FOC_DATA. What it asserts
     # is structure, not a seed's luck (--expect-skirmish-base): both sides start with their pre-built base (skai t08: the 10 base
@@ -577,8 +573,8 @@ if(_alamo_sim)
   set_tests_properties(alamo_headless_bench_synthetic PROPERTIES TIMEOUT 300)
   # t05: the OPT3 t07 worker-count check on the benchmark scenario (tests/benchmark/space_battle.abench, FoC data) from its save:
   # one timed run per worker count, CRCs compared with the 0-worker run. A scenario whose fingerprint no longer matches
-  # (any sim behaviour change) only prints "scenario changed, not comparable" here (--bench-allow-changed); regenerate it
-  # with tools\benchmark\regen_scenario.cmd. Skipped (exit 0) without ALAMO_FOC_DATA.
+  # (a stale build copy) only prints "scenario changed, not comparable" here (--bench-allow-changed). Skipped (exit 0)
+  # without ALAMO_FOC_DATA.
   # wr1 t06 (2026-11-21): benchmark scenarios are build products. A fixture per scenario makes it from its recipe in
   # tests/benchmark/<name>.abench (tools/goldens/bench_scenarios.py materialize: cached in <main checkout>\.cache, keyed by
   # the engine source, recipe, game data and compiler) and copies it to ${CMAKE_BINARY_DIR}/bench_scenarios; the bench tests
@@ -652,20 +648,17 @@ endif()
 # (final checksum + every tick's CRC record, 0/1/4/N workers).
 add_test(NAME alamo_headless_selfcheck COMMAND alamo_headless --selfcheck)
 
-# Q1 replay: a fixed recorded command stream must give identical per-tick CRC sequences for
-# 0/1/4/N workers, and match the golden CRC file checked into the repo (generated by MSVC;
-# the clang build must reproduce it). Regenerate after an intended sim change:
-#   alamo_headless --replay engine/apps/headless/testdata/replay_stream.acmd --crc-out engine/apps/headless/testdata/replay_golden.crc
-# alamo_headless_replay_workers* is the OPT3 t07 worker-count check (one process per count, the 0-worker entry also
-# against the golden); alamo_headless_replay_golden runs the in-process form (--check-workers, jobs::check_worker_counts).
+# Q1 replay: a fixed recorded command stream must give identical per-tick CRC sequences for 0/1/4/N workers.
+# alamo_headless_replay_workers* is the OPT3 t07 worker-count check (one process per count); alamo_headless_replay_golden
+# runs the in-process form (--check-workers, jobs::check_worker_counts). The result across commits is the scenario replay
+# of tools/goldens/scenarios.json (wr1 t07: no stored golden; MSVC versus clang: behaviour_check.py compilers).
 set(_q1_data ${CMAKE_CURRENT_SOURCE_DIR}/headless/testdata)
 alamo_add_worker_count_check(alamo_headless_replay_workers
     COMMAND alamo_headless --replay ${_q1_data}/replay_stream.acmd
-    SETUP_ARGS --golden ${_q1_data}/replay_golden.crc
     TIMEOUT 300)
 add_test(NAME alamo_headless_replay_golden
          COMMAND alamo_headless --replay ${_q1_data}/replay_stream.acmd --check-workers
-                 --crc-out ${CMAKE_CURRENT_BINARY_DIR}/replay_actual.crc --golden ${_q1_data}/replay_golden.crc)
+                 --crc-out ${CMAKE_CURRENT_BINARY_DIR}/replay_actual.crc)
 set_tests_properties(alamo_headless_replay_golden PROPERTIES TIMEOUT 300)
 
 # Golden checkpoints (ALAMO_CRC 2; docs/status/golden-checkpoints.md): --crc-checkpoint / --crc-convert / --compare on a v2 log,
@@ -699,16 +692,17 @@ if(ALAMO_GOLDEN_PYTHON)
                        alamo_goldens_bench_scenarios_selftest PROPERTIES TIMEOUT 120)
 endif()
 
-# mcx7 t04: mod goldens (docs/MOD_COMPAT_DESIGN.md 13.3): one short headless skirmish per reference mod, its checkpoint log in
-# tests/goldens/mods/<name>.crc, the run in <name>.json. tools/goldens/mod_golden.py skips when ALAMO_FOC_DATA is unset, the
-# workshop item is not installed or its data changed since the golden; regenerate with tools\regen_goldens.cmd --mods.
+# mcx7 t04: mod scenarios (docs/MOD_COMPAT_DESIGN.md 13.3): one short headless skirmish per reference mod, the run in
+# tests/goldens/mods/<name>.json. The ctest entry checks the mod loads and runs; its CRC log across commits is the scenario
+# mod_<name> of tools/goldens/scenarios.json (wr1 t07: no stored .crc). tools/goldens/mod_golden.py skips when
+# ALAMO_FOC_DATA is unset or the workshop item is not installed.
 if(ALAMO_GOLDEN_PYTHON AND TARGET alamo_ai_tactical_world)
   file(GLOB _alamo_mod_goldens CONFIGURE_DEPENDS ${CMAKE_SOURCE_DIR}/tests/goldens/mods/*.json)
   foreach(_spec ${_alamo_mod_goldens})
     get_filename_component(_mg ${_spec} NAME_WE)
     add_test(NAME alamo_headless_mod_golden_${_mg}
              COMMAND ${ALAMO_GOLDEN_PYTHON} -I ${CMAKE_SOURCE_DIR}/tools/goldens/mod_golden.py --spec ${_spec}
-                     --exe $<TARGET_FILE:alamo_headless> --golden ${CMAKE_SOURCE_DIR}/tests/goldens/mods/${_mg}.crc)
+                     --exe $<TARGET_FILE:alamo_headless>)
     set_tests_properties(alamo_headless_mod_golden_${_mg} PROPERTIES TIMEOUT 1200)
     alamo_label_slow(alamo_headless_mod_golden_${_mg})
   endforeach()

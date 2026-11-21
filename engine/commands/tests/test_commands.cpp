@@ -791,11 +791,11 @@ void test_pipeline_save() {
     }
 }
 
-// Existing .acmd streams (headless / sim goldens) still load and re-encode byte-identically.
+// An existing .acmd stream still loads and re-encodes byte-identically (the kept replay input; the sim streams were stored
+// goldens until wr1 t07, a fresh tactical stream's round trip is checked by alamo_sim_tests' determinism()).
 void test_old_streams() {
 #ifdef ALAMO_COMMANDS_APPS_DIR
-    const char* files[] = {"/headless/testdata/replay_stream.acmd", "/sim/testdata/synthetic.acmd",
-                           "/sim/testdata/_LAND_PLANET_BYSS_KIDNAPPING.acmd", "/sim/testdata/_SPACE_PLANET_CORELLIA_PIRACY.acmd"};
+    const char* files[] = {"/headless/testdata/replay_stream.acmd"};
     size_t checked = 0;
     for (const char* f : files) {
         const std::string path = std::string(ALAMO_COMMANDS_APPS_DIR) + f;
@@ -815,6 +815,7 @@ void test_old_streams() {
         ++checked;
     }
     std::printf("old streams: %zu .acmd file(s) load and re-encode identically\n", checked);
+    CHECK(checked == 1);
 #endif
 }
 

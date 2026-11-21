@@ -41,7 +41,7 @@ if(TARGET alamo_vfs)
   target_compile_definitions(alamo_tactical_abilities_tests PRIVATE ALAMO_ABILITIES_TESTS_HAVE_VFS=1)
 endif()
 add_test(NAME alamo_tactical_abilities_tests
-         COMMAND alamo_tactical_abilities_tests --golden ${CMAKE_CURRENT_SOURCE_DIR}/tests/golden/abilities_space_crc.txt)
+         COMMAND alamo_tactical_abilities_tests)  # battle CRC across commits: scenario abilities_space (wr1 t07)
 set_tests_properties(alamo_tactical_abilities_tests PROPERTIES TIMEOUT 300)
 
 # L1 systems: special weapons / lobbing superweapons / tactical superweapon (special_weapons.hpp) and the combat

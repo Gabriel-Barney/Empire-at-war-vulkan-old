@@ -55,12 +55,13 @@ if("data" IN_LIST ALAMO_ENGINE_MODULES AND "objects" IN_LIST ALAMO_ENGINE_MODULE
     target_compile_definitions(alamo_galactic_economy_tests PRIVATE ALAMO_GALACTIC_TESTS_HAVE_VFS=1)
   endif()
   # One exe, three ctest entries (run in parallel under ctest -j): unit / scenario tests, the scripted synthetic
-  # campaign and the FoC campaign (each campaign: 0/1/4/N-worker CRC logs identical + golden).
+  # campaign and the FoC campaign (each campaign: 0/1/4/N-worker CRC logs identical; across commits the scenarios
+  # galactic_synthetic / galactic_foc of tools/goldens/scenarios.json, wr1 t07).
   add_test(NAME alamo_galactic_economy_tests COMMAND alamo_galactic_economy_tests --only units)
   add_test(NAME alamo_galactic_economy_synthetic_campaign
-           COMMAND alamo_galactic_economy_tests --only synthetic --golden-dir ${CMAKE_CURRENT_SOURCE_DIR}/tests/golden)
+           COMMAND alamo_galactic_economy_tests --only synthetic)
   add_test(NAME alamo_galactic_economy_foc_campaign
-           COMMAND alamo_galactic_economy_tests --only foc --golden-dir ${CMAKE_CURRENT_SOURCE_DIR}/tests/golden)
+           COMMAND alamo_galactic_economy_tests --only foc)
   set_tests_properties(alamo_galactic_economy_synthetic_campaign alamo_galactic_economy_foc_campaign PROPERTIES TIMEOUT 300)
 
   # S10 - battle transitions, galactic side (docs/re/BATTLE_TRANSITIONS.md): conflict queues + state

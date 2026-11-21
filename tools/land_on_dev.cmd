@@ -5,19 +5,16 @@ rem
 rem Usage (from any worktree, branch committed):  tools\land_on_dev.cmd [--create]
 rem   1. refuses on main, on detached HEAD and with uncommitted tracked edits
 rem   2. fetches origin; with --create makes origin/dev from origin/main when dev does not exist yet
-rem   3. merges origin/dev INTO THIS BRANCH (conflicts are resolved here, so dev never holds a broken merge). When every
-rem      conflicted file is a golden regen_goldens writes (headless *.crc, game smoke .crc/.rec, tests/benchmark/*), it takes
-rem      origin/dev's version, builds the merged HEAD and regenerates only those goldens (tools\lint\golden_merge.py,
-rem      2026-11-13); any other conflict stops here for you to resolve
+rem   3. merges origin/dev INTO THIS BRANCH (conflicts are resolved here, so dev never holds a broken merge); a conflict
+rem      stops here for you to resolve
 rem   4. refuses generated or oversized new files (tools\lint\check_tracked.py)
 rem   5. refuses a merged HEAD that has no passing MSVC build of every module with the fast tier (tools\lint\verified_build.py;
 rem      runs build_agent.cmd msvc wt all itself when there is none; docs / *.md / .claude-only changes need none), then
-rem      runs the slow golden checks of the goldens the branch changed (tools\lint\golden_merge.py slow, ref6 t06), then
+rem      runs the behaviour check (tools\goldens\behaviour_check.py range origin/dev HEAD, wr1 t07: no stored goldens), then
 rem      pushes HEAD to origin dev as a plain fast-forward (never --force; a rejected push means dev moved: rerun)
 rem   6. deletes this branch on origin when it is not dev
 rem Run the build / tests the change needs (docs/BUILD.md) BEFORE this; dev must stay green. Step 5 covers the MSVC fast
-rem tier and the slow checks of changed goldens: clang, ASan and other slow tests are still yours to run when the change
-rem needs them (a code change that moves a slow golden without touching it is caught by the nightly dev gate).
+rem tier and the behaviour check: clang, ASan and other slow tests are still yours to run when the change needs them.
 rem The local branch and its worktree are left alone (git cannot delete a checked-out branch); the app or
 rem "git branch -d <name>" from another checkout removes them once the work is on dev.
 rem Retired 2026-11-21 (wr2 t04): only the verifier pushes dev. Sessions submit with tools\gate\land_queue.py. Gabriel
@@ -32,7 +29,6 @@ if not "%ALAMO_LAND_DIRECT%"=="1" (
 )
 set "CREATE=0"
 if /i "%~1"=="--create" set "CREATE=1"
-set "GOLDEN_MERGE="
 set "PY=python"
 if exist "%~dp0..\toolchain\venv\Scripts\python.exe" set "PY=%~dp0..\toolchain\venv\Scripts\python.exe"
 rem The worktree's MSVC tree, named by tools\lint\build_trees.py (ref3 t03).
@@ -73,17 +69,12 @@ if errorlevel 1 (
 
 if /i "%BR%"=="dev" goto :pushit
 
-rem Golden-only conflicts: golden_merge.py takes origin/dev's goldens and commits the merge; they are regenerated below.
 git merge --no-edit origin/dev
 if errorlevel 1 (
-  "%PY%" -I "%~dp0lint\golden_merge.py" resolve
-  if errorlevel 1 (
-    echo.
-    echo land_on_dev: merge conflict with origin/dev. Nothing was pushed.
-    echo Resolve here, commit, rebuild the affected modules, then rerun this script.
-    exit /b 1
-  )
-  set "GOLDEN_MERGE=1"
+  echo.
+  echo land_on_dev: merge conflict with origin/dev. Nothing was pushed.
+  echo Resolve here, commit, rebuild the affected modules, then rerun this script.
+  exit /b 1
 )
 
 :pushit
@@ -94,18 +85,6 @@ if errorlevel 1 (
   echo.
   echo land_on_dev: new files failed the tracked-file check above. Nothing was pushed.
   exit /b 1
-)
-
-if defined GOLDEN_MERGE (
-  echo land_on_dev: building the merged HEAD without tests, to regenerate the goldens taken from origin/dev.
-  call "%~dp0..\build_agent.cmd" msvc wt all none
-  cd /d "%~dp0.."
-  "%PY%" -I "%~dp0lint\golden_merge.py" regen %WT_TREE%
-  if errorlevel 1 (
-    echo.
-    echo land_on_dev: regenerating the merged goldens failed, see above. The merge is committed here; nothing was pushed.
-    exit /b 1
-  )
 )
 
 rem dev must stay green (2026-11-12): push only a commit that was built and tested AS MERGED. Two branches that each pass
@@ -126,24 +105,16 @@ if errorlevel 1 (
   )
 )
 
-rem ref6 t06: the fast tier skips the slow goldens, so the slow ctest entries that check a golden this branch changed run
-rem here (tools\lint\golden_merge.py slow, through build_agent.cmd). It also prints a line when the nightly dev gate
-rem (tools\gate_scheduled.cmd, every test on origin/dev's tip: the daily slow-golden record) has not run for a day.
+rem wr1 t07: the behaviour check, as the verifier runs it (tools\goldens\behaviour_check.py range; results cached in
+rem <main checkout>\.cache\scenario-results, a base commit not cached yet is built in .claude\worktrees\scenario-base).
 cd /d "%~dp0.."
-"%PY%" -I "%~dp0lint\golden_merge.py" slow origin/dev HEAD
+"%PY%" -I "%~dp0goldens\behaviour_check.py" range origin/dev HEAD --log auto
 if errorlevel 1 (
   echo.
-  echo land_on_dev: a slow golden check of a golden this branch changed failed, see above. Nothing was pushed.
-  echo Regenerate it ^(tools\regen_goldens.cmd^) only when the move is intended and attributed, commit, then rerun this script.
+  echo land_on_dev: the behaviour check failed, see above. Nothing was pushed. Declare an intended change in the commit's
+  echo Behaviour: trailer ^(behaviour-check skill^); an undeclared one is a regression to fix.
   exit /b 1
 )
-
-rem wr1 t04 (expand phase, 2026-11-21): the computed Behaviour: check runs beside the stored goldens, report only. It diffs
-rem each golden-backed headless scenario over origin/dev..HEAD (tools\goldens\behaviour_check.py range; results cached in
-rem <main checkout>\.cache\scenario-results, a base commit not cached yet is built in .claude\worktrees\scenario-base) and
-rem appends one line per landing to <main checkout>\logs\behaviour_landings.txt; "CHECKER BUG?" marks a disagreement with
-rem the stored goldens. The stored goldens still decide. set ALAMO_BEHAVIOUR_CHECK=0 skips it.
-if not "%ALAMO_BEHAVIOUR_CHECK%"=="0" "%PY%" -I "%~dp0goldens\behaviour_check.py" range origin/dev HEAD --expand --log auto
 
 git push origin HEAD:refs/heads/dev
 if errorlevel 1 (

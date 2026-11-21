@@ -6,7 +6,7 @@ description: Integrates finished engine modules or merged lane PRs - wires them 
 skills:
   - build
   - phase-status
-  - regen-goldens
+  - behaviour-check
   - diagnosing-bugs
 ---
 Read `CLAUDE.md` and `docs/ROADMAP_PROTOCOL.md`. Then:

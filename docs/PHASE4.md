@@ -124,7 +124,7 @@ version. All files are written as temporaries and moved in place with the manife
 - `--bench-make S.abench --save-session KIND [...] --bench-save-at T --ticks K [--bench-every N] [--bench-desc TEXT]`: builds the
   session (the `--save-session` kinds), saves at T, loads and runs K ticks recording the orders, loads again replaying them and requires
   the same CRCs, which become the fingerprint.
-- `--bench-regen S.abench` (`tools\benchmark\regen_scenario.cmd [name]`): remakes it with the recorded `make` arguments.
+- `--bench-regen S.abench` (`tools/goldens/bench_scenarios.py materialize <name>`, wr1 t07): remakes it with the recorded `make` arguments.
 
 **Not comparable.** A fingerprint mismatch, a pinned file that differs, or a save that no longer loads prints
 `scenario changed, not comparable: <first diverging tick and system>` and exits 3 (0 with `--bench-allow-changed`); the timings are
@@ -158,7 +158,7 @@ remake it unchanged (make line with a quoted `=` argument), compare with a basel
 checkpoint fingerprint, reject `--ticks 0`, and refuse a scenario with another run's fingerprint and an edited sidecar as "not
 comparable"); `alamo_headless_bench_space_battle*` (slow, FoC data): the OPT3 t07 worker-count check on the space battle from its save
 (0 / 1 / 4 / 16 / machine default; `--bench-allow-changed`, so a sim behaviour change only prints "scenario changed" there - remake the
-scenario with `tools\benchmark\regen_scenario.cmd` and commit it with the change).
+scenario with `tools/goldens/bench_scenarios.py materialize` (wr1 t07) and commit it with the change).
 
 ### BM2 - rendered benchmark runs (2026-11-06, group bm2)
 
@@ -246,7 +246,7 @@ output) plus the format-2 keys (`host game`, `mode`, `preset`, `frames_per_tick`
 
 **Regenerate** (after a save-format, sim-behaviour or game-data change: "scenario changed, not comparable", exit 3):
 `alamo_game --hidden --bench-regen tests/benchmark/<name>.abench` remakes the session from the `make` line, runs
-`--bench-make` on it and bumps `version` when the files changed (headless scenes: `tools\benchmark\regen_scenario.cmd <name>`).
+`--bench-make` on it and bumps `version` when the files changed (headless scenes: `tools/goldens/bench_scenarios.py materialize <name>`).
 `tools\regen_goldens.cmd --bench-check` checks **every** scene with `alamo_headless --bench --runs 1 --warmup 0` (game ones sim-only
 since bm2d t02; a game scene whose save no longer loads exits 3, not comparable, bm2d t01) and `tools\regen_goldens.cmd --only bench`
 remakes the stale ones (game ones with `alamo_game --hidden --bench-regen`); never by hand.

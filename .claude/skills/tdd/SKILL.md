@@ -39,8 +39,8 @@ vocabulary; it is a reference, not a session to run.
   so it can never disagree with the code. Expected values come from an independent source: a known-good literal, a worked example,
   the `docs/re/` spec, a retail probe result. For parity work that source is retail, by tier: tier 1 exact values, tier 2 a
   distribution over many seeds (the parity harness), never the port's own output.
-- **Golden as oracle for new behaviour**: regenerating a golden and calling it the test. A golden catches change; it does not say
-  the behaviour is right. New behaviour needs a test with an independent expected value; goldens move only through `regen-goldens`.
+- **Diff as oracle for new behaviour**: declaring a moved scenario and calling it the test. The behaviour check catches change;
+  it does not say the behaviour is right. New behaviour needs a test with an independent expected value (`behaviour-check`).
 - **Horizontal slicing**: writing all tests first, then all code. Bulk tests check imagined behaviour and lock in structure before
   you understand it. Work in **vertical slices**: one test, one implementation, repeat; each test a **tracer bullet** that responds
   to what the last cycle taught you.

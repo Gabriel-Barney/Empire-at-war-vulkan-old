@@ -1,6 +1,101 @@
 {
- "about": "Write-kind scenarios of tools/goldens/scenario_results.py (wr1 t05): each runs a test program so that it writes its outputs into <out> instead of over the tracked goldens, for the parent-versus-commit diff of tools/goldens/behaviour_check.py. Fields: name; row (docs/status/golden-inventory.md); test (ctest entry giving the program and working directory); args (<src>, <build>, <out> placeholders); goldens (tracked files covered, one per output); outputs (files written into <out>, default the goldens' file names); extra (more outputs that replace no golden, e.g. the run's CRC log); system (the column a non-CRC output difference is charged to; Behaviour: names it); needs (foc, gpu); env; drop (globs of written files that are not results); ignore (regexes of text lines not compared); nightly (left out of the landing check, run by the nightly gate); systems (output -> system, overrides system); key_paths (repo paths outside engine/ the result depends on); fingerprint (args of a command whose output is an input identity, e.g. the installed mod's data); agreement (false: the stored golden is also regenerated for input updates no code diff shows, so the expand-phase agreement check does not apply).",
+ "about": "Scenarios of tools/goldens/scenario_results.py (wr1 t05, t07): each runs a test program so that it writes its outputs into <out>, for the parent-versus-commit diff of tools/goldens/behaviour_check.py (the behaviour check since wr1 t07 removed the stored derived goldens). Fields: name; row (docs/status/golden-inventory.md); test (ctest entry giving the program and working directory) or argv0; args (<src>, <build>, <out> placeholders); outputs (files written into <out>); extra (more outputs); system (the column a non-CRC output difference is charged to; Behaviour: names it); systems (output -> system); needs (foc, gpu); env; drop (globs of written files that are not results); ignore (regexes of text lines not compared); nightly (left out of the landing check, run by the nightly gate); workers (the count a normal run uses) and workers_arg (the option that sets it; behaviour_check.py workers varies it); key_paths (repo paths outside engine/ the result depends on); fingerprint (args of a command whose output is an input identity, e.g. the installed mod's data).",
  "scenarios": [
+  {
+   "name": "skirmish_ai_synthetic",
+   "row": "D1",
+   "test": "alamo_headless_skirmish_ai_synthetic",
+   "args": [
+    "--skirmish-ai",
+    "synthetic",
+    "--quiet",
+    "--crc-out",
+    "<out>/result.crc"
+   ],
+   "outputs": [
+    "result.crc"
+   ],
+   "workers_arg": "--workers"
+  },
+  {
+   "name": "skirmish_ai_foc",
+   "row": "D2",
+   "test": "alamo_headless_skirmish_ai_foc",
+   "args": [
+    "--skirmish-ai",
+    "foc",
+    "--quiet",
+    "--crc-out",
+    "<out>/result.crc"
+   ],
+   "outputs": [
+    "result.crc"
+   ],
+   "needs": [
+    "foc"
+   ],
+   "workers": 4,
+   "workers_arg": "--workers"
+  },
+  {
+   "name": "skirmish_ai_foc_land",
+   "row": "D3",
+   "test": "alamo_headless_skirmish_ai_foc_land",
+   "args": [
+    "--skirmish-ai",
+    "foc-land",
+    "--ticks",
+    "3600",
+    "--quiet",
+    "--crc-out",
+    "<out>/result.crc"
+   ],
+   "outputs": [
+    "result.crc"
+   ],
+   "needs": [
+    "foc"
+   ],
+   "workers": 4,
+   "workers_arg": "--workers"
+  },
+  {
+   "name": "skirmish_ai_foc_land_campaign",
+   "row": "D4",
+   "test": "alamo_headless_skirmish_ai_foc_land_campaign",
+   "args": [
+    "--skirmish-ai",
+    "foc-land-campaign",
+    "--ticks",
+    "3600",
+    "--quiet",
+    "--crc-out",
+    "<out>/result.crc"
+   ],
+   "outputs": [
+    "result.crc"
+   ],
+   "needs": [
+    "foc"
+   ],
+   "workers": 4,
+   "workers_arg": "--workers"
+  },
+  {
+   "name": "replay",
+   "row": "D5",
+   "test": "alamo_headless_replay_workers",
+   "args": [
+    "--replay",
+    "<src>/engine/apps/headless/testdata/replay_stream.acmd",
+    "--crc-out",
+    "<out>/result.crc"
+   ],
+   "outputs": [
+    "result.crc"
+   ],
+   "workers_arg": "--workers"
+  },
   {
    "name": "galactic_ai_hotm",
    "row": "D6",
@@ -10,16 +105,11 @@
     "--galactic-ai",
     "--ticks",
     "18000",
-    "--workers",
-    "4",
     "--quiet",
     "--ai-log",
     "<out>/galactic_ai_hotm_golden.txt",
     "--crc-out",
     "<out>/run.crc"
-   ],
-   "goldens": [
-    "engine/apps/headless/testdata/galactic_ai_hotm_golden.txt"
    ],
    "outputs": [
     "galactic_ai_hotm_golden.txt"
@@ -33,7 +123,9 @@
    ],
    "extra": [
     "run.crc"
-   ]
+   ],
+   "workers": 4,
+   "workers_arg": "--workers"
   },
   {
    "name": "galactic_ai_hotm_human",
@@ -49,15 +141,10 @@
     "Rebel",
     "--human-script",
     "<src>/engine/apps/headless/testdata/galactic_human_hotm.txt",
-    "--workers",
-    "0",
     "--ai-log",
     "<out>/galactic_ai_hotm_human_golden.txt",
     "--crc-out",
     "<out>/run.crc"
-   ],
-   "goldens": [
-    "engine/apps/headless/testdata/galactic_ai_hotm_human_golden.txt"
    ],
    "outputs": [
     "galactic_ai_hotm_human_golden.txt"
@@ -72,7 +159,9 @@
    "nightly": true,
    "extra": [
     "run.crc"
-   ]
+   ],
+   "workers": 0,
+   "workers_arg": "--workers"
   },
   {
    "name": "game_smoke_skirmish",
@@ -87,10 +176,6 @@
     "--png-dir",
     "<out>"
    ],
-   "goldens": [
-    "engine/apps/game/testdata/game_smoke_skirmish.crc",
-    "engine/apps/game/testdata/game_smoke_skirmish.rec"
-   ],
    "system": "commands",
    "needs": [
     "foc",
@@ -102,7 +187,11 @@
     "game_campaign_video_options.png",
     "game_campaign_screen_video.png"
    ],
-   "nightly": true
+   "nightly": true,
+   "outputs": [
+    "game_smoke_skirmish.crc",
+    "game_smoke_skirmish.rec"
+   ]
   },
   {
    "name": "game_smoke_campaign",
@@ -117,10 +206,6 @@
     "--png-dir",
     "<out>"
    ],
-   "goldens": [
-    "engine/apps/game/testdata/game_smoke_campaign.crc",
-    "engine/apps/game/testdata/game_smoke_campaign.rec"
-   ],
    "system": "commands",
    "needs": [
     "foc",
@@ -132,7 +217,11 @@
     "game_campaign_video_options.png",
     "game_campaign_screen_video.png"
    ],
-   "nightly": true
+   "nightly": true,
+   "outputs": [
+    "game_smoke_campaign.crc",
+    "game_smoke_campaign.rec"
+   ]
   },
   {
    "name": "game_smoke_land",
@@ -149,10 +238,6 @@
     "--png-dir",
     "<out>"
    ],
-   "goldens": [
-    "engine/apps/game/testdata/game_smoke_land.crc",
-    "engine/apps/game/testdata/game_smoke_land.rec"
-   ],
    "system": "commands",
    "needs": [
     "foc",
@@ -164,7 +249,11 @@
     "game_campaign_video_options.png",
     "game_campaign_screen_video.png"
    ],
-   "nightly": true
+   "nightly": true,
+   "outputs": [
+    "game_smoke_land.crc",
+    "game_smoke_land.rec"
+   ]
   },
   {
    "name": "game_smoke_screens",
@@ -183,9 +272,6 @@
     "ALAMO_SMOKE_SCREENS": "1",
     "ALAMO_PSEUDO_LOC": "1"
    },
-   "goldens": [
-    "engine/apps/game/testdata/game_smoke_campaign.crc"
-   ],
    "outputs": [
     "game_smoke_campaign.crc"
    ],
@@ -211,17 +297,6 @@
     "--golden-out",
     "<out>"
    ],
-   "goldens": [
-    "engine/apps/sim/testdata/synthetic.acmd",
-    "engine/apps/sim/testdata/synthetic_golden.crc",
-    "engine/apps/sim/testdata/_SPACE_PLANET_CORELLIA_PIRACY.acmd",
-    "engine/apps/sim/testdata/_SPACE_PLANET_CORELLIA_PIRACY_golden.crc",
-    "engine/apps/sim/testdata/_LAND_PLANET_BYSS_KIDNAPPING.acmd",
-    "engine/apps/sim/testdata/_LAND_PLANET_BYSS_KIDNAPPING_golden.crc",
-    "engine/apps/sim/testdata/galactic_hotm_golden.crc",
-    "engine/apps/sim/testdata/story_synthetic_golden.txt",
-    "engine/apps/sim/testdata/story_underworld_golden.txt"
-   ],
    "system": "commands",
    "needs": [
     "foc"
@@ -229,7 +304,18 @@
    "systems": {
     "story_synthetic_golden.txt": "story",
     "story_underworld_golden.txt": "story"
-   }
+   },
+   "outputs": [
+    "synthetic.acmd",
+    "synthetic_golden.crc",
+    "_SPACE_PLANET_CORELLIA_PIRACY.acmd",
+    "_SPACE_PLANET_CORELLIA_PIRACY_golden.crc",
+    "_LAND_PLANET_BYSS_KIDNAPPING.acmd",
+    "_LAND_PLANET_BYSS_KIDNAPPING_golden.crc",
+    "galactic_hotm_golden.crc",
+    "story_synthetic_golden.txt",
+    "story_underworld_golden.txt"
+   ]
   },
   {
    "name": "sim_battles",
@@ -239,12 +325,12 @@
     "--golden-out",
     "<out>"
    ],
-   "goldens": [
-    "engine/apps/sim/testdata/battle_synthetic_golden.crc",
-    "engine/apps/sim/testdata/battle_queue_golden.crc",
-    "engine/apps/sim/testdata/battle_bm_golden.crc"
-   ],
-   "system": "battle.state"
+   "system": "battle.state",
+   "outputs": [
+    "battle_synthetic_golden.crc",
+    "battle_queue_golden.crc",
+    "battle_bm_golden.crc"
+   ]
   },
   {
    "name": "sim_battle_l1",
@@ -254,10 +340,10 @@
     "--golden-out",
     "<out>"
    ],
-   "goldens": [
-    "engine/apps/sim/testdata/battle_l1_golden.crc"
-   ],
-   "system": "battle.abilities"
+   "system": "battle.abilities",
+   "outputs": [
+    "battle_l1_golden.crc"
+   ]
   },
   {
    "name": "ai_perception",
@@ -267,10 +353,10 @@
     "--golden-out",
     "<out>"
    ],
-   "goldens": [
-    "engine/ai/tests/golden/ai_golden.txt"
-   ],
-   "system": "galactic.ai"
+   "system": "galactic.ai",
+   "outputs": [
+    "ai_golden.txt"
+   ]
   },
   {
    "name": "ai_galactic",
@@ -280,13 +366,13 @@
     "--golden-out",
     "<out>"
    ],
-   "goldens": [
-    "engine/ai/tests/golden/ai_galactic_synthetic_crc.txt",
-    "engine/ai/tests/golden/ai_underworld_crc.txt"
-   ],
    "system": "galactic.ai",
    "needs": [
     "foc"
+   ],
+   "outputs": [
+    "ai_galactic_synthetic_crc.txt",
+    "ai_underworld_crc.txt"
    ]
   },
   {
@@ -297,10 +383,10 @@
     "--write-golden",
     "<out>/ai_tactical_scenario_crc.txt"
    ],
-   "goldens": [
-    "engine/ai/tactical/tests/golden/ai_tactical_scenario_crc.txt"
-   ],
-   "system": "battle.ai"
+   "system": "battle.ai",
+   "outputs": [
+    "ai_tactical_scenario_crc.txt"
+   ]
   },
   {
    "name": "ai_tactical_perception",
@@ -310,10 +396,10 @@
     "--write-golden",
     "<out>/ai_tactical_perception_crc.txt"
    ],
-   "goldens": [
-    "engine/ai/tactical/tests/golden/ai_tactical_perception_crc.txt"
-   ],
-   "system": "battle.ai"
+   "system": "battle.ai",
+   "outputs": [
+    "ai_tactical_perception_crc.txt"
+   ]
   },
   {
    "name": "ai_tactical_world",
@@ -325,10 +411,10 @@
     "--golden-out",
     "<out>"
    ],
-   "goldens": [
-    "engine/ai/tactical/tests/golden/ai_tactical_world_crc.txt"
-   ],
-   "system": "battle.ai"
+   "system": "battle.ai",
+   "outputs": [
+    "ai_tactical_world_crc.txt"
+   ]
   },
   {
    "name": "dmath",
@@ -338,10 +424,10 @@
     "--write-golden",
     "<out>/dmath_golden.txt"
    ],
-   "goldens": [
-    "engine/core/tests/golden/dmath_golden.txt"
-   ],
-   "system": "dmath"
+   "system": "dmath",
+   "outputs": [
+    "dmath_golden.txt"
+   ]
   },
   {
    "name": "galactic_synthetic",
@@ -354,10 +440,10 @@
     "--golden-dir",
     "<out>"
    ],
-   "goldens": [
-    "engine/galactic/tests/golden/galactic_synthetic_crc.txt"
-   ],
-   "system": "galactic.state"
+   "system": "galactic.state",
+   "outputs": [
+    "galactic_synthetic_crc.txt"
+   ]
   },
   {
    "name": "galactic_foc",
@@ -370,12 +456,12 @@
     "--golden-dir",
     "<out>"
    ],
-   "goldens": [
-    "engine/galactic/tests/golden/galactic_foc_crc.txt"
-   ],
    "system": "galactic.state",
    "needs": [
     "foc"
+   ],
+   "outputs": [
+    "galactic_foc_crc.txt"
    ]
   },
   {
@@ -387,16 +473,16 @@
     "--golden-out",
     "<out>"
    ],
-   "goldens": [
-    "engine/shaderxlat/tests/golden/ps11_ops.hlsl",
-    "engine/shaderxlat/tests/golden/ps14_phase.hlsl",
-    "engine/shaderxlat/tests/golden/ps20_ops.hlsl",
-    "engine/shaderxlat/tests/golden/ps30_io.hlsl",
-    "engine/shaderxlat/tests/golden/vs11_skin.hlsl",
-    "engine/shaderxlat/tests/golden/vs20_flow.hlsl",
-    "engine/shaderxlat/tests/golden/vs30_io.hlsl"
-   ],
-   "system": "shaderxlat"
+   "system": "shaderxlat",
+   "outputs": [
+    "ps11_ops.hlsl",
+    "ps14_phase.hlsl",
+    "ps20_ops.hlsl",
+    "ps30_io.hlsl",
+    "vs11_skin.hlsl",
+    "vs20_flow.hlsl",
+    "vs30_io.hlsl"
+   ]
   },
   {
    "name": "abilities_space",
@@ -406,10 +492,10 @@
     "--write-golden",
     "<out>/abilities_space_crc.txt"
    ],
-   "goldens": [
-    "engine/tactical/abilities/tests/golden/abilities_space_crc.txt"
-   ],
-   "system": "battle.abilities"
+   "system": "battle.abilities",
+   "outputs": [
+    "abilities_space_crc.txt"
+   ]
   },
   {
    "name": "combat_space",
@@ -419,10 +505,10 @@
     "--write-golden",
     "<out>/combat_space_crc.txt"
    ],
-   "goldens": [
-    "engine/tactical/combat/tests/golden/combat_space_crc.txt"
-   ],
-   "system": "battle.combat"
+   "system": "battle.combat",
+   "outputs": [
+    "combat_space_crc.txt"
+   ]
   },
   {
    "name": "mod_aol_space",
@@ -437,9 +523,6 @@
     "<build>/bin/alamo_headless.exe",
     "--crc-out",
     "<out>/aol_space.crc"
-   ],
-   "goldens": [
-    "tests/goldens/mods/aol_space.crc"
    ],
    "needs": [
     "foc"
@@ -456,7 +539,9 @@
     "<src>/tests/goldens/mods/aol_space.json",
     "--fingerprint"
    ],
-   "agreement": false
+   "outputs": [
+    "aol_space.crc"
+   ]
   },
   {
    "name": "mod_fotr_space",
@@ -471,9 +556,6 @@
     "<build>/bin/alamo_headless.exe",
     "--crc-out",
     "<out>/fotr_space.crc"
-   ],
-   "goldens": [
-    "tests/goldens/mods/fotr_space.crc"
    ],
    "needs": [
     "foc"
@@ -490,7 +572,9 @@
     "<src>/tests/goldens/mods/fotr_space.json",
     "--fingerprint"
    ],
-   "agreement": false
+   "outputs": [
+    "fotr_space.crc"
+   ]
   },
   {
    "name": "mod_remake_space",
@@ -505,9 +589,6 @@
     "<build>/bin/alamo_headless.exe",
     "--crc-out",
     "<out>/remake_space.crc"
-   ],
-   "goldens": [
-    "tests/goldens/mods/remake_space.crc"
    ],
    "needs": [
     "foc"
@@ -524,7 +605,9 @@
     "<src>/tests/goldens/mods/remake_space.json",
     "--fingerprint"
    ],
-   "agreement": false
+   "outputs": [
+    "remake_space.crc"
+   ]
   },
   {
    "name": "mod_tr_space",
@@ -539,9 +622,6 @@
     "<build>/bin/alamo_headless.exe",
     "--crc-out",
     "<out>/tr_space.crc"
-   ],
-   "goldens": [
-    "tests/goldens/mods/tr_space.crc"
    ],
    "needs": [
     "foc"
@@ -558,7 +638,9 @@
     "<src>/tests/goldens/mods/tr_space.json",
     "--fingerprint"
    ],
-   "agreement": false
+   "outputs": [
+    "tr_space.crc"
+   ]
   }
  ]
 }

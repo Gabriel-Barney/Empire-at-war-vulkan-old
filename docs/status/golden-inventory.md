@@ -1,5 +1,9 @@
 ## Golden inventory (wr1 t01, 2026-11-21)
 
+**wr1 t07 (2026-11-21): every `derived` file below has been removed from git** (the D27-D29 `.abench` manifests stay, they
+hold the recipes; their derived lines are rewritten in each build's materialized copy). The paths are kept as the record of
+what each scenario of `tools/goldens/scenarios.json` replaced; `reference` files stay tracked.
+
 Purpose: the list that "goldens as computed diffs" (`docs/DECISIONS.md`, "Workflow redesign", first bullet) works from.
 Every tracked file that a test (or a check script) compares a run's output against, with its class:
 

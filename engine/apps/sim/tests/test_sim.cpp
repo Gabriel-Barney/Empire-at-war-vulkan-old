@@ -6,15 +6,16 @@
 //   * per-tick step order (T1..T13 and the tactical / common sub-steps)
 //   * command handlers: select / move / attack / stop validation, wire id mapping, execute_direct
 //   * synthetic space map (no game data): record a 600-tick run with live orders + AI stand-ins,
-//     replay it at 0/1/4/N workers -> identical CRC logs, = the record run, = the checked-in golden
-//     (testdata/synthetic_golden.crc; stream testdata/synthetic_stream.acmd must regenerate
-//     byte-identically). Real time pacing gives the same CRCs as the fast runner.
+//     save the stream (it must reload byte for byte), replay it at 0/1/4/N workers -> identical CRC logs, = the record
+//     run. Real time pacing gives the same CRCs as the fast runner. No stored golden (wr1 t07): --golden-out DIR
+//     writes the stream and CRC log for the scenario sim_tests (tools/goldens/scenarios.json), which diffs them
+//     against the parent commit's.
 //   * real data (ALAMO_FOC_DATA set; skipped otherwise): FoC space map _SPACE_PLANET_CORELLIA_PIRACY
 //     and land map _LAND_PLANET_BYSS_KIDNAPPING: spawn with real stats, spatial queries = brute
-//     force, 600 ticks replayed from testdata/<map>.acmd at 0/1/4/N workers = golden.
+//     force, the same record / replay at 0/1/4/N workers.
 //   * S4 story (built with engine/lua): synthetic plot + Lua script over a synthetic galactic campaign,
-//     fired-event log identical for 0/1/4/N workers = testdata/story_synthetic_golden.txt; with
-//     ALAMO_FOC_DATA the opening of Full_Story_Campaign_Underworld = testdata/story_underworld_golden.txt.
+//     fired-event log identical for 0/1/4/N workers; with ALAMO_FOC_DATA the opening of
+//     Full_Story_Campaign_Underworld (the logs across commits: scenario sim_tests).
 //   * q6 game-object Lua scripts (SimConfig::object_scripts): attach order, the service gate and its first-pump
 //     draw, ScriptExit / binding-error / runtime-error / death release, proximity order, a mini company spawner, the
 //     save refusal, identical CRCs for 0/1/4 workers.
@@ -425,14 +426,9 @@ static void check_spatial(const TacticalMode& tm) {
     CHECK(std::vector<tactical::EntityHandle>(got.begin(), got.end()) == brute && brute.size() > 5);
 }
 
-// --------------------------------------------------------------------------- determinism + golden
-static bool same_file(const std::string& path, const std::vector<uint8_t>& bytes) {
-    std::vector<uint8_t> have;
-    return read_host_file(path, have) && have == bytes;
-}
-
-// Records a live run of `map`, replays it at every worker count; compares with the stored stream
-// and golden (or rewrites them with --regen).
+// --------------------------------------------------------------------------- determinism
+// Records a live run of `map`, saves and reloads the stream, replays it at every worker count (each = the live run);
+// with --regen / --golden-out also writes the stream and the first replay's CRC log (the scenario sim_tests).
 static void determinism(const objects::GameObjectTypes& types, const terrain::MapData& map,
                         const std::string& stem, uint64_t ticks) {
     const TypeCrcIndex index(types);
@@ -451,21 +447,21 @@ static void determinism(const objects::GameObjectTypes& types, const terrain::Ma
                 live.log.records.back().parity);
     CHECK(live.ticks == ticks && live.log.records.size() == ticks + 1 && rec.command_count() > 50);
     CHECK(live.applied > 20 && live.rejected > 5);
-    const std::string stream_path = testdata(stem + ".acmd"), golden_path = testdata(stem + "_golden.crc");
+    // wr1 t07: always record -> save -> reload -> replay. With --regen / --golden-out the stream is a result (testdata()),
+    // otherwise a temp file (no stored stream to compare with).
+    const std::string stream_path =
+        g_regen ? testdata(stem + ".acmd") : (fs::temp_directory_path() / ("alamo_sim_tests_" + stem + ".acmd")).string();
+    const std::string golden_path = testdata(stem + "_golden.crc");
     const std::vector<uint8_t> bytes = rec.to_bytes();
-    if (g_regen) {
-        std::string err;
-        CHECK(rec.save(stream_path, &err));
-    } else {
-        CHECK(same_file(stream_path, bytes));  // the record path regenerates the stream byte for byte
-    }
-    cmd::CommandRecording stored;
     std::string err;
+    CHECK(rec.save(stream_path, &err));
+    cmd::CommandRecording stored;
     if (!cmd::CommandRecording::load(stream_path, stored, &err)) {
         std::printf("FAIL %s: %s\n", stream_path.c_str(), err.c_str());
         ++g_fail;
         return;
     }
+    CHECK(stored.to_bytes() == bytes);  // the saved stream reloads byte for byte
     CrcLog first;
     for (int32_t workers : jobs::determinism_worker_counts()) {
         MapRunSpec r;
@@ -481,17 +477,10 @@ static void determinism(const objects::GameObjectTypes& types, const terrain::Ma
     first.comments = {"G0 " + stem + " replay, seed 4242, " + std::to_string(ticks) + " ticks"};
     if (g_regen) {
         CHECK(first.save(golden_path, &err));
-        std::printf("  regenerated %s and %s\n", stream_path.c_str(), golden_path.c_str());
+        std::printf("  wrote %s and %s\n", stream_path.c_str(), golden_path.c_str());
     } else {
-        CrcLog golden;
-        if (!CrcLog::load(golden_path, golden, &err)) {
-            std::printf("FAIL golden %s: %s\n", golden_path.c_str(), err.c_str());
-            ++g_fail;
-        } else {
-            const auto d = first_divergence(golden, first);
-            std::printf("  golden %s: %s\n", (stem + "_golden.crc").c_str(), d.message.c_str());
-            CHECK(!d.diverged);
-        }
+        std::error_code ec;
+        fs::remove(path_from_utf8(stream_path), ec);
     }
 }
 
@@ -786,32 +775,13 @@ static void test_realtime_equals_fast(const World& w) {
 static bool g_regen_story = false;
 static bool g_story_only = false;
 
-static std::string read_text(const std::string& path) {
-    std::vector<uint8_t> b;
-    if (!read_host_file(path, b)) return {};
-    std::string s(b.begin(), b.end());
-    s.erase(std::remove(s.begin(), s.end(), '\r'), s.end());
-    return s;
-}
-
-// Compares `text` with testdata/<name> (or rewrites it with --regen / --regen-story).
+// Writes `text` to testdata/<name> with --regen / --regen-story / --golden-out (the scenario sim_tests); no stored copy
+// is compared (wr1 t07: the scenario diffs the log against the parent commit's).
 static void check_text_golden(const std::string& name, const std::string& text) {
+    if (!g_regen_story) return;
     const std::string path = testdata(name);
-    if (g_regen_story) {
-        std::ofstream(path_from_utf8(path), std::ios::binary) << text;
-        std::printf("  regenerated %s\n", name.c_str());
-        return;
-    }
-    const std::string want = read_text(path);
-    if (want == text) {
-        std::printf("  golden %s: MATCH (%zu bytes)\n", name.c_str(), text.size());
-        return;
-    }
-    size_t i = 0;
-    while (i < want.size() && i < text.size() && want[i] == text[i]) ++i;
-    const size_t line = static_cast<size_t>(std::count(text.begin(), text.begin() + static_cast<std::ptrdiff_t>(i), '\n')) + 1;
-    std::printf("FAIL golden %s differs at line %zu\n", name.c_str(), line);
-    ++g_fail;
+    std::ofstream(path_from_utf8(path), std::ios::binary) << text;
+    std::printf("  wrote %s\n", path.c_str());
 }
 
 #ifdef ALAMO_SIM_HAVE_STORY
@@ -3505,16 +3475,10 @@ static void test_real_data() {
         CHECK(!first_divergence(a, b).diverged && a.records.size() == 2791);
         const std::string golden = testdata("galactic_hotm_golden.crc");
         std::string gerr;
-        if (g_regen) {
+        if (g_regen) {  // wr1 t07: a result of the scenario sim_tests, no stored copy
             CrcLog g = a;
             g.comments = {"G0 + S3: Sandbox_Heart_Of_The_Maw_Underworld, seed 99, 1500 + 30 paused + 60 space + 1200 ticks"};
             CHECK(g.save(golden, &gerr));
-        } else {
-            CrcLog g;
-            CHECK(CrcLog::load(golden, g, &gerr));
-            const auto d = first_divergence(g, a);
-            std::printf("  golden galactic_hotm_golden.crc: %s\n", d.message.c_str());
-            CHECK(!d.diverged);
         }
     }
 #ifdef ALAMO_SIM_HAVE_STORY
@@ -3578,6 +3542,10 @@ int main(int argc, char** argv) {
             g_golden_out = argv[++i];
         } else if (std::strcmp(argv[i], "--regen-story") == 0) g_regen_story = true;
         else if (std::strcmp(argv[i], "--story-only") == 0) g_story_only = true;
+    if ((g_regen || g_regen_story) && g_golden_out.empty()) {
+        std::printf("%s: --regen / --write-golden needs --golden-out DIR (wr1 t07: no stored goldens in the source tree)\n", "alamo_sim_tests");
+        return 2;
+    }
     test_pacing();
     const auto world = make_world();
 #ifdef ALAMO_SIM_HAVE_STORY

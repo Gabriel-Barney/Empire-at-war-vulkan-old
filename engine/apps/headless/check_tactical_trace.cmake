@@ -1,12 +1,12 @@
-# ctest driver of alamo_headless_skirmish_trace (q4hf t02, tactical_trace.hpp). -D EXE, TRACE, GOLDEN, PY (may be empty), Q2TRACE.
-# 1. The synthetic skirmish (no game data) with --check-workers, --golden (its checked-in CRC golden) and --trace-out: only the
-#    first run writes the trace, so the golden and equal CRCs across worker counts show the trace changes nothing in the sim.
+# ctest driver of alamo_headless_skirmish_trace (q4hf t02, tactical_trace.hpp). -D EXE, TRACE, PY (may be empty), Q2TRACE.
+# 1. The synthetic skirmish (no game data) with --check-workers and --trace-out: only the first run writes the trace, so
+#    equal CRCs across worker counts show the trace changes nothing in the sim (wr1 t07: no stored golden).
 # 2. The trace holds the battle: the slots, a first-shot record, a keyframe, destroyed objects and the end reason.
 # 3. q2trace.py validate re-reads the trace, rebuilds the objects frame by frame and recomputes every digest (exit 0 = consistent).
 file(REMOVE "${TRACE}")
 get_filename_component(_dir "${TRACE}" DIRECTORY)
 file(MAKE_DIRECTORY "${_dir}")
-execute_process(COMMAND "${EXE}" --skirmish-ai synthetic --check-workers --quiet --golden "${GOLDEN}" --trace-out "${TRACE}"
+execute_process(COMMAND "${EXE}" --skirmish-ai synthetic --check-workers --quiet --trace-out "${TRACE}"
                 RESULT_VARIABLE _rc)
 if(NOT _rc EQUAL 0)
   message(FATAL_ERROR "alamo_headless --skirmish-ai synthetic --trace-out run failed (exit ${_rc})")

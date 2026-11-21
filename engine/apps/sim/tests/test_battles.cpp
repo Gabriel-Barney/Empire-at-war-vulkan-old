@@ -49,16 +49,6 @@ void test_space_battle(const Data& d) {
     if (g_regen) {
         CHECK(log.save(golden_path(), &err));
         std::printf("  wrote %s\n", golden_path().c_str());
-    } else {
-        CrcLog g;
-        if (!CrcLog::load(golden_path(), g, &err)) {
-            std::printf("FAIL golden %s: %s (run with --regen)\n", golden_path().c_str(), err.c_str());
-            ++g_fail;
-        } else {
-            const auto dv = first_divergence(g, log);
-            std::printf("  golden battle_synthetic_golden.crc: %s\n", dv.message.c_str());
-            CHECK(!dv.diverged);
-        }
     }
 }
 
@@ -281,16 +271,6 @@ void test_orders_and_queue(const Data& d) {
     if (g_regen) {
         CHECK(log.save(queue_golden_path(), &err));
         std::printf("  wrote %s\n", queue_golden_path().c_str());
-    } else {
-        CrcLog g;
-        if (!CrcLog::load(queue_golden_path(), g, &err)) {
-            std::printf("FAIL golden %s: %s (run with --regen)\n", queue_golden_path().c_str(), err.c_str());
-            ++g_fail;
-        } else {
-            const auto dv = first_divergence(g, log);
-            std::printf("  golden battle_queue_golden.crc: %s\n", dv.message.c_str());
-            CHECK(!dv.diverged);
-        }
     }
 }
 
@@ -1816,16 +1796,6 @@ void test_black_market_battle() {
     if (g_regen) {
         CHECK(log.save(path, &err));
         std::printf("  wrote %s\n", path.c_str());
-    } else {
-        CrcLog g;
-        if (!CrcLog::load(path, g, &err)) {
-            std::printf("FAIL golden %s: %s (run with --regen)\n", path.c_str(), err.c_str());
-            ++g_fail;
-        } else {
-            const auto dv = first_divergence(g, log);
-            std::printf("  golden battle_bm_golden.crc: %s\n", dv.message.c_str());
-            CHECK(!dv.diverged);
-        }
     }
 }
 // --- end P4 tactical ---
@@ -3595,6 +3565,10 @@ int main(int argc, char** argv) {
             g_regen = true;
             g_golden_out = argv[++i];
         }
+    }
+    if (g_regen && g_golden_out.empty()) {
+        std::printf("%s: --regen / --write-golden needs --golden-out DIR (wr1 t07: no stored goldens in the source tree)\n", "alamo_sim_battle_tests");
+        return 2;
     }
     auto d = make_data();
     std::printf("space battle\n");

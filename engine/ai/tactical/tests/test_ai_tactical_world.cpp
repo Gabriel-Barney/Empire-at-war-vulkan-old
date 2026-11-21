@@ -2246,17 +2246,6 @@ void test_skirmish() {
     if (g_write_golden) {
         std::ofstream(std::filesystem::path(path), std::ios::binary) << text;
         std::printf("  wrote %s\n", path.c_str());
-    } else {
-        std::ifstream in(std::filesystem::path(path), std::ios::binary);
-        std::string want((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
-        want.erase(std::remove(want.begin(), want.end(), '\r'), want.end());
-        const bool same = want == text;
-        std::printf("  golden %s: %s\n", path.c_str(), same ? "MATCH" : (want.empty() ? "MISSING" : "DIFFERS"));
-        if (!same) {
-            std::ofstream(std::filesystem::path(path + ".actual"), std::ios::binary) << text;
-            std::printf("  actual written to %s.actual\n", path.c_str());
-        }
-        CHECK(same);
     }
 }
 
@@ -3826,6 +3815,10 @@ int main(int argc, char** argv) {
         }
         if (std::strcmp(argv[i], "--only") == 0 && i + 1 < argc) only = argv[++i];
         if (std::strcmp(argv[i], "--list") == 0) list = true;
+    }
+    if (g_write_golden && g_golden_out.empty()) {
+        std::printf("%s: --regen / --write-golden needs --golden-out DIR (wr1 t07: no stored goldens in the source tree)\n", "alamo_ai_tactical_world_tests");
+        return 2;
     }
     size_t ran = 0;
     const auto scenario = [&](const char* name, const std::function<void()>& fn) {

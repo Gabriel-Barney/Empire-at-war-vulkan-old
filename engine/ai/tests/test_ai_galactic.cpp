@@ -11,6 +11,10 @@ int main(int argc, char** argv) {
             g_golden_out = argv[++i];
         }
     }
+    if (g_write_golden && g_golden_out.empty()) {
+        std::printf("%s: --regen / --write-golden needs --golden-out DIR (wr1 t07: no stored goldens in the source tree)\n", "alamo_ai_galactic_tests");
+        return 2;
+    }
     test_cadence();
     test_goal_pass_cadence();  // a2m r2
     test_goal_quota_players();  // bkx1 t01

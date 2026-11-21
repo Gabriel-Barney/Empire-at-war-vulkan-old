@@ -68,7 +68,7 @@ later is asked **before the first lane starts**, in as few cards as possible; do
 4. **Say what is left.** One line: "you can leave now; I stop only for <held questions, `g` tasks, anything that needs a click>".
 
 After the round, a run never waits on Gabriel for something it can decide: a choice the rules or docs settle (tier focus, S3 to
-the backlog, golden drift to `regen-goldens`, a reversible default) is taken and listed in the report as `default taken:`; a task
+the backlog, a behaviour change declared per `behaviour-check`, a reversible default) is taken and listed in the report as `default taken:`; a task
 that truly needs him stays `todo`, its question goes on the held list, and its lane goes on with its other tasks. Command
 spellings that run without a prompt: `docs/WORKFLOW_TIPS.md`, "Unattended runs".
 

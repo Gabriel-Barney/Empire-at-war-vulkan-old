@@ -7,10 +7,12 @@ the landing checks there:
 
   1. build_agent.cmd msvc verify all (every module, the landing tier with one rotating worker count, ALAMO_WC_SLOT),
      with the build record on (ALAMO_RECORD_BUILD=1); the test tier budget is reported (test_tiers.py check);
-  2. build_agent.cmd clang verify all when the placed commits touch sim code (engine/ except render, audio, video, ui);
-  3. tools/lint/golden_merge.py slow origin/dev HEAD (the slow checks of goldens the entries changed);
-  4. tools/goldens/behaviour_check.py range origin/dev HEAD (every sim commit declares `Behaviour:` and no undeclared
-     column moved); its one-line landing record goes to <main checkout>/logs/behaviour_landings.txt (wr1 t04 count).
+  2. build_agent.cmd clang verify all when the placed commits touch sim code (engine/ except render, audio, video, ui)
+     or a build input (toolchain/, cmake/, a CMakeLists.txt, build_agent.cmd);
+  3. tools/goldens/behaviour_check.py range origin/dev HEAD (every sim commit declares `Behaviour:` and no undeclared
+     column moved); its one-line landing record goes to <main checkout>/logs/behaviour_landings.txt;
+  4. with 2: tools/goldens/behaviour_check.py compilers on the two verify trees (each scenario's clang result equals its
+     MSVC result: the cross-compiler check stored goldens gave before wr1 t07 removed them).
 
 All pass: dev is fast-forwarded to the placed commits (`git push origin HEAD:refs/heads/dev`; a rejected push means dev
 moved and the batch is placed again). A failure rejects the entry with the summary file
@@ -39,6 +41,8 @@ sys.path.insert(0, HERE)
 import land_queue as lq  # noqa: E402
 
 NOT_SIM = ("engine/render/", "engine/audio/", "engine/video/", "engine/ui/")
+# Changes that can make the clang and MSVC builds differ without touching sim code (wr1 t07: the compiler check).
+BUILD_INPUTS = ("toolchain/", "cmake/", "CMakeLists.txt", "build_agent.cmd")
 WT_NAME = ".claude/worktrees/verifier"
 TREE = "verify"
 
@@ -66,8 +70,9 @@ def place(wt: str, entries: list[dict], base: str = "origin/dev") -> tuple[str, 
 
 
 def touches_sim(wt: str, base: str, tip: str) -> bool:
+    """Sim code or a build input changed: the clang fast tier and the compiler check run."""
     paths = [p for p in git(wt, "diff", "--name-only", base, tip).splitlines() if p]
-    return any(p.startswith("engine/") and not p.startswith(NOT_SIM) for p in paths)
+    return any((p.startswith("engine/") and not p.startswith(NOT_SIM)) or p.startswith(BUILD_INPUTS) for p in paths)
 
 
 # ---------------------------------------------------------------- checking
@@ -83,10 +88,14 @@ def run_checks(wt: str, base_sha: str, log: list[str]) -> bool:
         steps.append(("clang fast tier", ["cmd", "/d", "/c", os.path.join(wt, "build_agent.cmd"), "clang", TREE, "all"]))
     steps.append(("test tier budget (report only)", [py, "-I", os.path.join(wt, "tools", "lint", "test_tiers.py"), "check",
                                                      "--landing", os.path.join(wt, f"build-{TREE}-msvc", "ctest_junit.xml")]))
-    steps.append(("slow golden checks", [py, "-I", os.path.join(wt, "tools", "lint", "golden_merge.py"), "slow", base_sha, "HEAD"]))
     steps.append(("behaviour check", [py, "-I", os.path.join(wt, "tools", "goldens", "behaviour_check.py"), "range",
                                       base_sha, "HEAD", "--build", os.path.join(wt, f"build-{TREE}-msvc"),
                                       "--log", "auto"]))
+    if touches_sim(wt, base_sha, head):
+        steps.append(("compiler check", [py, "-I", os.path.join(wt, "tools", "goldens", "behaviour_check.py"), "compilers",
+                                         "--build", os.path.join(wt, f"build-{TREE}-msvc"),
+                                         "--msvc-build", os.path.join(wt, f"build-{TREE}-msvc"),
+                                         "--clang-build", os.path.join(wt, f"build-{TREE}-clang")]))
     for name, cmd in steps:
         t0 = time.time()
         r = subprocess.run(cmd, cwd=wt, env=env, capture_output=True, text=True, errors="replace")

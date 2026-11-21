@@ -1,10 +1,10 @@
-# bm2c t02: a committed rendered benchmark scene (tests/benchmark/<name>.abench, host game) timed sim-only by alamo_headless --bench.
+# bm2c t02: a rendered benchmark scene (made per build from tests/benchmark/<name>.abench, host game) timed sim-only by alamo_headless --bench.
 #   cmake -DEXE=<alamo_headless> -DSCENE=<.abench> -DOUT=<dir> -P check_bench_game.cmake
 # One timed run, no warm-up, the scene's full length: exit 0 (the run matched the scene's fingerprint, which is the CRC log of
 # the rendered alamo_game run that made it, so the sim-only run did the rendered run's sim work); the result JSON has BM1's
 # shape (alamo-bench-result, sim-only, no rendering), every scene tick was timed, and the run's final CRC is the manifest's
 # final_crc (the rendered run's). A scene whose save / fingerprint no longer matches the sim exits 3 ("scenario changed, not
-# comparable"): remake it with alamo_game --hidden --bench-regen (tools\regen_goldens.cmd --only bench).
+# comparable"): the build's copy is stale; tools/goldens/bench_scenarios.py materialize remakes it (wr1 t06).
 # Skipped (exit 0) without the scene file or the game data (ALAMO_FOC_DATA).
 cmake_minimum_required(VERSION 3.20)
 foreach(v EXE SCENE OUT)

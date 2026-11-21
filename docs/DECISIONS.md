@@ -512,7 +512,11 @@ and the docs it changes.
   the commit declares (`Behaviour: none`, or the systems it changes). Replaces "Golden CRC files" in CLAUDE.md "Parallel work",
   `tools\regen_goldens.cmd` as the way to accept a behaviour change, and the "landing commit names any golden that changed"
   rule. Kept: the worker-count and MSVC-versus-clang checks (determinism rule 3 is unchanged). Why: 228 of 1,770 dev commits
-  touched stored goldens and they are the files lanes collide on.
+  touched stored goldens and they are the files lanes collide on. **Carried out 2026-11-21 (wr1 t07):** the 127 derived files
+  are gone from git, `regen_goldens`, `golden_merge.py`, `regen_scenario.cmd` and the summary's golden-drift split are
+  retired, skill `behaviour-check` replaces `regen-goldens`, and the verifier adds `behaviour_check.py compilers` for sim
+  landings. Gabriel waived wr1 t04's acceptance (20 landings without a checker disagreement) at 11 clean landings plus t05's
+  coverage run (28 of 29 scenarios reproduced their goldens; the 29th was already stale on dev, ngt1 t04).
 - **Only the verifier pushes `dev`** (wr2). Sessions submit; one serial verifier on a warm tree builds MSVC (plus clang when
   sim code changed), runs the behaviour diff and fast-forwards `dev`. Replaces `tools\land_on_dev.cmd` pushing `dev` from each
   session ("Branching" above, CLAUDE.md "Branches", `docs/BUILD.md` "Landing check"). Gabriel still alone merges `dev` into

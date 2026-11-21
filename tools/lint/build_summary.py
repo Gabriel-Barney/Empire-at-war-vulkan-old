@@ -3,14 +3,13 @@
 Prints the step exits, the number of unique warnings and errors (first few lines), the ctest result with the names of failed
 tests and the tail of their output, and the skips line. Meant for agents: read this instead of the whole log.
 Exits 1 when a step failed, a warning or error was logged, a test failed, or the run did not finish.
-Failed tests are split (2026-11-13) into golden drift (the test's output shows only stored goldens / CRC logs / benchmark
-scenarios that differ: the code changed what a golden records, intended or not) and real failures (a failed CHECK, a
-crash, a timeout, anything else), so a behaviour change that only needs regenerated goldens reads differently from a broken
-test. The exit code stays 1 for both: dev never takes stale goldens.
+Every failed test is a real failure: since wr1 t07 (2026-11-21) no test compares a stored derived golden, so the
+golden-drift split of 2026-11-13 is gone (a behaviour change is judged by tools/goldens/behaviour_check.py against the
+commit's Behaviour: trailer, not by a failing test). `golden_drift` stays in the outcome as an empty list for old readers.
 Usage: build_summary.py [--state <tree>/build_state.json] <log> [<log> ...]
   --state  adds the outcome (rc, failure_kind, golden_drift, real_failures, summary) to the file tools/lint/build_state.py
            wrote: roadmap_store.py record-build copies it into the build record, and the next run's repeat check reads it.
-failure_kind: configure, compile, warnings, test (a real failure), golden (golden drift only), unfinished, other; null on a pass.
+failure_kind: configure, compile, warnings, test (a failed test), unfinished, other; null on a pass.
 Selftest: build_summary.py --selftest
 """
 import io
@@ -38,19 +37,6 @@ STEP_EXIT = re.compile(r'^(configure|build|ctest) exit (-?\d+)\s*$', re.M)
 # ctest prints "100% tests passed out of N" when all pass, "N% tests passed, F tests failed out of M" otherwise.
 TESTS_TOTAL = re.compile(r'\d+% tests passed(?:, (\d+) tests failed)? out of (\d+)')
 SKIPS = re.compile(r'^skips: .*$', re.M)
-# Golden drift: a stored golden, CRC log or benchmark scenario differs. Matches the messages of apps/headless/crc_out.hpp
-# ("golden X: checkpoint tick ..."), ai_run / map_run ("AI golden X: DIFFERS"), the test exes ("FAIL golden X ...",
-# "golden X: DIFFERS"), apps/game/compare_smoke.cmake ("CRC log differs from") and the benchmark checks ("scenario changed,
-# not comparable", "run N vs golden X").
-DRIFT = re.compile(r'\bgolden\b.*(?:DIFFERS|differs|\btick \d+:|DIVERGED|first bad checkpoint)'
-                   r'|^FAIL golden |scenario changed, not comparable|CRC log differs from|\bvs golden\b')
-# Determinism failures are never drift: runs that differ between runs of one build or by worker count (in-test checks
-# print "workers N vs 0: identical" when they agree; the alamo_add_worker_count_check entries compare with <name>_w0.crc).
-NOT_DRIFT = re.compile(r'non-deterministic|differs from run \d|workers? \d+ vs \d+: (?!identical)|golden\b.*_w0\.crc', re.I)
-WORKER_ENTRY = re.compile(r'^(.+)_w\d+$')
-# A failed CHECK of the test harness (engine/test_support): "FAIL <file>:<line>: <expr>"; older exes print "FAILED".
-CHECK_FAIL = re.compile(r'^FAIL(?:ED)? .+\.(?:c|cc|cpp|h|hpp|inl):\d+: ')
-CRASH = re.compile(r'Exception|Timeout|Not Run|SEGFAULT|Child aborted|SIGSEGV')
 
 
 def unique(lines):
@@ -80,25 +66,6 @@ def failed_test_output(lines):
         if cur is not None:
             cur.append(l.rstrip())
     return result
-
-
-def test_statuses(lines):
-    """name -> the status text of its ctest header line ("***Failed  1.2 sec", "***Exception: ...")."""
-    return {m.group(1): m.group(2) for m in (TEST_HEADER.match(l) for l in lines) if m}
-
-
-def classify(status: str, out_lines) -> str:
-    """'golden' when a failed test's output shows only goldens that differ, else 'real'."""
-    if CRASH.search(status):
-        return 'real'
-    if any(NOT_DRIFT.search(l) for l in out_lines):
-        return 'real'
-    drift = sum(1 for l in out_lines if DRIFT.search(l.strip()))
-    if not drift:
-        return 'real'
-    # A golden comparison may end in one failed CHECK of its own; more failed CHECKs than goldens: something else broke too.
-    checks = sum(1 for l in out_lines if CHECK_FAIL.match(l.strip()) and not DRIFT.search(l.strip()))
-    return 'golden' if checks <= drift else 'real'
 
 
 def cache_stats():
@@ -162,28 +129,14 @@ def summarize(paths, tree_name='<tree>', with_cache=True):
             names = re.findall(r'^\s+\d+ - (\S+) \(([^)]*)\)', text.rsplit('The following tests FAILED:', 1)[-1], re.M)
             print('FAILED: ' + ', '.join(f'{n} ({r})' for n, r in names))
             outs = failed_test_output(lines)
-            heads = test_statuses(lines)
-            kinds = {n: classify(heads.get(n, r), outs.get(n, [])) for n, r in names}
-            for n, r in names:  # worker-count entries skipped because their 0-worker setup only drifted follow it
-                w = WORKER_ENTRY.match(n)
-                if 'Not Run' in heads.get(n, r) + r and w and kinds.get(w.group(1)) == 'golden':
-                    kinds[n] = 'golden'
-            drift = [n for n in kinds if kinds[n] == 'golden']
-            real = [n for n in kinds if kinds[n] != 'golden']
-            info['golden_drift'], info['real_failures'] = drift, real
-            if real:
-                print(f'real failures ({len(real)}): ' + ', '.join(real))
-            if drift:
-                print(f'golden drift ({len(drift)}): ' + ', '.join(drift))
-                print('  their output shows only stored goldens that differ: the code changed what they record. Intended: commit,')
-                print(f'  then tools\\regen_goldens.cmd --build-dir {tree_name} --only all (goldens a test exe owns: that exe with')
-                print('  --regen), and say so in the commit message. Not intended: it is a regression, fix the code.')
-            for n in (real + drift)[:MAX_FAILED]:  # real failures first: they are what needs fixing
-                print(f'--- {n}' + (' (golden drift)' if kinds[n] == 'golden' else ''))
+            real = [n for n, _ in names]
+            info['real_failures'] = real
+            for n in real[:MAX_FAILED]:
+                print(f'--- {n}')
                 for l in outs.get(n, [])[-MAX_FAIL_LINES:]:
                     print('  ' + l[:200])
             if kind is None:
-                kind = 'test' if real else 'golden'
+                kind = 'test'
     else:
         print('tests: no ctest result found')
     cache = cache_stats() if with_cache else None
@@ -202,8 +155,7 @@ def summarize(paths, tree_name='<tree>', with_cache=True):
     if bad and kind is None:
         kind = 'test' if ex.get('ctest', '0') != '0' else 'other'
     info['failure_kind'] = kind if bad else None
-    tail = ' (golden drift only: regenerate the goldens if the change was intended)' if bad and kind == 'golden' else ''
-    print('SUMMARY ' + ('FAIL' if bad else 'PASS') + tail)
+    print('SUMMARY ' + ('FAIL' if bad else 'PASS'))
     return (1 if bad else 0), info
 
 
@@ -268,21 +220,14 @@ def selftest() -> int:
             rc, info = summarize([str(log)], with_cache=False)
         if rc != 1:
             bad.append(f'rc {rc}')
-        if info['golden_drift'] != ['alamo_headless_skirmish_ai_foc_land', 'alamo_ai_galactic_tests']:
-            bad.append(f"drift {info['golden_drift']}")
-        if info['real_failures'] != ['alamo_tactical_movement_tests', 'alamo_headless_bench_space_battle_w4',
+        if info['golden_drift'] != []:
+            bad.append(f"drift {info['golden_drift']} (no golden drift since wr1 t07)")
+        if info['real_failures'] != ['alamo_headless_skirmish_ai_foc_land', 'alamo_ai_galactic_tests',
+                                     'alamo_tactical_movement_tests', 'alamo_headless_bench_space_battle_w4',
                                      'alamo_game_smoke_land_golden']:
             bad.append(f"real {info['real_failures']}")
         if info['failure_kind'] != 'test':
             bad.append(f"kind {info['failure_kind']}")
-        head, rest = SAMPLE.split('  3/5 Test', 1)
-        only = head + '\n' + rest[rest.index('20% tests passed'):]
-        only = '\n'.join(l for l in only.splitlines() if not re.search(r' [345] - ', l))
-        log.write_text(only.replace('4 tests failed out of 5', '2 tests failed out of 2'), encoding='utf8')
-        with redirect_stdout(io.StringIO()) as o:
-            rc, info = summarize([str(log)], with_cache=False)
-        if rc != 1 or info['failure_kind'] != 'golden' or 'golden drift only' not in o.getvalue():
-            bad.append(f"golden-only: rc {rc} kind {info['failure_kind']}")
         log.write_text('configure exit 0\nbuild exit 1\nx.cpp(3): error C2001: newline in constant\nAGENT_DONE\n', encoding='utf8')
         with redirect_stdout(io.StringIO()):
             rc, info = summarize([str(log)], with_cache=False)

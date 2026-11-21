@@ -25,18 +25,17 @@ needs what this machine lacks (game data, a GPU) is reported as SKIP and does no
 tree's results with the MSVC tree's. Neither needs a stored file. Any difference fails (determinism rule 3).
 
   python -I tools/goldens/behaviour_check.py commit [REV] [--only REGEX] [--fast] [--report FILE]
-  python -I tools/goldens/behaviour_check.py range BASE HEAD [--expand] [--log FILE]   the landing range (t04): every
-      commit's declarations together, plus whether each scenario's computed diff agrees with its stored golden changing
+  python -I tools/goldens/behaviour_check.py range BASE HEAD [--log FILE]   the landing range (the verifier): every
+      commit's declarations together, each scenario's BASE result against HEAD's
   python -I tools/goldens/behaviour_check.py workers [--counts 1,4,15,16] [--only REGEX] [--fast]
-  python -I tools/goldens/behaviour_check.py compilers [--only REGEX] [--fast]
-  python -I tools/goldens/behaviour_check.py goldens [--only REGEX] [--fast]   wr1 t05 / t07: this checkout's results
-      against the tracked goldens they replace (a scenario that does not reproduce its golden covers nothing)
+  python -I tools/goldens/behaviour_check.py compilers [--only REGEX] [--fast] [--msvc-build DIR --clang-build DIR]
   python -I tools/goldens/behaviour_check.py nightly --history FILE [--build DIR]   the nightly gate's run of the
       scenarios marked `nightly` (GPU smoke, the long galactic AI campaign): range from the last gated night in FILE
-      (tools/gate_scheduled.cmd's history) to HEAD, report only until wr1 t07, logged to logs/behaviour_nightly.txt
+      (tools/gate_scheduled.cmd's history) to HEAD, logged to logs/behaviour_nightly.txt; with --clang-build DIR
+      also their MSVC-versus-clang compare
 
-Scenarios marked `nightly` in tools/goldens/scenarios.json are left out of commit / range (the landing check) unless
---nightly is given.
+Scenarios marked `nightly` in tools/goldens/scenarios.json are left out of commit / range / workers / compilers (the
+landing check) unless --nightly is given. Since wr1 t07 no derived golden is stored: these diffs are the behaviour check.
   python -I tools/goldens/behaviour_check.py trailer [REV]       prints what the commit declares and whether it needs to
   python -I tools/goldens/behaviour_check.py parity BEFORE.json AFTER.json   parity-harness metrics that moved (t08);
       `commit --parity-before F --parity-after F` adds the same line to the report
@@ -376,27 +375,16 @@ def range_declarations(base: str, head: str, repo: str = ROOT) -> tuple[list[str
     return (sorted(declared) if declared is not None else None), missing
 
 
-def agreement(diff_same: bool, golden_changed: bool) -> str:
-    """Expand phase (wr1 t04): a stored golden is regenerated exactly when its scenario's result changes, so the computed
-    diff and the stored-golden change must coincide. Returns '' when they agree, else what disagrees."""
-    if diff_same and golden_changed:
-        return "stored golden changed but the computed results are identical"
-    if not diff_same and not golden_changed:
-        return "computed results differ but the stored golden did not change"
-    return ""
-
-
 def check_range(base: str, head: str, scen: list[sr.Scenario], cache: sr.Cache, build_dir: str, compiler: str,
                 log_path: str | None) -> tuple[bool, list[str]]:
-    """Landing check, expand phase: base..head (the landing range) per scenario, the range's declarations judged, and the
-    agreement with the stored goldens recorded. Report only: the stored goldens stay authoritative until wr1 t07."""
+    """Landing check: base..head (the landing range) per scenario, judged against the range's declarations."""
     base_sha = sr.git(ROOT, "rev-parse", base).strip()
     head_sha = sr.git(ROOT, "rev-parse", head).strip()
     declared, missing = range_declarations(base_sha, head_sha)
     lines = [f"behaviour check {base_sha[:8]}..{head_sha[:8]}: "
              + ("declares nothing" if declared is None else "declares none" if not declared else "declares " + ", ".join(declared))
              + (f"; sim commits without a Behaviour: trailer: {', '.join(missing)}" if missing else "")]
-    ok, agree, disagree = True, 0, 0
+    ok, compared = True, 0
     skipped_new = 0
     for s in scen:
         shared = sr.parent_outputs(ROOT, base_sha, head_sha, s)
@@ -415,28 +403,17 @@ def check_range(base: str, head: str, scen: list[sr.Scenario], cache: sr.Cache, 
         d, parts = compare_results(s, old_p, new_p, sub)
         v = judge(declared, d, parts, True)
         ok &= v.ok
-        note = _new_outputs(s, shared) + _run_exits(old_p, new_p)
-        if not s.agreement:
-            lines.append(f"  {'PASS' if v.ok else 'FAIL'} {s.name}: {v.reason}{note} (no golden agreement check)")
-            continue
-        # agreement compares only the outputs that replace a tracked golden (extra outputs replace none)
-        covered = {o for o, _ in zip(s.outputs or ("result.crc",), s.covers())}
-        covered = covered & shared if sub is not None else covered
-        d_cov, _ = compare_results(s, old_p, new_p, covered) if s.kind != "headless" else (d, parts)
-        changed = bool(sr.git(ROOT, "diff", "--name-only", base_sha, head_sha, "--", *s.covers()).strip())
-        bug = agreement(d_cov.same, changed)
-        agree += not bug
-        disagree += bool(bug)
-        lines.append(f"  {'PASS' if v.ok else 'FAIL'} {s.name}: {v.reason}{note}" + (f"  [CHECKER BUG? {bug}]" if bug else ""))
-    summary = (f"{time.strftime('%Y-%m-%dT%H:%M:%S')} {base_sha[:8]}..{head_sha[:8]} scenarios {agree + disagree} agree {agree} "
-               f"disagree {disagree} declaration {'PASS' if ok else 'FAIL'}" + (f" missing-trailer {','.join(missing)}" if missing else "")
+        compared += 1
+        lines.append(f"  {'PASS' if v.ok else 'FAIL'} {s.name}: {v.reason}{_new_outputs(s, shared)}{_run_exits(old_p, new_p)}")
+    summary = (f"{time.strftime('%Y-%m-%dT%H:%M:%S')} {base_sha[:8]}..{head_sha[:8]} scenarios {compared} "
+               f"declaration {'PASS' if ok else 'FAIL'}" + (f" missing-trailer {','.join(missing)}" if missing else "")
                + (f" new {skipped_new}" if skipped_new else ""))
     lines.append("  landing record: " + summary)
     if log_path:
         os.makedirs(os.path.dirname(log_path), exist_ok=True)
         with open(log_path, "a", encoding="utf-8") as f:
             f.write(summary + "\n")
-    return ok and not disagree, lines
+    return ok, lines
 
 
 def _run_exits(*dirs: str) -> str:
@@ -476,42 +453,6 @@ def last_gated_sha(history: str, head: str) -> str | None:
     return found
 
 
-def check_goldens(scen: list[sr.Scenario], cache: sr.Cache, build_dir: str, compiler: str) -> tuple[bool, list[str]]:
-    """Each scenario's HEAD result against the tracked files it covers (wr1 t05 acceptance, t07 precondition). A CRC v1
-    result is compared on the checkpoints a v2 golden keeps; a tracked file is laid out under the output name it
-    replaces, so the compare rules are the parent-versus-commit ones."""
-    import shutil
-    import tempfile
-    lines = [f"golden coverage at HEAD {sr.git(ROOT, 'rev-parse', '--short', 'HEAD').strip()}: results against tracked goldens"]
-    ok = True
-    for s in scen:
-        try:
-            res = sr.result_here(cache, s, ROOT, build_dir, compiler)
-        except RuntimeError as e:
-            ok &= _skip_or_error(s, e, lines)
-            continue
-        tracked = tempfile.mkdtemp(prefix="goldens_")
-        try:
-            outs = (s.outputs or ("result.crc",))[:len(s.covers())]  # extra outputs replace no golden
-            for rel, g in zip(outs, s.covers()):
-                dst = os.path.join(tracked, rel)
-                os.makedirs(os.path.dirname(dst), exist_ok=True)
-                shutil.copyfile(os.path.join(ROOT, g), dst)
-            # compare only the files that have a tracked copy (a result may hold more: screenshots, the run's CRC)
-            view = tempfile.mkdtemp(prefix="result_")
-            for rel in outs:
-                dst = os.path.join(view, rel)
-                os.makedirs(os.path.dirname(dst), exist_ok=True)
-                shutil.copyfile(os.path.join(res, rel), dst)
-            d, _ = compare_results(s, tracked, view)
-            shutil.rmtree(view, ignore_errors=True)
-        finally:
-            shutil.rmtree(tracked, ignore_errors=True)
-        ok &= d.same
-        lines.append(f"  {'PASS' if d.same else 'FAIL'} {s.name} ({len(s.covers())} file(s)): {d.text()}")
-    return ok, lines
-
-
 def _new_outputs(s: sr.Scenario, shared: set | None) -> str:
     """' (new outputs, not compared: ...)' for outputs the parent's definition does not list."""
     if s.kind == "headless" or shared is None:
@@ -538,10 +479,11 @@ def check_workers(counts: list[int], scen: list[sr.Scenario], cache: sr.Cache, b
     return ok, lines
 
 
-def check_compilers(scen: list[sr.Scenario], cache: sr.Cache) -> tuple[bool, list[str]]:
+def check_compilers(scen: list[sr.Scenario], cache: sr.Cache, msvc: str | None = None,
+                    clang: str | None = None) -> tuple[bool, list[str]]:
     lines = [f"compiler check at HEAD {sr.git(ROOT, 'rev-parse', '--short', 'HEAD').strip()}: clang tree against MSVC tree"]
     ok = True
-    msvc, clang = sr.default_build("msvc"), sr.default_build("clang")
+    msvc, clang = msvc or sr.default_build("msvc"), clang or sr.default_build("clang")
     for s in scen:
         try:
             d, _ = compare_results(s, sr.result_here(cache, s, ROOT, msvc, "msvc"), sr.result_here(cache, s, ROOT, clang, "clang"))
@@ -724,9 +666,6 @@ def selftest() -> int:
         check(last_gated_sha(hist, "c" * 40) == "a" * 40 and last_gated_sha(hist, "d" * 40) == "c" * 8,
               "the last gated night other than tonight's commit (short shas as the gate writes them)")
 
-    # expand phase: computed diff and stored-golden change must coincide
-    check(agreement(True, False) == "" and agreement(False, True) == "", "agreement when both or neither change")
-    check("identical" in agreement(True, True) and "did not change" in agreement(False, False), "disagreement both ways")
 
     for b in bad:
         print("behaviour_check selftest FAIL: " + b)
@@ -742,7 +681,9 @@ def main(argv: list[str]) -> int:
     import argparse
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     ap.add_argument("command", nargs="?",
-                    choices=("commit", "range", "workers", "compilers", "goldens", "nightly", "trailer", "parity"))
+                    choices=("commit", "range", "workers", "compilers", "nightly", "trailer", "parity"))
+    ap.add_argument("--msvc-build", help="compilers: the MSVC tree (default this worktree's)")
+    ap.add_argument("--clang-build", help="compilers: the clang tree (default this worktree's)")
     ap.add_argument("--nightly", action="store_true", help="commit / range: include the scenarios marked nightly")
     ap.add_argument("--history", help="nightly: tools\\gate_scheduled.cmd's history file")
     ap.add_argument("--log", help="range: append the one-line landing record to this file")
@@ -775,9 +716,10 @@ def main(argv: list[str]) -> int:
     if not a.command:
         ap.error("a command is needed")
     build = os.path.abspath(a.build) if a.build else sr.default_build(a.compiler)
+    if a.command == "compilers" and a.msvc_build and not a.build:
+        build = os.path.abspath(a.msvc_build)  # the scenarios come from the tree being compared
     try:
-        mode = "only" if a.command == "nightly" else "all" if (a.nightly or a.command in ("goldens", "workers", "compilers")) \
-            else "exclude"
+        mode = "only" if a.command == "nightly" else "all" if a.nightly else "exclude"
         scen = pick(sr.discover(build), a.only, a.fast, slow_tests(build) if a.fast else set(), mode)
     except RuntimeError as e:
         print(f"behaviour_check: {e}", file=sys.stderr)
@@ -812,15 +754,18 @@ def main(argv: list[str]) -> int:
             return 0
         log = os.path.join(sr.main_checkout(ROOT), "logs", "behaviour_nightly.txt")
         ok, lines = check_range(base, head, scen, cache, build, a.compiler, log)
-        lines.append("RESULT " + ("PASS" if ok else "FAIL") + " (expand phase: report only, the stored goldens decide)")
+        if a.clang_build:  # the nightly scenarios' MSVC-versus-clang check (the landing check leaves them out)
+            ok2, lines2 = check_compilers(scen, cache, build, os.path.abspath(a.clang_build))
+            ok &= ok2
+            lines += lines2
+        lines.append("RESULT " + ("PASS" if ok else "FAIL"))
         print("\n".join(lines))
-        return 0
-    elif a.command == "goldens":
-        ok, lines = check_goldens(scen, cache, build, a.compiler)
+        return 0 if ok else 1
     elif a.command == "workers":
         ok, lines = check_workers([int(x) for x in a.counts.split(",") if x], scen, cache, build, a.compiler)
     else:
-        ok, lines = check_compilers(scen, cache)
+        ok, lines = check_compilers(scen, cache, a.msvc_build and os.path.abspath(a.msvc_build),
+                                    a.clang_build and os.path.abspath(a.clang_build))
     lines.append("RESULT " + ("PASS" if ok else "FAIL"))
     text = "\n".join(lines)
     print(text)

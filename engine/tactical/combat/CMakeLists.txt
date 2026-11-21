@@ -47,5 +47,5 @@ if(TARGET alamo_tactical_movement)
   target_compile_definitions(alamo_tactical_combat_tests PRIVATE ALAMO_COMBAT_TESTS_HAVE_MOVEMENT=1)
 endif()
 add_test(NAME alamo_tactical_combat_tests
-         COMMAND alamo_tactical_combat_tests --golden ${CMAKE_CURRENT_SOURCE_DIR}/tests/golden/combat_space_crc.txt)
+         COMMAND alamo_tactical_combat_tests)  # battle CRC across commits: scenario combat_space (wr1 t07)
 set_tests_properties(alamo_tactical_combat_tests PROPERTIES TIMEOUT 300)

@@ -463,24 +463,18 @@ void test_emitter(const std::vector<Blob>& syn) {
         if (f.samplers.size() == 3) CHECK(f.samplers[1].dim == TextureDim::Cube);
     }
 
-    // Golden text.
+    // Emitted HLSL across commits: the scenario shaderxlat_emitter (tools/goldens/scenarios.json; wr1 t07: no stored
+    // golden). --write-golden / --golden-out write it.
+    if (!g_write_golden) return;
     const std::filesystem::path gdir =
         g_golden_out.empty() ? std::filesystem::path(ALAMO_SHADERXLAT_GOLDEN_DIR) : std::filesystem::path(g_golden_out);
     for (const char* name : {"vs11_skin", "vs20_flow", "ps11_ops", "ps14_phase", "ps20_ops", "vs30_io", "ps30_io"}) {
         if (!tr.count(name)) continue;
         const std::filesystem::path f = gdir / (std::string(name) + ".hlsl");
-        if (g_write_golden) {
-            std::filesystem::create_directories(gdir);
-            std::ofstream o(f, std::ios::binary);
-            o << tr[name].hlsl;
-            std::printf("  wrote %s\n", f.string().c_str());
-            continue;
-        }
-        std::ifstream in(f, std::ios::binary);
-        const std::string want((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
-        const bool same = !want.empty() && want == tr[name].hlsl;
-        if (!same) std::printf("  golden mismatch: %s (rerun with --write-golden after reviewing)\n", f.string().c_str());
-        CHECK(same);
+        std::filesystem::create_directories(gdir);
+        std::ofstream o(f, std::ios::binary);
+        o << tr[name].hlsl;
+        std::printf("  wrote %s\n", f.string().c_str());
     }
 }
 
@@ -961,6 +955,10 @@ int main(int argc, char** argv) {
             g_golden_out = argv[++i];
         } else if (a == "--dump" && i + 1 < argc) g_dump_dir = argv[++i];
         else mode = a;
+    }
+    if (g_write_golden && g_golden_out.empty()) {
+        std::printf("%s: --regen / --write-golden needs --golden-out DIR (wr1 t07: no stored goldens in the source tree)\n", "alamo_shaderxlat_tests");
+        return 2;
     }
     const std::vector<Blob> syn = synthetic_blobs();
     std::string note;

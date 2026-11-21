@@ -267,7 +267,8 @@ void print_stats(const char* label, const bench::TickStats& s, uint64_t first_ti
 
 int not_comparable(const BenchOptions& opt, const std::string& why) {
     std::printf("bench: scenario changed, not comparable: %s\n", why.c_str());
-    std::printf("bench: regenerate it with tools\\benchmark\\regen_scenario.cmd (alamo_headless --bench-regen %s)\n", opt.scenario.c_str());
+    std::printf("bench: the scenario is stale for this build; tools/goldens/bench_scenarios.py materialize remakes it "
+                "(alamo_headless --bench-regen %s)\n", opt.scenario.c_str());
     return opt.allow_changed ? 0 : kExitNotComparable;
 }
 

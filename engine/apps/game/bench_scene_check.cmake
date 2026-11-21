@@ -1,9 +1,9 @@
-# bm3: a committed rendered benchmark scene (tests/benchmark/<name>.abench, host game) runs and its fingerprint holds.
+# bm3: a rendered benchmark scene (made per build from tests/benchmark/<name>.abench, host game) runs and its fingerprint holds.
 #   cmake -DGAME=<alamo_game> -DSCENE=<.abench> -DOUT=<dir> [-DTICKS=120] -P bench_scene_check.cmake
 # One short hidden alamo_game --bench-scenario run (the scenario's own mode / preset / camera, TICKS ticks instead of its full length; the
 # fingerprint covers those ticks): exit 0, the report says result ok, fingerprint match, the scenario's file name, load_ms and a hitch
 # summary, and the GPU timer scopes when the queue has timestamps. A scene whose save/fingerprint no longer matches the sim exits 3
-# ("scenario changed, not comparable"): remake it with tools\goldens\regen_goldens.py / alamo_game --bench-regen (docs/PHASE4.md, BM3).
+# ("scenario changed, not comparable"): the build's copy is stale; tools/goldens/bench_scenarios.py materialize remakes it (wr1 t06).
 # Skipped (exit 0) without the game data (ALAMO_FOC_DATA) or the scene file.
 if(NOT EXISTS "${SCENE}")
   message(STATUS "bench scene: ${SCENE} missing: skipped")

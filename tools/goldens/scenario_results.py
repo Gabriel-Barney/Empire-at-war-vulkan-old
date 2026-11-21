@@ -1,13 +1,11 @@
 #!/usr/bin/env python3
 """Scenario results computed from a build, cached outside git (wr1 t02, "Goldens as computed diffs").
 
-A scenario is a run whose output replaces a derived golden of docs/status/golden-inventory.md. Two kinds:
-
-  - headless: a ctest entry of a build tree that runs alamo_headless with `--golden <tracked file>`, found by `discover`.
-    Its result is the full CRC log the run writes with `--crc-out` (ALAMO_CRC 1, every tick), stored as `result.crc`.
-  - write (wr1 t05): an entry of tools/goldens/scenarios.json: a test executable (taken from its ctest entry) or a script,
-    run with arguments that write its outputs into a result folder (`<out>` in the arguments) instead of over the tracked
-    files. Its result is that folder: CRC logs, own text formats, binary recordings or screenshots, one file per output.
+A scenario is a run whose outputs used to be stored as a derived golden (docs/status/golden-inventory.md; wr1 t07
+removed the stored files): an entry of tools/goldens/scenarios.json, a test executable (taken from its ctest entry) or a
+script run with arguments that write its outputs into a result folder (`<out>` in the arguments). Its result is that
+folder: CRC logs (`--crc-out`, ALAMO_CRC 1, every tick), own text formats, binary recordings or screenshots.
+(Kind `headless`, a scenario run with `--crc-out result.crc` appended, is kept for Scenario objects built directly.)
 
 Results are stored under the main checkout's `.cache/scenario-results/` (gitignored;
 `ALAMO_SCENARIO_CACHE` overrides), keyed by
@@ -57,9 +55,6 @@ SOURCE_PATHS = ("engine", "CMakeLists.txt", "tests/benchmark")
 DATA_VARS = ("ALAMO_FOC_DATA", "ALAMO_EAW_DATA")
 KEY_VERSION = 1
 BASE_WORKTREE = ".claude/worktrees/scenario-base"
-# Comparison and output options a scenario's ctest command carries; the definition is the command without them.
-_OPT_WITH_VALUE = ("--golden", "--crc-out", "--profile-out", "--crc-checkpoint", "--crc-keep", "--workers")
-_OPT_FLAG = ("--check-workers", "--profile")
 
 
 # ---------------------------------------------------------------- small helpers
@@ -104,9 +99,8 @@ class Scenario:
     cwd: str             # working directory with placeholders
     workers: int | None  # the worker count the ctest entry used (None: the program default)
     kind: str = "headless"   # headless (--crc-out result.crc) or write (argv writes the outputs into <out>)
-    goldens: tuple = ()      # every tracked file the scenario covers (write kind: one per output, same order)
-    outputs: tuple = ()      # write kind: the files the run writes into <out>, relative to it; the first len(goldens)
-                             # replace the goldens in order, any after them (registry `extra`) replace none
+    goldens: tuple = ()      # unused since wr1 t07 (the stored goldens are gone); `golden` names the inventory row
+    outputs: tuple = ()      # write kind: the files the run writes into <out>, relative to it (registry outputs + extra)
     system: str = ""         # the column a difference in a non-CRC output is charged to (Behaviour: names it)
     needs: tuple = ()        # what the run needs besides a build: foc (game data), gpu, mod:<workshop id>
     workers_arg: str = ""    # write kind: the option that sets the worker count ("" = the run picks its own counts)
@@ -117,17 +111,12 @@ class Scenario:
     key_paths: tuple = ()    # repo paths outside SOURCE_PATHS the result depends on (a mod spec, its runner script)
     fingerprint: tuple = ()  # args (after argv0) of a command whose output is an input identity (an installed mod's data)
     output_systems: tuple = ()  # (output, system) pairs that override `system` for one output
-    agreement: bool = True   # expand phase: the stored golden changes exactly when the result does (False: it is also
-                             # regenerated for input updates no code diff shows, e.g. a workshop mod update)
 
     def definition(self) -> dict:
         d = {"argv": list(self.argv), "cwd": self.cwd}
         if self.kind != "headless":  # headless keys stay as they were before wr1 t05
             d.update(kind=self.kind, outputs=list(self.outputs), env=[list(x) for x in self.env], drop=list(self.drop))
         return d
-
-    def covers(self) -> tuple:
-        return self.goldens or (self.golden,)
 
 
 def _placeholders(value: str, build_dir: str, src_dir: str) -> str:
@@ -141,45 +130,6 @@ def _placeholders(value: str, build_dir: str, src_dir: str) -> str:
 
 def _resolve(value: str, build_dir: str, src_dir: str) -> str:
     return value.replace("<build>", build_dir.replace("\\", "/")).replace("<src>", src_dir.replace("\\", "/"))
-
-
-def split_command(cmd: list[str]) -> tuple[list[str], int | None]:
-    out, workers, i = [], None, 0
-    while i < len(cmd):
-        a = cmd[i]
-        if a in _OPT_WITH_VALUE:
-            if a == "--workers" and i + 1 < len(cmd):
-                workers = int(cmd[i + 1])
-            i += 2
-            continue
-        if a in _OPT_FLAG:
-            i += 1
-            continue
-        out.append(a)
-        i += 1
-    return out, workers
-
-
-def scenarios_from_ctest(tests: list[dict], build_dir: str, src_dir: str, tracked: set[str]) -> list[Scenario]:
-    """One scenario per tracked golden that an alamo_headless ctest entry passes to --golden (first entry by name)."""
-    seen: dict[str, Scenario] = {}
-    for t in sorted(tests, key=lambda t: t["name"]):
-        cmd = t.get("command") or []
-        if "--golden" not in cmd or not os.path.basename(cmd[0]).lower().startswith("alamo_headless"):
-            continue
-        g = norm(cmd[cmd.index("--golden") + 1])
-        src = norm(src_dir)
-        if not g.startswith(src + "/"):
-            continue
-        rel = g[len(src) + 1:]
-        if rel not in tracked or rel in seen:
-            continue
-        cwd = next((p["value"] for p in t.get("properties", []) if p.get("name") == "WORKING_DIRECTORY"), build_dir)
-        argv, workers = split_command(cmd)
-        name = os.path.splitext(os.path.basename(rel))[0]
-        seen[rel] = Scenario(name, rel, t["name"], tuple(_placeholders(a, build_dir, src_dir) for a in argv),
-                             _placeholders(cwd, build_dir, src_dir), workers)
-    return sorted(seen.values(), key=lambda s: s.name)
 
 
 REGISTRY = os.path.join("tools", "goldens", "scenarios.json")
@@ -202,17 +152,21 @@ def scenarios_from_registry(entries: list[dict], tests: list[dict], build_dir: s
             cwd = _placeholders(cwd, build_dir, src_dir)
         else:
             argv0, cwd = e["argv0"], e.get("cwd", "<build>")
-        goldens = tuple(e["goldens"])
-        outputs = tuple(e.get("outputs") or [os.path.basename(g) for g in goldens])
-        if len(outputs) != len(goldens):
-            raise RuntimeError(f"{REGISTRY}: {e['name']}: {len(goldens)} goldens but {len(outputs)} outputs")
-        outputs += tuple(e.get("extra", []))  # results that replace no golden (a run's CRC log beside its AI log)
-        out.append(Scenario(e["name"], goldens[0], e.get("test", ""), (argv0, *e.get("args", [])), cwd, None, "write",
-                            goldens, outputs, e.get("system", ""), tuple(e.get("needs", [])), e.get("workers_arg", ""),
+        outputs = _entry_outputs(e)
+        if not outputs:
+            raise RuntimeError(f"{REGISTRY}: {e['name']}: no outputs")
+        out.append(Scenario(e["name"], e.get("row", e["name"]), e.get("test", ""), (argv0, *e.get("args", [])), cwd, e.get("workers"),
+                            "write", (), outputs, e.get("system", ""), tuple(e.get("needs", [])), e.get("workers_arg", ""),
                             tuple(sorted(e.get("env", {}).items())), tuple(e.get("drop", [])), tuple(e.get("ignore", [])),
                             bool(e.get("nightly", False)), tuple(e.get("key_paths", [])), tuple(e.get("fingerprint", [])),
-                            tuple(sorted(e.get("systems", {}).items())), bool(e.get("agreement", True))))
+                            tuple(sorted(e.get("systems", {}).items()))))
     return out
+
+
+def _entry_outputs(e: dict) -> tuple:
+    """A registry entry's outputs: `outputs` (before wr1 t07 an entry could list `goldens` instead: their file names), then
+    `extra` (outputs that replaced no golden)."""
+    return tuple(e.get("outputs") or [os.path.basename(g) for g in e.get("goldens", [])]) + tuple(e.get("extra", []))
 
 
 def registry_entry(repo: str, commit: str, name: str) -> dict | None:
@@ -240,9 +194,7 @@ def parent_outputs(repo: str, base: str, head: str, scenario: Scenario) -> set |
     if old is None or new is None or any(old.get(k) != new.get(k) for k in ("test", "argv0", "args", "env")):
         return None
 
-    def outs(e: dict) -> set:
-        return set(e.get("outputs") or [os.path.basename(g) for g in e.get("goldens", [])]) | set(e.get("extra", []))
-    return outs(old) & outs(new)
+    return set(_entry_outputs(old)) & set(_entry_outputs(new))
 
 
 def load_registry(src_dir: str = ROOT) -> list[dict]:
@@ -257,11 +209,8 @@ def discover(build_dir: str, src_dir: str = ROOT) -> list[Scenario]:
     r = subprocess.run([find_ctest(), "--test-dir", build_dir, "--show-only=json-v1"], capture_output=True, text=True)
     if r.returncode != 0:
         raise RuntimeError(f"ctest --show-only failed in {build_dir}: {r.stderr.strip()}")
-    tracked = set(git(src_dir, "ls-files").splitlines())
     tests = json.loads(r.stdout).get("tests", [])
-    found = scenarios_from_ctest(tests, build_dir, src_dir, tracked) + \
-        scenarios_from_registry(load_registry(src_dir), tests, build_dir, src_dir)
-    return sorted(found, key=lambda s: s.name)
+    return sorted(scenarios_from_registry(load_registry(src_dir), tests, build_dir, src_dir), key=lambda s: s.name)
 
 
 # ---------------------------------------------------------------- keys
@@ -452,10 +401,10 @@ def run_scenario(scenario: Scenario, build_dir: str, src_dir: str, out_dir: str,
         argv += ["--crc-out", os.path.join(out_dir, "result.crc")]
         expected = ["result.crc"]
     else:
-        if workers is not None:
+        if w is not None:  # the registry's count, or the one asked for
             if not scenario.workers_arg:
                 raise RuntimeError(f"{scenario.name}: the run picks its own worker counts (no workers_arg)")
-            argv += [scenario.workers_arg, str(workers)]
+            argv += [scenario.workers_arg, str(w)]
         expected = list(scenario.outputs)
         for rel in expected:
             os.makedirs(os.path.dirname(os.path.join(out_dir, rel)), exist_ok=True)
@@ -630,16 +579,8 @@ def selftest() -> int:
         check(source_key(repo, c1) == source_key(repo, c2), "a docs-only commit keeps the source key")
         check(source_key(repo, c2) != source_key(repo, c3), "an engine change moves the source key")
         build = os.path.join(tmp, "build")
-        tests = [{"name": "alamo_headless_x", "command": [f"{build}/bin/alamo_headless.exe", "--skirmish-ai", "foc", "--workers",
-                                                          "4", "--quiet", "--golden", f"{repo}/engine/t/x_golden.crc"],
-                  "properties": [{"name": "WORKING_DIRECTORY", "value": f"{build}/engine/apps"}]},
-                 {"name": "alamo_headless_x_w4", "command": [f"{build}/bin/alamo_headless.exe", "--golden", f"{build}/x_w0.crc"]},
-                 {"name": "other", "command": [f"{build}/bin/other.exe", "--golden", f"{repo}/engine/t/x_golden.crc"]}]
-        sc = scenarios_from_ctest(tests, build, repo, {"engine/t/x_golden.crc"})
-        check(len(sc) == 1 and sc[0].name == "x_golden", f"discovery keeps only tracked alamo_headless goldens: {sc}")
-        s = sc[0]
-        check(s.argv == ("<build>/bin/alamo_headless.exe", "--skirmish-ai", "foc", "--quiet") and s.workers == 4
-              and s.cwd == "<build>/engine/apps", f"definition strips options and uses placeholders: {s}")
+        s = Scenario("x_golden", "D0", "alamo_headless_x", ("<build>/bin/alamo_headless.exe", "--skirmish-ai", "foc", "--quiet"),
+                     "<build>/engine/apps", 4)
         s2 = dataclasses.replace(s, argv=s.argv + ("--ticks", "100"))
         d0 = {"ALAMO_FOC_DATA": None, "ALAMO_EAW_DATA": None}
         d1 = {"ALAMO_FOC_DATA": {"path": "x", "files": "1"}, "ALAMO_EAW_DATA": None}
@@ -718,18 +659,20 @@ def selftest() -> int:
 
         # write kind: registry entries, <out> substitution, result folders with several files
         reg = [{"name": "ai_x", "test": "alamo_ai_x_tests", "args": ["--write-golden", "<out>/a.txt"],
-                "goldens": ["engine/ai/g/a.txt"], "system": "battle.ai", "needs": ["foc"], "extra": ["run.crc"]},
-               {"name": "two", "argv0": "python", "args": ["<src>/tools/w.py", "<out>"], "goldens": ["g/1.crc", "g/2.txt"],
+                "outputs": ["a.txt"], "system": "battle.ai", "needs": ["foc"], "extra": ["run.crc"]},
+               {"name": "two", "argv0": "python", "args": ["<src>/tools/w.py", "<out>"],
                 "outputs": ["sub/1.crc", "2.txt"]},
-               {"name": "absent", "test": "not_built", "goldens": ["g/z.txt"]}]
+               {"name": "absent", "test": "not_built", "outputs": ["z.txt"]}]
         tests2 = [{"name": "alamo_ai_x_tests", "command": [f"{build}/bin/alamo_ai_x_tests.exe"],
                    "properties": [{"name": "WORKING_DIRECTORY", "value": f"{build}/engine/ai"}]}]
         ws = {x.name: x for x in scenarios_from_registry(reg, tests2, build, repo)}
         check(sorted(ws) == ["ai_x", "two"], f"registry: a scenario whose test is not built is left out: {sorted(ws)}")
         check(ws["ai_x"].argv == ("<build>/bin/alamo_ai_x_tests.exe", "--write-golden", "<out>/a.txt")
               and ws["ai_x"].cwd == "<build>/engine/ai" and ws["ai_x"].outputs == ("a.txt", "run.crc")
-              and ws["ai_x"].covers() == ("engine/ai/g/a.txt",), f"registry argv, extra outputs: {ws['ai_x']}")
-        check(ws["two"].outputs == ("sub/1.crc", "2.txt") and ws["two"].covers() == ("g/1.crc", "g/2.txt"), "outputs map")
+              , f"registry argv, extra outputs: {ws['ai_x']}")
+        check(ws["two"].outputs == ("sub/1.crc", "2.txt"), "outputs map")
+        check(_entry_outputs({"goldens": ["g/1.crc"], "extra": ["r.crc"]}) == ("1.crc", "r.crc"),
+              "an entry from before wr1 t07 (goldens instead of outputs) still gives its outputs")
         check(missing_needs(ws["ai_x"], {}) == ["ALAMO_FOC_DATA"] and not missing_needs(ws["two"], {}), "needs are checked")
         kw = result_key(source_key(repo, c3), ws["two"], d0, "msvc", None)
         check(kw != result_key(source_key(repo, c3), dataclasses.replace(ws["two"], outputs=("x",)), d0, "msvc", None),
@@ -790,11 +733,11 @@ def selftest() -> int:
               "an entry new since the base has none")
         check(parent_outputs(repo, c4, c5, s) == {"result.crc"}, "headless scenarios always have one")
         with open(reg_path, "w") as f:
-            json.dump({"scenarios": [{"name": "two", "args": ["a"], "goldens": ["g/1.crc", "g/2.txt"]}]}, f)
+            json.dump({"scenarios": [{"name": "two", "args": ["a"], "goldens": ["g/1.crc", "g/2.txt"]}]}, f)  # old form
         g("add", "-A"); g("commit", "-q", "-m", "registry 3")
         c6 = g("rev-parse", "HEAD").strip()
         with open(reg_path, "w") as f:
-            json.dump({"scenarios": [{"name": "two", "args": ["a"], "goldens": ["g/1.crc", "g/2.txt", "g/3.txt"]}]}, f)
+            json.dump({"scenarios": [{"name": "two", "args": ["a"], "outputs": ["1.crc", "2.txt", "3.txt"]}]}, f)
         g("add", "-A"); g("commit", "-q", "-m", "registry 4")
         c7 = g("rev-parse", "HEAD").strip()
         check(parent_outputs(repo, c6, c7, ws["two"]) == {"1.crc", "2.txt"}, "an added golden is new, the others compare")
@@ -855,8 +798,8 @@ def main(argv: list[str]) -> int:
     scen = discover(build)
     if a.command == "list" or not a.command:
         for s in scen:
-            more = f" (+{len(s.covers()) - 1} more)" if len(s.covers()) > 1 else ""
-            print(f"{s.name:<45} {s.golden}{more}  ({s.kind}; ctest {s.test or '-'}, workers {s.workers})"
+            more = f" (+{len(s.outputs) - 1} more)" if len(s.outputs) > 1 else ""
+            print(f"{s.name:<30} {s.golden:<8} {(s.outputs or ('result.crc',))[0]}{more}  (ctest {s.test or '-'})"
                   + (f" needs {','.join(s.needs)}" if s.needs else "") + (" nightly" if s.nightly else ""))
         return 0
     match = [s for s in scen if s.name == a.name or s.test == a.name]

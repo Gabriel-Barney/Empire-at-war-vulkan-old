@@ -1,21 +1,18 @@
 #!/usr/bin/env python3
-"""Run one mod golden (tests/goldens/mods/<name>.json; roadmap mcx7 t04, docs/MOD_COMPAT_DESIGN.md §13.3).
+"""Run one mod scenario (tests/goldens/mods/<name>.json; roadmap mcx7 t04, docs/MOD_COMPAT_DESIGN.md §13.3).
 
-A mod golden is a short headless skirmish of a reference mod whose CRC checkpoint log (ALAMO_CRC 2) is checked in as
-tests/goldens/mods/<name>.crc. The spec file next to it names the mod and the run:
-
+A mod scenario is a short headless skirmish of a reference mod. Its CRC log used to be stored as tests/goldens/mods/<name>.crc;
+since wr1 t07 (2026-11-21) it is a scenario of tools/goldens/scenarios.json, computed on the parent and the commit and
+diffed by tools/goldens/behaviour_check.py (nightly tier). The spec file names the mod and the run:
   {"name": "...", "mod": "<workshop id>", "stack": ["STEAMMOD=<id>", ...], "args": [alamo_headless arguments],
-   "fingerprint": "<data fingerprint of the mod when the golden was made>"}
-
-  python -I tools/goldens/mod_golden.py --spec S --exe alamo_headless.exe [more alamo_headless arguments, e.g. --golden F]
-  python -I tools/goldens/mod_golden.py --spec S --fingerprint     print the installed mod's fingerprint (regen_goldens)
-
-It skips (prints "skipped" and exits 0, so ctest_skips.py counts it) when ALAMO_FOC_DATA is not set, when the workshop
-item is not installed (the Steam libraries: the one holding the FoC folder, then ALAMO_STEAM_ROOT or the default client's
-libraryfolders.vdf, as docs/MODS.md §3.1), and when the mod's data changed since the golden was made (a Steam update is
-not a port regression: tools\\regen_goldens.cmd --mods makes the golden again). A regeneration run (--crc-out among the
-arguments) skips only for a missing mod. Otherwise it runs alamo_headless --game <ALAMO_FOC_DATA> <args> <stack>
-[--workers 4] <more arguments> and passes its exit code through.
+   "fingerprint": "<data fingerprint of the mod when the spec was made; informational>"}
+  python -I tools/goldens/mod_golden.py --spec S --exe alamo_headless.exe [more alamo_headless arguments, e.g. --crc-out F]
+  python -I tools/goldens/mod_golden.py --spec S --fingerprint     print the installed mod's fingerprint (the scenario's
+                                                                    input identity in the result cache key)
+It skips (prints "skipped" and exits 0, so ctest_skips.py counts it) when ALAMO_FOC_DATA is not set or the workshop item
+is not installed (the Steam libraries: the one holding the FoC folder, then ALAMO_STEAM_ROOT or the default client's
+libraryfolders.vdf, as docs/MODS.md §3.1). Otherwise it runs alamo_headless --game <ALAMO_FOC_DATA> <args> <stack>
+[--workers 4] <more arguments> and passes its exit code through (the ctest entry: the mod loads and runs without error).
 """
 from __future__ import annotations
 
@@ -104,11 +101,6 @@ def main() -> int:
         return 0
     if not a.exe:
         ap.error("--exe is required")
-    regen = "--crc-out" in rest
-    if not regen and spec.get("fingerprint") and spec["fingerprint"] != fp:
-        print(f"mod golden {name}: the installed {spec.get('name', spec['mod'])} changed since the golden (data {fp}, golden made "
-              f"with {spec['fingerprint']}): skipped; tools\\regen_goldens.cmd --mods makes it again")
-        return 0
     cmd = [a.exe, "--game", game] + list(spec["args"]) + list(spec.get("stack") or ["STEAMMOD=" + spec["mod"]])
     if "--workers" not in rest and "--workers" not in spec["args"]:
         cmd += ["--workers", "4"]

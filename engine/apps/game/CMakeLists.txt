@@ -360,12 +360,9 @@ function(alamo_game_add_exe)
   # Smoke tests (need ALAMO_FOC_DATA; exit 0 "skipped" without it): scripted input through the real menus, PNGs to
   # <build>/smoke_out (Int-final: one folder per build, so the three compilers' runs never overwrite each other), per-tick
   # CRC of the run == a fresh presentation-off replay of its command stream, 0 validation messages.
-  # Int-final: alamo_game_smoke_<kind>_golden then compares the run's dumped CRC log (comments ignored) and command
-  # recording with engine/apps/game/testdata/game_smoke_<kind>.crc / .rec (MSVC-generated; clang must match).
-  # Regenerate after an intended sim change: copy build-msvc/smoke_out/game_smoke_<kind>.crc / .rec over the goldens, or run
-  # tools\regen_goldens.cmd (it converts the .crc to the checkpoint form). The .crc golden may be a full log (ALAMO_CRC 1, exact
-  # line compare) or a checkpoint log (ALAMO_CRC 2, docs/status/golden-checkpoints.md: compared on its stored ticks by
-  # alamo_headless --compare, hence -DHEADLESS below).
+  # wr1 t07: the run's CRC log, command recording and screenshots across commits are the scenarios game_smoke_<kind> of
+  # tools/goldens/scenarios.json (nightly tier; no stored .crc / .rec / baseline PNGs). compare_smoke.cmake still compares
+  # two logs of one build (the screens run against the campaign run; -DHEADLESS for checkpoint logs).
   set(_smoke_headless "")
   if(TARGET alamo_headless)
     set(_smoke_headless -DHEADLESS=$<TARGET_FILE:alamo_headless>)
@@ -387,15 +384,10 @@ function(alamo_game_add_exe)
     endif()
     add_test(NAME alamo_game_smoke_${_k} COMMAND alamo_game --smoke ${_k} --hidden --audio null ${_seed_args} --png-dir ${_smoke_out})
     set_tests_properties(alamo_game_smoke_${_k} PROPERTIES TIMEOUT 1800 FIXTURES_SETUP alamo_game_smoke_${_k}_run)
-    add_test(NAME alamo_game_smoke_${_k}_golden
-             COMMAND ${CMAKE_COMMAND} -DACTUAL=${_smoke_out}/game_smoke_${_k}
-                     -DGOLDEN=${PROJECT_SOURCE_DIR}/engine/apps/game/testdata/game_smoke_${_k} ${_smoke_headless}
-                     -P ${PROJECT_SOURCE_DIR}/engine/apps/game/compare_smoke.cmake)
-    set_tests_properties(alamo_game_smoke_${_k}_golden PROPERTIES TIMEOUT 120 FIXTURES_REQUIRED alamo_game_smoke_${_k}_run)
   endforeach()
   # QA t12: the campaign smoke with the per-screen shots (victory, unit tooltip, video dialog: game_campaign_screen_*.png in
   # smoke_out/screens) and pseudo-localized text. Nothing reads the PNGs: look at them for overflow. Its CRC log and command
-  # recording must still equal the normal campaign golden (the text and the screens never reach the sim).
+  # recording must equal the normal campaign run's (the text and the screens never reach the sim).
   set(_screens_out ${_smoke_out}/screens)
   file(MAKE_DIRECTORY ${_screens_out})
   add_test(NAME alamo_game_smoke_screens COMMAND alamo_game --smoke campaign --hidden --audio null --png-dir ${_screens_out})
@@ -403,9 +395,10 @@ function(alamo_game_add_exe)
                        ENVIRONMENT "ALAMO_SMOKE_SCREENS=1;ALAMO_PSEUDO_LOC=1")
   add_test(NAME alamo_game_smoke_screens_golden
            COMMAND ${CMAKE_COMMAND} -DACTUAL=${_screens_out}/game_smoke_campaign
-                   -DGOLDEN=${PROJECT_SOURCE_DIR}/engine/apps/game/testdata/game_smoke_campaign ${_smoke_headless}
+                   -DGOLDEN=${_smoke_out}/game_smoke_campaign ${_smoke_headless}
                    -P ${PROJECT_SOURCE_DIR}/engine/apps/game/compare_smoke.cmake)
-  set_tests_properties(alamo_game_smoke_screens_golden PROPERTIES TIMEOUT 120 FIXTURES_REQUIRED alamo_game_smoke_screens_run)
+  set_tests_properties(alamo_game_smoke_screens_golden PROPERTIES TIMEOUT 120
+                       FIXTURES_REQUIRED "alamo_game_smoke_screens_run;alamo_game_smoke_campaign_run")
   # N1 follow-up t01: the save / load menus driven like a player (app_script_saveload.cpp): Save with a typed name, the
   # overwrite and delete questions (No / Yes), Load from the in-game menu and from the main menu (tick + state CRC == the
   # save's), a save during a battle loaded back into it. PNGs game_smoke_saveload_*.png; its own saves folder (the run
@@ -433,7 +426,6 @@ function(alamo_game_add_exe)
     set_tests_properties(alamo_game_bench_${_name} PROPERTIES TIMEOUT 1200 FIXTURES_REQUIRED alamo_game_smoke_saveload_run)
   endforeach()
   alamo_label_slow(alamo_game_smoke_skirmish alamo_game_smoke_campaign alamo_game_smoke_land alamo_game_smoke_screens
-                   alamo_game_smoke_skirmish_golden alamo_game_smoke_campaign_golden alamo_game_smoke_land_golden
                    alamo_game_smoke_screens_golden alamo_game_smoke_saveload alamo_game_bench_fixed alamo_game_bench_fixed_galactic
                    alamo_game_bench_realtime alamo_game_bench_fixed_taa)
   # bm2: a scenario made with --bench-make from the battle save and the test recipe (testdata/bench_orbit.abench: fixed

@@ -13,8 +13,6 @@ Each iteration:
 2. **Classify** with the summary's own split:
    - warnings or compile errors: fix the code (zero warnings at MSVC `/W4 /permissive-`; explicit narrowing casts, no shadowing);
    - `real failures`: read the failing test's output, fix the cause in the code;
-   - `golden drift` only: **stop**. Do not regenerate or edit goldens to get green. Report which goldens moved and ask whether the
-     behaviour change was intended (`regen-goldens` skill is the only way to change them);
    - skipped data tests (`skips:`): say so, they prove less.
 3. **Change something before rerunning.** An identical failing rerun is refused (exit 3). `ALAMO_RERUN=1` only for a flaky test or a
    changed environment, and say so when you use it. A flaky sim test while other lanes build: rerun with `ctest -j 2` first.

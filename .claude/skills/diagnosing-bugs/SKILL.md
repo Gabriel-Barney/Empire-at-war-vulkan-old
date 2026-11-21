@@ -70,7 +70,8 @@ scenario gets one ctest entry per worker count (`alamo_add_worker_count_check`),
 code or a fixture, diff against a pristine copy to prove the mutation landed before trusting the result.
 No fitting seam is a finding: record it (backlog, or the task for a Stage 6 group) because the architecture is blocking a lock-down;
 the `codebase-design` skill has the vocabulary for describing the seam that is missing.
-Never edit goldens to get green; a golden that moved on purpose goes through `regen-goldens`.
+Never declare a behaviour change to get green; a result that moved on purpose is declared in the `Behaviour:` trailer
+(`behaviour-check` skill).
 
 ## 6. Cleanup
 

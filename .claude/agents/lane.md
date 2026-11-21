@@ -117,8 +117,8 @@ findings) join the list above; `spec-review` and `codebase-design`'s design-it-t
      whole fast tier (no 4th argument, or `all`) once before landing; the verifier runs it on `dev`'s tip anyway.
    - An identical failing rerun is refused (exit 3, `tools\lint\build_state.py`): it prints the last summary again. Change the
      code first; for a flaky test or a changed environment set `ALAMO_RERUN=1`.
-   Read the summary it prints (`tools\lint\build_summary.py`), not the whole log; zero warnings at MSVC `/W4` and clang. It splits
-   failed tests into `real failures` (fix them first) and `golden drift` (only a stored golden differs: step 7).
+   Read the summary it prints (`tools\lint\build_summary.py`), not the whole log; zero warnings at MSVC `/W4` and clang. Every
+   failed test is a real failure (no stored goldens since wr1 t07).
    - Sim code (everything in `engine/` except render, audio, video, UI): also `& .\build_agent.cmd --% clang wt "<modules>"`
      (`build-wt-clang`), including the CRC selfchecks.
    - `engine/jobs` or other threading code: also `build_asan.cmd` (UBSan; `set ALAMO_SANITIZE=address` for ASan).
@@ -127,10 +127,9 @@ findings) join the list above; `spec-review` and `codebase-design`'s design-it-t
    - A header edit that a worktree build ignores is the shared compiler cache: rebuild with `set ALAMO_COMPILER_CACHE=OFF`.
    - A flaky sim test while other lanes build: rerun with `ctest -j 2` before blaming your change.
    - Before landing, a broad change runs `tools\pr_check.cmd` (MSVC, `--compiler both` for sim code).
-7. **Goldens.** Never regenerate or edit goldens (`engine/apps` golden files, CRC logs, `tests/visual_baselines`) to make a test pass.
-   Regenerate only when the behaviour change is intended and the task says so: `tools\regen_goldens.cmd` (never by hand),
-   inspect the diff (per-system CRC columns show what moved), and say in the commit message which goldens changed and why.
-   Do not edit `engine/apps` goldens another lane is also changing: coordinate through the roadmap (group `why` / log line).
+7. **Behaviour.** No derived golden is stored (wr1 t07): every sim commit ends with a `Behaviour:` trailer (`none` or the
+   CRC columns it is meant to move), and `tools/goldens/behaviour_check.py commit HEAD` shows what moved against the parent
+   (`behaviour-check` skill). Declare only an intended change; an unintended one is a regression to fix.
 8. **Roadmap** (rule 6; `docs/ROADMAP_PROTOCOL.md`). Write a JSON list to a scratch file (not the repo) and run
    `python roadmap-store\roadmap_store.py write <file>` once per finished unit: close each task (`{"tasks":{"t03":{"s":"done"}},
    "updated":"<date>","by":"<session>"}`), then **re-read the group**: if it has no `todo` task left, set the group
@@ -159,7 +158,7 @@ findings) join the list above; `spec-review` and `codebase-design`'s design-it-t
 
 - **Goal.** `/start-group` sets `/goal` from the group's `exit` test; work toward it and do not stop early or drift past it.
 - **Green loop.** After a large edit, the `green-fast-tier` skill (`/loop /green-fast-tier <modules>` unattended) iterates build,
-  summary and fix. It stops on golden drift, never regenerates goldens, and never polls CI.
+  summary and fix. It never polls CI.
 - **Context.** Check `/context` at the start and after each finished task; `/compact` between tasks when it is more than half full
   (keep the group id, claim, exit test, open items and the last build summary; drop logs and diffs). Read build summaries, not logs.
 - **C++ lookups.** Where a C++ symbol is defined, who calls it, what a header declares: the `LSP` tool first

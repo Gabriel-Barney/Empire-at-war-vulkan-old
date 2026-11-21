@@ -28,7 +28,7 @@ Spellings the allowlist covers (Bash tool / PowerShell tool):
 - Build: `cmd //c build_agent.cmd ...` / `& .\build_agent.cmd --% msvc wt "<modules>"` (same for `build_module`, `build_msvc`,
   `build_clang`, `build_asan`, `build_gate`, `build_launcher`).
 - Project tools: `python -I tools/<dir>/<script>.py ...` / the same with `tools\`; `.cmd` helpers as `cmd //c tools\<name>.cmd ...`
-  / `& .\tools\<name>.cmd ...` (`regen_goldens`, `pr_check`, `clean_worktrees`, `tc`, probe-kit scripts).
+  / `& .\tools\<name>.cmd ...` (`pr_check`, `clean_worktrees`, `tc`, probe-kit scripts).
 - Roadmap: `python roadmap-store/roadmap_store.py <subcommand> ...` (every subcommand).
 - Git and GitHub, read and local steps: `status`, `log`, `diff`, `show`, `fetch`, `add`, `commit`, `merge origin/dev`, `rev-parse`,
   `ls-files`, `blame`, `checkout -b`; `gh pr view|list|checks|diff`, `gh run list|view`. Landing goes through `python -I tools/gate/land_queue.py submit`; a direct push to `dev` is denied.
@@ -52,7 +52,7 @@ which mines transcripts for read-only commands) turns it into a rule for Gabriel
 
 ## Rules for the loop skill
 
-- It never regenerates goldens. A run that fails only on golden drift stops and asks (`regen-goldens` skill is the way to change them).
+- It never declares a behaviour change to get green: a moved scenario is declared in the commit's `Behaviour:` trailer only when intended (`behaviour-check` skill).
 - It changes the code between runs: an identical failing rerun is refused (exit 3). `ALAMO_RERUN=1` only for a flaky test or a changed
   environment, and the report says so.
 - It has an iteration cap (default 6) and stops when the same test fails three iterations running.

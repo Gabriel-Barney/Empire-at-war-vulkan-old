@@ -42,8 +42,8 @@ value game logic reads.
 - A new long sim scenario gets one ctest entry per worker count with `alamo_add_worker_count_check` (`engine/CMakeLists.txt`;
   example `alamo_sim_fleet_groups_battle` in `engine/apps/CMakeLists.txt`), never one test running `--check-workers` over all counts.
   Label it `slow` when it takes over about 5 s.
-- A worker-count or run-to-run failure is always a real bug, never golden drift: do not regenerate goldens for it
-  (`regen-goldens` skill).
+- A worker-count, run-to-run or MSVC-versus-clang difference is always a real bug: no `Behaviour:` declaration excuses it
+  (`behaviour-check` skill; `behaviour_check.py workers` / `compilers`).
 
 ## Finding a divergence
 

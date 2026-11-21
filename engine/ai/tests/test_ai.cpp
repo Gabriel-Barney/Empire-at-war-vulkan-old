@@ -672,28 +672,16 @@ static void test_determinism(bool write_golden) {
         b.hash(hb);
         CHECK(ha.digest() == hb.digest());
     }
-    // Golden (MSVC / clang / gcc must agree).
+    // The digests across commits and compilers: the scenario ai_perception (tools/goldens/scenarios.json; wr1 t07: no
+    // stored golden). --write-golden / --golden-out write them.
+    if (!write_golden) return;
     const std::string text = golden_text(serial);
     const std::string dir = g_golden_out.empty() ? std::string(ALAMO_AI_GOLDEN_DIR) : g_golden_out;
     const std::string path = dir + "/ai_golden.txt";
-    if (write_golden) {
-        std::error_code ec;
-        fs::create_directories(path_from_utf8(dir), ec);
-        std::ofstream(path_from_utf8(path), std::ios::binary) << text;
-        std::printf("golden written: %s\n%s", path.c_str(), text.c_str());
-        return;
-    }
-    std::vector<uint8_t> bytes;
-    if (!read_host_file(path, bytes)) {
-        std::printf("FAIL golden missing: %s (run with --write-golden)\n", path.c_str());
-        ++g_fail;
-        return;
-    }
-    const std::string want(bytes.begin(), bytes.end());
-    if (want != text) {
-        std::printf("FAIL golden mismatch:\nwant:\n%sgot:\n%s", want.c_str(), text.c_str());
-        ++g_fail;
-    }
+    std::error_code ec;
+    fs::create_directories(path_from_utf8(dir), ec);
+    std::ofstream(path_from_utf8(path), std::ios::binary) << text;
+    std::printf("golden written: %s\n%s", path.c_str(), text.c_str());
 }
 
 // ---- AI execution path finder (ai_path_finder.hpp, GALACTIC.md §4) -------------------------------
@@ -1311,6 +1299,10 @@ int main(int argc, char** argv) {
     test_enum_literal_files();
     test_hand_cases();
     test_visibility_levels();
+    if (write_golden && g_golden_out.empty()) {
+        std::printf("%s: --regen / --write-golden needs --golden-out DIR (wr1 t07: no stored goldens in the source tree)\n", "alamo_ai_tests");
+        return 2;
+    }
     test_determinism(write_golden);
     test_path_finder_cadence();
     test_path_finder_costs_and_fog();
