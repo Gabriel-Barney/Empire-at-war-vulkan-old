@@ -2070,15 +2070,15 @@ float MovementSystem::svs_cost(const Unit& x, const Unit& y, V2 d) const {
 // units with targets -> nobody; against a Giant of a higher class only the smaller one is a candidate; else both are,
 // the cheaper first (cost(p1) <= cost(p0) -> p1 first). Of the candidates the first whose locomotor would accept the
 // claim moves (no owner, this record, or an owner of lower weight). A participant without a locomotor (a death clone, s78n t20
-// batch 1) makes the other one move (rule 1). [port] A unit whose max speed is 0 counts as immobile too (retail has no
-// such case: it would pick it and wait for good).
+// batch 1) makes the other one move (rule 1). mov3 t04 (BKR2_RE_ANSWERS Q4 [H]): no max-speed rule - a unit whose effective
+// max speed is 0 costs 0 (svs_cost: no along / side term), so it is the cheaper candidate (ties to p1), takes the claim and
+// holds the record in state 1 without moving.
 uint8_t MovementSystem::svs_pick_mover(const CollisionObject& c, const Unit& p0, const Unit& p1) const {
     if (p0.d.collision_class == kUccLandingTransport || p0.d.no_locomotor) return 1;  // (s78n t20 batch 1: no locomotor)
     if (p1.d.collision_class == kUccLandingTransport || p1.d.no_locomotor) return 0;
     if (p0.hover == 3) return 1;
     if (p1.hover == 3) return 0;
-    const auto imm = [this](const Unit& x) { return deploy_immobile(x) || !(walk_max_speed(x) > 0.0f); };
-    const bool i0 = imm(p0), i1 = imm(p1);
+    const bool i0 = deploy_immobile(p0), i1 = deploy_immobile(p1);
     if (i0 && i1) return 2;
     if (i0) return 1;
     if (i1) return 0;

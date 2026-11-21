@@ -1151,6 +1151,33 @@ void test_mov2_reorder_at_speed() {
     }
 }
 
+
+// mov3 t04 (BKR2_RE_ANSWERS Q4 [H], 0x687010 / 0x686b20): the StoppedVsStopped mover pick has no max-speed rule. Two
+// standing vehicles overlap; unit 2's speed override is 0, so its cost is 0 (no along / side term) and it is picked
+// (cheaper, ties to p1): it takes the record's claim and the path, never moves, and the record stays resolving (state 1,
+// the port's Resolving) while unit 1 stands. Before mov3 t04 the port counted it immobile and moved unit 1.
+void test_mov3_svs_speed_zero() {
+    ::alamo::test::section("mov3_svs_speed_zero");
+    MovementSystem sys{MovementConfig{}};
+    land_system(sys, 80);
+    const V2 at = cell_center(40, 40);
+    CHECK(sys.add_unit(vehicle(1, at, 0)));
+    CHECK(sys.add_unit(vehicle(2, at + V2{8.0f, 0.0f}, 0)));
+    CHECK(sys.set_speed_override(2, 0.0f));
+    SimRng rng(404);
+    const V2 p1 = sys.view(1).pos, p2 = sys.view(2).pos;
+    ObjectId mover = -1;
+    for (uint32_t f = 1; f < 200; ++f) {
+        sys.tick(f, rng, serial_for);
+        for (const CollisionObject& c : sys.collisions().list())
+            if (c.kind == CollisionKind::StoppedVsStopped && c.master <= 1 && mover < 0) mover = c.master == 0 ? c.a : c.b;
+    }
+    const float m1 = distance(sys.view(1).pos, p1), m2 = distance(sys.view(2).pos, p2);
+    std::printf("mov3 t04 SvS speed 0: mover %d, unit 1 moved %.2f, unit 2 moved %.2f\n", mover, static_cast<double>(m1),
+                static_cast<double>(m2));
+    CHECK(mover == 2 && m1 == 0.0f && m2 == 0.0f);
+}
+
 }  // namespace
 
 // ---------------------------------------------------------------- s78n t24 (RE f8afef8d): the role slots
@@ -1358,5 +1385,6 @@ int main() {
     test_mov2_formation_path();
     test_mov2_head_on_pairs();
     test_mov2_reorder_at_speed();
+    test_mov3_svs_speed_zero();
     return ::alamo::test::report("alamo_tactical_movement_b3_tests");
 }
