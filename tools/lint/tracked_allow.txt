@@ -28,3 +28,9 @@ launcher/assets/icon.ico
 launcher/assets/icon.png
 # mcx3 t07: an empty stand-in so the VFS detects the conformance fixture's EaW install (<foc>\..\GameData\sweaw.exe); 0 bytes, never run
 engine/apps/game/testdata/conformance/stacks/GameData/sweaw.exe
+
+# wr0 t04: the nightly gate failed on both of these since 2026-11-21 (check_tracked against origin/main).
+# The work skill (.claude/skills/work/) is a skill folder, not a tool output folder named "work".
+.claude/skills/work/SKILL.md
+# Benchmark scenario save (522 KiB, a little over the 512 KiB limit); tests/benchmark reads it.
+tests/benchmark/water_battle.alsv
