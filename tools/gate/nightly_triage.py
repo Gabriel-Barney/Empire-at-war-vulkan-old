@@ -52,16 +52,39 @@ def gate_failures(logs_dir: str) -> dict[str, list[str]]:
     return out
 
 
-def bisect(commits: list[str], fails: Callable[[str], bool], max_steps: int = 8) -> str | None:
+EXITS_RE = re.compile(r"exits: configure=(\d+) build=(\d+) ctest=(\d+)")
+
+
+def step_result(test: str, output: str) -> bool | None:
+    """What one bisect build (build_agent.cmd's summary) says about `test`: True = it ran and failed; False = it ran
+    and passed, or the commit does not have the test yet; None = the step proves nothing (no summary, configure or
+    build failed, or the outcome is not one of these)."""
+    m = EXITS_RE.search(output)
+    if not m or m.group(1) != "0" or m.group(2) != "0":
+        return None
+    if any(l.startswith("FAILED: ") and f" {test} (" in l for l in output.splitlines()) or test in failing_tests(output):
+        return True
+    if "(of 0 tests)" in output or "No tests were found" in output:
+        return False
+    if m.group(3) == "0" and "SUMMARY PASS" in output:
+        return False
+    return None
+
+
+def bisect(commits: list[str], fails: Callable[[str], bool | None], max_steps: int = 8) -> str | None:
     """commits oldest..newest; commits[-1] fails, the commit before commits[0] passed. The first failing commit, or None
-    when max_steps ran out (then the answer is somewhere in the remaining range)."""
+    when max_steps ran out (then the answer is somewhere in the remaining range) or a step proved nothing (fails()
+    returned None: a culprit is never guessed from a build that did not run the test)."""
     lo, hi, steps = -1, len(commits) - 1, 0  # lo passes (or is before the list), hi fails
     while hi - lo > 1:
         if steps >= max_steps:
             return None
         mid = (lo + hi) // 2
         steps += 1
-        if fails(commits[mid]):
+        r = fails(commits[mid])
+        if r is None:
+            return None
+        if r:
             hi = mid
         else:
             lo = mid
@@ -184,11 +207,19 @@ def run(sha: str, rc: int, logs_dir: str, main: str, wt: str | None, dry: bool) 
             budget -= 1
             commits = [c for c in git(wt, "rev-list", "--first-parent", "--reverse", f"{good}..{sha}").split() if c]
 
-            def fails(c: str, test: str = t) -> bool:
+            # gate_scheduled.cmd keeps the gate's exit code in RC, and CMake reads the environment variable RC as the
+            # resource compiler: every bisect configure failed with it set (2026-11-21, the first observed run)
+            benv = {k: v for k, v in os.environ.items() if k.upper() != "RC"}
+            benv["ALAMO_RERUN"] = "1"
+
+            def fails(c: str, test: str = t) -> bool | None:
                 subprocess.run(["git", "-C", wt, "checkout", "-q", "-f", "--detach", c], capture_output=True)
                 r = subprocess.run(["cmd", "/d", "/c", os.path.join(wt, "build_agent.cmd"), "msvc", "bisect", "all", f"^{test}$"],
-                                   cwd=wt, capture_output=True, text=True, errors="replace")
-                return r.returncode != 0
+                                   cwd=wt, env=benv, capture_output=True, text=True, errors="replace")
+                res = step_result(test, r.stdout + r.stderr)
+                print(f"nightly_triage: bisect {test} at {c[:8]}: " + {True: "fails", False: "passes", None: "no result"}[res],
+                      flush=True)
+                return res
             if commits:
                 culprit = bisect(commits, fails)
             subprocess.run(["git", "-C", wt, "checkout", "-q", "-f", "--detach", sha], capture_output=True)
@@ -248,6 +279,13 @@ def selftest() -> int:
         check(got == f"c{culprit}", f"bisect finds c{culprit} (got {got})")
         check(len(calls) <= 4, f"bisect over 10 commits uses at most 4 builds ({calls})")
     check(bisect(commits, lambda c: int(c[1:]) >= 3, max_steps=1) is None, "bisect gives up after max_steps")
+    check(bisect(commits, lambda c: None) is None, "bisect names no culprit when a step proves nothing")
+    ok_exits = "exits: configure=0 build=0 ctest="
+    check(step_result("t_x", ok_exits + "8\nFAILED: t_a (Failed), t_x (Failed)\nSUMMARY FAIL\n") is True, "step: the test ran and failed")
+    check(step_result("t_x", ok_exits + "0\ntests: 1/1 passed\nSUMMARY PASS\n") is False, "step: the test passed")
+    check(step_result("t_x", ok_exits + "0\nskips: data=0 gpu=0 other=0 (of 0 tests)\n") is False, "step: no such test yet")
+    check(step_result("t_x", "exits: configure=1 build=1 ctest=0\n(of 0 tests)\n") is None, "step: a failed configure proves nothing")
+    check(step_result("t_x", "something else broke\n") is None, "step: no summary proves nothing")
 
     # filed once: an injected failure is new the first night and known the second
     state: dict = {"open": {}}
