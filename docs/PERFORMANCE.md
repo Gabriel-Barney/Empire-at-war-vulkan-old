@@ -1509,3 +1509,14 @@ Notes:
   `alamo_ai_galactic_tests` 158, `alamo_headless_skirmish_ai_foc_land` 154, `alamo_headless_skirmish_ai_synthetic` 152.
 - Most changed golden files: `game_smoke_land.crc` 116 commits, `skirmish_ai_foc_land_golden.crc` 103,
   `game_smoke_campaign.crc` 87, `game_smoke_skirmish.crc` 86; benchmark `land_battle.abench` 58.
+
+## Warm-tree build settings (wr3 t07, 2026-11-21)
+
+MSVC, all modules, no tests, `build_agent.cmd msvc <tree> all none`, 16 cores; the verifier was building at the same time for most runs, so treat differences under about 10% as noise. Clean = a fresh tree (the shared sccache was warm from other trees); one .cpp = a real code line added to `engine/galactic/src/conflicts.cpp`; core header = the same in `engine/core/include/alamo/core/dmath.hpp` (reaches most of the engine). A comment-only edit is useless for the cache rows: sccache hashes the preprocessed file, so it hits.
+
+| Option | Clean | One .cpp | Core header |
+|---|---|---|---|
+| compiler cache on, PCH off (default) | 38-45 s | 17 s | 134-137 s |
+| PCH on, compiler cache off | 212-216 s | 13-16 s | 109-113 s |
+
+Kept: cache on, PCH off (`docs/DECISIONS.md`, "Warm-tree build settings stay as they are"). Runs labelled lld-link (clean 35 / 42 s, one .cpp 13-14 s, header 109-129 s) did not use lld: `-DCMAKE_LINKER` left the MSVC link rule on `link.exe`.
