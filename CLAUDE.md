@@ -91,8 +91,11 @@ headless multithreaded simulation core first, then a Vulkan 1.3 renderer. Any Cl
 
 **Default workflow for task requests (Gabriel, 2026-11-21; Stage 12 · Workflow redesign, groups wr0-wr6, is replacing the
 lane workflow): a request to complete roadmap work ("do aud3", "work the AUDIO box") is worked by the session that got it, in
-its own checkout.** One writing session at a time per checkout; it follows the group loop (`/start-group <id>`, the work,
-`/finish-group <id>`) and lands through the landing queue (`land_queue.py submit`). It starts no coordinator, lanes or lane sessions; read-only help
+its own checkout.** One writing session at a time per checkout; it follows the `work` skill (`/work <id>`: plan with the `plan`
+skill, build, one `review` pass, roadmap, `land_queue.py submit`; `start-group` / `finish-group` until wr6 removes them). Two
+fixed writer checkouts (wr4, `tools/gate/writer_setup.py`): `.claude\worktrees\writer-sim` for sim groups and
+`writer-nonsim` for the rest (a group's `writer` field); the path guard hook blocks sim edits from the non-sim checkout and
+any edit in the verifier's. It starts no coordinator, lanes or lane sessions; read-only help
 (`re-analyst`, `reviewer`, research, exploration) still runs as subagents. Until wr1 and wr2 are on `dev`, parity and mod groups
 are started only when Gabriel names one; Stage 12 groups go first (crashes, hangs and save corruption are still fixed). The
 `run-group` coordinator still works and runs only when Gabriel types `/run-group`. What each Stage 12 group replaces, and when:
@@ -105,7 +108,7 @@ Under `/run-group`, each group (or share) is a `lane` session (`.claude/agents/l
 not a folder: two lanes must not edit the same files, and a landing commit names any golden that changed.
 A change to `engine/core` public headers or the top-level CMake goes through the integrating agent. Single-module
 `engine-module` agents remain for narrow side tasks. Definitions live in `.claude/agents/`.
-Project skills (`.claude/skills/`; triggers in each description): `run-group` (lane coordinator, only when Gabriel types it) / `start-group` / `finish-group` / `build` / `phase-status`
+Project skills (`.claude/skills/`; triggers in each description): `work` / `plan` / `review` / `upkeep` (weekly, wr5) / `run-group` (lane coordinator, only when Gabriel types it) / `start-group` / `finish-group` / `build` / `phase-status`
 (the loop), `green-fast-tier` (build, summary, fix iteration after a large edit; speed habits below), `determinism-check` and `regen-goldens` (sim and goldens), `diagnosing-bugs` (an unexplained failure: loop first),
 `research` (cited report in its `docs/` home), `re-question` (ask the binary through `re-analyst`), `probe-kit` (retail checks), `writing-for-agents` (editing any file agents read),
 `codebase-design` / `improve-codebase-architecture` (deep-module vocabulary; architecture review that files tier-3 proposals), `triage` (file findings, clean the backlog), `tdd` (test-first, red then green), `to-tickets` (split work into tasks / groups), `prototype` (throwaway logic demo or UI variants), `grill-with-docs` (interview Gabriel on a plan, record decisions), `spec-review` (standards + spec axes, in `finish-group` next to `/code-review`;

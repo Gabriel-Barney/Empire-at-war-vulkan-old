@@ -34,7 +34,7 @@ The claude.ai page https://claude.ai/artifact/56dGptBoT3JcDH4rHZ6BjT is retired:
 | `backlog` | `b0001`… | One finding that is not part of an open group: `t` (text), `cat` (category id), `node` (flowchart box, and so the stage, the work belongs to), `sev` (`S1`/`S2`/`S3`), `kind`, `s` (`open`/`promoted`/`dropped`), `from` (group it was found in), `task`, `ref`, `g` (only Gabriel can do it), `added`, `by`, and when closed `promoted` (`group/task`) or `why` |
 | `lanes` | short id (`st1`…) | One stage of the plan: `title`, `goal` (what the stage is for), `exit` ("done when" condition), `order`, `num` (the fixed "Stage N" number; without it a stage counts on from the one before, so removing a stage does not renumber the rest, 2026-11-21). Stages run in `order`, top to bottom in both the plan and the flowchart |
 | `nodes` | box id (`N1`, `MOVE`…) | `label`, `sub`, `lane`, `status`, `shape` (`box`/`pill`), `order`, `to` (map of target box id → `solid` "do before" or `dash` "feeds into") |
-| `items` | group id (`s7`, `n1`…) | `title`, `tag`, `node` (box id), `status`, `preset`, `mod`, `why`, `order`, `after` (list of group ids that must finish first), `updated` (date), `by` (session name), `tasks` (key `t01`… → `t` text, `s` `todo`/`done`/`oos`, `o` order, optional `sev`, `tier`, `g`, `sub` (sub-category: `Parity`, `Engine`, `Process` or `Research`), `moved`, `why`), `eta`, `exit` (the exit test: the metric or test that says the group is done), `cap` (most tasks the group may hold; default `meta/backlog` `cap`, 8), `closed` (set by `close-group`: `at`, `passed`, `moved`, `dropped`); claim fields, all optional, set by `claim` (below): `claimed_by` (session), `claimed_at` (ISO time), `touches` (list of module folders/files the work edits; default: `mod` split on `·` `,` `;`) |
+| `items` | group id (`s7`, `n1`…) | `title`, `tag`, `node` (box id), `status`, `preset`, `mod`, `why`, `order`, `after` (list of group ids that must finish first), `updated` (date), `by` (session name), `tasks` (key `t01`… → `t` text, `s` `todo`/`done`/`oos`, `o` order, optional `sev`, `tier`, `g`, `sub` (sub-category: `Parity`, `Engine`, `Process` or `Research`), `moved`, `why`), `eta`, `exit` (the exit test: the metric or test that says the group is done), `cap` (most tasks the group may hold; default `meta/backlog` `cap`, 8), `closed` (set by `close-group`: `at`, `passed`, `moved`, `dropped`), `writer` (`sim` or `non-sim`: the checkout that works the group, derived from its modules, see "Two writers"); old claim fields (`claimed_by`, `claimed_at`, `touches`) stay on closed groups as history |
 | `log` | `yyyymmdd-hhmmss-<session>` | `at` (ISO time), `by`, `text` |
 | `builds` | `yyyymmddhhmmss-<machine>-<tree>-<compiler>` | `at`, `by`, `machine`, `compiler`, `tree`, `status` (`pass`/`fail`), `exits`, `warnings`, `tests`, `tests_failed`, `test_seconds`, `excerpt` (first error or warning lines), `group` (optional roadmap group id) |
 
@@ -255,14 +255,13 @@ leave the group.
 - **Parking.** `park <group> --by S --why "..."` sets an unstarted group to status `parked`: it leaves the open lists, "Most important" and
   the limit, keeps its tasks and shows as "Parked" (a milestone made only of parked groups shows "Parked", not "Done");
   `unpark <group> --by S` restores its old status. Use it for side goals that are not on the path to the current goal.
-- **Limits and lint.** `meta/backlog` `wip` (default 8) is the number of *started* groups (one with a closed task or a live claim, not
+- **Limits and lint.** `meta/backlog` `wip` (default 4 since wr4 t04: two writers, each with a group in work and one in observation; 8 before) is the number of *started* groups (one with a closed task or a live claim, not
   waiting on an `after` group, not status `gab`) the project aims for; `inbox_days` (14) is how long
   an entry may sit untriaged. `roadmap_store.py lint [--strict] [--verbose]` reports: open group without an exit test, over its cap,
   open with no open task (error), done with an open task (error), more started groups than `wip`, a stale inbox entry, a bad
   category, severity or tier (error), a tier-3 entry above S3, a Parity-category entry without a tier, an S1 / S2 entry in the
   backlog, an open task without a `sub` (or with an unknown one: error). Run it when planning; `write` prints the group problems it touched.
-- **Plan cycle.** Plan (Gabriel: pick a few groups from the backlog or the unstarted list, each with an exit test and cap; `batch`
-  hands out a conflict-free set) → run (lanes, one claimed group each) → close (`close-group`) → triage (S1 / S2 findings are
+- **Plan cycle.** Plan (Gabriel: pick a few groups from the backlog or the unstarted list, each with an exit test and cap) → run (each group by its writer, see "Two writers") → close (`close-group`) → triage (S1 / S2 findings are
   already group tasks; drop or promote S3 entries, empty `inbox`) → repeat.
 - Tasks that `close-group` leaves as `oos` (moved, dropped) are the audit trail; the 2026-10-30 rule that out-of-scope tasks are
   deleted still applies to work Gabriel declares out of scope in `docs/DECISIONS.md`.
@@ -282,40 +281,17 @@ This replaces the 2026-11-04 "both copies" rule. Check the remote with `python r
 machine wrote to it). `sync` pulls, regenerates the page and pushes. `write` and every build record pull first the same way.
 If you pulled by hand inside `roadmap-store/`, run `python roadmap-store/roadmap_store.py render` afterwards.
 
-## Claims and parallel batches
+## Two writers (wr4 t04, 2026-11-21; replaces claims and parallel batches)
 
-Several agents work in parallel, so a group can be claimed and the coordinator can ask for a batch that cannot collide. All of it
-goes through the normal locked write path (pull, apply, journal, commit, background push), so a claim reaches every account.
+Work is done by two writers, each in its own fixed checkout: the **sim** writer (any engine module except render, audio, video and ui) and the **non-sim** writer (render, audio, video, ui, tools, docs, the launcher). Both land through the verifier (`docs/BUILD.md`, "Landing queue and verifier"), and the path guard keeps the non-sim session out of sim modules, so two writers cannot collide on files and groups are no longer claimed or handed out by touches.
 
 ```bash
-python roadmap-store/roadmap_store.py batch 5 [--by <session>] [--json]   # up to N ready groups that touch different files
-python roadmap-store/roadmap_store.py claim <group> --by <session> [--touches a,b] [--force]
-python roadmap-store/roadmap_store.py claims [--all]                        # live claims (--all adds expired ones)
-python roadmap-store/roadmap_store.py release <group> [--by <session>] [--force]
+python roadmap-store/roadmap_store.py writers [--apply]   # each open group's writer; --apply stores it where missing
 ```
 
-- `claim` sets `claimed_by` / `claimed_at`. It fails (exit 1, naming the holder and the expiry) while another session holds a live
-  claim, unless `--force`. A claim is live for 24 hours; claiming again with the same `--by` renews it, and an expired claim can
-  be taken by anyone. `--by` defaults to `ALAMO_SESSION`. `--touches` stores an explicit `touches` list; otherwise `touches` is the
-  group's `mod` string split on `·`, `,` and `;` (`a/b+c` means `a/b` and `a/c`).
-- `release` clears the claim (`--by` makes it refuse another session's live claim without `--force`). A group written as `done` or
-  `out` through `write` (or the page hook) loses its claim in the same write and commit, so nobody has to release it.
-- `batch` prints up to N groups that are open, have every `after` group finished, are not claimed by another session, do not have
-  status `gab`, `probe` or `spec` (or preset `gab`), and whose `touches` overlap neither each other nor the touches of a live claim.
-  Order: status `next` first, then stage, box and group order. Two paths overlap when they are equal or one is a folder of the
-  other (`render` and `render/particles`). A leading `engine/` is ignored, and a bare `apps/sim` counts as `apps`, so `apps`,
-  `engine/apps` and `apps/sim` overlap each other and everything under `apps`. Since WF1b (2026-11-08) `engine/apps/sim` is three
-  libraries (`alamo_sim_base`, `alamo_sim_battle`, `alamo_sim_campaign`), and a file below it counts as `apps/sim/<target>/<stem>`
-  (`apps/sim/src/tactical_battle_bt.cpp` -> `apps/sim/battle/tactical_battle_bt`; a header and its source are one stem; tests ->
-  `apps/sim/tests/<stem>`; target by name prefix, `SIM_TARGET_PREFIXES` in `roadmap_store.py`). So lanes that list the sim files
-  they edit run side by side, a target name (`apps/sim/battle`) overlaps each of its files, and a group whose `mod` says only
-  `apps/sim` still blocks all of apps: give apps/sim groups file-level `touches` (`claim --touches`, or `update` the field).
-  A group with no `mod` and no `touches` never conflicts. `--by <session>` stops that session's own claims from blocking it.
-- Coordinator flow: `batch N`, then each agent runs `claim <group> --by <its name>` before it edits anything; a refused claim means
-  take the next group from a fresh `batch`.
-- The page shows a "claimed by X" badge on groups with a live claim and names the claim in the "Most important" list (it reads
-  the two fields only; a claim older than 24 hours is ignored). The shell is edited in `roadmap-store/page_shell.html` (what the
-  generator reads), outside the data markers.
+- A group's `writer` is derived from its `mod` / `touches`: `sim` when one names a sim module, else `non-sim`. `write` stores it on every open group it writes that has none; set it by hand (`update items/<id> {"writer": ...}`) when the modules say too little. The page shows it as a badge on open groups (it replaced the claim badge).
+- A cross-cutting change (an `engine/core` public header, the top-level CMake) belongs to the sim writer; the non-sim writer rebases after it lands.
+- `claim`, `release`, `claims` and `batch` still run (the `/run-group` coordinator, which only Gabriel starts, uses them) but are retired from the normal flow; the 2026-11-06 rules for them are in git history and `docs/DECISIONS.md`.
 - `python roadmap-store/roadmap_store.py selftest` runs the tests for all of this on a temporary store with a local bare remote
   (claim conflicts, expiry, overlap and batch logic, done clearing, build-record batching, lock-busy fallback); it never touches
   the real store.

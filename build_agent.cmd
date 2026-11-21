@@ -55,6 +55,8 @@ if /i "!ACOMP!"=="clang" (
 ) else (
   set COMPILER=-DCMAKE_CXX_COMPILER=cl
 )
+rem ALAMO_LINKER (wr3 t07): a linker for the MSVC build, e.g. %TC%\llvm\bin\lld-link.exe; a fresh tree takes it.
+if defined ALAMO_LINKER if /i not "!ACOMP!"=="clang" set COMPILER=!COMPILER! "-DCMAKE_LINKER=!ALAMO_LINKER!"
 set FILTER=-R "!ATESTS!"
 if "!ATESTS!"=="" set FILTER=--exclude-from-file "%~dp0!B!\tier_exclude.txt"
 if /i "!ATESTS!"=="all" set FILTER=
