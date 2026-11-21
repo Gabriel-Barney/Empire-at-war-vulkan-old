@@ -919,10 +919,12 @@ bool MovementSystem::rejoin_search(const Unit& u, std::span<const V2> base, uint
     return stopped && verdict == kRejoinTaken;
 }
 
-std::vector<MovementSystem::RejoinGoal> MovementSystem::rejoin_goals(ObjectId id, float d, uint32_t fail_at) const {
+std::vector<MovementSystem::RejoinGoal> MovementSystem::rejoin_goals(ObjectId id, float d, uint32_t fail_at,
+                                                                    ObjectId forced) const {
     std::vector<RejoinGoal> out;
     const Unit* u = unit_ptr(id);
     if (!u) return out;
+    const Unit* f = forced != 0 ? unit_ptr(forced) : nullptr;
     std::vector<V2> scratch;
     std::span<const V2> base;
     uint32_t cur = 0;
@@ -930,8 +932,25 @@ std::vector<MovementSystem::RejoinGoal> MovementSystem::rejoin_goals(ObjectId id
     (void)rejoin_search(*u, base, cur, d, [&](const Rejoin& r) {
         out.push_back({r.q, r.src});
         return fail_at != 0 && out.size() == fail_at ? kRejoinFail : kRejoinNext;
-    });
+    }, f);
     return out;
+}
+
+bool MovementSystem::debug_coast(ObjectId id, bool spent_push) {
+    Unit* u = unit_ptr(id);
+    if (!u || !u->d.team_container || !(u->m.speed > 0.0f)) return false;
+    u->coast = true;
+    if (spent_push) {
+        const V2 at = u->m.pos;
+        u->pushed = true;
+        u->push_path = {at - dir_from_deg(u->m.yaw) * 10.0f, at};
+        u->push_next = 2;
+        u->push_frac.assign(2, 1.0f);
+        u->push_turn_done = false;
+        u->push_kind = 1;
+        u->push_tags.clear();
+    }
+    return true;
 }
 
 bool MovementSystem::spare_point(const Unit& a, const Unit& b, V2& v) const {

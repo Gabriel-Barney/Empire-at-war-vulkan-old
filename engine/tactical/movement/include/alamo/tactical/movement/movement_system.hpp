@@ -427,12 +427,19 @@ public:
     // mov3 t03 (b0174, test accessor): the rejoin goals rejoin_search offers for unit `id` with clearance D (the generator of
     // a kind-3 Path Around, on around_base's path) - each goal's point and its source (0 = (a) along the path, 1 = (b) past
     // the end, 2 = (c) the ring), in order. Every goal is answered kRejoinNext, except the `fail_at`-th (1-based; 0 never),
-    // which is answered kRejoinFail and ends the call. Not hashed, changes nothing.
+    // which is answered kRejoinFail and ends the call. `forced` (0 none): the forced object of a flag-1 Path Around (mov3
+    // t06, b0065: an obstacle to every goal spot, before the relation test). Not hashed, changes nothing.
     struct RejoinGoal {
         V2 q;
         uint8_t src = 0;
     };
-    std::vector<RejoinGoal> rejoin_goals(ObjectId id, float d, uint32_t fail_at = 0) const;
+    std::vector<RejoinGoal> rejoin_goals(ObjectId id, float d, uint32_t fail_at = 0, ObjectId forced = 0) const;
+    // mov3 t06 (b0054, test accessor): squad container `id`, moving, coasts in End Move from its next walk (0x14 with no
+    // top path, as brake_to_stop leaves it); with spent_push a push record walked to its end is left on its stack
+    // (pushed, a 2-point kind-1 push path ending where it stands, push_next past its end, no owner) - the state a push
+    // that ran out during the coast leaves, which public orders cannot set up. False (nothing changed) when `id` is not a
+    // moving squad container. Test only.
+    bool debug_coast(ObjectId id, bool spent_push);
     std::span<const SpaceWaypoint> space_path(ObjectId id) const;
     uint32_t mask_of(ObjectId id) const;
 

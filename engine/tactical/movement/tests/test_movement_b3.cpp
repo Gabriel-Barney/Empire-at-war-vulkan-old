@@ -1243,6 +1243,41 @@ void test_mov3_rejoin_goals() {
     }
 }
 
+
+// mov3 t06 (b0065, MOVEMENT §5.4.7 "Rejoin candidates" item 2 [H]): the forced object of a flag-1 Path Around is an
+// obstacle to every goal spot before the relation test. Vehicle 1 (speed 1) walks east; vehicle 2 (speed 2, its own order)
+// walks the same way ahead of it, inside the window of 1's (a) goals: same way and not slower, so not an obstacle by the
+// relation - the goals run 10 apart through its place. Named as the forced object, the goals its rectangle overlaps are
+// refused (today every flag-1 caller is MovingVsMoving, whose partner is an obstacle already: this pins the rule itself).
+void test_mov3_forced_goal_obstacle() {
+    ::alamo::test::section("mov3_forced_goal_obstacle");
+    MovementSystem sys{MovementConfig{}};
+    land_system(sys, 100);
+    CHECK(sys.add_unit(vehicle(1, cell_center(10, 50), 0)));
+    CHECK(sys.add_unit(vehicle(2, cell_center(14, 50), 0, 10.0f, 6.0f, 2.0f)));
+    SimRng rng(33);
+    for (const ObjectId id : {ObjectId{1}, ObjectId{2}}) {
+        MoveOrder o;
+        o.units = {id};
+        o.destination = cell_center(90, 50);
+        sys.move(o, rng, 1);
+    }
+    uint32_t f = 1;
+    for (; f < 300 && !(sys.view(1).speed > 0.0f && sys.view(2).speed > 0.0f); ++f) sys.tick(f, rng, serial_for);
+    CHECK(sys.view(1).speed > 0.0f && sys.view(2).speed > 0.0f);
+    const V2 p2 = sys.view(2).pos;
+    const auto near2 = [&](const std::vector<MovementSystem::RejoinGoal>& g) {
+        uint32_t n = 0;
+        for (const auto& x : g) n += std::fabs(x.q.x - p2.x) < 12.0f && std::fabs(x.q.y - p2.y) < 6.0f ? 1u : 0u;
+        return n;
+    };
+    const std::vector<MovementSystem::RejoinGoal> free_g = sys.rejoin_goals(1, 30.0f);
+    const std::vector<MovementSystem::RejoinGoal> forced_g = sys.rejoin_goals(1, 30.0f, 0, 2);
+    std::printf("mov3 t06 forced goal obstacle: unit 2 %.1f ahead; goals near it %u without, %u as the forced object (%zu / %zu goals)\n",
+                static_cast<double>(p2.x - sys.view(1).pos.x), near2(free_g), near2(forced_g), free_g.size(), forced_g.size());
+    CHECK(near2(free_g) >= 1 && near2(forced_g) == 0);
+}
+
 }  // namespace
 
 // ---------------------------------------------------------------- s78n t24 (RE f8afef8d): the role slots
@@ -1452,5 +1487,6 @@ int main() {
     test_mov2_reorder_at_speed();
     test_mov3_svs_speed_zero();
     test_mov3_rejoin_goals();
+    test_mov3_forced_goal_obstacle();
     return ::alamo::test::report("alamo_tactical_movement_b3_tests");
 }

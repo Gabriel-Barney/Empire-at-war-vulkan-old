@@ -575,6 +575,58 @@ void test_terrain_container_coast() {
     CHECK(sys.view(100).speed == 0.0f && sys.view(100).pos == at && at.x < static_cast<float>(wx) * kCellSize - kHalfCell);
 }
 
+// mov3 t06 (b0054 / b0094, MOVEMENT §5.4.7 item 1, §3.5.2 C.4 / E): which coast reports. A squad marching +x at speed 3
+// under a forced order (flag 0x20: a straight path, no passability) is put into its End Move coast (debug_coast) with a
+// wall stamped two cells ahead. (a) Only the forced order path on the stack: the coast step is forced too - it is not
+// point-tested, no Terrain record, the container coasts on into the wall cells. (b) A push record walked to its end left
+// on the stack above it: the top record decides, a push record reports - the step into the wall is refused (speed 0, the
+// position kept) and a Terrain record names the container in that coast tick.
+void test_mov3_spent_push_coast() {
+    ::alamo::test::section("mov3_spent_push_coast");
+    for (const bool spent : {false, true}) {
+        MovementSystem sys{unit_multiplier()};
+        land_system(sys, 100);
+        add_squad(sys, cell_center(10, 20), 3.0f, 0.05f);
+        SimRng rng(409);
+        MoveOrder o;
+        o.units = {1};
+        o.destination = cell_center(90, 20);
+        o.flags = kMoveFlagSkipValidation;
+        sys.move(o, rng, 1);
+        uint32_t f = 1;
+        for (; f < 900 && !(sys.view(100).speed >= 3.0f && sys.view(100).pos.x > 400.0f); ++f) sys.tick(f, rng, serial_for);
+        CHECK(sys.view(100).speed == 3.0f && sys.view(100).has_goal);
+        CHECK(sys.debug_coast(100, spent));
+        const int32_t wx = world_to_cell(sys.view(100).pos.x) + 2;
+        const float edge = static_cast<float>(wx) * kCellSize - kHalfCell;
+        wall(sys, wx, wx + 1, 15, 25);
+        uint32_t coast_frames = 0, fail = 0;
+        bool fail_ok = false, in_wall = false;
+        for (uint32_t k = 0; k < 60 && fail == 0; ++k, ++f) {
+            const UnitView b = sys.view(100);
+            const uint32_t coasts = sys.stats().walk_coasts;
+            sys.tick(f, rng, serial_for);
+            const bool coast = sys.stats().walk_coasts > coasts;
+            if (coast) ++coast_frames;
+            if (sys.view(100).pos.x > edge) in_wall = true;
+            if (terrain_records(sys, 100) >= 1) {
+                fail = f;
+                const UnitView v = sys.view(100);
+                fail_ok = coast && v.speed == 0.0f && v.pos == b.pos && b.speed > 0.0f;
+            }
+        }
+        std::printf("mov3 t06 coast %s: %u coast frame(s), Terrain record at frame %u, into the wall cells %d, x %.3f (edge %.1f)\n",
+                    spent ? "over a spent push record" : "on the forced order path", coast_frames, fail, in_wall ? 1 : 0,
+                    static_cast<double>(sys.view(100).pos.x), static_cast<double>(edge));
+        if (spent) {
+            CHECK(fail > 0 && fail_ok && coast_frames >= 2 && !in_wall);
+        } else {
+            CHECK(fail == 0 && coast_frames >= 2 && in_wall);
+        }
+    }
+    CHECK(!MovementSystem{MovementConfig{}}.debug_coast(100, true));  // no such unit
+}
+
 // ---------------------------------------------------------------- (b) the goal-spot filter's relation rules
 // MOVEMENT §5.4.7 "Rejoin candidates of a kind-3 Path Around" item 2 (0x67d580, s78n t24 goal_obstacle): a candidate spot
 // is refused when the unit's rectangle there overlaps an object that counts as an obstacle - a standing object does; an
@@ -701,6 +753,7 @@ int main() {
     test_walk_corner_clip_system();
     test_terrain_container_start_turn();
     test_terrain_container_coast();
+    test_mov3_spent_push_coast();  // mov3 t06
     test_terrain_goal_relation();
     return ::alamo::test::report("alamo_tactical_movement_b4_tests");
 }
