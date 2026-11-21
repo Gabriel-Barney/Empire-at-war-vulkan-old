@@ -1412,6 +1412,75 @@ void t25_attack_before(World& w, uint32_t f) {
     w.sys.move(o, w.rng, f);
 }
 
+// mov3 t02 (b0166): a save round trip with the bkm1 stored heights and the secondary yaw live - the t25.2 attack approach
+// on sloped ground (z = x / 10: the slot leg's G carries the target's height, LandMotion::end_z, and the members' paths
+// Unit::lane_z) with unit 10 a UseSecondaryFacing type (its Y2 steps while it walks). Every resume point continues
+// identically.
+void test_mov3_heights_save() {
+    Scenario sc;
+    sc.name = "land attack approach on a slope, UseSecondaryFacing (mov3 t02)";
+    sc.build = [](World& w) {
+        PassabilityGrid g;
+        g.init(100, 60);
+        w.sys.set_grid(std::move(g));
+        w.sys.set_height_fn([](float x, float) { return x * 0.1f; });
+        w.rng = SimRng(61);
+        const V2 c = cell_center(55, 30);
+        for (const auto& [id, y] : {std::pair<ObjectId, int32_t>{10, 28}, std::pair<ObjectId, int32_t>{11, 32}}) {  // one formation
+            UnitDesc d = t20_save_vehicle(id, cell_center(5, y));
+            d.hard_x = d.hard_y = 15.0f;
+            d.use_secondary_facing = id == 10;
+            CHECK(w.sys.add_unit(d));
+        }
+        UnitDesc t = t20_save_vehicle(900, c);
+        t.hard_x = t.hard_y = 5.0f;
+        t.owner = 2;
+        CHECK(w.sys.add_unit(t));
+        alamo::test::set_fire_test<V2>(alamo::test::engagement_of(w.sys),
+                                       [c](ObjectId, V2 p, ObjectId, bool, V2, float) { return distance(p, c) <= 255.0f; });
+    };
+    // the t25.2 order with the target's height C z = 40, no fire trim: the slot leg's G carries it (bkm1 t06)
+    sc.before = [](World& w, uint32_t f) {
+        if (f != 1) return;
+        MoveOrder o;
+        o.units = {10, 11};
+        o.destination = cell_center(55, 30);
+        o.attack.target = 900;
+        o.attack.c = o.attack.g = cell_center(55, 30);
+        o.attack.cz = 40.0f;
+        o.attack.trim = false;  // the path ends on G (a trim at 255 cuts before the last segment: z 0)
+        o.attack.t_hx = o.attack.t_hy = 5.0f;
+        for (const ObjectId id : o.units) {
+            LandAttackUnit e;
+            e.id = id;
+            e.range = 250.0f;
+            e.engage = 255.0f;
+            o.attack.units.push_back(e);
+        }
+        w.sys.move(o, w.rng, f);
+    };
+    sc.after = squad_after;
+    sc.frames = 700;
+    World v(sc.cfg);
+    sc.build(v);
+    uint32_t moving_first = 0, moving_last = 0;
+    float end_z = 0.0f;
+    for (uint32_t f = 0; f < sc.frames; ++f) {
+        step(sc, v, f, serial_for);
+        const UnitView a = v.sys.view(10);
+        if (a.atk_rho > 0.0f && a.has_goal && a.speed > 0.0f) {
+            if (moving_first == 0) moving_first = f + 1;
+            moving_last = f + 1;
+            end_z = std::max(end_z, a.end_z);
+        }
+    }
+    CHECK(moving_first > 0 && moving_last > moving_first + 50);
+    std::printf("mov3 t02 heights save: approach frames %u..%u, stored end z %.3f (C z 40), slot legs %u (refused %u)\n",
+                moving_first, moving_last, static_cast<double>(end_z), v.sys.stats().attack_legs, v.sys.stats().attack_leg_refused);
+    CHECK(end_z == 40.0f);  // non-zero: the save below carries it
+    for (const uint32_t at : {moving_first, (moving_first + moving_last) / 2, moving_last}) check_resume(sc, at, 0);
+}
+
 void test_t25_attack() {
     Scenario sc;
     sc.name = "land attack approach (s78n t25.2)";
@@ -1857,7 +1926,11 @@ void test_rejections() {
     CHECK(rejects(u.sys, bad));
     put_u32(bad, 0, 35);  // 35: before the mcx4 t11 bomber lookahead / bike lateral fields (36)
     CHECK(rejects(u.sys, bad));
-    put_u32(bad, 0, 37);
+    put_u32(bad, 0, 36);  // 36: before mov2 t01's member slot (Unit::mslot / slot_on) (37)
+    CHECK(rejects(u.sys, bad));
+    put_u32(bad, 0, 37);  // 37: before mov3 t05's corner-zero split counters (38)
+    CHECK(rejects(u.sys, bad));
+    put_u32(bad, 0, 39);
     CHECK(rejects(u.sys, bad));
     bad = good;
     bad[4] = static_cast<uint8_t>(bad[4] ^ 3);  // mode
@@ -1978,7 +2051,10 @@ int main() {
             t18.build(v);
             bool repulsion = false, around = false, rising = false, lowering = false;
             uint32_t rep_at = 0, around_at = 0, coast_first = 0, coast_last = 0;
+            bool coasted = false;
+            float yaw_prev = 0.0f;
             for (uint32_t f = 0; f < t18.frames; ++f) {
+                yaw_prev = v.sys.view(100).yaw;
                 step(t18, v, f, serial_for);
                 for (const CollisionObject& c : v.sys.collisions().list()) {
                     if (c.state == CollisionState::Repulsion && !repulsion) {
@@ -1990,27 +2066,25 @@ int main() {
                         around_at = f;
                     }
                 }
-                if (v.sys.view(100).team_coast) {  // s78n t18 review: the braking coast after the new order of frame 230
+                // mov2 t09 (MOVEMENT §3.5.2 G, 0x410170's TEAM rule [H]): the new order of frame 230 is walked at speed and
+                // turned on the move (before mov2 t09: a braking coast) - the first run of turning frames after it
+                coasted = coasted || (f >= 230 && v.sys.view(100).team_coast);
+                const bool turning = f >= 230 && v.sys.view(100).speed > 0.0f && v.sys.view(100).yaw != yaw_prev;
+                if (turning && (coast_first == 0 || coast_last == f)) {
                     if (coast_first == 0) coast_first = f + 1;
                     coast_last = f + 1;
-                    CHECK(v.sys.view(100).speed > 0.0f && v.sys.view(100).has_goal);
+                    CHECK(v.sys.view(100).has_goal);
                 }
                 rising = rising || v.sys.hover_state(74) == 2;
                 lowering = lowering || v.sys.hover_state(74) == 3;
             }
             CHECK(repulsion && around && rising && lowering);
             CHECK(v.sys.team_member_parked(4) && !v.sys.has_unit(4));
-            // s78n t18 review: the coast is really there (from the order of frame 230 for several frames), and the saves
+            // the turn at speed is really there (from the order of frame 230 for several frames, no coast), and the saves
             // below land in it - at its first frame, in its middle and at its last frame
-            CHECK(coast_first == 231 && coast_last >= coast_first + 4);
-            std::printf("land squad t18 saves: coast frames %u..%u\n", coast_first, coast_last);
-            for (const uint32_t at : {coast_first, (coast_first + coast_last) / 2, coast_last}) {
-                World c(t18.cfg);
-                t18.build(c);
-                for (uint32_t f = 0; f < at; ++f) step(t18, c, f, serial_for);
-                CHECK(c.sys.view(100).team_coast);  // the state the save holds
-                check_resume(t18, at, 0);
-            }
+            CHECK(!coasted && coast_first >= 231 && coast_first <= 233 && coast_last >= coast_first + 4);
+            std::printf("land squad t18 saves: turn at speed frames %u..%u\n", coast_first, coast_last);
+            for (const uint32_t at : {coast_first, (coast_first + coast_last) / 2, coast_last}) check_resume(t18, at, 0);
             for (uint32_t at : {rep_at + 2u, around_at + 2u, 100u, 151u, 201u, coast_last + 1u, 301u, 325u, 400u}) check_resume(t18, at, 0);
             check_resume(t18, (coast_first + coast_last) / 2, 29);
         }
@@ -2034,6 +2108,7 @@ int main() {
     test_t18_states();              // s78n t18 review
     test_t20_states();              // s78n t20
     test_t25_attack();              // s78n t25.2
+    test_mov3_heights_save();       // mov3 t02
     test_s78o_unit_rejections();    // s78o (b0087)
     test_stale_team_entries();      // s78n t18 review
     test_hidden_after_load();       // s78n t18 review

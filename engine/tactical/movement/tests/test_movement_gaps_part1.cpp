@@ -61,54 +61,34 @@ void test_lanes() {
     sh.left = 50.0f;
     l = formation_lane(g2, chan, sh, kPassClear);
     CHECK(l.size() == 2 && at(l[0], 500.0f, 260.0f) && at(l[1], 700.0f, 310.0f));
-    // The member's path: a depth of 50 drops the waypoints within 50 of the end and ends 50 short of it; the start is the
-    // unit's foot on the lane.
+    // mov2 t01 (MOVEMENT §4.3.3 items 2 - 4 [H]): a member walks the formation path itself; its end shift +0x68 is -depth
+    // (no final facing), so a rear member (back 50) stops 50 short of the end and a front-row member (back -30: the
+    // layout centres its rows) 30 beyond it, both on their slot lateral.
     sh.left = 0.0f;
     const std::vector<V2> longer = {{0.0f, 0.0f}, {200.0f, 0.0f}};
-    std::vector<V2> m = member_lane(none, longer, sh, 50.0f, kPassClear, {-10.0f, 5.0f});
-    CHECK(m.size() == 2 && at(m[0], -10.0f, 0.0f) && at(m[1], 150.0f, 0.0f));
-    // Passed waypoints are skipped; a depth past the start extends back along the first segment.
-    const std::vector<V2> three = {{0.0f, 0.0f}, {100.0f, 0.0f}, {300.0f, 0.0f}};
-    m = member_lane(none, three, sh, 0.0f, kPassClear, {120.0f, 30.0f});
-    CHECK(m.size() == 2 && at(m[0], 120.0f, 0.0f) && at(m[1], 300.0f, 0.0f));
-    m = member_lane(none, straight, sh, 150.0f, kPassClear, {-80.0f, 0.0f});
-    CHECK(m.size() == 2 && at(m[0], -80.0f, 0.0f) && at(m[1], -50.0f, 0.0f));
-    // A front-row member (depth < 0: the layout centres its rows) ends ahead of the path's end along the last segment, so
-    // two rows never share an end (review finding 1); the last waypoint stays a lane point (nothing passed: the path
-    // starts at the unit).
-    m = member_lane(none, longer, sh, -30.0f, kPassClear, {-10.0f, 5.0f});
-    CHECK(m.size() == 3 && at(m[0], -10.0f, 5.0f) && at(m[1], 200.0f, 0.0f) && at(m[2], 230.0f, 0.0f));
-    // A passed corner stays the lane's start when no later point is kept: the path does not cut back across the corner
-    // (review finding 4).
-    const std::vector<V2> corner = {{0.0f, 0.0f}, {100.0f, 0.0f}, {100.0f, 200.0f}};
-    m = member_lane(none, corner, sh, 50.0f, kPassClear, {110.0f, 10.0f});
-    CHECK(m.size() == 2 && at(m[0], 100.0f, 10.0f) && at(m[1], 100.0f, 150.0f));
-    // Squeeze rows: inside a segment whose straight lane line is blocked, the rows' changes get their own points; a clear
-    // line keeps one point per waypoint. A narrow row takes the unit's offset in that width entry's pack.
+    CHECK(lane_end_shift(longer, sh, 50.0f) == -50.0f && at(lane_end(longer, sh, 50.0f), 150.0f, 0.0f));
+    CHECK(lane_end_shift(longer, sh, -30.0f) == 30.0f && at(lane_end(longer, sh, -30.0f), 230.0f, 0.0f));
+    sh.left = 12.0f;
+    CHECK(at(lane_end(longer, sh, 50.0f), 150.0f, 12.0f));
+    // Squeeze rows: the lane is one point per waypoint whatever the line between them (mov2 t01: it feeds only the corner
+    // pass; retail has no point per row and no segment test). A narrow row takes the unit's offset in that entry's pack.
     const std::vector<float> shift = {0.0f, 0.0f, 0.0f, 10.0f, 10.0f, 0.0f, 0.0f};
     const std::vector<uint32_t> entry = {0, 0, 0, 1, 1, 0, 0};
     const std::vector<float> entry_left = {0.0f, 5.0f};
     const std::vector<V2> row_path = {{500.0f, 260.0f}, {680.0f, 260.0f}};
+    sh.left = 0.0f;
     sh.shift = shift;
     sh.entry = entry;
     sh.entry_left = entry_left;
     PassabilityGrid g3 = open_grid(60, 30);
-    CHECK(formation_lane(g3, row_path, sh, kPassClear).size() == 2);
     g3.set_base(30, 13, kPassImpassable);  // on the line y = 260 at x 590 .. 610
     l = formation_lane(g3, row_path, sh, kPassClear);
-    CHECK(l.size() == 6 && at(l[0], 500.0f, 260.0f) && at(l[1], 560.0f, 260.0f) && at(l[2], 590.0f, 275.0f) &&
-          at(l[3], 620.0f, 275.0f) && at(l[4], 650.0f, 260.0f) && at(l[5], 680.0f, 260.0f));
+    CHECK(l.size() == 2 && at(l[0], 500.0f, 260.0f) && at(l[1], 680.0f, 260.0f));
+    CHECK(near(sh.lateral_at(100.0f), 15.0f, 1e-6f));  // row 3: shift 10 + the entry-1 offset 5
     sh.left = 20.0f;
     CHECK(near(sh.offset(0.0f), 20.0f, 1e-6f) && near(sh.offset(95.0f), 15.0f, 1e-6f) && near(sh.offset(1e6f), 20.0f, 1e-6f));
     CHECK(near(sh.offset(-5.0f), 20.0f, 1e-6f));
     sh.shift = {};
-    // lane_start: a unit past the lane's first point toward its end keeps its own position.
-    std::vector<V2> p = {{0.0f, 0.0f}, {10.0f, 0.0f}};
-    lane_start(p, {20.0f, 5.0f});
-    CHECK(at(p[0], 20.0f, 5.0f));
-    p = {{0.0f, 0.0f}, {10.0f, 0.0f}};
-    lane_start(p, {4.0f, 5.0f});
-    CHECK(at(p[0], 4.0f, 0.0f));
     std::printf("lanes: straight / bend / pull-in / collapse / depth / squeeze rows ok\n");
 }
 

@@ -206,7 +206,8 @@ re-plan calls: it is passed in r8).
 Notation in this section: P = rocket position (obj +0x78), E = emitter position, `fn(v)` = the fast normalise
 0x16f570 (FIGHTER_FLYING §1.3; a zero vector is left unchanged), CD / CO = `Projectile_Rocket_Curve_Distance` (type
 +0x1ff0) / `Projectile_Rocket_Curve_Offset` (+0x1ff4), MFD = `Projectile_Max_Flight_Distance` (+0x4bc), h(x, y) =
-terrain heightmap height (0x135140 / 0x135350, bilinear; the two differ only in call shape [M]). All arithmetic is
+terrain heightmap height (0x135140 / 0x135350, bilinear; the two differ only in call shape, [H] since mov3 t08:
+0x135350 also returns a blended normal, MOVEMENT §3.6). All arithmetic is
 float (no double ops in any routine below except the 1e-6 tests of §2.4.3). Sums of three squares are written in
 the order the code adds them where it is not x, y, z.
 

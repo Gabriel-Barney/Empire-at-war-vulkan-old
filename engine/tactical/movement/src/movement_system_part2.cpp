@@ -798,9 +798,10 @@ bool MovementSystem::goal_obstacle(const Unit& u, const Unit& o, const Unit* for
 
 // 0x679aa0: the candidate is taken at the nearest passable point Q of the unit's region within LandDestinationProximity
 // (60), when the unit's rectangle placed at Q, axis along Q - E (its facing when zero), overlaps no layer object that
-// the goal-spot filter counts as an obstacle (s78n t24: goal_obstacle). [port] the tracker argument of goals 2 - 11
-// (the previous window's grown shapes, [M] in the spec) is not modelled: every goal queries the layer.
-bool MovementSystem::rejoin_accept(const Unit& u, V2 cand, V2 path_end, V2& q, const Unit* forced) const {
+// the goal-spot filter counts as an obstacle (s78n t24: goal_obstacle). mov2 t08 (docs/re/MOV2_T05_TERRAIN_STOPS.md [H]):
+// with a tracker (goals 2 - 11 of a Path Around: the window the last failed goal built) the objects met are the
+// tracker's (their tracker rectangles, 0x6b4cb0), not the layer's; a rejected candidate is not a goal.
+bool MovementSystem::rejoin_accept(const Unit& u, V2 cand, V2 path_end, V2& q, const Unit* forced, const RejoinTracker* trk) const {
     q = cand;
     const int32_t comp = regions_.component_at(u.slot, world_to_cell(u.m.pos.x), world_to_cell(u.m.pos.y));
     const int32_t cx = world_to_cell(cand.x), cy = world_to_cell(cand.y);
@@ -812,6 +813,13 @@ bool MovementSystem::rejoin_accept(const Unit& u, V2 cand, V2 path_end, V2& q, c
     FootRect r = foot_at(u, q);
     const V2 axis = normalize_retail(q - path_end);
     if (length_sq(axis) > 0.0f) r.a = axis;
+    if (trk && trk->set) {
+        for (size_t i = 0; i < trk->rects.size(); ++i) {
+            const Unit& o = units_[trk->units[i]];
+            if (o.d.id != u.d.id && foot_overlap(r, trk->rects[i]) && goal_obstacle(u, o, forced)) return false;
+        }
+        return true;
+    }
     std::vector<uint32_t> near_units;
     layer_box_query(q, foot_radius(u), near_units);
     for (uint32_t ci : near_units) {
@@ -822,7 +830,7 @@ bool MovementSystem::rejoin_accept(const Unit& u, V2 cand, V2 path_end, V2& q, c
 }
 
 bool MovementSystem::rejoin_search(const Unit& u, std::span<const V2> base, uint32_t cur, float d,
-                                   const std::function<int(const Rejoin&)>& fn, const Unit* forced) const {
+                                   const std::function<int(const Rejoin&)>& fn, const Unit* forced, const RejoinTracker* trk) const {
     // 0x675ed0: at most 11 accepted goals (0x676020 cmp r12d, 0xa); the generator itself has no count
     // limit: retail MOVEMENT §1.5.1 (0x675ed0: at most 11 rejoin goals)
     constexpr uint32_t kMaxGoals = 11;
@@ -844,7 +852,7 @@ bool MovementSystem::rejoin_search(const Unit& u, std::span<const V2> base, uint
         Rejoin r;
         r.on_path = !u.pushed;
         r.resume = u.pushed ? u.m.next : p.next;  // (a detour off an older collision path resumes the order path by its lines)
-        if (rejoin_accept(u, p.p, end, r.q, forced) && offer(r)) return verdict == kRejoinTaken;
+        if (rejoin_accept(u, p.p, end, r.q, forced, trk) && offer(r)) return verdict == kRejoinTaken;
     }
     // 0x679e20: a land path from the end E to the spot no longer than 2 x the straight line
     LandPathScratch sc;
@@ -873,7 +881,8 @@ bool MovementSystem::rejoin_search(const Unit& u, std::span<const V2> base, uint
         const V2 spot = end + dir * s;
         Rejoin r;
         r.resume = past;
-        if (!rejoin_accept(u, spot, end, r.q, forced)) continue;
+        r.src = 1;
+        if (!rejoin_accept(u, spot, end, r.q, forced, trk)) continue;
         if (!reachable(spot)) break;
         if (offer(r)) return verdict == kRejoinTaken;
     }
@@ -903,10 +912,45 @@ bool MovementSystem::rejoin_search(const Unit& u, std::span<const V2> base, uint
             Rejoin r;
             r.q = p;
             r.resume = past;
+            r.src = 2;
             return offer(r);
         },
         spot);
     return stopped && verdict == kRejoinTaken;
+}
+
+std::vector<MovementSystem::RejoinGoal> MovementSystem::rejoin_goals(ObjectId id, float d, uint32_t fail_at,
+                                                                    ObjectId forced) const {
+    std::vector<RejoinGoal> out;
+    const Unit* u = unit_ptr(id);
+    if (!u) return out;
+    const Unit* f = forced != 0 ? unit_ptr(forced) : nullptr;
+    std::vector<V2> scratch;
+    std::span<const V2> base;
+    uint32_t cur = 0;
+    if (!around_base(*u, scratch, base, cur)) return out;
+    (void)rejoin_search(*u, base, cur, d, [&](const Rejoin& r) {
+        out.push_back({r.q, r.src});
+        return fail_at != 0 && out.size() == fail_at ? kRejoinFail : kRejoinNext;
+    }, f);
+    return out;
+}
+
+bool MovementSystem::debug_coast(ObjectId id, bool spent_push) {
+    Unit* u = unit_ptr(id);
+    if (!u || !u->d.team_container || !(u->m.speed > 0.0f)) return false;
+    u->coast = true;
+    if (spent_push) {
+        const V2 at = u->m.pos;
+        u->pushed = true;
+        u->push_path = {at - dir_from_deg(u->m.yaw) * 10.0f, at};
+        u->push_next = 2;
+        u->push_frac.assign(2, 1.0f);
+        u->push_turn_done = false;
+        u->push_kind = 1;
+        u->push_tags.clear();
+    }
+    return true;
 }
 
 bool MovementSystem::spare_point(const Unit& a, const Unit& b, V2& v) const {
@@ -966,6 +1010,7 @@ bool MovementSystem::path_around(const CollisionObject& c, Unit& u, const Unit* 
     // whose first segment makes more than 120 degrees with u's facing; the call then fails
     const bool refuse_back = c.kind == CollisionKind::MovingVsMoving && c.state == CollisionState::Pass;
     bool searched = false, done = false;
+    RejoinTracker trk;  // mov2 t08: the goal loop's tracker, kept from one failed goal to the next
     rejoin_search(u, base, cur, d, [&](const Rejoin& rj) {
         AroundRequest q;
         q.start = u.m.pos;
@@ -982,6 +1027,18 @@ bool MovementSystem::path_around(const CollisionObject& c, Unit& u, const Unit* 
         searched = true;
         const bool ok = around_search(grid_, k, q, res);
         quota_used_ += res.complexity;
+        // mov2 t08 (MOV2_T05_TERRAIN_STOPS.md [H]: one tracker pointer kept across the goals, rebuilt with each window):
+        // a goal that builds no window leaves the last window's tracker in place ([port] [M]: an empty one would accept
+        // every later candidate)
+        if (res.windowed) {
+            trk.set = true;
+            trk.rects.clear();
+            trk.units.clear();
+            for (const uint32_t wi : res.window) {
+                trk.rects.push_back(rect_grown(obs[wi].shape, q.tracker));
+                trk.units.push_back(obs_units[wi]);
+            }
+        }
         // s78n t24 (§5.4.7 "Rejoin candidates" item 3): an A* failure fails the call; an earlier failure tries the next goal
         if (!ok || res.points.size() < 2) return res.graph ? kRejoinFail : kRejoinNext;
         // Last-point drop: the last corner sees the next original waypoint N -> the rejoin point is removed
@@ -1020,7 +1077,7 @@ bool MovementSystem::path_around(const CollisionObject& c, Unit& u, const Unit* 
         u.around_frame = frame;
         done = true;
         return kRejoinTaken;
-    }, flag ? o : nullptr);  // s78o (b0065): a flag-1 call's obstacle is the goal-spot filter's forced object
+    }, flag ? o : nullptr, &trk);  // mov2 t08: + the tracker; s78o (b0065): a flag-1 call's obstacle is the goal-spot filter's forced object
     if (searched && !probe) ++stats_.dynamic_repaths;
     return done;
 }
@@ -2049,15 +2106,15 @@ float MovementSystem::svs_cost(const Unit& x, const Unit& y, V2 d) const {
 // units with targets -> nobody; against a Giant of a higher class only the smaller one is a candidate; else both are,
 // the cheaper first (cost(p1) <= cost(p0) -> p1 first). Of the candidates the first whose locomotor would accept the
 // claim moves (no owner, this record, or an owner of lower weight). A participant without a locomotor (a death clone, s78n t20
-// batch 1) makes the other one move (rule 1). [port] A unit whose max speed is 0 counts as immobile too (retail has no
-// such case: it would pick it and wait for good).
+// batch 1) makes the other one move (rule 1). mov3 t04 (BKR2_RE_ANSWERS Q4 [H]): no max-speed rule - a unit whose effective
+// max speed is 0 costs 0 (svs_cost: no along / side term), so it is the cheaper candidate (ties to p1), takes the claim and
+// holds the record in state 1 without moving.
 uint8_t MovementSystem::svs_pick_mover(const CollisionObject& c, const Unit& p0, const Unit& p1) const {
     if (p0.d.collision_class == kUccLandingTransport || p0.d.no_locomotor) return 1;  // (s78n t20 batch 1: no locomotor)
     if (p1.d.collision_class == kUccLandingTransport || p1.d.no_locomotor) return 0;
     if (p0.hover == 3) return 1;
     if (p1.hover == 3) return 0;
-    const auto imm = [this](const Unit& x) { return deploy_immobile(x) || !(walk_max_speed(x) > 0.0f); };
-    const bool i0 = imm(p0), i1 = imm(p1);
+    const bool i0 = deploy_immobile(p0), i1 = deploy_immobile(p1);
     if (i0 && i1) return 2;
     if (i0) return 1;
     if (i1) return 0;
@@ -2301,6 +2358,16 @@ void MovementSystem::tick_land(uint32_t frame, SimRng& rng, const ParallelFor& p
             if (u.in_formation) x.jiggle = u.jiggle;  // OI tactical: formation members
             x.formation = u.formation_speed;
             x.forced = u.forced;
+        }
+        // mov2 t01 (MOVEMENT §4.3.3 items 1 - 3 [H]): u.m is the order path here (a pushed record is swapped in after); when
+        // it is the formation path's copy, its end shift rides with it (the walked record, or the started path below a
+        // collision-owned one) and, walked itself, its slot shape steers the lane term
+        if (slot_walk(u)) {
+            x.end_shift = u.mslot.end_shift;
+            if (order_rec) {
+                x.slot_walk = true;
+                x.slot = u.mslot.shape();
+            }
         }
     };
     // The walk of one unit that is no squad member / container (the parallel pass; s78n t26.2: also the serial start-turn

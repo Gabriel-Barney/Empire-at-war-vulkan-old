@@ -83,10 +83,18 @@ float line_distance_along(V2 pos, V2 d, V2 l0, V2 n) {
 namespace {
 // MOVEMENT §3.5.2 notation: line(i) = the waypoint line 0x5c4ec0 through path[i] (the port's waypoint i is retail idx + 1),
 // normal = the bisector of its two segments; the last waypoint: its segment's direction (fast normalise).
-void waypoint_line(const std::vector<V2>& path, size_t i, V2& l0, V2& n) {
+// mov2 t01 (MOVEMENT §4.3.3 item 3 [H]): on a formation member's order path the record's end shift +0x68 (`shift`) moves the
+// line of every waypoint whose rest (the length after it; [port] 2-D, the port's path points have z = 0) is below |shift|
+// along its incoming segment direction by (rest + shift): the last waypoint's line passes through W + d1 shift.
+void waypoint_line(const std::vector<V2>& path, size_t i, V2& l0, V2& n, float shift = 0.0f) {
     l0 = path[i];
     const V2 din = normalize_retail(path[i] - path[i - 1]);
     n = i + 1 < path.size() ? normalize_retail(din + normalize_retail(path[i + 1] - path[i])) : din;
+    if (shift != 0.0f) {
+        float rest = 0.0f;
+        for (size_t k = i + 1; k < path.size(); ++k) rest += distance(path[k - 1], path[k]);
+        if (rest < std::fabs(shift)) l0 = l0 + din * (rest + shift);
+    }
 }
 }  // namespace
 
@@ -96,11 +104,18 @@ bool walk_wanted_dir(std::span<const V2> path, uint32_t next, V2 pos, const Walk
     const V2 sd = normalize_retail(path[next] - a);
     float k = 0.0f;
     if (x && x->lane) {
-        // 0x41dbb0: e = (the slot's side offset + the jiggle's side on a formation path) - the unit's signed side
-        // (s78p [port]: the slot's side offset is 0 - a formation member's path is its lane, already offset by its slot)
-        // offset from its segment; |e| <= min -> 0, else (e -+ min) / max (FoC 0.1 / 30)
+        // 0x41dbb0: e = (the slot's side offset + the jiggle's side on a formation path) - the unit's signed side offset
+        // from its segment; |e| <= min -> 0, else (e -+ min) / max (FoC 0.1 / 30). mov2 t01 (MOVEMENT §4.3.3 item 1 [H]):
+        // a formation member walks the formation path itself, and its side target is its slot lateral at its arc position
+        // s on that path (the squeeze row's offset, turned by the final-facing rotation: LaneShape::lateral_at)
         float e = -cross(sd, pos - a);
         if (x->formation_path) e += cross(sd, x->jiggle);
+        if (x->slot_walk) {
+            float s = 0.0f;
+            for (uint32_t j = 1; j < next; ++j) s += distance(path[j - 1], path[j]);
+            s += std::max(0.0f, dot(pos - a, sd));
+            e += x->slot.lateral_at(s);
+        }
         k = formation_side_correction(e, x->side_error_min, x->side_error_max);
     }
     const V2 base = normalize_retail(sd + perp_left(sd) * k);  // item 2, renormalised (fast normalise)
@@ -196,6 +211,8 @@ WalkResult walk_step(LandMotion& m, const LocomotorParams& p, float speed_cap, c
     if (wts) wt_advance(m, *wt);
     LandMotion* below = x ? x->below : nullptr;
     bool forced = x && x->forced;
+    // mov2 t01 (MOVEMENT §4.3.3 item 3): the end shift of the record being walked - a formation member's order path only
+    float top_shift = x && x->slot_walk ? x->end_shift : 0.0f;
     const auto yaw_of = [&](const LandMotion& k) {
         V2 wd;
         return walk_wanted_dir(k, x, wd) && length_sq(wd) > 0.0f ? heading_deg(wd) : k.yaw;
@@ -220,8 +237,10 @@ WalkResult walk_step(LandMotion& m, const LocomotorParams& p, float speed_cap, c
             m.state = LocoState::WalkStopped;
             return r;
         }
-        if (n >= 2 && static_cast<size_t>(m.next) + 1 == n &&
-            dot(m.pos - m.path[n - 1], normalize_retail(m.path[n - 1] - m.path[n - 2])) > -5.0f) {
+        // mov2 t01 (§4.3.3 item 3): the last waypoint's line, moved by a formation member's end shift
+        const float sh = x && x->slot_walk ? x->end_shift : 0.0f;
+        const V2 d1 = n >= 2 ? normalize_retail(m.path[n - 1] - m.path[n - 2]) : V2{};
+        if (n >= 2 && static_cast<size_t>(m.next) + 1 == n && dot(m.pos - (m.path[n - 1] + d1 * sh), d1) > -5.0f) {
             m.next = static_cast<uint32_t>(n);
             m.turn_done = false;
         }
@@ -341,7 +360,7 @@ WalkResult walk_step(LandMotion& m, const LocomotorParams& p, float speed_cap, c
         si.frac_next = wp_frac(m, m.next);
         if (si.frac_next * vmax < m.speed) {  // B.5: D along d to line(idx + 1)
             V2 l0, n;
-            waypoint_line(m.path, m.next, l0, n);
+            waypoint_line(m.path, m.next, l0, n, top_shift);
             const V2 d = normalize_retail(m.path[m.next] - m.path[m.next - 1]);
             if (length_sq(d) > 0.0f && length_sq(n) > 0.0f) si.line_d = line_distance_along(m.pos, d, l0, n);
         }
@@ -390,7 +409,7 @@ WalkResult walk_step(LandMotion& m, const LocomotorParams& p, float speed_cap, c
                     uint32_t k = below->next;
                     for (; static_cast<size_t>(k) + 1 < below->path.size(); ++k) {
                         V2 ql0, qn;
-                        waypoint_line(below->path, k, ql0, qn);
+                        waypoint_line(below->path, k, ql0, qn, x->end_shift);
                         if (!(dot(qn, m.pos - ql0) >= -0.001f)) break;
                     }
                     if (walk_wanted_dir(std::span<const V2>(below->path), k, m.pos, x, wd) && length_sq(wd) > 0.0f) return heading_deg(wd);
@@ -425,6 +444,7 @@ WalkResult walk_step(LandMotion& m, const LocomotorParams& p, float speed_cap, c
             std::swap(m.started, below->started);
             m.next = resume_index(m, x->below_kind, x->below_resume);
             forced = x->below_forced;
+            top_shift = x->end_shift;  // mov2 t01: the order path below carries the end shift
             below = nullptr;
             r.popped = true;
             no_turn = true;
@@ -434,7 +454,7 @@ WalkResult walk_step(LandMotion& m, const LocomotorParams& p, float speed_cap, c
         }
         // C.5: n . (pos - L0) >= -0.001 -> the waypoint is passed (0x5c4920: the turn-done byte cleared)
         V2 l0, n;
-        waypoint_line(m.path, m.next, l0, n);
+        waypoint_line(m.path, m.next, l0, n, top_shift);
         if (dot(n, m.pos - l0) >= -0.001f) {
             ++m.next;
             m.turn_done = false;

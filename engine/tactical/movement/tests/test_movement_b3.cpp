@@ -883,6 +883,401 @@ void test_t23_state2_self_read() {
     }
 }
 
+
+// mov2 t03 (MOVEMENT §4.2 step 2 item 7 [H], 0x43c1b0): the recruitment distance d_min is 3-D; a candidate on a team that
+// already joined the formation joins at once (test 1); a candidate with a team needs a seed with one (test 7); test 12's
+// line / path runs candidate -> seed with the 1.4 x d_min budget.
+void test_mov2_recruitment() {
+    MovementConstants k;
+    k.should_infantry_teams_split_across_formations = false;
+    std::vector<FormationMember> m(2);
+    for (uint32_t i = 0; i < 2; ++i) {
+        m[i].id = static_cast<ObjectId>(i + 1);
+        m[i].max_speed = 1.0f;
+        m[i].type_name = "Rebel_Infantry";
+        m[i].collision_class = 5;
+    }
+    m[1].pos = {50.0f, 0.0f};  // 2-D 50 <= 60
+    const uint32_t bucket[] = {0, 1};
+    CHECK(split_into_formations(m, bucket, k).size() == 1);
+    m[1].z = 40.0f;  // 3-D sqrt(50^2 + 40^2) = 64 > 60: the candidate seeds its own formation
+    CHECK(split_into_formations(m, bucket, k).size() == 2);
+    // test 1: the same team joins at once - past the distance, and past the FoC split clause of test 3
+    m[0].team = 7;
+    m[1].team = 7;
+    m[1].pos = {500.0f, 0.0f};
+    const MovementConstants foc;
+    CHECK(foc.should_infantry_teams_split_across_formations);
+    CHECK(split_into_formations(m, bucket, foc).size() == 1);
+    // test 7: a candidate with a team and a seed without one
+    m[0].team = -1;
+    m[1].team = 8;
+    m[1].pos = {10.0f, 0.0f};
+    m[1].z = 0.0f;
+    CHECK(split_into_formations(m, bucket, k).size() == 2);
+    m[1].team = -1;
+    // test 12: the reach callback gets (seed, candidate, d_min)
+    std::vector<FormationMember> r(3, m[0]);
+    for (uint32_t i = 0; i < 3; ++i) r[i].id = static_cast<ObjectId>(i + 1);
+    r[0].pos = {0.0f, 0.0f};
+    r[1].pos = {30.0f, 0.0f};
+    r[2].pos = {50.0f, 0.0f};
+    const uint32_t b3[] = {0, 1, 2};
+    std::vector<float> dmins;
+    std::vector<uint32_t> seeds;
+    const auto reach = [&](uint32_t sd, uint32_t, float d) {
+        seeds.push_back(sd);
+        dmins.push_back(d);
+        return true;
+    };
+    CHECK(split_into_formations(r, b3, k, {}, 0.0f, reach).size() == 1);
+    // the seed nearest the centroid (26.7, 0) is r[1]; r[0] (d_min 30) then r[2] (nearest member r[1]: 20)
+    CHECK(seeds.size() == 2 && seeds[0] == 1 && seeds[1] == 1);
+    CHECK(dmins.size() == 2 && dmins[0] == 30.0f && dmins[1] == 20.0f);
+}
+
+
+// mov2 t01 (MOVEMENT §4.3.3 items 1 - 4 [H]): the members of a land formation walk copies of one formation path (shared
+// waypoints, not lanes); the lane term steers each onto its slot lateral, and each stops on the last waypoint line moved by
+// its end shift: at its slot point (the goal the order gave it), with no search of its own.
+void test_mov2_formation_path() {
+    ::alamo::test::section("mov2_formation_path");
+    MovementSystem sys{MovementConfig{}};
+    land_system(sys, 100);
+    const ObjectId ids[] = {1, 2, 3};
+    for (ObjectId i : ids) CHECK(sys.add_unit(unit(i, cell_center(15, 48 + 2 * i), 2, 1.0f, 6.0f)));
+    SimRng rng(77);
+    MoveOrder o;
+    o.units = {1, 2, 3};
+    o.destination = cell_center(80, 50);
+    sys.move(o, rng, 1);
+    uint32_t f = 1;
+    bool planned = false;
+    for (; f < 200 && !planned; ++f) {
+        sys.tick(f, rng, serial_for);
+        planned = !sys.land_path(1).empty() && !sys.land_path(2).empty() && !sys.land_path(3).empty();
+    }
+    CHECK(planned);
+    CHECK(sys.view(1).form_id != 0 && sys.view(2).form_id == sys.view(1).form_id && sys.view(3).form_id == sys.view(1).form_id);
+    // one formation path: every member's path has the same points (a copy of W), not its own lane
+    const std::vector<V2> w(sys.land_path(1).begin(), sys.land_path(1).end());
+    bool shared = true;
+    for (ObjectId i : ids) {
+        const std::span<const V2> p = sys.land_path(i);
+        shared = shared && p.size() == w.size() && std::equal(p.begin(), p.end(), w.begin());
+    }
+    CHECK(shared && w.size() >= 2);
+    // the goals differ (each member's slot point) and none is W's end
+    const V2 g1 = sys.view(1).goal, g2 = sys.view(2).goal, g3 = sys.view(3).goal;
+    CHECK(!(g1 == g2) && !(g2 == g3) && !(g1 == g3));
+    // while walking the middle of the path, each member holds its slot lateral (its goal's side offset from W's line) by
+    // the lane term alone: the waypoints are W's
+    const V2 wd = normalize_retail(w.back() - w.front());
+    const auto side = [&](V2 p) { return cross(wd, p - w.front()); };
+    float lat_err = 0.0f;
+    uint32_t mid = 0;
+    for (; f < 1500; ++f) {
+        sys.tick(f, rng, serial_for);
+        for (ObjectId i : ids) {
+            const UnitView v = sys.view(i);
+            const float along = dot(v.pos - w.front(), wd), len = distance(w.front(), w.back());
+            if (along > 0.4f * len && along < 0.7f * len) {
+                lat_err = std::max(lat_err, std::fabs(side(v.pos) - side(v.goal)));
+                ++mid;
+            }
+        }
+        if (sys.view(1).arrived && sys.view(2).arrived && sys.view(3).arrived) break;
+    }
+    std::printf("mov2 t01 formation path: mid-path lateral error %.3f over %u samples\n", static_cast<double>(lat_err), mid);
+    CHECK(mid > 30 && lat_err < 1.0f);
+    float worst = 0.0f;
+    for (ObjectId i : ids) {
+        const UnitView v = sys.view(i);
+        CHECK(v.arrived && !v.has_goal);
+        worst = std::max(worst, distance(v.pos, v.goal));
+    }
+    std::printf("mov2 t01 formation path: %zu shared waypoints, all arrived by frame %u, worst %.2f from the slot point\n", w.size(), f,
+                static_cast<double>(worst));
+    // stopped within the End Move coast of each slot point (the lane term's dead band 0.1 sideways, the coast along)
+    CHECK(worst < 2.0f);
+}
+
+
+// mov2 t10 (MOVEMENT "Retail measurement of MovingVsMoving head-on pairs", run 20261116-022245): two units of one player
+// ordered at once toward each other's start, 600 apart on open ground - T4B / T4B on one line, T4B / T4B 12 to the side,
+// AT-ST / T4B. Retail: neither stands at speed 0 before its goal or leaves 0x13; one swerves at full speed, the other
+// slows to 0.11 - 0.22 for 27 - 66 frames and runs on. Type values from GROUNDVEHICLES.XML (T4B_Tank: Max_Speed 0.7,
+// OverrideAcceleration / Deceleration 0.05, turn 6, hard extents 20 x 22 x Scale_Factor 0.85, Vehicle; AT_ST_Walker:
+// 1.2, turn 7.5, 8 x 6 x 1.6, Large Vehicle).
+struct HeadOnOut {
+    uint32_t zero[2] = {0, 0};   // frames at speed 0 with a goal, after the unit first moved
+    float vlow[2] = {9.0f, 9.0f};  // lowest speed on the way (after its first full-speed frame, 150+ from its goal)
+    uint32_t below_half[2] = {0, 0};  // frames below 0.5 on the way
+    uint32_t slowed[2] = {0, 0};      // frames below its max speed on the way
+    float side[2] = {0.0f, 0.0f};  // largest distance off its start line
+    bool arrived = false;
+    CollisionState decided = CollisionState::Active;
+};
+HeadOnOut run_head_on(bool atst, float offset) {
+    HeadOnOut o;
+    MovementSystem sys{MovementConfig{}};
+    land_system(sys, 120);
+    const V2 west = cell_center(30, 60), east = west + V2{600.0f, offset};
+    const auto t4b = [](ObjectId id, V2 at) {
+        UnitDesc d = vehicle(id, at, 0, 20.0f * 0.85f, 22.0f * 0.85f, 0.7f);
+        d.accel = d.decel = 0.05f;
+        d.turn_rate = d.alt_turn_rate = 6.0f;
+        d.type_name = "T4B_Tank";
+        return d;
+    };
+    UnitDesc a = t4b(1, west);
+    UnitDesc b = t4b(2, east);
+    if (atst) {
+        b = vehicle(2, east, 0, 8.0f * 1.6f, 6.0f * 1.6f, 1.2f);
+        b.collision_class = kUccLargeVehicle;
+        b.turn_rate = b.alt_turn_rate = 7.5f;
+        b.type_name = "AT_ST_Walker";
+    }
+    b.yaw_deg = 180.0f;
+    CHECK(sys.add_unit(a) && sys.add_unit(b));
+    SimRng rng(1016);
+    MoveOrder ao;
+    ao.units = {1};
+    ao.destination = east;
+    sys.move(ao, rng, 1);
+    MoveOrder bo;
+    bo.units = {2};
+    bo.destination = west;
+    sys.move(bo, rng, 1);
+    bool full[2] = {false, false};
+    const V2 start[2] = {west, east};
+    for (uint32_t f = 1; f < 2000; ++f) {
+        sys.tick(f, rng, serial_for);
+        const CollisionObject* c = mvm_record(sys, 1, 2);
+        if (o.decided == CollisionState::Active && c && c->state != CollisionState::Active) o.decided = c->state;
+        for (int k = 0; k < 2; ++k) {
+            const UnitView v = sys.view(static_cast<ObjectId>(k + 1));
+            o.side[k] = std::max(o.side[k], std::fabs(v.pos.y - start[k].y));
+            if (!v.has_goal) continue;
+            if (v.speed >= v.max_speed) full[k] = true;
+            if (!full[k]) continue;
+            if (v.speed == 0.0f) ++o.zero[k];
+            if (distance(v.pos, start[1 - k]) < 150.0f) continue;  // the goal's brake is not part of the meeting
+            o.vlow[k] = std::min(o.vlow[k], v.speed);
+            if (v.speed < 0.5f) ++o.below_half[k];
+            if (v.speed < v.max_speed) ++o.slowed[k];
+        }
+        if (sys.view(1).arrived && sys.view(2).arrived) {
+            o.arrived = true;
+            break;
+        }
+    }
+    return o;
+}
+
+void test_mov2_head_on_pairs() {
+    ::alamo::test::section("mov2_head_on_pairs");
+    const struct {
+        const char* name;
+        bool atst;
+        float offset;
+    } cases[] = {{"T4B / T4B", false, 0.0f}, {"T4B / T4B offset 12", false, 12.0f}, {"AT-ST / T4B", true, 0.0f}};
+    for (const auto& c : cases) {
+        const HeadOnOut o = run_head_on(c.atst, c.offset);
+        std::printf("mov2 t10 head-on %s: decided %d, zero-speed frames %u / %u, lowest speed %.3f / %.3f, slowed %u / %u "
+                    "frames (below 0.5: %u / %u), off line %.1f / %.1f, both arrived %d\n",
+                    c.name, static_cast<int>(o.decided), o.zero[0], o.zero[1], static_cast<double>(o.vlow[0]),
+                    static_cast<double>(o.vlow[1]), o.slowed[0], o.slowed[1], o.below_half[0], o.below_half[1],
+                    static_cast<double>(o.side[0]), static_cast<double>(o.side[1]), o.arrived ? 1 : 0);
+        // the retail pattern (four trials): no stand at speed 0, one unit swerves at full speed (up to ~40 off its line),
+        // the other slows to 0.11 - 0.22 for 27 - 66 frames; port 2026-11-20: 0.107 - 0.153 for 42 - 66 frames, swerve
+        // 31 - 47
+        const int sw = o.vlow[0] >= o.vlow[1] ? 0 : 1;
+        // Q2 [H]: the pair is decided Path Around (state 1); S detours at full speed, M slows at the slave speed
+        CHECK(o.decided == CollisionState::PathAround);
+        CHECK(o.arrived && o.zero[0] == 0 && o.zero[1] == 0);
+        CHECK(o.slowed[sw] == 0 && o.side[sw] > 20.0f && o.side[sw] < 50.0f);
+        CHECK(o.vlow[1 - sw] > 0.1f && o.vlow[1 - sw] < 0.25f && o.slowed[1 - sw] >= 20 && o.slowed[1 - sw] <= 70);
+    }
+}
+
+
+// mov2 t09 (MOVEMENT §3.5.2 G correction, MOV2_RE_QUESTIONS Q1 [H]): 0x410170 aligns a new path when |delta| <= R or
+// |delta| <= CE (type Close_Enough_Angle_For_Move_Start, else GameConstants CloseEnoughAngleForMoveStart = 180), with
+// waypoint 0's fraction > 0 - so a T4B (no type CE) re-ordered at cruise 90 / 180 degrees off keeps 0x13 and turns on
+// the move, as retail did in 5 of 6 re-orders; a type with CE 30 (the AT-AT) coasts to a stop and turns in place.
+void test_mov2_reorder_at_speed() {
+    ::alamo::test::section("mov2_reorder_at_speed");
+    const auto run = [](float turn_deg, float ce, bool& kept, bool& coasted) {
+        MovementSystem sys{MovementConfig{}};
+        land_system(sys, 120);
+        const V2 at = cell_center(30, 60);
+        UnitDesc d = vehicle(1, at, 0, 20.0f * 0.85f, 22.0f * 0.85f, 0.7f);
+        d.accel = d.decel = 0.05f;
+        d.turn_rate = d.alt_turn_rate = 6.0f;
+        d.close_enough_angle = ce;
+        CHECK(sys.add_unit(d));
+        SimRng rng(909);
+        MoveOrder o;
+        o.units = {1};
+        o.destination = at + V2{1200.0f, 0.0f};
+        sys.move(o, rng, 1);
+        uint32_t f = 1;
+        for (; f < 400 && !(sys.view(1).speed >= sys.view(1).max_speed && sys.view(1).pos.x > at.x + 200.0f); ++f)
+            sys.tick(f, rng, serial_for);
+        const V2 p = sys.view(1).pos;
+        const float r = turn_deg * 0.017453292f;
+        MoveOrder b;
+        b.units = {1};
+        b.destination = p + V2{400.0f * std::cos(r), 400.0f * std::sin(r)};
+        sys.move(b, rng, f);
+        kept = true;
+        coasted = false;
+        for (uint32_t n = 0; n < 60; ++n, ++f) {
+            sys.tick(f, rng, serial_for);
+            const UnitView v = sys.view(1);
+            kept = kept && v.walk_state == LocoState::WalkMoving && v.speed > 0.0f;
+            coasted = coasted || v.walk_state == LocoState::WalkEndMove || v.speed == 0.0f;
+        }
+    };
+    for (const float a : {90.0f, 180.0f}) {
+        bool kept = false, coasted = false;
+        run(a, 0.0f, kept, coasted);
+        std::printf("mov2 t09 T4B re-order %.0f deg at cruise: kept 0x13 %d, braked %d\n", static_cast<double>(a), kept ? 1 : 0,
+                    coasted ? 1 : 0);
+        CHECK(kept && !coasted);
+        run(a, 30.0f, kept, coasted);  // a type CE of 30 (AT_AT_Walker): not aligned, the coast and the turn in place
+        CHECK(!kept && coasted);
+    }
+}
+
+
+// mov3 t04 (BKR2_RE_ANSWERS Q4 [H], 0x687010 / 0x686b20): the StoppedVsStopped mover pick has no max-speed rule. Two
+// standing vehicles overlap; unit 2's speed override is 0, so its cost is 0 (no along / side term) and it is picked
+// (cheaper, ties to p1): it takes the record's claim and the path, never moves, and the record stays resolving (state 1,
+// the port's Resolving) while unit 1 stands. Before mov3 t04 the port counted it immobile and moved unit 1.
+void test_mov3_svs_speed_zero() {
+    ::alamo::test::section("mov3_svs_speed_zero");
+    MovementSystem sys{MovementConfig{}};
+    land_system(sys, 80);
+    const V2 at = cell_center(40, 40);
+    CHECK(sys.add_unit(vehicle(1, at, 0)));
+    CHECK(sys.add_unit(vehicle(2, at + V2{8.0f, 0.0f}, 0)));
+    CHECK(sys.set_speed_override(2, 0.0f));
+    SimRng rng(404);
+    const V2 p1 = sys.view(1).pos, p2 = sys.view(2).pos;
+    ObjectId mover = -1;
+    for (uint32_t f = 1; f < 200; ++f) {
+        sys.tick(f, rng, serial_for);
+        for (const CollisionObject& c : sys.collisions().list())
+            if (c.kind == CollisionKind::StoppedVsStopped && c.master <= 1 && mover < 0) mover = c.master == 0 ? c.a : c.b;
+    }
+    const float m1 = distance(sys.view(1).pos, p1), m2 = distance(sys.view(2).pos, p2);
+    std::printf("mov3 t04 SvS speed 0: mover %d, unit 1 moved %.2f, unit 2 moved %.2f\n", mover, static_cast<double>(m1),
+                static_cast<double>(m2));
+    CHECK(mover == 2 && m1 == 0.0f && m2 == 0.0f);
+}
+
+
+// mov3 t03 (b0174, MOVEMENT §5.4.7 "Rejoin candidates of a kind-3 Path Around" [H]): the generator rules through the
+// rejoin_goals accessor. A vehicle walking east on open ground: (a) the path points from progress + D + 2 in steps of 10,
+// at most 11 goals; near the end (a) gives out and (b) steps past the end follow (up to LandTemporaryDestinationProximity
+// 20), then (c) the ring, which resumes after each goal; a wall right past the end fails (b)'s path-length test at its
+// first step, which ends (b); a kRejoinFail answer ends the call at once.
+void test_mov3_rejoin_goals() {
+    ::alamo::test::section("mov3_rejoin_goals");
+    const auto setup = [](MovementSystem& sys, SimRng& rng, V2 dest) {
+        land_system(sys, 100);
+        CHECK(sys.add_unit(vehicle(1, cell_center(10, 50), 0)));
+        MoveOrder o;
+        o.units = {1};
+        o.destination = dest;
+        sys.move(o, rng, 1);
+        uint32_t f = 1;
+        for (; f < 200 && sys.land_path(1).empty(); ++f) sys.tick(f, rng, serial_for);
+        CHECK(!sys.land_path(1).empty());  // planned (frame 62 here)
+    };
+    {  // a long way left: eleven (a) goals 10 apart, the first at progress + D + 2
+        MovementSystem sys{MovementConfig{}};
+        SimRng rng(31);
+        setup(sys, rng, cell_center(80, 50));
+        const float x0 = sys.view(1).pos.x;
+        const std::vector<MovementSystem::RejoinGoal> g = sys.rejoin_goals(1, 30.0f);
+        bool along = g.size() == 11;
+        for (size_t k = 0; k < g.size() && along; ++k)
+            along = g[k].src == 0 && std::fabs(g[k].q.x - (x0 + 32.0f + 10.0f * static_cast<float>(k))) < 1.0f;
+        std::printf("mov3 t03 rejoin goals: long path %zu goals, first at +%.2f\n", g.size(),
+                    g.empty() ? 0.0 : static_cast<double>(g[0].q.x - x0));
+        CHECK(along);
+        // a kRejoinFail answer at the 3rd goal ends the call there
+        CHECK(sys.rejoin_goals(1, 30.0f, 3).size() == 3);
+    }
+    {  // the end close by (remaining 60, D 30): (a) gives 3 goals, (b) 2 (+10, +20 past E), the ring the rest up to 11
+        MovementSystem sys{MovementConfig{}};
+        SimRng rng(32);
+        setup(sys, rng, cell_center(13, 50));
+        const std::vector<MovementSystem::RejoinGoal> g = sys.rejoin_goals(1, 30.0f);
+        uint32_t n[3] = {0, 0, 0};
+        bool ordered = true;
+        for (size_t k = 0; k < g.size(); ++k) {
+            ++n[g[k].src];
+            if (k > 0 && g[k].src < g[k - 1].src) ordered = false;
+        }
+        std::printf("mov3 t03 rejoin goals: near end (a) %u, (b) %u, (c) %u\n", n[0], n[1], n[2]);
+        CHECK(g.size() == 11 && ordered && n[1] == 2 && n[2] >= 2);
+        // a wall across the way right past the end: (b)'s first step fails 0x679e20, so (b) gives nothing; the ring still
+        // offers goals (it resumes after each)
+        MovementSystem w{MovementConfig{}};
+        SimRng rng2(32);
+        setup(w, rng2, cell_center(13, 50));
+        if (w.land_path(1).empty()) return;
+        const int32_t ex = world_to_cell(w.land_path(1).back().x);
+        CHECK(ex + 1 < 100);
+        for (int32_t y = 0; y < 100 && ex + 1 < 100; ++y) w.grid().set_base(ex + 1, y, kPassImpassable);
+        w.rebuild_regions_if_dirty();
+        const std::vector<MovementSystem::RejoinGoal> h = w.rejoin_goals(1, 30.0f);
+        uint32_t m[3] = {0, 0, 0};
+        for (const auto& x : h) ++m[x.src];
+        std::printf("mov3 t03 rejoin goals: wall past the end (a) %u, (b) %u, (c) %u\n", m[0], m[1], m[2]);
+        CHECK(m[1] == 0 && m[2] >= 2);
+    }
+}
+
+
+// mov3 t06 (b0065, MOVEMENT §5.4.7 "Rejoin candidates" item 2 [H]): the forced object of a flag-1 Path Around is an
+// obstacle to every goal spot before the relation test. Vehicle 1 (speed 1) walks east; vehicle 2 (speed 2, its own order)
+// walks the same way ahead of it, inside the window of 1's (a) goals: same way and not slower, so not an obstacle by the
+// relation - the goals run 10 apart through its place. Named as the forced object, the goals its rectangle overlaps are
+// refused (today every flag-1 caller is MovingVsMoving, whose partner is an obstacle already: this pins the rule itself).
+void test_mov3_forced_goal_obstacle() {
+    ::alamo::test::section("mov3_forced_goal_obstacle");
+    MovementSystem sys{MovementConfig{}};
+    land_system(sys, 100);
+    CHECK(sys.add_unit(vehicle(1, cell_center(10, 50), 0)));
+    CHECK(sys.add_unit(vehicle(2, cell_center(14, 50), 0, 10.0f, 6.0f, 2.0f)));
+    SimRng rng(33);
+    for (const ObjectId id : {ObjectId{1}, ObjectId{2}}) {
+        MoveOrder o;
+        o.units = {id};
+        o.destination = cell_center(90, 50);
+        sys.move(o, rng, 1);
+    }
+    uint32_t f = 1;
+    for (; f < 300 && !(sys.view(1).speed > 0.0f && sys.view(2).speed > 0.0f); ++f) sys.tick(f, rng, serial_for);
+    CHECK(sys.view(1).speed > 0.0f && sys.view(2).speed > 0.0f);
+    const V2 p2 = sys.view(2).pos;
+    const auto near2 = [&](const std::vector<MovementSystem::RejoinGoal>& g) {
+        uint32_t n = 0;
+        for (const auto& x : g) n += std::fabs(x.q.x - p2.x) < 12.0f && std::fabs(x.q.y - p2.y) < 6.0f ? 1u : 0u;
+        return n;
+    };
+    const std::vector<MovementSystem::RejoinGoal> free_g = sys.rejoin_goals(1, 30.0f);
+    const std::vector<MovementSystem::RejoinGoal> forced_g = sys.rejoin_goals(1, 30.0f, 0, 2);
+    std::printf("mov3 t06 forced goal obstacle: unit 2 %.1f ahead; goals near it %u without, %u as the forced object (%zu / %zu goals)\n",
+                static_cast<double>(p2.x - sys.view(1).pos.x), near2(free_g), near2(forced_g), free_g.size(), forced_g.size());
+    CHECK(near2(free_g) >= 1 && near2(forced_g) == 0);
+}
+
 }  // namespace
 
 // ---------------------------------------------------------------- s78n t24 (RE f8afef8d): the role slots
@@ -1086,5 +1481,12 @@ int main() {
     test_mov1_overtake_rank();
     test_mov1_step10_attack();
     test_mov2_tracker_snapshot();
+    test_mov2_recruitment();
+    test_mov2_formation_path();
+    test_mov2_head_on_pairs();
+    test_mov2_reorder_at_speed();
+    test_mov3_svs_speed_zero();
+    test_mov3_rejoin_goals();
+    test_mov3_forced_goal_obstacle();
     return ::alamo::test::report("alamo_tactical_movement_b3_tests");
 }

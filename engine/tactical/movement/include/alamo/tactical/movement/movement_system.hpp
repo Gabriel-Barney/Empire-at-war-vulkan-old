@@ -227,7 +227,9 @@ struct MoveOrder {
     // s78n t20 (MOVEMENT §4.3.1 item 2): the order has an object goal (block kind 3), which retail sends to the attack-arc
     // slot test 0x438c10 instead of the destination check 0x439360. [port] the arc test is not modelled: the host sets
     // this for its attack approaches (and for the garrison approach until its retail form is ported), and the land
-    // destination check and the single-member shortcut are skipped.
+    // destination check and the single-member shortcut are skipped. mov2 t06 (MOVEMENT §4.2 step 2 [H]): the composition
+    // pass still zone-validates the destination per seed (0x50f480, unless kMoveFlagSkipValidation); a failure ends the
+    // pass, the validated point is not used.
     bool skip_destination_check = false;
     // s78n t25.2 (MOVEMENT §4.3.2): the land attack block. With attack.target >= 0 (land) the order is an object goal:
     // no destination check and no single-member shortcut (as skip_destination_check), the attack slots 0x438c10 at a new
@@ -302,6 +304,7 @@ struct UnitView {
     int32_t form_rank = 0;
     uint32_t coord_id = 0;
     bool near_end = false;  // mov1 t04: pack +0x28c as of its last rebuild (BKR1 Q5)
+    float end_z = 0.0f;     // mov3 t02: the order path's stored last-waypoint height (LandMotion::end_z, bkm1 t06)
     bool trk_static = false;  // mov2 t04: the tracker's Static flag taken before the last walk (the next plans read it)
     // REMAINING_GAPS §4.3-4.7: special locomotors
     LocomotorKind locomotor = LocomotorKind::Default;  // the active locomotor
@@ -367,6 +370,8 @@ struct MovementStats {
     // s78n t26.3 (MOVEMENT §3.5.2 D): the corner-speed pass's corners written with fraction 0 / with a fraction in (0, 1),
     // and its probe step-downs (v /= 1.5).
     uint32_t corner_zero = 0, corner_slowed = 0, corner_stepdowns = 0;
+    // mov3 t05 (CornerPassStats): corner_zero split - at corner 0, and by cause (corridor alone, line test, below f_min)
+    uint32_t corner_zero_first = 0, corner_zero_corridor = 0, corner_zero_line = 0, corner_zero_fmin = 0;
     // s78n t26.4 (MOVEMENT §3.5.2 C): Walk move steps - End Move coast steps (C.4), 0x15 restarts away from the end, waypoints
     // skipped by tau = 0 (C.9) and by a degenerate segment (C.8).
     uint32_t walk_coasts = 0, walk_restarts = 0, walk_tau_skips = 0, walk_degen_skips = 0;
@@ -419,6 +424,22 @@ public:
     // of the yaw (the store facing), pitch first. False (both 0) when the unit is unknown.
     bool attitude(ObjectId id, float& roll_deg, float& pitch_deg) const;
     std::span<const V2> land_path(ObjectId id) const;            // remaining + travelled points
+    // mov3 t03 (b0174, test accessor): the rejoin goals rejoin_search offers for unit `id` with clearance D (the generator of
+    // a kind-3 Path Around, on around_base's path) - each goal's point and its source (0 = (a) along the path, 1 = (b) past
+    // the end, 2 = (c) the ring), in order. Every goal is answered kRejoinNext, except the `fail_at`-th (1-based; 0 never),
+    // which is answered kRejoinFail and ends the call. `forced` (0 none): the forced object of a flag-1 Path Around (mov3
+    // t06, b0065: an obstacle to every goal spot, before the relation test). Not hashed, changes nothing.
+    struct RejoinGoal {
+        V2 q;
+        uint8_t src = 0;
+    };
+    std::vector<RejoinGoal> rejoin_goals(ObjectId id, float d, uint32_t fail_at = 0, ObjectId forced = 0) const;
+    // mov3 t06 (b0054, test accessor): squad container `id`, moving, coasts in End Move from its next walk (0x14 with no
+    // top path, as brake_to_stop leaves it); with spent_push a push record walked to its end is left on its stack
+    // (pushed, a 2-point kind-1 push path ending where it stands, push_next past its end, no owner) - the state a push
+    // that ran out during the coast leaves, which public orders cannot set up. False (nothing changed) when `id` is not a
+    // moving squad container. Test only.
+    bool debug_coast(ObjectId id, bool spent_push);
     std::span<const SpaceWaypoint> space_path(ObjectId id) const;
     uint32_t mask_of(ObjectId id) const;
 
@@ -1190,11 +1211,17 @@ private:
         V2 form_slot;
         bool self_arrive = false;
         V2 self_goal;
-        // s78p (b0049, MOVEMENT §3.5.2 D / G; save version 30): the member's lane on its formation's path (member_lane), set
-        // by the order (move_land / attack_plan) for a member of a land formation of 2+ and taken as the unit's path by
-        // its next plan when it still ends at the unit's goal (the plan then makes no search of its own); lane_d = the
-        // formation path's summed 3-D length (the walk-deployed cap's d, §3.2.1 item 2). Cleared by the plan.
+        // s78p (b0049, MOVEMENT §3.5.2 D / G; save version 30): set by the order (move_land / attack_plan) for a member of a
+        // land formation of 2+ and taken as the unit's path by its next plan while the unit's goal is still its stop point
+        // (the plan then makes no search of its own); lane_d = the formation path's summed 3-D length (the walk-deployed
+        // cap's d, §3.2.1 item 2). Cleared by the plan. mov2 t01 (MOVEMENT §4.3.3 items 1 - 3 [H], version 37): `lane` is
+        // a copy of the formation path itself (retail's record is a copy of W), `mslot` the member's slot shape and end
+        // shift; slot_on = the order path taken by the plan is that copy (the walk's lane term
+        // targets the slot lateral, the end lines move by the end shift, the corner pass runs on formation_lane). Every
+        // other path set clears slot_on.
         std::vector<V2> lane;
+        MemberSlot mslot;
+        bool slot_on = false;
         float lane_d = 0.0f;
         float lane_z = 0.0f;  // bkm1 t06 (version 31): the stored height of the lane's last point (LandMotion::end_z when taken)
         // s78n t25.2 (MOVEMENT §4.3.2 item 4, save version 28): the attack slot of the unit's formation (block +0x3c /
@@ -1721,12 +1748,23 @@ private:
         V2 q;
         uint32_t resume = 0;
         bool on_path = false;
+        uint8_t src = 0;  // mov3 t03: 0 (a) along the path, 1 (b) past the end, 2 (c) the ring
     };
     static constexpr int kRejoinNext = 0, kRejoinTaken = 1, kRejoinFail = -1;
-    // s78o (b0065): `forced` = 0x67d580's object argument (a flag-1 Path Around's obstacle): an obstacle for every goal
+    // mov2 t08 (docs/re/MOV2_T05_TERRAIN_STOPS.md [H]): the goal loop 0x675ed0's tracker - the tracker rectangles (shape
+    // + the request's tracker growth) and unit indices of the window the last failed goal built (0x677340). Unset before
+    // the first goal: 0x679aa0 then queries the layer; set, it queries these instead.
+    struct RejoinTracker {
+        bool set = false;
+        std::vector<FootRect> rects;
+        std::vector<uint32_t> units;
+    };
+    // s78o (b0065): `forced` = 0x67d580's object argument (a flag-1 Path Around's obstacle): an obstacle for every goal.
+    // `trk`: the caller's goal-loop tracker (Path Around), read at each (a) / (b) acceptance; null: the layer every time
     bool rejoin_search(const Unit& u, std::span<const V2> base, uint32_t cur, float d, const std::function<int(const Rejoin&)>& fn,
-                       const Unit* forced = nullptr) const;
-    bool rejoin_accept(const Unit& u, V2 cand, V2 path_end, V2& q, const Unit* forced = nullptr) const;
+                       const Unit* forced = nullptr, const RejoinTracker* trk = nullptr) const;
+    bool rejoin_accept(const Unit& u, V2 cand, V2 path_end, V2& q, const Unit* forced = nullptr,
+                       const RejoinTracker* trk = nullptr) const;
     // mov1 t01 (BKR1_RE_ANSWERS Q1 [H]): 0x505630 - the number of MovingVsMoving records in state 15 (Starved) whose
     // master is u; master_list_partner: o is the slave of one of u's MovingVsMoving records in state 4 (Pass, 0x505e10)
     // or state 15 (0x505630) where u is the master - an obstacle of every Path Around of u (0x67d580's "always" lists)
@@ -1852,12 +1890,17 @@ private:
     // (indexed like idx) = each member as it was before this order's set-up; a failed plan restores it. True: failed.
     bool attack_plan(const MoveOrder& order, const std::vector<uint32_t>& idx, const LandForm& f, uint32_t frame,
                      const std::vector<uint8_t>& kept, std::span<const FormationMember> mem, std::span<const Unit> snap);
-    // s78p (b0049): each member's lane on the formation path `fpath` (Unit::lane, member_lane) and its goal := the lane's end
+    // s78p (b0049): each member's copy of the formation path `fpath` (Unit::lane, mov2 t01: + Unit::mslot) and its goal :=
+    // its stop point lane_end
     // - not for air, forced or `kept` members (indexed like idx) or a member without a goal
     // bkm1 t06: fz = the stored height of fpath's last point (a slot-leg G; 0 for any other formation path)
     // mcx4 t11: facing_deg = the order block's facing (kNoFacing: none) - the final-facing rotation (final_formation_facing)
     void set_lanes(const std::vector<uint32_t>& idx, const LandForm& f, std::span<const V2> fpath, const std::vector<uint8_t>& kept,
                    std::span<const FormationMember> mem, float fz = 0.0f, float facing_deg = kNoFacing);
+    // mov2 t01: u's order path (the top record m.path) is the formation path's copy its plan took (slot_on: every other
+    // plan path set clears it). An early-arrival cut (0x54e780) shortens that record and keeps it, so its slot shape and
+    // end shift stay (review: a path-end test dropped them after a cut and stacked the members on the cut end).
+    static bool slot_walk(const Unit& u) { return u.slot_on && u.m.path.size() >= 2; }
     void move_space(const MoveOrder& order, const std::vector<uint32_t>& idx, uint32_t frame,
                     const std::vector<uint32_t>& delays, uint32_t serial);
     void park_space(Unit& u, uint32_t frame);

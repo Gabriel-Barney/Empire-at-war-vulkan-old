@@ -62,7 +62,7 @@ void test_land_squad_speed_order() {
     // Rebel: 13 steps leave 0.1404, then the rate, then the zero (15 frames)
     path_end("Stormtrooper squad", 0, 0.8f, t18_storm(), 0.05f * mult, 0.8f * mult, 15, true);
     path_end("Rebel squad", 1, 1.1f, rebel, 0.07f * mult, 1.0f * mult, 13, true);
-    const float a = 0.05f * mult, vmax = 0.8f * mult;
+    const float vmax = 0.8f * mult;
     {  // s78n t23 (MOVEMENT §5.4.6): a vehicle crossing the squad's path - Path Around (state 1), the vehicle detours
         MovementSystem sys{MovementConfig{}};
         land_system(sys, 100);
@@ -117,33 +117,29 @@ void test_land_squad_speed_order() {
         CHECK(near(sys.view(100).speed, vmax, 1e-5f));  // not taken at once
         for (ObjectId id = 1; id <= 9; ++id) CHECK(sys.team_start_delay(id) == 0);  // no start delays (the squad moves)
         CHECK(rng.draws() == draws0);
-        const float x0 = sys.view(100).pos.x, yaw0 = sys.view(100).yaw;
-        // s78n t26.5 (MOVEMENT §3.5.2 G, FIGHTER_FLYING §7.7 item 5): the coast starts at the path set - the old path stays on
-        // top of the stack until the plan (this tick's plan pass, before the walk)
-        bool steps = !sys.view(100).team_coast;
-        for (uint32_t k = 1; k <= 15; ++k, ++f) {  // 15 frames of the rate while it coasts straight on
-            sys.tick(f, rng, serial_for);
-            steps = steps && near(sys.view(100).speed, vmax - a * static_cast<float>(k), 2e-5f) && sys.view(100).yaw == yaw0 &&
-                    sys.view(100).team_coast;
-        }
-        // s78n t18 review: exactly as the path-end braking - the float sum left a hair more than the rate, so one more
-        // step of the rate itself follows (t18_brake_steps = 16), then 0x15 zeroes the speed with no step
-        CHECK(t18_brake_steps(vmax, a) == 16);
-        sys.tick(f++, rng, serial_for);
-        steps = steps && near(sys.view(100).speed, a, 1e-5f) && sys.view(100).team_coast;
-        const float coast = sys.view(100).pos.x - x0;
-        sys.tick(f++, rng, serial_for);  // 0x15: the speed (<= the rate) is zeroed, no step
-        CHECK(!sys.view(100).team_coast);
-        CHECK(steps && coast > 121.0f * a - 0.01f && coast < 121.0f * a + 0.01f);
-        CHECK(sys.view(100).speed == 0.0f && sys.view(100).pos.x - x0 == coast);
-        bool turned = false, arrived = false;
+        const float yaw0 = sys.view(100).yaw;
+        // mov2 t09 (MOVEMENT §3.5.2 G "Retail measurement" and the 0x410170 read [H]): a squad container is aligned at the
+        // path set whatever the angle (its TEAM behaviour), so the 180-degree re-order is walked at full speed in 0x13 and
+        // turned on the move - no coast, no stop (retail 12 / 12 re-orders); before mov2 t09 it coasted to 0x15 and turned
+        // in place
+        bool cruise = true, turned = false, arrived = false, coasted = false;
+        float vlow = vmax;
         for (uint32_t n = 0; n < 900 && !arrived; ++n, ++f) {
             sys.tick(f, rng, serial_for);
             const UnitView k = sys.view(100);
-            turned = turned || (k.speed == 0.0f && k.yaw != yaw0);  // the start turn of the new path, from speed 0
+            coasted = coasted || k.team_coast;
+            if (!turned) {
+                cruise = cruise && k.speed > 0.0f && k.walk_state == LocoState::WalkMoving;
+                vlow = std::min(vlow, k.speed);
+            }
+            turned = turned || std::fabs(wrap_deg(k.yaw - yaw0)) > 170.0f;
             arrived = k.arrived;
         }
-        CHECK(turned && arrived && length(sys.view(100).pos - at) <= 8.0f * a + 1e-3f);
+        CHECK(cruise);
+        const float left = length(sys.view(100).pos - at);
+        std::printf("land squad speed order: re-order turned %d coasted %d arrived %d, %.3f from the goal\n", turned ? 1 : 0,
+                    coasted ? 1 : 0, arrived ? 1 : 0, static_cast<double>(left));
+        CHECK(turned && !coasted && arrived && left <= vmax);  // within one frame's step of the goal
         // Stop at cruise: zero at once
         MoveOrder again;
         again.units = {1};
@@ -154,7 +150,8 @@ void test_land_squad_speed_order() {
         const ObjectId one[1] = {1};
         sys.stop(one);
         CHECK(sys.view(100).speed == 0.0f && !sys.view(100).has_goal);
-        std::printf("land squad speed order: new order while moving - coasted %.3f, then turned and arrived\n", static_cast<double>(coast));
+        std::printf("land squad speed order: new order while moving - turned at speed (lowest %.3f of %.3f), arrived\n",
+                    static_cast<double>(vlow), static_cast<double>(vmax));
     }
     {  // a final facing more than 10 degrees off: turned to in place before the arrival
         MovementSystem sys{MovementConfig{}};
@@ -1450,6 +1447,8 @@ void test_t20_early_arrival() {
         }
         CHECK(lane.size() == 2 && side.size() == 2);
         bool placed = false;
+        V2 end0[5];  // mov2 t01: each member's path end after the plan (the formation path's end W: every member walks a copy)
+        bool have0 = false;
         uint32_t f = 1;
         for (; f < 2500 && sys.stats().early_arrivals == 0; ++f) {
             // mov1 t04 (BKR1 Q5 [H]): a destination counts as blocked only once the mover's approximation byte +0x28c (rebuilt
@@ -1459,30 +1458,33 @@ void test_t20_early_arrival() {
                 placed = true;
             }
             sys.tick(f, rng, serial_for);
+            if (!have0) {
+                have0 = true;
+                for (ObjectId i = 0; i < 5; ++i) {
+                    have0 = have0 && !sys.land_path(10 + i).empty();
+                    if (have0) end0[i] = sys.land_path(10 + i).back();
+                }
+            }
         }
-        CHECK(placed && sys.stats().early_arrivals == 1);
+        CHECK(placed && have0 && sys.stats().early_arrivals == 1);
         // the leader's stop point is 30 before the standing unit: every cut path lost 33 from its end (s78n t20 batch 1:
-        // 0x54e780 keeps total - 33 measured from the path's first point, the index untouched) - the member one row back
-        // had more than that left and walks on; the member two rows back had less: its record is left on its last
-        // waypoint (it is past the new end's line), so it is finished - arrived, braking where it is; the two beside the
-        // lane keep their paths. s78p (b0049): the members walk their lanes (one formation path, each lane started at the
-        // foot of the member's position), so both lane members still have more than 33 left when the leader stops and
-        // both walk on.
-        bool cut = near(distance(sys.land_path(10 + lead).back(), goal[lead]), 33.0f, 1e-2f);
+        // 0x54e780 keeps total - 33 measured from the path's first point, the index untouched); the two beside the lane keep
+        // their paths. mov2 t01 (MOVEMENT §4.3.3 item 1 [H]): every member walks a copy of the formation path, so a cut
+        // path ends 33 before W's end, and a member's stop line lies its depth before that new end: both lane members still
+        // have more than that left when the leader stops and walk on (before mov2 t01, on their lanes, the member two rows
+        // back had less and was finished)
+        bool cut = near(distance(sys.land_path(10 + lead).back(), end0[lead]), 33.0f, 1e-2f);
         uint32_t exact = 0, walking = 0, finished = 0;
         for (int i : lane) {
             const V2 end = sys.land_path(10 + i).back();
-            if (near(distance(end, goal[i]), 33.0f, 1e-2f)) ++exact;
+            if (near(distance(end, end0[i]), 33.0f, 1e-2f)) ++exact;
             const UnitView v = sys.view(10 + i);
             if (v.has_goal) ++walking;
             else if (v.arrived && !v.pushed) ++finished;
         }
         bool kept = true;
-        for (int i : side) kept = kept && sys.land_path(10 + i).back() == goal[i];
-        // mov1 t04: the blocker comes inside the leader's +0x28c look-ahead (60 out), so the cut is made with the members
-        // closer to their ends than before: the member one row back walks on, the one two rows back has less than 33 left
-        // and is finished (as before s78p)
-        CHECK(cut && exact == 2 && walking == 1 && finished == 1 && kept);
+        for (int i : side) kept = kept && sys.land_path(10 + i).back() == end0[i];
+        CHECK(cut && exact == 2 && walking == 2 && finished == 0 && kept);
         std::printf("t20 early arrival: formation - leader cut 33, lane members cut 33: %u (walking on %u, finished %u), side lanes kept %d "
                     "[cut %d, cuts %u, frame %u, leader %.2f from its goal, path end %.2f, re-paths %u, pushes %u, unit 30 moved %.2f]\n",
                     exact, walking, finished, kept ? 1 : 0, cut ? 1 : 0, sys.stats().early_arrivals, f,
@@ -1997,7 +1999,11 @@ void test_t20_stopped_vs_stopped() {
             UnitDesc x = unit(1, xp, 2, 1.0f, 6.0f, LocomotorKind::Default);
             x.collision_class = cls;
             CHECK(sys.add_unit(x));
-            CHECK(sys.add_unit(unit(2, {xp.x - 4.0f, xp.y}, 2, 0.0f, 3.0f, LocomotorKind::Default)));  // cannot walk
+            // cannot walk: no locomotor (rule 1 makes the other one move). mov3 t04 (BKR2 Q4): a max speed of 0 alone is
+            // no longer immobile - it costs 0 and would be the one picked
+            UnitDesc w = unit(2, {xp.x - 4.0f, xp.y}, 2, 0.0f, 3.0f, LocomotorKind::Default);
+            w.no_locomotor = true;
+            CHECK(sys.add_unit(w));
             SimRng rng(103);
             moved = tal = false;
             angle = 0.0f;

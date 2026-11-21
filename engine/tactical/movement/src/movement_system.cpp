@@ -494,6 +494,7 @@ UnitView MovementSystem::view(ObjectId id) const {
     v.form_rank = u->form_rank;
     v.coord_id = u->coord_id;
     v.near_end = u->near_end;
+    v.end_z = u->m.end_z;
     v.trk_static = u->trk_static;
     v.jiggle = u->jiggle;
     v.locomotor = u->d.locomotor;  // §4.3-4.7
@@ -729,6 +730,11 @@ void MovementSystem::move_land(const MoveOrder& order, const std::vector<uint32_
         f.order = u.d.formation_order;
         f.collision_class = u.d.collision_class;
         f.team_member = u.d.team_member;
+        f.z = u.z;        // mov2 t03: d_min is 3-D
+        // mov2 t03 [port]: the parent team (retail pack +0x1f0) is Unit::team unless it is the unit itself - a land squad
+        // container's set_team link to itself is the host's speed link, not a parent (BKR2 Q8: formations hold containers
+        // and lone units, whose parent team is null in FoC)
+        f.team = u.team != u.d.id ? u.team : -1;
         mem.push_back(f);
     }
     // s78n t25.2 (MOVEMENT §4.3.2): a land attack order (an object goal, block kind 3); `replan` = a re-plan of its
@@ -802,22 +808,23 @@ void MovementSystem::move_land(const MoveOrder& order, const std::vector<uint32_
         const V2 d = dest_of(a);
         return zone_connected(regions_, ua.lp.mask, ua.m.pos, d) && zone_connected(regions_, ub.lp.mask, ub.m.pos, d);
     };
-    // §4.2 step 2 item 4 [H]: a straight passable line (0x5a4c10) from the nearest member to the candidate, or a path
-    // (0x5a2830) no longer than 1.4 x their distance ([port] [M]: the candidate's class, the line from the member)
+    // mov2 t03 (§4.2 step 2 item 7 test 12 [H]): the terrain line (0x5a4c10) from the candidate to the seed with the
+    // candidate's class, or a path (0x5a2830) candidate -> seed no longer than 1.4 x d_min (the 3-D distance to the nearest
+    // member)
     LandPathScratch reach_sc;
-    const auto reach = [&](uint32_t nm, uint32_t cand) {
+    const auto reach = [&](uint32_t sd, uint32_t cand, float d_min) {
         if (no_grid) return true;
-        const Unit& um = units_[idx[nm]];
+        const Unit& us = units_[idx[sd]];
         const Unit& uc = units_[idx[cand]];
-        if (line_passable(grid_, um.m.pos, uc.m.pos, uc.lp.mask)) return true;
+        if (line_passable(grid_, uc.m.pos, us.m.pos, uc.lp.mask)) return true;
         LandPathRequest q;
         q.start = uc.m.pos;
-        q.goal = um.m.pos;
+        q.goal = us.m.pos;
         q.mask = uc.lp.mask;
         q.snap_goal = false;
         LandPath lp;
         find_land_path(grid_, regions_, q, reach_sc, lp);
-        return lp.ok && !(path_length(lp.points) > k.formation_recruit_path_ratio * distance(um.m.pos, uc.m.pos));
+        return lp.ok && !(path_length(lp.points) > k.formation_recruit_path_ratio * d_min);
     };
     std::vector<uint64_t> taken;
     std::vector<LandForm> forms;  // s78n t20: every formation of the order, laid out before any goal is given
@@ -841,7 +848,13 @@ void MovementSystem::move_land(const MoveOrder& order, const std::vector<uint32_
     // bkm3 t01 (b0076, MOVEMENT §4.2 step 2 "Destination"): an attack order's point P (the target's goal point C, 0x583150)
     // is validated per seed as well - its result is used only for position goals, but a failure still ends the pass: this
     // formation and every later one get no move. Not for a re-plan (no composition pass) or a queued order.
-    const bool validate_only = attack && !replan && !(order.flags & kMoveFlagSkipValidation) && !queued;
+    // mov2 t06 (MOVEMENT §4.2 step 2, MOV2_RE_QUESTIONS Q3 [H]): a move to an object (skip_destination_check, not an
+    // attack) is validated the same way - only block flag 0x20 skips 0x50f480 - against the order point ([port] the host's
+    // object point stands for 0x583150's choice: the stored point when fogged, the seed's position for an unseen stealthed
+    // target, the hard point, the targeted team member, the object's position); its result is not used, a failure ends
+    // the pass.
+    const bool object_goal = order.skip_destination_check && !attack;
+    const bool validate_only = (attack || object_goal) && !replan && !(order.flags & kMoveFlagSkipValidation) && !queued;
     bool zone_failed = false;
     std::vector<uint32_t> no_move;  // indices into idx: the units of the formations the failed validation left out
     if (replan) {
@@ -898,7 +911,7 @@ void MovementSystem::move_land(const MoveOrder& order, const std::vector<uint32_
                 const Unit& seed = units_[idx[f[0]]];
                 if (!is_air(seed) && grid_.passable_world(seed.m.pos, seed.lp.mask)) {
                     V2 v;
-                    const V2 p = validate_only ? order.attack.c : order.destination;
+                    const V2 p = attack ? order.attack.c : order.destination;
                     if (!zone_validate(regions_, p, seed.m.pos, seed.lp.mask, v)) {
                         zone_failed = true;
                     } else if (position_order && !(v == order.destination)) {
@@ -1905,13 +1918,13 @@ void MovementSystem::plan_land(uint32_t frame, const ParallelFor& pf) {
         req.push_back(i);
     }
     if (req.empty()) return;
-    // s78p (b0049): a member with a lane takes it as its path (no search of its own) while the lane still ends at its goal
-    // and both its position and that goal pass its class ([port] else it plans singly, as before: the search's start escape
-    // and goal snap)
+    // s78p (b0049): a member with a lane takes it as its path (no search of its own) while its goal is still the stop point
+    // the order gave it and both its position and that goal pass its class ([port] else it plans singly, as before: the
+    // search's start escape and goal snap). mov2 t01: the lane is the formation path's copy
     std::vector<uint8_t> use_lane(req.size(), 0);
     for (size_t r = 0; r < req.size(); ++r) {
         const Unit& u = units_[req[r]];
-        use_lane[r] = !u.lane.empty() && u.lane.size() >= 2 && !u.forced && !is_air(u) && u.lane.back() == u.goal &&
+        use_lane[r] = !u.lane.empty() && u.lane.size() >= 2 && !u.forced && !is_air(u) && u.mslot.stop == u.goal &&
                               grid_.passable_world(u.m.pos, u.lp.mask) && grid_.passable_world(u.goal, u.lp.mask)
                           ? 1
                           : 0;
@@ -1961,6 +1974,7 @@ void MovementSystem::plan_land(uint32_t frame, const ParallelFor& pf) {
         if (u.pushed && !is_air(u) && (u.forced || use_lane[r] || out[r].ok)) end_push(u);
         std::vector<V2> lane;
         lane.swap(u.lane);  // s78p: a lane is taken by this plan or dropped
+        u.slot_on = false;  // mov2 t01: set again below when the lane is the new order path
         u.around.clear();  // s78n t18: a new path (pack +0x288 := NOW), planned around nobody
         u.path_change = frame;
         u.approx_countdown = 0;  // mov1 t04: a path push zeroes pack +0x275
@@ -2010,11 +2024,13 @@ void MovementSystem::plan_land(uint32_t frame, const ParallelFor& pf) {
             continue;
         }
         if (use_lane[r]) {
-            // s78p (b0049, MOVEMENT §3.5.2 G): the path set of the member's lane - from where it stands now; the corner pass
-            // runs on the lane (§3.5.2 D) and the walk-deployed cap's d is the formation path's 3-D length (§3.2.1 item 2)
+            // s78p (b0049, MOVEMENT §3.5.2 G): the path set of the member's lane; the corner pass runs on the lane (§3.5.2 D)
+            // and the walk-deployed cap's d is the formation path's 3-D length (§3.2.1 item 2). mov2 t01 (§4.3.3 item 1
+            // [H]): the path is the formation path's copy (waypoint 0 the formation's start), the slot shape and end shift
+            // ride with it (slot_on)
             u.m.path = std::move(lane);
-            lane_start(u.m.path, u.m.pos);  // where it stands now (it may have walked on since the order)
-            u.m.end_z = u.lane_z;  // bkm1 t06: a slot-leg lane keeps G's height on its last point
+            u.slot_on = true;
+            u.m.end_z = u.lane_z;  // bkm1 t06: a slot-leg path keeps G's height on its last point
             u.m.end_at = u.m.path.back();
             u.lane_z = 0.0f;
             u.m.next = 1;
@@ -2110,13 +2126,23 @@ void MovementSystem::plan_deploy_cap(Unit& u, uint32_t frame, float d) {
 // 0x14 is affected: a standing one starts its path at its walk's 0x16 either way (then start rule A). A moving unit that is
 // not aligned coasts in End Move (C.1 / C.4), stops at 0x15 and starts the path from 0x16. [port] A squad container keeps
 // its own path_started (team_walk); the Walk byte is set for it and for every non-Walk locomotor. s78n t26.5 (FIGHTER_FLYING
-// §7.7 item 5, MOVEMENT §3.5.2 G / E): a squad container's new path is never started at the path set (0x5ad140 has no
-// aligned test) - a moving one brakes at its rate in End Move along its facing (Unit::coast), a standing one starts it
-// from 0x16.
+// §7.7 item 5, MOVEMENT §3.5.2 G / E): a standing squad container starts its new path from 0x16. mov2 t09: a moving one is
+// aligned by 0x410170's TEAM rule when waypoint 0's fraction is > 0 (it walks on in its state); otherwise it brakes at its
+// rate in End Move along its facing (Unit::coast).
 void MovementSystem::set_path_started(Unit& u) const {
     LandMotion& m = u.m;
     m.started = true;
     if (u.d.team_container) {
+        // mov2 t09 (MOVEMENT §3.5.2 G "Retail measurement", the 0x410170 read [H]): an object with a TEAM behaviour (obj
+        // +0x348, a squad container) is aligned at once when its new path's waypoint 0 fraction is > 0, whatever the
+        // angle - a container re-ordered while marching keeps its state and speed (0x13 at full speed) and turns on the
+        // move (retail 12 / 12); only one with waypoint 0 at fraction 0 coasts to a stop and starts from 0x16
+        // (MOV2_RE_QUESTIONS Q1: the TEAM test comes before 0x410170's state switch, so any moving state counts)
+        if (m.speed > 0.0f && !m.path.empty() && wp_frac(m, 0) > 0.0f) {
+            u.path_started = true;
+            u.coast = false;
+            return;
+        }
         u.path_started = false;
         u.coast = m.speed > 0.0f;
         if (!u.coast) m.state = LocoState::WalkStopped;
@@ -2138,8 +2164,8 @@ void MovementSystem::set_path_started(Unit& u) const {
 // s78n t26.3 (MOVEMENT §3.5.2 D, s78n t26 RE 2): the corner-speed pass 0x5070b0 of the Walk path set vf +0x190 0x42c680
 // and of the squad container's 0x5ad140 - land mode, a formation path (every land order composes a formation: form_id;
 // [port] the flag-0x20 straight path too, it is the formation's path) of a Walk unit or a squad container. The input is
-// the unit's own path: s78p (b0049) for a member of a formation of 2+ its lane 0x413340 (set_lanes / member_lane, with the
-// pull-in); a unit alone (or one that planned singly) its own planned path. vmax = the effective max speed (a container: its
+// the unit's own path: s78p (b0049) for a member of a formation of 2+ its lane 0x413340 (mov2 t01: formation_lane on the
+// formation path's copy it walks, with the pull-in, one point per waypoint); a unit alone (or one that planned singly) its own planned path. vmax = the effective max speed (a container: its
 // team speed), vmin = Min_Speed x mode, R, f_min, a = the deceleration (a container: its rate 0x5ab540, team_rate); probe
 // segment max(2, 10 x 0x397830) = max(2, the soft radius) ([port] UnitDesc::radius stands for Scale_Factor x the
 // radius), a container max(2, max(HX, HY) / 2). Line test = 0x5a4c10 for the unit's movement class; corridor 0x5093c0 =
@@ -2197,9 +2223,15 @@ void MovementSystem::corner_pass(Unit& u) {
         return true;
     };
     CornerPassStats st;
-    // s78p: corner 0 is the unit's own position (a lane path starts at its foot on the lane, lane_start)
+    // s78p: corner 0 is the unit's own position. mov2 t01 (MOVEMENT §4.3.3 item 1 [H]): a member walking the formation
+    // path's copy takes its corner fractions from its lane (formation_lane: one point per waypoint, so the fractions index
+    // the path's waypoints)
     std::vector<float> f;
-    if (u.m.path[0] == u.m.pos) {
+    if (slot_walk(u)) {
+        std::vector<V2> poly = formation_lane(grid_, u.m.path, u.mslot.shape(), u.lp.mask);
+        poly[0] = u.m.pos;
+        f = corner_fractions(poly, in, &st);
+    } else if (u.m.path[0] == u.m.pos) {
         f = corner_fractions(u.m.path, in, &st);
     } else {
         std::vector<V2> poly = u.m.path;
@@ -2207,6 +2239,10 @@ void MovementSystem::corner_pass(Unit& u) {
         f = corner_fractions(poly, in, &st);
     }
     stats_.corner_zero += st.zero;
+    stats_.corner_zero_first += st.zero_first;  // mov3 t05
+    stats_.corner_zero_corridor += st.zero_corridor;
+    stats_.corner_zero_line += st.zero_line;
+    stats_.corner_zero_fmin += st.zero_fmin;
     stats_.corner_slowed += st.slowed;
     stats_.corner_stepdowns += st.stepdowns;
     // every entry 1.0 is the default record (an empty vector)
