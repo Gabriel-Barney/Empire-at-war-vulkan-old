@@ -2179,8 +2179,9 @@ shield-bypassing. The full numbering is not read (§8).
   disabled at attach 0x62b8d0, enabled by the stun's apply 0x62b920 and disabled again by its service when the stun
   ends). **No base-power test**: `Shield_Requires_Base_Power` (+0x8c) is read only by the base shield's
   `Evaluate_State` 0x56bb00 (TRU1_A_RE_ANSWERS). The cadence (0x5494b0) keeps running through the gates.
-  Port status (2026-11-20): not applied yet - the port still gates on `UnitDesc::shield_requires_base_power` (default
-  true, so no shield regenerates in space) and has no ion-stun gate; the change is parked (cmb3 t07, see PHASE4).
+  Port status (2026-11-20, cmb3 t07): applied - the old `UnitDesc::shield_requires_base_power` gate (default true, so
+  no shield regenerated in space) is gone and regeneration skips while the unit is ion-stunned ([port] the port's
+  ion-stun window stands in for the behaviour, backlog b0544). Space skirmishes now last longer: see PHASE4 cmb3.
 - **Clamps — verified in disassembly [H]** (0x140549360–0x14054938a):
   1. new = clamp(current + amount, 0, maximum shield).
   2. While the depleted lockout is active, new = min(new, `Depleted_Shield_Regen_Cap`) (GameConstants

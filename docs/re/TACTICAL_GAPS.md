@@ -1430,7 +1430,7 @@ resolve pass 0x50a780 runs.
 - Readers: energy pool 0x56c030 (energy 0); turrets 0x632270 (do not act); gravity control field 0x61c700;
   lobbing super-weapon 0x4ea3f0 and the FIRE_LOBBING gate in 0x39b480; the **base shield** 0x56bb00
   (`Shield_Requires_Base_Power` +0x8c, BaseShield_Evaluate_State; the SHIELDED regeneration 0x549250 does not read
-  base power, TACTICAL_COMBAT §3.7, cmb3 t07; the port's SHIELDED gate is still in, parked); GUI warning 0x2e0570; reinforcement prevention (0x3b6170, via POWERED).
+  base power, TACTICAL_COMBAT §3.7, cmb3 t07; the port's SHIELDED gate was removed in cmb3 t07); GUI warning 0x2e0570; reinforcement prevention (0x3b6170, via POWERED).
 - Users: FoC `Ground_Magnepulse_Cannon`, `Template_Ground_Turbolaser_Tower`; TR `Template_Base_Shield`,
   `Template_Planetary_Shield`, `Template_Turbolaser_Tower` and variants.
 - **Port: the "Requires_Base_Power passes" stand-in is wrong for TR** — towers and shields are dead without a

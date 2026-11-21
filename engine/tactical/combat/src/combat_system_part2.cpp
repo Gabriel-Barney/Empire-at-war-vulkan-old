@@ -1632,9 +1632,13 @@ void CombatSystem::upkeep_unit(Unit& u, uint32_t frame) {
             const float amount = ud.shield_refresh_rate * mult(u, ModKind::ShieldRegen) * frac;
             const bool lockout = u.shield_depleted &&
                                  shield_lockout_active(frame, u.shield_depleted_frame, cfg_.fps, cfg_.depleted_shield_disable_time);
-            // OI abilities: Shield_Requires_Base_Power (0x56bb00, TACTICAL_GAPS §7.3) - no regeneration without power [M].
-            const bool unpowered = ud.shield_requires_base_power && !has_base_power(u.owner);
-            if (!u.regen_blocked && !unpowered) {
+            // cmb3 t07 (b0454, TACTICAL_COMBAT §3.7 [H], 0x549250): no base-power test (Shield_Requires_Base_Power is read only
+            // by the base shield 0x56bb00); the regeneration is skipped while regen is blocked (TD +0x131) or the unit's
+            // ION_STUN_EFFECT is running (its disable counter +0x3c is 0 from the stun's apply to its end). [port] the port's
+            // ion stun window (ion_stun_end) stands in for that behaviour, so a stunned unit without ION_STUN_EFFECT is gated
+            // too (backlog b0544).
+            const bool ion_stunned = u.ion_stun_end > frame;
+            if (!u.regen_blocked && !ion_stunned) {
                 const float next = shield_regen_step(u.shield, amount, unit_max_shield(u), lockout, cfg_.depleted_shield_regen_cap);
                 if (has_energy_pool(u) && next > u.shield) {
                     // S9 shield exchange (0x56be20): x points cost x * EnergyToShieldExchangeRate, all or nothing.

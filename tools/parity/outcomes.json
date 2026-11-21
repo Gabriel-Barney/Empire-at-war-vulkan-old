@@ -3,9 +3,9 @@
  "foc_space": {
   "args": ["--skirmish-ai", "foc", "--ticks", "16000", "--workers", "0", "--quiet", "--expect-battle-end"],
   "seeds": 16,
-  "min_end_share": 0.875,
+  "min_end_share": 0.5625,
   "end_frames": [3000, 15999],
-  "why": "FoC space skirmish (_MP_SPACE_KUAT), Empire vs Rebel AI, must reach a decisive outcome (S7 t09). Measured 16/16 end, 6544-11129 frames (Empire, all destroyed); 14 of 16 must."
+  "why": "FoC space skirmish (_MP_SPACE_KUAT), Empire vs Rebel AI, must reach a decisive outcome (S7 t09). Re-baselined by cmb3 t07 (2026-11-20, default taken, Gabriel may reverse): the old 16/16 (6544-11129 frames, need 14) was measured while no shield regenerated in space (the port's base-power gate; retail has none, TACTICAL_COMBAT 3.7). With retail regeneration 11/16 end inside alamo_headless's [port] 14400-frame battle limit, 9278-12707 frames; the other five (seeds 2 5 10 13 16) end decisively at 15506-27437 frames when that limit is raised (3 Empire, 2 Rebel wins), so none stalls. 9 of 16 must."
  },
  "foc_station": {
   "args": ["--skirmish-ai", "foc-station", "--ticks", "20000", "--workers", "0", "--quiet", "--expect-battle-end"],
