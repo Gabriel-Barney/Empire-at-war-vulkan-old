@@ -1,10 +1,9 @@
 {
   "permissions": {
     "allow": [
-      "PowerShell(cmd /c tools\\land_on_dev.cmd)",
-      "PowerShell(cmd /c \"tools\\land_on_dev.cmd\")",
-      "PowerShell(.\\tools\\land_on_dev.cmd)",
-      "PowerShell(& .\\tools\\land_on_dev.cmd)",
+      "Bash(python -I tools/gate/land_queue.py *)",
+      "PowerShell(python -I tools/gate/land_queue.py *)",
+      "PowerShell(python -I tools\\gate\\land_queue.py *)",
       "PowerShell(Select-String *)",
       "PowerShell(Get-ChildItem *)",
       "PowerShell(Get-Content *)",
@@ -209,12 +208,18 @@
       "Bash(git push -f*)",
       "Bash(git push * --force*)",
       "Bash(git push * -f *)",
+      "Bash(git push * HEAD:refs/heads/dev*)",
+      "Bash(git push * HEAD:dev*)",
+      "Bash(git push origin dev*)",
       "Bash(git stash)",
       "Bash(git stash pop*)",
       "PowerShell(git push --force*)",
       "PowerShell(git push -f*)",
       "PowerShell(git push * --force*)",
       "PowerShell(git push * -f *)",
+      "PowerShell(git push * HEAD:refs/heads/dev*)",
+      "PowerShell(git push * HEAD:dev*)",
+      "PowerShell(git push origin dev*)",
       "PowerShell(git stash)",
       "PowerShell(git stash pop*)"
     ]

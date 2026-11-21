@@ -17,7 +17,7 @@ worktree name). Follow the `lane` agent loop (`.claude/agents/lane.md`):
    and that `Data`, `extracted`, `toolchain`, `roadmap-store` resolve (`dir`); a missing one is re-linked with
    `cmd /c mklink /J <link> <main checkout folder>`. Otherwise, from the main checkout, run
    `tools\new_worktree.cmd <name> --modules "<modules the tasks touch>"` (branches from `origin/dev`) and continue in the folder it
-   prints. A session already on its own app branch keeps it: `tools\land_on_dev.cmd` brings `dev` in when it lands.
+   prints. A session already on its own app branch keeps it: the verifier rebases it onto `dev` when it lands.
    Then, in the worktree, before opening any C++ file: `build_agent.cmd clang all configure` (about 5 s, no build). It writes
    `build-wt-clang\compile_commands.json`, which `.clangd` points clangd at; without it the LSP tool misses references and
    reports false include errors. A C++ file clangd opened before that keeps its fallback flags until the session restarts.

@@ -47,7 +47,7 @@ How it is wired:
 | Benchmarks, worker sweeps, build times | `tools\benchmark\` (`run_suite.cmd`, `worker_sweep.py`, `build_times.py`) |
 | Workflow figures (builds per day, failed share, test hours, golden-touching and merge commits) | `python -I tools\analysis\workflow_stats.py --from <day> [--to <day>] [--markdown]`; baseline in `docs/PERFORMANCE.md`, "Workflow baseline" |
 | Nightly dev gate: install, missed nights | `tools\install_gate_task.cmd`; history `logs\gate_history.txt`, missed nights `python -I tools\lint\gate_nights.py missed logs\gate_history.txt` (`docs/BUILD.md`, "Scheduled gate") |
-| Land on `dev` | `python -I tools\gate\land_queue.py submit`, then `status <id>` (the verifier lands it; `docs/BUILD.md`, "Landing queue and verifier"); fallback `tools\land_on_dev.cmd` until wr2 t04 is applied |
+| Land on `dev` | `python -I tools\gate\land_queue.py submit`, then `status <id>` (the verifier lands it; `docs/BUILD.md`, "Landing queue and verifier"); `tools\land_on_dev.cmd` is retired (wr2 t04) |
 | Computed goldens: behaviour check, scenario results, benchmark scenarios | `python -I tools\goldens\behaviour_check.py commit\|range\|workers\|compilers`, `scenario_results.py`, `bench_scenarios.py` (`docs/status/golden-checkpoints.md`, "Computed results") |
 | Worktrees | `tools\new_worktree.cmd <name>`, `worktree_tool.py link`, `tools\clean_worktrees.cmd` |
 | Stop a hung test exe / delete a merged branch | `python -I tools\worktree\stop_tree_procs.py`, `delete_merged_branch.py` |
@@ -124,4 +124,4 @@ pinned setup step in `toolchain\2_setup.cmd` (rule 5), then a row here.
 
 LSP (clangd, `eaw-clangd` plugin), web search / fetch, the built-in browser, computer use (retail probe runs only; never the
 port's `alamo_game.exe`), ReVa and windbg MCP (registered on `re-analyst`; main sessions start it, subagents use `re-question`), scheduled tasks and `/loop`. Approval rules for outward or
-irreversible actions (pushing anywhere but `dev` via `land_on_dev.cmd`, merging PRs, deleting) are unchanged.
+irreversible actions (pushing, merging PRs, deleting; `dev` moves only through the verifier) are unchanged.

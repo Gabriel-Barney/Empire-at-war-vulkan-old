@@ -28,10 +28,10 @@ Spellings the allowlist covers (Bash tool / PowerShell tool):
 - Build: `cmd //c build_agent.cmd ...` / `& .\build_agent.cmd --% msvc wt "<modules>"` (same for `build_module`, `build_msvc`,
   `build_clang`, `build_asan`, `build_gate`, `build_launcher`).
 - Project tools: `python -I tools/<dir>/<script>.py ...` / the same with `tools\`; `.cmd` helpers as `cmd //c tools\<name>.cmd ...`
-  / `& .\tools\<name>.cmd ...` (`land_on_dev`, `regen_goldens`, `pr_check`, `clean_worktrees`, `tc`, probe-kit scripts).
+  / `& .\tools\<name>.cmd ...` (`regen_goldens`, `pr_check`, `clean_worktrees`, `tc`, probe-kit scripts).
 - Roadmap: `python roadmap-store/roadmap_store.py <subcommand> ...` (every subcommand).
 - Git and GitHub, read and local steps: `status`, `log`, `diff`, `show`, `fetch`, `add`, `commit`, `merge origin/dev`, `rev-parse`,
-  `ls-files`, `blame`, `checkout -b`; `gh pr view|list|checks|diff`, `gh run list|view`. Pushing goes through `land_on_dev.cmd`.
+  `ls-files`, `blame`, `checkout -b`; `gh pr view|list|checks|diff`, `gh run list|view`. Landing goes through `python -I tools/gate/land_queue.py submit`; a direct push to `dev` is denied.
 - Test executables in the checkout's own `build-*` trees (`./build-wt-msvc/...` / `& .\build-wt-msvc\...`).
 
 Shapes that miss every rule, and what to use instead:

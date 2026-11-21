@@ -2,7 +2,7 @@
 name: lane
 model: opus
 effort: high
-description: Works one roadmap group end to end in its own git worktree - claim it, branch from origin/dev, implement across whatever modules the group needs, build and test, tick the roadmap, land it on dev with tools\land_on_dev.cmd. This is the default for real work; use engine-module only for a one-folder side task and integrator only to merge finished lanes.
+description: Works one roadmap group end to end in its own git worktree - claim it, branch from origin/dev, implement across whatever modules the group needs, build and test, tick the roadmap, land it on dev through the landing queue (tools\gate\land_queue.py submit). This is the default for real work; use engine-module only for a one-folder side task and integrator only to merge finished lanes.
 skills:
   - determinism-check
   - diagnosing-bugs
@@ -114,7 +114,7 @@ findings) join the list above; `spec-review` and `codebase-design`'s design-it-t
    and put nothing after the `--%` command on the same line (PowerShell passes the rest of the line to it).
    - **While iterating, test only what you changed:** `& .\build_agent.cmd --% msvc wt "<modules>" changed` runs the fast-tier
      tests that depend on what you changed against `origin/dev` through the build graph (`tools\lint\affected_tests.py`), `none` only builds. Run the
-     whole fast tier (no 4th argument, or `all`) once before landing; `land_on_dev.cmd` runs it on the merged HEAD anyway.
+     whole fast tier (no 4th argument, or `all`) once before landing; the verifier runs it on `dev`'s tip anyway.
    - An identical failing rerun is refused (exit 3, `tools\lint\build_state.py`): it prints the last summary again. Change the
      code first; for a flaky test or a changed environment set `ALAMO_RERUN=1`.
    Read the summary it prints (`tools\lint\build_summary.py`), not the whole log; zero warnings at MSVC `/W4` and clang. It splits
@@ -144,10 +144,9 @@ findings) join the list above; `spec-review` and `codebase-design`'s design-it-t
    for anything else you write. Record results where `docs/README.md` says (decisions, measurements, build rules, `docs/re/`); status is tracked only on the roadmap.
    The roadmap lives only in `roadmap-store/` (PR #89, 2026-11-06): nothing about it is committed to this repository.
    Check that `sync` prints `in sync with origin/main`.
-9. **Land on `dev`** (no PR): commit, then `tools\land_on_dev.cmd`. It merges `origin/dev` into your branch (resolve a conflict
-   there, rebuild the affected modules, rerun; a conflict only in goldens regen_goldens writes is resolved for you: it takes
-   `dev`'s, builds and regenerates those goldens, `tools\lint\golden_merge.py`), pushes to `dev` as a fast-forward and deletes your branch on origin. A rejected
-   push means `dev` moved: rerun it. It also refuses generated or oversized new files (`tools\lint\check_tracked.py`;
+9. **Land on `dev`** (no PR): commit, then `python -I tools/gate/land_queue.py submit` and read `status <id>`: the
+   verifier rebases the entry onto `dev`, builds, tests and fast-forwards `dev` (`docs/BUILD.md`, "Landing queue and
+   verifier"; `land_on_dev.cmd` is retired, wr2 t04). Rejected: fix, commit, submit again. The verifier also refuses generated or oversized new files (`tools\lint\check_tracked.py`;
    tools write into ignored output folders, exceptions go in `tools/lint/tracked_allow.txt`). The last commit message says what changed, build and test results (MSVC / clang / ASan as
    applicable, skips), goldens changed or "none", roadmap group and tasks closed, open items, and ends with
    the `Co-Authored-By:` line the session's attribution reminder gives. Never open a PR to `main` or push `main`: Gabriel releases `dev`.

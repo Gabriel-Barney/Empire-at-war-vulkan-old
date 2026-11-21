@@ -1,5 +1,7 @@
 # wr2 t04: make the verifier the only way onto dev (settings edit for Gabriel)
 
+**Applied 2026-11-21** at Gabriel's request (commit "wr2 t04"); `land_on_dev.cmd` now refuses unless `ALAMO_LAND_DIRECT=1`. Kept as the record of the change.
+
 Agents may not widen or change their own permission rules, so this file prepares the edit and Gabriel applies it to
 `.claude/settings.json` (`permissions`). Apply it once the verifier task is registered and has landed a few entries
 (`python -I tools/gate/land_queue.py status`).

@@ -57,6 +57,5 @@ Remade benchmark scenarios: say "scenario regenerated". The landing commit repea
 
 ## Merge conflicts in goldens
 
-When `tools\land_on_dev.cmd` hits a conflict only in goldens that `regen_goldens` writes, it resolves them itself
-(`tools\lint\golden_merge.py`: take `dev`'s, build, regenerate). For a test-owned golden or a conflict mixed with other files it
-stops: take `dev`'s version of the golden, finish the merge, rebuild, and regenerate as in step 2.
+When the verifier rejects a submission because it conflicts with `dev` in goldens, merge `origin/dev` into your branch,
+take `dev`'s version of each conflicted golden, finish the merge, rebuild, regenerate as in step 2, then submit again.

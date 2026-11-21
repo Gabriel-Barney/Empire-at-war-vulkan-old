@@ -20,7 +20,16 @@ rem tier and the slow checks of changed goldens: clang, ASan and other slow test
 rem needs them (a code change that moves a slow golden without touching it is caught by the nightly dev gate).
 rem The local branch and its worktree are left alone (git cannot delete a checked-out branch); the app or
 rem "git branch -d <name>" from another checkout removes them once the work is on dev.
+rem Retired 2026-11-21 (wr2 t04): only the verifier pushes dev. Sessions submit with tools\gate\land_queue.py. Gabriel
+rem may still land directly when the verifier is down: set ALAMO_LAND_DIRECT=1 for that one run.
 setlocal
+if not "%ALAMO_LAND_DIRECT%"=="1" (
+  echo land_on_dev: retired 2026-11-21 ^(wr2 t04^): only the verifier pushes dev.
+  echo   Submit instead:  python -I tools\gate\land_queue.py submit
+  echo   Then:            python -I tools\gate\land_queue.py status ^<id^>
+  echo   Details: docs\BUILD.md, "Landing queue and verifier". Gabriel only, verifier down: set ALAMO_LAND_DIRECT=1.
+  exit /b 2
+)
 set "CREATE=0"
 if /i "%~1"=="--create" set "CREATE=1"
 set "GOLDEN_MERGE="
