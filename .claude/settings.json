@@ -237,8 +237,8 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python -I -c \"import os,runpy,sys; p=os.path.join(os.environ.get('CLAUDE_PROJECT_DIR','.'),'tools','lint','check_string_literals.py'); sys.argv=[p,'--hook']; os.path.isfile(p) and runpy.run_path(p,run_name='__main__')\"",
-            "timeout": 20
+            "command": "python -I -c \"import io,json,os,pathlib,runpy,sys; d=sys.stdin.read(); f=(json.loads(d or '{}').get('tool_input') or {}).get('file_path') or ''; rel=os.path.join('tools','lint','compile_check.py'); c=[q/rel for q in pathlib.Path(os.path.abspath(f or '.')).parents if (q/rel).is_file()]; p=str(c[0]) if c else os.path.join(os.environ.get('CLAUDE_PROJECT_DIR','.'),rel); sys.stdin=io.StringIO(d); sys.argv=[p,'--hook']; os.path.isfile(p) and runpy.run_path(p,run_name='__main__')\"",
+            "timeout": 60
           }
         ]
       }
