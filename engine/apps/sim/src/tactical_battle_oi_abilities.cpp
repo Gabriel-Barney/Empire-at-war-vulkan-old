@@ -204,6 +204,8 @@ void TacticalBattle::oi_install(TacticalMode& mode, SimRng& rng) {
         const mv::MovementSystem::DeployResult r = movement_->deploy(id, on, frame);
         return r != mv::MovementSystem::DeployResult::NoWalk && r != mv::MovementSystem::DeployResult::Ignored;
     };
+    // mdu1 t01 (SKAI_T19_MDU_DEPLOY_BLOCK Q1): DEPLOY's leave and adopt in the activation call, before Deploy.
+    h.stop_hold_now = [this, m = &mode](tc::ObjectId id, uint32_t) { return oi_stop_hold(*m, id); };
     // S8 t10 (LOB_SOLVER Â§3.5 "Facing at apply"): the thrown abilities snap the movement yaw (the combat facing follows).
     h.snap_yaw = [this](tc::ObjectId id, float yaw_deg) {
         if (movement_) movement_->snap_yaw(id, yaw_deg);
@@ -617,16 +619,17 @@ void TacticalBattle::oi_events(TacticalMode& mode) {
                 Unit* u = unit_by_id(e.id);
                 if (u && u->alive && u->movable && movement_) {
                     const std::vector<objects::ObjectId> ids{e.id};
-                    // b0416: the unit leaves its coordinator, so the formation's attack block no longer moves it (as the
-                    // Stop order, order_stop). Without this a land attack block re-planned its approach on the 30-frame
-                    // timer and undeployed a Mobile Defense Unit that DEPLOY had just stopped.
-                    team_attack_drop(ids);
                     // cu8j t02 (MOVEMENT §4.7.2 / §4.7.5): the stop-and-hold 0x3a9880 leaves every coordinator and adopts
                     // (one ctor draw through the 0x39bcb0 predicate); DEPLOY 0x3a1ce0 stops, then adopts. cu8l t02: the
                     // coordinator-system stop 0x4261f0 (kStopLeave) leaves every coordinator without the adopt.
-                    if (e.value == ta::kStopHold && bt_rng_) {
-                        (void)mv_adopt(mode, u->h, *bt_rng_, true);
-                    } else if (e.value == ta::kStopLeave) {
+                    if (e.value == ta::kStopHold) {
+                        (void)oi_stop_hold(mode, e.id);
+                        break;
+                    }
+                    // b0416: the unit leaves its coordinator, so the formation's attack block no longer moves it (as the
+                    // Stop order, order_stop).
+                    team_attack_drop(ids);
+                    if (e.value == ta::kStopLeave) {
                         (void)movement_->stop_and_leave(e.id);
                     } else {
                         movement_->stop(ids);
@@ -932,6 +935,18 @@ void TacticalBattle::oi_deployed_behaviors(TacticalMode& mode, objects::ObjectId
                 break;
             }
     }
+}
+
+bool TacticalBattle::oi_stop_hold(TacticalMode& mode, objects::ObjectId id) {
+    const Unit* u = unit_by_id(id);
+    if (!u || !u->alive || !u->movable || !movement_) return false;
+    // b0416: the unit leaves its coordinator, so the formation's attack block no longer moves it (as the Stop order,
+    // order_stop). Without this a land attack block re-planned its approach on the 30-frame timer and undeployed a Mobile
+    // Defense Unit that DEPLOY had just stopped.
+    const std::vector<objects::ObjectId> ids{id};
+    team_attack_drop(ids);
+    if (bt_rng_) (void)mv_adopt(mode, u->h, *bt_rng_, true);
+    return true;
 }
 
 void TacticalBattle::oi_deploy_sync(TacticalMode& mode) {

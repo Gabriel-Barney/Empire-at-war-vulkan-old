@@ -196,3 +196,18 @@ re-plans it.
   re-plan and reverse the deploy) [M, not traced; not reachable for an MDU].
 - The meanings of 0x39a350 ("busy", pack +0x100), obj +0x100 → +0x28 and the obj +0xf0 tests in 0x3a1ce0 [L].
 - Not probed in game; everything above rests on the code reads.
+
+## Port finding: mdu1 (2026-11-21) [H: measured in the port]
+
+The MDU race of mdu1 (`AI_PLAN_EXPANSIONGENERIC_BUILDMDUITEM` "Underworld_Mobile_Defense_Unit is not a valid build
+location", land Empire / Underworld) was an **ordering** difference, not a timing race. In the port, Q1 steps 2-3 (leave
+every coordinator, drop the land attack block, adopt) were a queued StopOrder event, applied in the ability event pass
+after the movement tick, while step 4 (Walk `Deploy(true)`, state 0x18) ran at once in the activation call. A Lua
+`Activate_Ability("DEPLOY", true)` runs between battle ticks, so the next tick's attack-block service saw the MDU still in
+its old attack formation: with the target hidden for the lead (FIGHTER_FLYING §4.11 C 3, d >= 40) it re-planned the
+formation in the deploy's first frame; the plan's cap test (Q2, 0x3ac100) undeployed the MDU (0x18 -> 0x1A -> 0, signal
+0x29 at once), `BlockOnCommand` returned and `Build` came 63 frames later on an undeployed MDU. Seed 4 on dev 074b9a3d,
+frame 58403, MDU 7765 (attack block target 791, re-plan through `TacticalBattle::attack_block_service`).
+
+Fix: DEPLOY's leave and adopt run inside the activation call, before Walk `Deploy`, as 0x3a1ce0 does them
+(`AbilityHost::stop_hold_now` -> `TacticalBattle::oi_stop_hold`; the StopOrder event stays for hosts without the hook).

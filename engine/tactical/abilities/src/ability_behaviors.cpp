@@ -668,8 +668,10 @@ void AbilitySystem::h_deploy(Obj& o, bool on, uint32_t frame) {
     // unit's formation membership and its land attack block stay with the old formation), then adopts (0x39bcb0, one
     // ctor draw; return 0x3a1f81, MOVEMENT §4.7.2), both directions, before Walk Deploy. That is the stop-and-hold; the
     // earlier stop + adopt (kStopAdopt, cu8j t02) left a formation member in its formation, whose re-plan then undeployed
-    // a Mobile Defense Unit before its Build.
-    stop_order(o.id, frame, kStopHold);
+    // a Mobile Defense Unit before its Build. mdu1 t01: with a host, the leave and adopt run here, in this call, before
+    // Walk Deploy as in 0x3a1ce0; queued, a stale land attack block re-planned the unit in the services between the
+    // activation (a Lua Activate_Ability between ticks) and the event pass, which undeployed it in the deploy's first frame.
+    if (!host_.stop_hold_now || !host_.stop_hold_now(o.id, frame)) stop_order(o.id, frame, kStopHold);
     // TRU1 t03 (MOVEMENT §3.2 "Deploy(true)", docs/re/TRU1_GRAVITY_FIELD.md): the Walk locomotor refuses to start a deploy
     // while the unit is in a gravity control field (obj +0x3a1 bit 0x40); the stop above still happened. With a movement
     // host the locomotor refuses it too (MovementSystem deploy_block, every route); this copy covers the host-less path.

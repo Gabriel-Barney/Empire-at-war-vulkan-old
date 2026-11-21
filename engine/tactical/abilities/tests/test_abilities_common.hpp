@@ -635,6 +635,7 @@ void test_oi_shields_jamming_ion();
 void test_oi_class_bodies();
 uint32_t special_hardpoint(CombatData& cd, int32_t blast_projectile);
 void test_gaps_eject_thief();
+void test_mdu1_deploy_stop_hold_now();
 void test_gaps_deploy_troopers();
 void test_gaps_jet_pack();
 void test_gaps_stun_release();

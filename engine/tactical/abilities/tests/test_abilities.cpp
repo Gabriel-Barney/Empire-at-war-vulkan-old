@@ -68,6 +68,7 @@ int main(int argc, char** argv) {
     test_oi_class_bodies();
     // REMAINING_GAPS §5
     test_gaps_eject_thief();
+    test_mdu1_deploy_stop_hold_now();
     test_gaps_deploy_troopers();
     test_cu8f_parse_defaults();
     test_cu8f_lure();

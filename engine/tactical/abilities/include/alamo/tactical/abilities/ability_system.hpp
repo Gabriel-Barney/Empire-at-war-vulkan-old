@@ -352,6 +352,10 @@ struct AbilityHost {
     // deploy state and reports every change with set_deploy_state() (DEPLOY Is_Active = Walk state 0x19); unset: [port] the
     // deploy is instant (Is_Active follows the request).
     std::function<bool(ObjectId id, bool on, uint32_t frame)> deploy;
+    // mdu1 t01 (SKAI_T19_MDU_DEPLOY_BLOCK Q1 steps 2-3): DEPLOY's stop-and-hold applied at once, inside the activation call
+    // and before `deploy` - `id` leaves every coordinator (its formation and land attack block stay behind) and is adopted.
+    // True when the host did it. Unset or false: the StopOrder event (kStopHold) carries it to the host after the pass.
+    std::function<bool(ObjectId id, uint32_t frame)> stop_hold_now;
     // S8 t10 (LOB_SOLVER §3.5 "Facing at apply"): 0x3a8710 - snap `id`'s yaw to `yaw_deg` at once (no turn rate; roll and
     // pitch 0). Unset: [port] the facing is not changed.
     std::function<void(ObjectId id, float yaw_deg)> snap_yaw;

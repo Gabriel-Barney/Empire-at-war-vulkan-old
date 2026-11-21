@@ -2940,6 +2940,9 @@ private:
     // Called after the movement tick (clip ends, before the combat flags are read) and after oi_events (requests).
     void oi_deploy_sync(TacticalMode& mode);
     void oi_deployed_behaviors(TacticalMode& mode, objects::ObjectId id, bool deployed);  // b0173: DeployedBehavior add / remove
+    // The stop-and-hold of a movable unit (kStopHold: drop its land attack blocks, leave every coordinator, adopt); false
+    // when `id` is not a live movable unit. mdu1 t01: DEPLOY calls it inside the activation (AbilityHost::stop_hold_now).
+    bool oi_stop_hold(TacticalMode& mode, objects::ObjectId id);
     // ref2 t04: the one adopt step for a single object spawned after setup (ability spawns, Lua Spawn_Unit, hangar
     // launches). `unit` false (an object with a container or attach parent): the L1 systems only (l1_register). `unit`
     // true: a type in the battle tables becomes a battle unit (bt_adopt_built: combat, abilities, hangars, S4, L1), a

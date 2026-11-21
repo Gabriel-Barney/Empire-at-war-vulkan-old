@@ -2312,6 +2312,42 @@ void test_gaps_eject_thief() {
 
 namespace bo3split {
 
+void test_mdu1_deploy_stop_hold_now() {
+    // mdu1 t01 (SKAI_T19_MDU_DEPLOY_BLOCK Q1 steps 2-4, "Port finding: mdu1"): with the host hook, DEPLOY's leave and adopt
+    // run inside the activation call and before Walk Deploy, and no StopOrder event is queued for the event pass; without
+    // the hook (or when the host declines) the event carries it, as before.
+    OiWorld w;
+    AbilityObjectDesc a;
+    a.unit_abilities = {rec(kDeploy, 0.0f, 0.0f)};
+    const uint32_t ud = push(w.cd, w.ad, oi_unit("MDU", 100.0f), a);
+    w.make(GameMode::Land);
+    std::vector<std::string> calls;
+    bool accept = true;
+    AbilityHost h;
+    h.stop_hold_now = [&](ObjectId id, uint32_t) {
+        calls.push_back("hold " + std::to_string(id));
+        return accept;
+    };
+    h.deploy = [&](ObjectId id, bool on, uint32_t) {
+        calls.push_back(std::string(on ? "deploy " : "undeploy ") + std::to_string(id));
+        return true;
+    };
+    w.ab->set_host(std::move(h));
+    w.add(1, ud, 0, {0, 0, 0});
+    const ObjectId one[] = {1};
+    CHECK(w.ab->set_unit_ability_mode(one, kDeploy, true, w.frame) == 1);
+    CHECK(calls.size() == 2 && calls[0] == "hold 1" && calls[1] == "deploy 1");
+    w.collect();
+    CHECK(w.count(AbilityEventKind::StopOrder, 1) == 0 && w.count(AbilityEventKind::Deployed, 1) == 1);
+    w.ab->set_deploy_state(1, 0x19);  // the locomotor reports Deployed (the clip ended)
+    accept = false;  // the host declines (not a movable unit): the queued event
+    calls.clear();
+    CHECK(w.ab->set_unit_ability_mode(one, kDeploy, false, w.frame) == 1);
+    CHECK(calls.size() == 2 && calls[0] == "hold 1" && calls[1] == "undeploy 1");
+    w.collect();
+    CHECK(w.count(AbilityEventKind::StopOrder, 1) == 1);
+}
+
 void test_gaps_deploy_troopers() {
     // §5.2: member i of the spawned type's company at Owner_Attachment_Bone i; bones the model lacks are skipped (their
     // member index too); N = members - deployed (+0x40); no draws. Max_Num_Spawned_Objects 9 does not bind here
