@@ -67,3 +67,30 @@ galactic written by their own `--write-golden` options) are still written as ful
 
 `python tools/goldens/convert_goldens.py --all --in-place --check` (or only the files you want), run the fast tier, commit. Files that were
 converted keep their `checkpoint` / `keep` settings on later runs.
+
+## Computed results and the `Behaviour:` check (wr1, 2026-11-21: expand phase)
+
+Stage 12 replaces stored derived goldens with results computed from builds (`docs/DECISIONS.md`, "Workflow redesign").
+Until wr1 t07 removes them, the stored goldens above stay in force and the tools below run beside them.
+
+- Inventory: `docs/status/golden-inventory.md` lists every stored expected-result file as derived (to be computed) or
+  reference (stays tracked).
+- `tools/goldens/scenario_results.py` (t02): a scenario is a golden-backed headless ctest entry; its result is the full
+  CRC log of the same command, stored under the main checkout's `.cache/scenario-results/` (gitignored) and keyed by
+  the commit's `engine/`, `CMakeLists.txt` and `tests/benchmark` trees, the command, the game-data identity, compiler and
+  worker count. A docs or tools commit keeps every key. `result --commit C` builds another commit in the locked worktree
+  `.claude/worktrees/scenario-base` (tree `build-base-<compiler>`) when no entry exists. Nothing is stored from a tree with
+  uncommitted source edits; the cache is capped (`ALAMO_SCENARIO_CACHE_MB`, default 4096) and drops the least recently used
+  entries.
+- `tools/goldens/behaviour_check.py` (t03, t08): `commit [REV]` diffs every scenario of a commit against its first parent
+  over all ticks and judges the commit's `Behaviour:` trailer (`none`, or the CRC system columns it changes); a sim commit
+  without the trailer fails. `workers` and `compilers` compare worker counts with the 0-worker run and the clang tree with
+  the MSVC tree for one commit, with no stored file (the cross-compiler check stored goldens gave for free).
+  `--parity-before/--parity-after` (or `parity A B`) add which parity-harness metrics moved.
+
+Commit trailer, from now on for every commit that touches sim code (the last line block of the message):
+
+```
+Behaviour: none
+Behaviour: movement, combat
+```

@@ -3,6 +3,8 @@
 /logs/
 /dist/
 /backups/
+# Scenario results computed from builds (tools/goldens/scenario_results.py, wr1)
+/.cache/
 
 # Project-local toolchain (rebuilt by toolchain\*.cmd) and agent worktrees
 /toolchain/

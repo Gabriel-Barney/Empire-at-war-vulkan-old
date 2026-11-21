@@ -661,6 +661,12 @@ if(ALAMO_GOLDEN_PYTHON)
   add_test(NAME alamo_goldens_convert_selftest
            COMMAND ${ALAMO_GOLDEN_PYTHON} ${CMAKE_SOURCE_DIR}/tools/goldens/convert_goldens.py --selftest)
   set_tests_properties(alamo_goldens_convert_selftest PROPERTIES TIMEOUT 60)
+  # wr1 t02 / t03: scenario result cache and the Behaviour: declaration check (temporary git repos, no build needed).
+  add_test(NAME alamo_goldens_scenario_results_selftest
+           COMMAND ${ALAMO_GOLDEN_PYTHON} -I ${CMAKE_SOURCE_DIR}/tools/goldens/scenario_results.py --selftest)
+  add_test(NAME alamo_goldens_behaviour_check_selftest
+           COMMAND ${ALAMO_GOLDEN_PYTHON} -I ${CMAKE_SOURCE_DIR}/tools/goldens/behaviour_check.py --selftest)
+  set_tests_properties(alamo_goldens_scenario_results_selftest alamo_goldens_behaviour_check_selftest PROPERTIES TIMEOUT 120)
 endif()
 
 # mcx7 t04: mod goldens (docs/MOD_COMPAT_DESIGN.md 13.3): one short headless skirmish per reference mod, its checkpoint log in
