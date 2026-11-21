@@ -78,6 +78,13 @@ alamo_lua_patch(lundump.c
 alamo_lua_patch(lundump.c " n=LoadInt(S);\n f->locvars=" " n=LoadCount(S,sizeof(LocVar));\n f->locvars=")
 alamo_lua_patch(lundump.c " int size=LoadInt(S);\n f->lineinfo=" " int size=LoadCount(S,sizeof(int));\n f->lineinfo=")
 alamo_lua_patch(lundump.c " n=LoadInt(S);\n f->k=" " n=LoadCount(S,sizeof(TObject));\n f->k=")
+# The header's test number is compared as (long)x: a NaN or out-of-range number from the file makes that cast undefined
+# (UBSan in alamo_fuzz_smoke, nightly gate 2026-11-20; wr0 t04). Such a number is refused first. Same outcome as retail:
+# on x86 the cast gives LONG_MIN there, which never equals (long)TEST_NUMBER, so stock 5.0.2 refuses the chunk too.
+# long is 32-bit (Windows x64 only).
+alamo_lua_patch(lundump.c
+  " x=LoadNumber(S);\n if ((long)x!=(long)tx)"
+  " x=LoadNumber(S);\n if (!(x>-2147483649.0 && x<2147483648.0) || (long)x!=(long)tx)  /* alamo: no undefined cast */")
 alamo_lua_patch(lundump.c " n=LoadInt(S);\n f->p=" " n=LoadCount(S,sizeof(Proto*));\n f->p=")
 # OI lua (L1 determinism, [port]): tostring() of a table / function / full userdata / thread prints the value's
 # creation serial (8 hex digits) instead of its address, so printed / concatenated / compared names are the same

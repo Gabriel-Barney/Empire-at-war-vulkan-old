@@ -2,6 +2,7 @@
 
 #include <cstring>
 #include <initializer_list>
+#include <limits>
 #include <string_view>
 
 #if defined(ALAMO_FUZZ_HAVE_TERRAIN)
@@ -192,6 +193,16 @@ std::vector<Bytes> seeds_lc() {
         if (luaL_loadbuffer(L, s, std::strlen(s), "=seed") == 0) lua_dump(L, dump_writer, &b);
         lua_close(L);
         if (!b.empty()) out.push_back(std::move(b));
+    }
+    // Header test numbers that lundump's (long) compare cannot take (UBSan, nightly gate 2026-11-20; wr0 t04): NaN and
+    // 1e300 over TEST_NUMBER, which starts at byte 14 ("\033Lua", version, endianness, 8 size bytes). Both are refused.
+    constexpr size_t kTestNumberAt = 14;
+    if (!out.empty() && out[0].size() >= kTestNumberAt + sizeof(double)) {
+        for (const double bad : {std::numeric_limits<double>::quiet_NaN(), 1e300}) {
+            Bytes b = out[0];
+            std::memcpy(b.data() + kTestNumberAt, &bad, sizeof bad);
+            out.push_back(std::move(b));
+        }
     }
     return out;
 }
