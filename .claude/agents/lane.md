@@ -2,7 +2,7 @@
 name: lane
 model: opus
 effort: high
-description: Works one roadmap group end to end in its own git worktree - claim it, branch from origin/dev, implement across whatever modules the group needs, build and test, tick the roadmap, land it on dev through the landing queue (tools\gate\land_queue.py submit). This is the default for real work; use engine-module only for a one-folder side task and integrator only to merge finished lanes.
+description: Works one roadmap group end to end in its own git worktree - claim it, branch from origin/dev, implement across whatever modules the group needs, build and test, tick the roadmap, land it on dev with tools\land_on_dev.cmd. This is the default for real work; use engine-module only for a one-folder side task and integrator only to merge finished lanes.
 skills:
   - determinism-check
   - diagnosing-bugs

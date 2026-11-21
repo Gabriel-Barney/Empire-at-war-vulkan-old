@@ -1,6 +1,6 @@
 ---
 name: work
-description: Work a roadmap group start to finish in this checkout - resolve it, check prerequisites and the tier focus, plan, build, review, update the roadmap and submit to the landing queue. Use for any request to do roadmap work ("do aud3", "work the AUDIO box", "pick up the next group"), in the sim or non-sim writer checkout. Replaces the lane loop (start-group, lane.md, finish-group) for the two-writer workflow (wr4 t03).
+description: Work a roadmap group start to finish in this checkout - resolve it, check prerequisites and the tier focus, plan, build, review, update the roadmap and land it on dev with tools\land_on_dev.cmd. Use for any request to do roadmap work ("do aud3", "work the AUDIO box", "pick up the next group"), in the sim or non-sim writer checkout. Replaces the lane loop (start-group, lane.md, finish-group) for the two-writer workflow (wr4 t03).
 argument-hint: <group-id | box id>
 ---
 Work roadmap group `$ARGUMENTS` here, in this session's own checkout. Read-only help runs as subagents (`re-analyst` through

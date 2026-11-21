@@ -78,7 +78,7 @@ def decide(session_dir: str, target: str) -> str | None:
     verifier = os.path.join(main, ".claude", "worktrees", "verifier")
     if norm(target).startswith(norm(verifier) + os.sep):
         return (f"{target} is in the verifier's checkout ({verifier}); only tools/gate/verifier.py changes it. Edit your own "
-                "checkout and submit through the landing queue.")
+                "checkout and land it with tools\\land_on_dev.cmd.")
     if role_of(session) == "non-sim" and tgt_co:
         rel = os.path.relpath(target, tgt_co)
         if is_sim_path(rel):

@@ -423,7 +423,7 @@ def cmd_new(ctx: Ctx, name: str, base: str | None = None, fetch: bool = False, s
     out(f'  & .\\build_agent.cmd --% msvc wt "{modules}"     # fast tier; read the summary, not the log')
     out(f'  & .\\build_agent.cmd --% clang wt "{modules}"    # sim code too (everything but render/audio/video/UI)')
     out("  .\\build_asan.cmd                                      # engine/jobs or other threading code")
-    out('Finish: commit, then python -I tools/gate/land_queue.py submit --note "<what>" (the verifier lands it on dev).')
+    out("Finish: commit, then .\\tools\\land_on_dev.cmd (merges origin/dev, checks, pushes dev; no step of Gabriel's).")
     out(f"Remove it once it is on dev:  tools\\clean_worktrees.cmd --apply --only {name}")
     return target
 
