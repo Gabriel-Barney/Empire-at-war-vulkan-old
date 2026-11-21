@@ -78,4 +78,9 @@ echo %DATE% %TIME% !SHA! dev gate exit !RC!!MISSED!>> "%HIST%"
 rem wr2 t05: attribute each failure of tonight's run to a commit and file it on the roadmap (group ngt1), or update
 rem the task a known failure already has; also sets the roadmap page's build line (tools\gate\nightly_triage.py).
 python -I "%WT%\tools\gate\nightly_triage.py" --sha !SHA! --rc !RC! --logs "%WT%\logs" --main "%MAIN%" --wt "%WT%"
+rem wr1 t05: the scenarios too slow for the landing check (GPU smoke runs, the long galactic AI campaign) diffed from the
+rem last gated night to tonight's commit; report only until wr1 t07, one line per night in logs\behaviour_nightly.txt.
+set "GT="
+for /f "delims=" %%t in ('python -I "%WT%\tools\lint\build_trees.py" name main msvc') do set "GT=%%t"
+if defined GT python -I "%WT%\tools\goldens\behaviour_check.py" nightly --history "%HIST%" --build "%WT%\!GT!" > "%MAIN%\logs\behaviour_nightly_report.txt" 2>&1
 exit /b !RC!

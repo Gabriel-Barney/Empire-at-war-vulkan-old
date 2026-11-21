@@ -67,7 +67,12 @@ static bool g_regen = false;
 
 using ::alamo::test::env_or_empty;
 
-static std::string testdata(const std::string& name) { return std::string(ALAMO_SIM_TESTDATA) + "/" + name; }
+// wr1 t05: --golden-out DIR regenerates into DIR instead of over the tracked testdata (the scenario-result run of
+// tools/goldens/scenarios.json). Only golden and recorded-stream paths go through here.
+static std::string g_golden_out;
+static std::string testdata(const std::string& name) {
+    return (g_golden_out.empty() ? std::string(ALAMO_SIM_TESTDATA) : g_golden_out) + "/" + name;
+}
 
 // ------------------------------------------------------------------------------------------ pacing
 static void test_pacing() {
@@ -3568,7 +3573,10 @@ int main(int argc, char** argv) {
     log::set_min_level(log::Level::Error);
     for (int i = 1; i < argc; ++i)
         if (std::strcmp(argv[i], "--regen") == 0) g_regen = g_regen_story = true;
-        else if (std::strcmp(argv[i], "--regen-story") == 0) g_regen_story = true;
+        else if (std::strcmp(argv[i], "--golden-out") == 0 && i + 1 < argc) {
+            g_regen = g_regen_story = true;
+            g_golden_out = argv[++i];
+        } else if (std::strcmp(argv[i], "--regen-story") == 0) g_regen_story = true;
         else if (std::strcmp(argv[i], "--story-only") == 0) g_story_only = true;
     test_pacing();
     const auto world = make_world();

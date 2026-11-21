@@ -29,6 +29,7 @@ namespace alamo::shaderxlat::test {
 namespace {
 
 bool g_write_golden = false;
+std::string g_golden_out;  // wr1 t05: --golden-out DIR writes the golden HLSL into DIR
 std::string g_dump_dir;
 std::string g_exe;   // argv[0], for the multi-process cache test
 
@@ -463,7 +464,8 @@ void test_emitter(const std::vector<Blob>& syn) {
     }
 
     // Golden text.
-    const std::filesystem::path gdir = ALAMO_SHADERXLAT_GOLDEN_DIR;
+    const std::filesystem::path gdir =
+        g_golden_out.empty() ? std::filesystem::path(ALAMO_SHADERXLAT_GOLDEN_DIR) : std::filesystem::path(g_golden_out);
     for (const char* name : {"vs11_skin", "vs20_flow", "ps11_ops", "ps14_phase", "ps20_ops", "vs30_io", "ps30_io"}) {
         if (!tr.count(name)) continue;
         const std::filesystem::path f = gdir / (std::string(name) + ".hlsl");
@@ -954,7 +956,10 @@ int main(int argc, char** argv) {
     for (int i = 1; i < argc; ++i) {
         const std::string a = argv[i];
         if (a == "--write-golden") g_write_golden = true;
-        else if (a == "--dump" && i + 1 < argc) g_dump_dir = argv[++i];
+        else if (a == "--golden-out" && i + 1 < argc) {
+            g_write_golden = true;
+            g_golden_out = argv[++i];
+        } else if (a == "--dump" && i + 1 < argc) g_dump_dir = argv[++i];
         else mode = a;
     }
     const std::vector<Blob> syn = synthetic_blobs();

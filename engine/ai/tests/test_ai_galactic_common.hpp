@@ -68,6 +68,9 @@ using ::alamo::test::g_checks;
 using ::alamo::test::g_fail;
 
 inline bool g_write_golden = false;
+// wr1 t05: --golden-out DIR writes the goldens into DIR instead of ALAMO_AI_GOLDEN_DIR.
+inline std::string g_golden_out;
+inline std::string ai_golden_dir() { return g_golden_out.empty() ? std::string(ALAMO_AI_GOLDEN_DIR) : g_golden_out; }
 void test_cadence();
 void test_goal_pass_cadence();
 void test_goal_quota_players();  // bkx1 t01

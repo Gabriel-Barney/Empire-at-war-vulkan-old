@@ -151,13 +151,22 @@ Out of scope, left out of the counts:
 
 ### Migration status (t04-t06, 2026-11-21)
 
-| Rows | Covered by | State |
+Every derived row is now covered by a scenario (t05); `behaviour_check.py goldens` shows each one reproducing the tracked
+files it replaces. Scenario names: `scenario_results.py list`. No row was turned into a rule-level test in t05: the rule
+candidates above already assert their rules in the tests (D13 queue / Black Market counts, D14 special weapon, D3 / D4
+`--expect-skirmish-base`), so the stored log only added the whole-run CRC, which the computed diff now gives.
+
+| Rows | Covered by | Landing / nightly |
 |---|---|---|
-| D1-D7 headless goldens (alamo_headless `--golden <tracked file>`) | `tools/goldens/scenario_results.py` scenarios, `behaviour_check.py commit/range/workers/compilers` | expand phase: `land_on_dev.cmd` runs `range --expand` and logs each landing to `logs\behaviour_landings.txt` (t04 counts twenty landings with no disagreement) |
-| Benchmark `.alsv` / `.acmd` / `.crc` and the derived manifest lines | `tools/goldens/bench_scenarios.py` (recipe in git, scenario made per build key); the headless bench ctests read `${CMAKE_BINARY_DIR}/bench_scenarios` through a fixture | t06: headless and `alamo_headless_bench_game_*` done; `alamo_game_bench_scene_*` (apps/game) still read `tests/benchmark` until t07 strips the files |
-| D17, D18, D20, D24, D25 (module exes with `--write-golden <file>`) | next: a scenario kind "test exe" whose result is the file `--write-golden <tmp>` writes; D24 / D25 are CRC v2, so columns apply; D17 / D18 / D20 compare as text (one value) | t05 open |
-| D9-D14 (`alamo_sim*_tests --regen`, rewrites tracked files in place) | next: give the sim exes `--regen-to DIR` (write beside, not over) so a scenario can take the output; D13 / D14 / D12 story logs are rule-level candidates (notes above) | t05 open |
-| D15, D16, D19, D21, D22 (own text formats, `--write-golden` without a path or `--golden-dir`) | as the module rows once each exe takes an output path | t05 open |
-| D8 game smoke `.crc` / `.rec` (GPU) | `alamo_game` smoke runs as scenarios on the GPU machine (nightly), like the rendered bench scenes | t05 open |
-| Mod goldens (`tests/goldens/mods/*.crc`) | scenarios of `mod_golden.py`'s command (skips without the workshop item) | t05 open |
-| Visual baselines (61 PNGs, no ctest) | computed by `tools\visual` on the parent and the commit at review time, never stored | t05 open (no test reads them; t07 can drop them once `visual_check` diffs two builds) |
+| D1-D5 headless goldens (alamo_headless `--golden <tracked file>`) | headless scenarios found in ctest (`scenario_results.py`) | landing check (verifier, strict); landings logged to `logs\behaviour_landings.txt` for t04 |
+| D6, D7 galactic AI logs | write scenarios `galactic_ai_hotm`, `galactic_ai_hotm_human` (`--ai-log <out>`, plus the run's `--crc-out` for columns; `#` header lines except `# t=` ignored); charge `galactic.ai` | D6 landing, D7 nightly (36000 ticks) |
+| D8 game smoke `.crc` / `.rec` | `game_smoke_skirmish`, `_campaign`, `_land` (`--png-dir <out>`; saves and the wall-clock shots dropped); `.rec` charged to `commands` | nightly (GPU) |
+| D9-D12 (`alamo_sim_tests --regen`) | `sim_tests` (`--golden-out <out>`, new: regenerates into the folder instead of over `testdata/`); story logs charged to `story` | landing |
+| D13, D14 | `sim_battles`, `sim_battle_l1` (`--golden-out <out>`, new) | landing |
+| D15, D16, D19 | `ai_perception`, `ai_galactic`, `ai_tactical_world` (`--golden-out <out>`, new); charges `galactic.ai`, `battle.ai` | landing |
+| D17, D18, D20, D24, D25 | `ai_tactical_scenario`, `ai_tactical_perception`, `dmath`, `abilities_space`, `combat_space` (`--write-golden <out>/<file>`) | landing |
+| D21, D22 | `galactic_synthetic`, `galactic_foc` (`--write-golden --golden-dir <out>`) | landing |
+| D23 shaderxlat HLSL | `shaderxlat_emitter` (`--golden-out <out>`, new); charge `shaderxlat` | landing |
+| D26 mod goldens | `mod_aol_space`, `mod_fotr_space`, `mod_remake_space`, `mod_tr_space` (`mod_golden.py --crc-out <out>/...`; SKIP without the workshop item). The installed mod's data is not in the cache key: a Steam update between two runs shows as a difference | landing |
+| D27-D29 benchmark `.alsv` / `.acmd` / `.crc` and the derived manifest lines | `tools/goldens/bench_scenarios.py` (t06; recipe in git, scenario made per build key) | ctest fixtures; `alamo_game_bench_scene_*` still read `tests/benchmark` until t07 strips the files |
+| D30 visual baselines | the game smoke scenarios keep their PNGs; `tools\visual\visual_check.cmd parent [REV]` (`tools/visual/visual_builds.py`) diffs a commit's screenshots against its parent's; the checker reports screenshot differences but never judges them | nightly with the smoke scenarios; by hand at review |

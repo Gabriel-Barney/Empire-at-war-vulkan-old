@@ -48,6 +48,7 @@ namespace fs = std::filesystem;
 
 using ::alamo::test::g_fail;
 static bool g_regen = false;
+static std::string g_golden_out;  // wr1 t05: --golden-out DIR regenerates into DIR
 
 namespace {
 
@@ -538,7 +539,7 @@ void test_battle(const Data& d) {
         CHECK(!dv.diverged && b.trace == a.trace);
     }
     // Golden (MSVC writes it with --regen; clang / gcc must reproduce it): includes the L1 state ("battle.abilities").
-    const std::string path = std::string(ALAMO_SIM_TESTDATA) + "/battle_l1_golden.crc";
+    const std::string path = (g_golden_out.empty() ? std::string(ALAMO_SIM_TESTDATA) : g_golden_out) + "/battle_l1_golden.crc";
     CrcLog log = a.crc;
     log.comments = {"L1 systems synthetic campaign: special weapon, TSW, hyperspace, engines, teleport; seed 7"};
     std::string err;
@@ -2686,7 +2687,13 @@ void test_foc() {
 }  // namespace
 
 int main(int argc, char** argv) {
-    for (int i = 1; i < argc; ++i) g_regen = g_regen || std::string(argv[i]) == "--regen";
+    for (int i = 1; i < argc; ++i) {
+        g_regen = g_regen || std::string(argv[i]) == "--regen";
+        if (std::string(argv[i]) == "--golden-out" && i + 1 < argc) {  // wr1 t05
+            g_regen = true;
+            g_golden_out = argv[++i];
+        }
+    }
     const auto d = make_data();
     test_battle(*d);
     test_tsw_follow(*d);

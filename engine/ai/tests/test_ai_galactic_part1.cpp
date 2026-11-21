@@ -1481,7 +1481,7 @@ void test_synthetic_campaign() {
         CHECK(first == r.crc.size() && r.decisions == base.decisions);
     }
     const std::string text = golden_text(base);
-    const std::string path = std::string(ALAMO_AI_GOLDEN_DIR) + "/ai_galactic_synthetic_crc.txt";
+    const std::string path = ai_golden_dir() + "/ai_galactic_synthetic_crc.txt";
     if (g_write_golden) {
         std::ofstream(std::filesystem::path(path), std::ios::binary) << text;
         std::printf("  wrote %s\n", path.c_str());

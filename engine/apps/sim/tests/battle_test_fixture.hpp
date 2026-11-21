@@ -1258,7 +1258,12 @@ inline Run run_campaign(const Data& d, bool land, bool fight, int32_t workers, u
     return out;
 }
 
-inline std::string golden_path() { return std::string(ALAMO_SIM_TESTDATA) + "/battle_synthetic_golden.crc"; }
+// wr1 t05: --golden-out DIR (test_battles.cpp) regenerates into DIR instead of over the tracked testdata.
+inline std::string g_golden_out;
+inline std::string testdata_path(const std::string& name) {
+    return (g_golden_out.empty() ? std::string(ALAMO_SIM_TESTDATA) : g_golden_out) + "/" + name;
+}
+inline std::string golden_path() { return testdata_path("battle_synthetic_golden.crc"); }
 
 
 }  // namespace battle_fixture

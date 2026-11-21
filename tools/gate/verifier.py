@@ -10,7 +10,7 @@ the landing checks there:
   2. build_agent.cmd clang verify all when the placed commits touch sim code (engine/ except render, audio, video, ui);
   3. tools/lint/golden_merge.py slow origin/dev HEAD (the slow checks of goldens the entries changed);
   4. tools/goldens/behaviour_check.py range origin/dev HEAD (every sim commit declares `Behaviour:` and no undeclared
-     column moved).
+     column moved); its one-line landing record goes to <main checkout>/logs/behaviour_landings.txt (wr1 t04 count).
 
 All pass: dev is fast-forwarded to the placed commits (`git push origin HEAD:refs/heads/dev`; a rejected push means dev
 moved and the batch is placed again). A failure rejects the entry with the summary file
@@ -85,7 +85,8 @@ def run_checks(wt: str, base_sha: str, log: list[str]) -> bool:
                                                      "--landing", os.path.join(wt, f"build-{TREE}-msvc", "ctest_junit.xml")]))
     steps.append(("slow golden checks", [py, "-I", os.path.join(wt, "tools", "lint", "golden_merge.py"), "slow", base_sha, "HEAD"]))
     steps.append(("behaviour check", [py, "-I", os.path.join(wt, "tools", "goldens", "behaviour_check.py"), "range",
-                                      base_sha, "HEAD", "--build", os.path.join(wt, f"build-{TREE}-msvc")]))
+                                      base_sha, "HEAD", "--build", os.path.join(wt, f"build-{TREE}-msvc"),
+                                      "--log", "auto"]))
     for name, cmd in steps:
         t0 = time.time()
         r = subprocess.run(cmd, cwd=wt, env=env, capture_output=True, text=True, errors="replace")

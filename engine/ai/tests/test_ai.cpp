@@ -642,6 +642,8 @@ static std::string golden_text(const RunDigest& d) {
     return buf;
 }
 
+static std::string g_golden_out;  // wr1 t05: --golden-out DIR writes the golden into DIR
+
 static void test_determinism(bool write_golden) {
     const RunDigest serial = run_synthetic(160, 4, 181, serial_for);
     CHECK(serial.nonzero_costs > 0);  // computed, not placeholder
@@ -672,10 +674,11 @@ static void test_determinism(bool write_golden) {
     }
     // Golden (MSVC / clang / gcc must agree).
     const std::string text = golden_text(serial);
-    const std::string path = std::string(ALAMO_AI_GOLDEN_DIR) + "/ai_golden.txt";
+    const std::string dir = g_golden_out.empty() ? std::string(ALAMO_AI_GOLDEN_DIR) : g_golden_out;
+    const std::string path = dir + "/ai_golden.txt";
     if (write_golden) {
         std::error_code ec;
-        fs::create_directories(path_from_utf8(ALAMO_AI_GOLDEN_DIR), ec);
+        fs::create_directories(path_from_utf8(dir), ec);
         std::ofstream(path_from_utf8(path), std::ios::binary) << text;
         std::printf("golden written: %s\n%s", path.c_str(), text.c_str());
         return;
@@ -1293,6 +1296,11 @@ int main(int argc, char** argv) {
     bool write_golden = false;
     for (int i = 1; i < argc; ++i) {
         if (std::string(argv[i]) == "--write-golden") write_golden = true;
+        if (std::string(argv[i]) == "--golden-out" && i + 1 < argc) {  // wr1 t05
+            write_golden = true;
+            g_golden_out = argv[++i];
+            continue;
+        }
         if (std::string(argv[i]) == "--tr-seed-roles") {  // q6: the Thrawn's Revenge check alone (slow: ~19k types)
             tr_seed_roles(env_or("ALAMO_FOC_DATA", ""));
             std::printf(g_fail ? "alamo_ai_tests: %d failure(s)\n" : "alamo_ai_tests: OK\n", g_fail);

@@ -289,6 +289,7 @@ def main(argv: list[str]) -> int:
         return 2
     tree = a.tree if os.path.isabs(a.tree) else os.path.join(ROOT, a.tree)
     g = graph(tree)
+    sys.path.insert(0, HERE)  # python -I leaves the script's folder off sys.path
     import test_tiers  # the measured tiers decide what "slow" means (wr3 t03)
     for name, tier in test_tiers.load_tiers().items():
         if name in g["tests"]:

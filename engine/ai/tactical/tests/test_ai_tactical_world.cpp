@@ -48,6 +48,7 @@ using namespace alamo::ai::tactical;
 
 using ::alamo::test::g_fail;
 static bool g_write_golden = false;
+static std::string g_golden_out;  // wr1 t05: --golden-out DIR writes the golden into DIR
 
 namespace {
 
@@ -2240,7 +2241,8 @@ void test_skirmish() {
     std::printf("  easy: countdown after the first commit %d\n", e.countdown_easy);
     CHECK(e.countdown_easy == 15 * 30);
     const std::string text = golden_text(a);
-    const std::string path = std::string(ALAMO_AI_TACTICAL_GOLDEN_DIR) + "/ai_tactical_world_crc.txt";
+    const std::string path =
+        (g_golden_out.empty() ? std::string(ALAMO_AI_TACTICAL_GOLDEN_DIR) : g_golden_out) + "/ai_tactical_world_crc.txt";
     if (g_write_golden) {
         std::ofstream(std::filesystem::path(path), std::ios::binary) << text;
         std::printf("  wrote %s\n", path.c_str());
@@ -3818,6 +3820,10 @@ int main(int argc, char** argv) {
     bool list = false;
     for (int i = 1; i < argc; ++i) {
         if (std::strcmp(argv[i], "--write-golden") == 0) g_write_golden = true;
+        if (std::strcmp(argv[i], "--golden-out") == 0 && i + 1 < argc) {  // wr1 t05
+            g_write_golden = true;
+            g_golden_out = argv[++i];
+        }
         if (std::strcmp(argv[i], "--only") == 0 && i + 1 < argc) only = argv[++i];
         if (std::strcmp(argv[i], "--list") == 0) list = true;
     }

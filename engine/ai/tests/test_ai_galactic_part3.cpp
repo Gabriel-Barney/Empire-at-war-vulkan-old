@@ -335,7 +335,7 @@ void test_underworld_special() {
     o << base.summary << "\n";
     for (const std::string& d : base.decisions) o << d << "\n";
     const std::string text = o.str();
-    const std::string path = std::string(ALAMO_AI_GOLDEN_DIR) + "/ai_underworld_crc.txt";
+    const std::string path = ai_golden_dir() + "/ai_underworld_crc.txt";
     if (g_write_golden) {
         std::ofstream(std::filesystem::path(path), std::ios::binary) << text;
         std::printf("  wrote %s\n", path.c_str());

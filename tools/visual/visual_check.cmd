@@ -1,7 +1,9 @@
 @echo off
 rem Screenshot check (PAF t09): compares the PNGs the game smoke tests write (build-msvc\smoke_out and smoke_out\screens) with the
 rem downscaled baselines in tests\visual_baselines (320 px wide, see tools\visual\png_diff.py). Exit 0 = all match.
-rem Usage: tools\visual\visual_check.cmd [run|update]
+rem Usage: tools\visual\visual_check.cmd [run|update|parent [REV]]
+rem   parent  (wr1 t05) compare REV's smoke screenshots (default HEAD) with its parent's, both taken from the scenario results
+rem           (tools\visual\visual_builds.py: no stored baseline); diff images in logs\visual_diff\game_smoke_*\
 rem   (none)  compare the PNGs of the last build_msvc.cmd run (it runs the smoke tests)
 rem   run     run the smoke tests first (needs the game data and a GPU), then compare
 rem   update  store the current PNGs as the new baselines (after an intended visual change; commit tests\visual_baselines)
@@ -20,6 +22,10 @@ rem load smoke's shots list saves with their wall-clock save time. The video opt
 rem (resolution / refresh rate rows), which change with the monitor setup.
 rem They have no baselines, and update skips them too.
 set IGN=--ignore game_campaign_galactic_after.png --ignore game_campaign_video_options.png --ignore "game_smoke_saveload_*.png" --ignore game_campaign_screen_video.png
+if /i "%~1"=="parent" (
+  "%TC%\venv\Scripts\python.exe" -I tools\visual\visual_builds.py %2
+  exit /b !ERRORLEVEL!
+)
 if /i "%~1"=="update" (
   %PD% update tests\visual_baselines\smoke %BT%\smoke_out --scale %SCALE% %IGN%
   %PD% update tests\visual_baselines\smoke_screens %BT%\smoke_out\screens --scale %SCALE% %IGN%

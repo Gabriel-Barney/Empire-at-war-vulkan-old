@@ -4,8 +4,13 @@
 
 int main(int argc, char** argv) {
     std::setvbuf(stdout, nullptr, _IONBF, 0);  // keep the progress lines when a test crashes
-    for (int i = 1; i < argc; ++i)
+    for (int i = 1; i < argc; ++i) {
         if (std::strcmp(argv[i], "--write-golden") == 0) g_write_golden = true;
+        if (std::strcmp(argv[i], "--golden-out") == 0 && i + 1 < argc) {  // wr1 t05
+            g_write_golden = true;
+            g_golden_out = argv[++i];
+        }
+    }
     test_cadence();
     test_goal_pass_cadence();  // a2m r2
     test_goal_quota_players();  // bkx1 t01

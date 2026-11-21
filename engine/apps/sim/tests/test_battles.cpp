@@ -128,7 +128,7 @@ struct QueueRun {
     std::vector<int> stages;  // queue sizes in the order seen
 };
 
-std::string queue_golden_path() { return std::string(ALAMO_SIM_TESTDATA) + "/battle_queue_golden.crc"; }
+std::string queue_golden_path() { return testdata_path("battle_queue_golden.crc"); }
 
 QueueRun run_orders(const Data& d, int32_t workers, uint64_t ticks) {
     QueueRun out;
@@ -1808,7 +1808,7 @@ void test_black_market_battle() {
         std::printf("  bm battle workers %2d: %s\n", w, dv.message.c_str());
         CHECK(!dv.diverged && b.battles == a.battles);
     }
-    const std::string path = std::string(ALAMO_SIM_TESTDATA) + "/battle_bm_golden.crc";
+    const std::string path = testdata_path("battle_bm_golden.crc");
     CrcLog log = a.crc;
     log.comments = {"P4 tactical Black Market gate: S10 synthetic space campaign, POWER_TO_WEAPONS marked and not bought, "
                     "seed 2026, " + std::to_string(ticks) + " ticks"};
@@ -3589,8 +3589,13 @@ void test_galactic_upgrade_spawns() {
 int main(int argc, char** argv) {
     std::setvbuf(stdout, nullptr, _IONBF, 0);
     g_temp_prefix = "alamo_sim_battle_tests";
-    for (int i = 1; i < argc; ++i)
+    for (int i = 1; i < argc; ++i) {
         if (std::string(argv[i]) == "--regen") g_regen = true;
+        if (std::string(argv[i]) == "--golden-out" && i + 1 < argc) {  // wr1 t05
+            g_regen = true;
+            g_golden_out = argv[++i];
+        }
+    }
     auto d = make_data();
     std::printf("space battle\n");
     test_space_battle(*d);

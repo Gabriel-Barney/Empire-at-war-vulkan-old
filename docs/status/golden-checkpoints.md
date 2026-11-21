@@ -87,6 +87,24 @@ Until wr1 t07 removes them, the stored goldens above stay in force and the tools
   without the trailer fails. `workers` and `compilers` compare worker counts with the 0-worker run and the clang tree with
   the MSVC tree for one commit, with no stored file (the cross-compiler check stored goldens gave for free).
   `--parity-before/--parity-after` (or `parity A B`) add which parity-harness metrics moved.
+- Write-kind scenarios (t05): `tools/goldens/scenarios.json` covers the derived goldens that are not headless `--golden`
+  runs (module and sim test exes, galactic AI logs, game smoke runs, mod goldens). Each runs its test program so that it
+  writes into a result folder (`--write-golden <out>/...`, `--golden-dir <out>`, `--golden-out <out>` for the exes that
+  used to rewrite tracked files in place, `--png-dir <out>`, `--ai-log`, `--crc-out`). The checker compares a result
+  folder file by file: CRC logs by column; other text and binary outputs byte for byte (registry `ignore` lines left out),
+  a difference charged to the scenario's `system`; screenshots with `png_diff.py` tolerances, reported but never judged.
+  `goldens` checks that each scenario reproduces the tracked files it replaces (run before t07 deletes any). A scenario
+  whose needs are missing (game data, GPU, workshop item) is a SKIP.
+- Screenshots: `tools\visual\visual_check.cmd parent [REV]` diffs REV's smoke screenshots against its parent's
+  (`tools/visual/visual_builds.py`), the replacement for `tests/visual_baselines`.
+
+Names a `Behaviour:` trailer can list: the CRC system columns (the `systems` line of a log: `frame`, `objects`,
+`galactic.state`, `spatial`, `players`, `rng`, `commands`, `galactic.conflicts`, `battle.state`, `battle.movement`,
+`battle.combat`, `battle.abilities`, `battle.ai`, ...), plus the charge names of non-CRC outputs in `scenarios.json`:
+`galactic.ai` (galactic AI logs and digests), `story` (story event logs, sim_tests), `dmath` (`alamo::dmath` digests),
+`shaderxlat` (emitted HLSL); `commands` also covers recorded command streams (`.acmd`, smoke `.rec`), `battle.ai` the
+tactical AI digests, `battle.state` / `battle.abilities` / `battle.combat` / `galactic.state` a module's CRC run when its
+file is not ALAMO_CRC.
 
 Commit trailer, from now on for every commit that touches sim code (the last line block of the message):
 
