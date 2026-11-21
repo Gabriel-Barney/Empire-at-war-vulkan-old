@@ -1520,3 +1520,19 @@ MSVC, all modules, no tests, `build_agent.cmd msvc <tree> all none`, 16 cores; t
 | PCH on, compiler cache off | 212-216 s | 13-16 s | 109-113 s |
 
 Kept: cache on, PCH off (`docs/DECISIONS.md`, "Warm-tree build settings stay as they are"). Runs labelled lld-link (clean 35 / 42 s, one .cpp 13-14 s, header 109-129 s) did not use lld: `-DCMAKE_LINKER` left the MSVC link rule on `link.exe`.
+
+## Landing queue: a batch of five against one by one (wr2 t08, 2026-11-21)
+
+Check time is from the entry's `building` state to `landed` (`python -I tools/gate/land_queue.py audit <dev commit>` prints it per landing). The verifier's MSVC tree was warm; other sessions were building at the same time.
+
+| Landing | Entries | Check |
+|---|---|---|
+| batch (dev bbb7fa72): five entries from five branches, tools and docs only | 5 | 183 s (MSVC landing tier 95 s, behaviour check 86 s) |
+| single entries without sim code the same day (29a405b0, c445b11c, 978c8c09, ec2e8d24, 15bda16a) | 1 each | 115, 91, 462, 285, 124 s; median 124 s |
+| single entries with sim code the same day (140a4d51, 8c4bb983, bf807b01) | 1 each | 267, 249, 221 s |
+
+Five such entries one by one cost about 5 x 124 s = 620 s of checks (measured singles, not the same five commits again), plus up to 5 minutes of waiting each for the verifier task's next start; the batch took 183 s and one wait. The check time barely depends on how many entries it holds, so a batch of n saves about (n - 1) checks while it passes.
+
+A failing batch costs more than its entries one by one: the three deliberately bad entries of the same day (conflict, failing test, undeclared behaviour change) were taken together; the conflict was rejected in 2 s at placing, the batch of the other two failed, and bisecting it took 417 s for the failing test and 183 s more for the behaviour change.
+
+Nightly deep run on the same day, started by hand through the AlamoGateNightly task: gate 32 min (07:51 to 08:23) and 27 min (08:35 to 09:02); attributing one new failure over 8 commits took 4 bisect builds, about 7 min.

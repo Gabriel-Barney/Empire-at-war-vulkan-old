@@ -80,9 +80,3 @@ add_subdirectory(tools/parity)
 # in a clang tree with ASan + fuzzer instrumentation.
 option(ALAMO_FUZZ "Configure the libFuzzer targets in tools/fuzz (clang only, build_fuzz.cmd)" OFF)
 add_subdirectory(tools/fuzz)
-
-# wr2 t08 observation (2026-11-21, removed again after the observed nightly runs): a slow-tier test that always fails, so
-# the nightly deep run has one injected failure to attribute to this commit and file once (tools/gate/nightly_triage.py).
-# The landing tier never runs it (label slow).
-add_test(NAME alamo_wr2_injected_nightly_failure COMMAND ${CMAKE_COMMAND} -E false)
-set_tests_properties(alamo_wr2_injected_nightly_failure PROPERTIES LABELS slow)
