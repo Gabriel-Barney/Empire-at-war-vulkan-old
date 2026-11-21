@@ -41,7 +41,7 @@ headless multithreaded simulation core first, then a Vulkan 1.3 renderer. Any Cl
 - C++ symbol questions (where defined, who calls it, what a header declares): the `LSP` tool before Grep or reading whole files; ask from a `.cpp` use for callers. Once per worktree, before opening C++ files: `build_agent.cmd msvc all configure` (5 s; `.clangd` reads its `compile_commands.json`). Grep stays the tool for strings, Lua, XML, Python and docs.
 
 ## Rules
-1. Zero warnings at MSVC `/W4 /permissive-` and clang `-Wall -Wextra -Wpedantic -Wconversion -Wshadow` (clang's checked nightly). Explicit narrowing casts; no shadowing.
+1. Zero warnings at MSVC `/W4 /permissive-` plus the off-by-default conversion warnings in `engine/CMakeLists.txt` (C4365 signed / unsigned, C5219 int to float, ...; they stand in for clang per change), and clang `-Wall -Wextra -Wpedantic -Wconversion -Wshadow` (clang's checked nightly). Explicit narrowing casts; no shadowing.
 2. No third-party dependencies in `engine/` without asking Gabriel. Approved so far: Vulkan-Headers, DXC, VMA (Phase 3); Lua 5.0.2 (vendored, original semantics), miniaudio, FFmpeg's Bink decoder (2026-10-27); the reference SMAA (2026-11-13, `engine/render/third_party/smaa`); AMD FidelityFX SDK 2.4.0 Vulkan upscaler DLLs for FSR (2026-11-13); Intel XeSS SDK 3.0.2 `libxess.dll` for XeSS (2026-11-13); see `docs/DECISIONS.md`.
 3. Determinism (saves, replays and parity checks rely on the per-tick CRC): results read by game logic
    must be bit-identical across thread counts, runs, and the MSVC and clang builds (the compiler compare runs nightly). Parallel jobs write per-index outputs; reductions
