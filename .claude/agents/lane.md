@@ -142,9 +142,9 @@ findings) join the list above; `spec-review` and `codebase-design`'s design-it-t
    for anything else you write. Record results where `docs/README.md` says (decisions, measurements, build rules, `docs/re/`); status is tracked only on the roadmap.
    The roadmap lives only in `roadmap-store/` (PR #89, 2026-11-06): nothing about it is committed to this repository.
    Check that `sync` prints `in sync with origin/main`.
-9. **Land on `dev`** (no PR): commit, then `python -I tools/gate/land_queue.py submit` and read `status <id>`: the
-   verifier rebases the entry onto `dev`, builds, tests and fast-forwards `dev` (`docs/BUILD.md`, "Landing queue and
-   verifier"; `land_on_dev.cmd` is retired, wr2 t04). Rejected: fix, commit, submit again. The verifier also refuses generated or oversized new files (`tools\lint\check_tracked.py`;
+9. **Land on `dev`** (no PR): commit, then `tools\land_on_dev.cmd`: it merges `origin/dev`, needs a passing MSVC
+   fast tier of the merged HEAD, runs the behaviour check and fast-forwards `dev` (`docs/BUILD.md`, "Landing check";
+   2026-11-21, the verifier task is disabled). A failure: fix, commit, run it again. It also refuses generated or oversized new files (`tools\lint\check_tracked.py`;
    tools write into ignored output folders, exceptions go in `tools/lint/tracked_allow.txt`). The last commit message says what changed, build and test results (MSVC / clang / ASan as
    applicable, skips), goldens changed or "none", roadmap group and tasks closed, open items, and ends with
    the `Co-Authored-By:` line the session's attribution reminder gives. Never open a PR to `main` or push `main`: Gabriel releases `dev`.

@@ -17,16 +17,10 @@ rem Run the build / tests the change needs (docs/BUILD.md) BEFORE this; dev must
 rem tier and the behaviour check: clang, ASan and other slow tests are still yours to run when the change needs them.
 rem The local branch and its worktree are left alone (git cannot delete a checked-out branch); the app or
 rem "git branch -d <name>" from another checkout removes them once the work is on dev.
-rem Retired 2026-11-21 (wr2 t04): only the verifier pushes dev. Sessions submit with tools\gate\land_queue.py. Gabriel
-rem may still land directly when the verifier is down: set ALAMO_LAND_DIRECT=1 for that one run.
+rem The way sessions land on dev again since 2026-11-21 (Gabriel: the AlamoVerifier task stays disabled; docs/DECISIONS.md,
+rem "Sessions land directly again"). Under the wr2 landing queue it ran only with ALAMO_LAND_DIRECT=1; that gate is gone.
+rem A plain "git push origin dev" stays denied in .claude/settings.json: dev is pushed only by this script, after its checks.
 setlocal
-if not "%ALAMO_LAND_DIRECT%"=="1" (
-  echo land_on_dev: retired 2026-11-21 ^(wr2 t04^): only the verifier pushes dev.
-  echo   Submit instead:  python -I tools\gate\land_queue.py submit
-  echo   Then:            python -I tools\gate\land_queue.py status ^<id^>
-  echo   Details: docs\BUILD.md, "Landing queue and verifier". Gabriel only, verifier down: set ALAMO_LAND_DIRECT=1.
-  exit /b 2
-)
 set "CREATE=0"
 if /i "%~1"=="--create" set "CREATE=1"
 set "PY=python"

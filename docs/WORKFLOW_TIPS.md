@@ -31,7 +31,7 @@ Spellings the allowlist covers (Bash tool / PowerShell tool):
   / `& .\tools\<name>.cmd ...` (`pr_check`, `clean_worktrees`, `tc`, probe-kit scripts).
 - Roadmap: `python roadmap-store/roadmap_store.py <subcommand> ...` (every subcommand).
 - Git and GitHub, read and local steps: `status`, `log`, `diff`, `show`, `fetch`, `add`, `commit`, `merge origin/dev`, `rev-parse`,
-  `ls-files`, `blame`, `checkout -b`; `gh pr view|list|checks|diff`, `gh run list|view`. Landing goes through `python -I tools/gate/land_queue.py submit`; a direct push to `dev` is denied.
+  `ls-files`, `blame`, `checkout -b`; `gh pr view|list|checks|diff`, `gh run list|view`. Landing goes through `tools\land_on_dev.cmd` (2026-11-21); a plain `git push` to `dev` is denied.
 - Test executables in the checkout's own `build-*` trees (`./build-wt-msvc/...` / `& .\build-wt-msvc\...`).
 
 Shapes that miss every rule, and what to use instead:

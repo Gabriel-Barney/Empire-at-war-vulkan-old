@@ -29,8 +29,8 @@ Each step ends in the state named after "Done when".
    the last open group); exit test passed with tasks left means `close-group`; findings outside the group filed as the rules say
    (S1 / S2 as tasks of the owning group, S3 to the backlog; Stage 6 and 9 keep follow-ups as tasks). Done when:
    `roadmap_store.py lint` shows nothing new for this group.
-7. **Land.** `python -I tools/gate/land_queue.py submit --note "<group> <what>"`, then go on with other work. Done when:
-   `land_queue.py status <id>` says `landed` (rejected: read its summary file, fix, commit, submit again). Then
-   `python -I tools/gate/writer_setup.py sync .` puts this checkout on dev's tip.
+7. **Land.** `tools\land_on_dev.cmd` (2026-11-21: sessions land directly; the verifier task is disabled). Done when it
+   prints the push to `dev` (a merge conflict, failed build or behaviour check: fix, commit, run it again; a rejected push
+   means `dev` moved: rerun). Then `python -I tools/gate/writer_setup.py sync .` puts this checkout on dev's tip.
 8. **Report.** Tasks closed and open (why), the exit test result, the landed commit, goldens or behaviour declared, skips, the
    `g` tasks and questions for Gabriel, and one friction line (runs wasted and what would have prevented them, or "none").
