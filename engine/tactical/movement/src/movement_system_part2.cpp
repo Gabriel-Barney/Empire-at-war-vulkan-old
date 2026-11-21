@@ -881,6 +881,7 @@ bool MovementSystem::rejoin_search(const Unit& u, std::span<const V2> base, uint
         const V2 spot = end + dir * s;
         Rejoin r;
         r.resume = past;
+        r.src = 1;
         if (!rejoin_accept(u, spot, end, r.q, forced, trk)) continue;
         if (!reachable(spot)) break;
         if (offer(r)) return verdict == kRejoinTaken;
@@ -911,10 +912,26 @@ bool MovementSystem::rejoin_search(const Unit& u, std::span<const V2> base, uint
             Rejoin r;
             r.q = p;
             r.resume = past;
+            r.src = 2;
             return offer(r);
         },
         spot);
     return stopped && verdict == kRejoinTaken;
+}
+
+std::vector<MovementSystem::RejoinGoal> MovementSystem::rejoin_goals(ObjectId id, float d, uint32_t fail_at) const {
+    std::vector<RejoinGoal> out;
+    const Unit* u = unit_ptr(id);
+    if (!u) return out;
+    std::vector<V2> scratch;
+    std::span<const V2> base;
+    uint32_t cur = 0;
+    if (!around_base(*u, scratch, base, cur)) return out;
+    (void)rejoin_search(*u, base, cur, d, [&](const Rejoin& r) {
+        out.push_back({r.q, r.src});
+        return fail_at != 0 && out.size() == fail_at ? kRejoinFail : kRejoinNext;
+    });
+    return out;
 }
 
 bool MovementSystem::spare_point(const Unit& a, const Unit& b, V2& v) const {

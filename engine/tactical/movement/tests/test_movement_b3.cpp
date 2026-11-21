@@ -1178,6 +1178,71 @@ void test_mov3_svs_speed_zero() {
     CHECK(mover == 2 && m1 == 0.0f && m2 == 0.0f);
 }
 
+
+// mov3 t03 (b0174, MOVEMENT §5.4.7 "Rejoin candidates of a kind-3 Path Around" [H]): the generator rules through the
+// rejoin_goals accessor. A vehicle walking east on open ground: (a) the path points from progress + D + 2 in steps of 10,
+// at most 11 goals; near the end (a) gives out and (b) steps past the end follow (up to LandTemporaryDestinationProximity
+// 20), then (c) the ring, which resumes after each goal; a wall right past the end fails (b)'s path-length test at its
+// first step, which ends (b); a kRejoinFail answer ends the call at once.
+void test_mov3_rejoin_goals() {
+    ::alamo::test::section("mov3_rejoin_goals");
+    const auto setup = [](MovementSystem& sys, SimRng& rng, V2 dest) {
+        land_system(sys, 100);
+        CHECK(sys.add_unit(vehicle(1, cell_center(10, 50), 0)));
+        MoveOrder o;
+        o.units = {1};
+        o.destination = dest;
+        sys.move(o, rng, 1);
+        uint32_t f = 1;
+        for (; f < 200 && sys.land_path(1).empty(); ++f) sys.tick(f, rng, serial_for);
+        CHECK(!sys.land_path(1).empty());  // planned (frame 62 here)
+    };
+    {  // a long way left: eleven (a) goals 10 apart, the first at progress + D + 2
+        MovementSystem sys{MovementConfig{}};
+        SimRng rng(31);
+        setup(sys, rng, cell_center(80, 50));
+        const float x0 = sys.view(1).pos.x;
+        const std::vector<MovementSystem::RejoinGoal> g = sys.rejoin_goals(1, 30.0f);
+        bool along = g.size() == 11;
+        for (size_t k = 0; k < g.size() && along; ++k)
+            along = g[k].src == 0 && std::fabs(g[k].q.x - (x0 + 32.0f + 10.0f * static_cast<float>(k))) < 1.0f;
+        std::printf("mov3 t03 rejoin goals: long path %zu goals, first at +%.2f\n", g.size(),
+                    g.empty() ? 0.0 : static_cast<double>(g[0].q.x - x0));
+        CHECK(along);
+        // a kRejoinFail answer at the 3rd goal ends the call there
+        CHECK(sys.rejoin_goals(1, 30.0f, 3).size() == 3);
+    }
+    {  // the end close by (remaining 60, D 30): (a) gives 3 goals, (b) 2 (+10, +20 past E), the ring the rest up to 11
+        MovementSystem sys{MovementConfig{}};
+        SimRng rng(32);
+        setup(sys, rng, cell_center(13, 50));
+        const std::vector<MovementSystem::RejoinGoal> g = sys.rejoin_goals(1, 30.0f);
+        uint32_t n[3] = {0, 0, 0};
+        bool ordered = true;
+        for (size_t k = 0; k < g.size(); ++k) {
+            ++n[g[k].src];
+            if (k > 0 && g[k].src < g[k - 1].src) ordered = false;
+        }
+        std::printf("mov3 t03 rejoin goals: near end (a) %u, (b) %u, (c) %u\n", n[0], n[1], n[2]);
+        CHECK(g.size() == 11 && ordered && n[1] == 2 && n[2] >= 2);
+        // a wall across the way right past the end: (b)'s first step fails 0x679e20, so (b) gives nothing; the ring still
+        // offers goals (it resumes after each)
+        MovementSystem w{MovementConfig{}};
+        SimRng rng2(32);
+        setup(w, rng2, cell_center(13, 50));
+        if (w.land_path(1).empty()) return;
+        const int32_t ex = world_to_cell(w.land_path(1).back().x);
+        CHECK(ex + 1 < 100);
+        for (int32_t y = 0; y < 100 && ex + 1 < 100; ++y) w.grid().set_base(ex + 1, y, kPassImpassable);
+        w.rebuild_regions_if_dirty();
+        const std::vector<MovementSystem::RejoinGoal> h = w.rejoin_goals(1, 30.0f);
+        uint32_t m[3] = {0, 0, 0};
+        for (const auto& x : h) ++m[x.src];
+        std::printf("mov3 t03 rejoin goals: wall past the end (a) %u, (b) %u, (c) %u\n", m[0], m[1], m[2]);
+        CHECK(m[1] == 0 && m[2] >= 2);
+    }
+}
+
 }  // namespace
 
 // ---------------------------------------------------------------- s78n t24 (RE f8afef8d): the role slots
@@ -1386,5 +1451,6 @@ int main() {
     test_mov2_head_on_pairs();
     test_mov2_reorder_at_speed();
     test_mov3_svs_speed_zero();
+    test_mov3_rejoin_goals();
     return ::alamo::test::report("alamo_tactical_movement_b3_tests");
 }
