@@ -412,7 +412,7 @@ bool parse_unit_ability(const data::XmlNode& e, UnitAbilityRecord& out, const Ab
     // <Mod_Multiplier>KIND_MULTIPLIER, value</Mod_Multiplier>, value with an optional trailing 'f'.
     for (data::XmlNode c : e.children("Mod_Multiplier")) {
         const auto pr = data::parse_pair(c.text_trimmed());
-        const uint8_t k = pr ? mod_kind_from_name(pr->first) : 0;
+        const uint8_t k = pr ? mod_kind_from_name(pr->first) : uint8_t{0};
         const auto v = pr ? data::parse_float(pr->second) : std::nullopt;
         if (k == 0 || !v) {
             note(diag, c, "bad Mod_Multiplier '" + std::string(c.text_trimmed()) + "'");
@@ -422,7 +422,7 @@ bool parse_unit_ability(const data::XmlNode& e, UnitAbilityRecord& out, const Ab
     }
     for (data::XmlNode c : e.children("Mod_Flag")) {
         const auto pr = data::parse_pair(c.text_trimmed());
-        const uint8_t k = pr ? mod_flag_from_name(pr->first) : 0;
+        const uint8_t k = pr ? mod_flag_from_name(pr->first) : uint8_t{0};
         const std::optional<bool> v = pr ? std::optional<bool>(data::xml_values::to_bool(pr->second)) : std::nullopt;
         if (k == 0 || k >= combat::kModFlagCount || !v) {
             note(diag, c, "bad Mod_Flag '" + std::string(c.text_trimmed()) + "'");

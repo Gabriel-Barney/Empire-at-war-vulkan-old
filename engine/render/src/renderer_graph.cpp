@@ -229,10 +229,10 @@ void RendererCore::translated_fill(const PostSpec& s, XConstCache& cc, bool cach
             for (const materials::RegisterBinding& rb : plan.floats) {
                 const std::span<const float> val = pv.v;
                 if (rb.name != pv.name || rb.count == 0) continue;
-                for (uint16_t r = 0; r < rb.count && rb.reg + r < regs.size(); ++r) {
+                for (uint16_t r = 0; r < rb.count && static_cast<size_t>(rb.reg + r) < regs.size(); ++r) {
                     float f[4] = {0, 0, 0, 0};
                     for (size_t k = 0; k < 4 && r * 4u + k < val.size(); ++k) f[k] = val[r * 4u + k];
-                    regs[rb.reg + r] = {f[0], f[1], f[2], f[3]};
+                    regs[static_cast<size_t>(rb.reg + r)] = {f[0], f[1], f[2], f[3]};
                 }
             }
     };

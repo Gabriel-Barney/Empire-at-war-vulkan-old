@@ -376,7 +376,7 @@ void apply_galactic_fog(const galactic::GalacticSim& sim, int32_t player, Galact
             if (!(snap.planets[i].flags & kGalPlanet)) continue;  // scenery: no data pack (a route end without one counts as set)
             const auto p = static_cast<PlanetIndex>(i);
             raw[i] = sim.planet_revealed_raw(p) ? 1 : 0;
-            visible[i] = rule == GalacticFogRule::RawByte ? raw[i] : (sim.is_planet_revealed(p) ? 1 : 0);
+            visible[i] = static_cast<uint8_t>(rule == GalacticFogRule::RawByte ? raw[i] : (sim.is_planet_revealed(p) ? 1 : 0));
         }
     }
     apply_galactic_fog(snap, visible, raw);

@@ -211,7 +211,7 @@ uint8_t source_byte(CommandSource source, uint16_t player, bool queued) noexcept
 }
 
 bool split_source_byte(uint8_t byte, uint8_t player_low, CommandSource& source, uint16_t& player, bool& queued) noexcept {
-    const uint32_t src = byte & kSourceMask;
+    const uint32_t src = static_cast<uint32_t>(byte & kSourceMask);
     const uint32_t high = (static_cast<uint32_t>(byte & ~kCommandQueuedBit) >> kPlayerHighShift) & 0x1Fu;
     const uint32_t id = (high << 8) | player_low;
     if (src >= kCommandSourceCount || id >= kMaxPlayerSlots) return false;

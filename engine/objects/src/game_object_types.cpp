@@ -286,7 +286,7 @@ void GameObjectTypes::apply(State& s, FieldId f, std::string_view text, bool var
         case Conv::Vec3:
         case Conv::Float4:
         case Conv::Rgba: {
-            const size_t n = tf.conv == Conv::Float2 ? 2 : (tf.conv == Conv::Vec3 ? 3 : 4);
+            const size_t n = static_cast<size_t>(tf.conv == Conv::Float2 ? 2 : (tf.conv == Conv::Vec3 ? 3 : 4));
             const auto toks = split_type_list(text);
             for (size_t k = 0; k < n && k < toks.size(); ++k)
                 v.v[k] = tf.conv == Conv::Rgba ? static_cast<float>(c_atoi(toks[k])) : static_cast<float>(c_atof(toks[k]));

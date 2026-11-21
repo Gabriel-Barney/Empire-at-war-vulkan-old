@@ -375,7 +375,7 @@ int main(int argc, char** argv) {
     // Accuracy bounds vs the CRT (the CRT itself is not correctly rounded; these are loose).
     for (const auto& r : res) {
         const bool is_float = r.name.back() == 'f';
-        const uint64_t bound = r.name.rfind("sqrt", 0) == 0 ? 0 : (is_float ? 1 : 4);
+        const uint64_t bound = static_cast<uint64_t>(r.name.rfind("sqrt", 0) == 0 ? 0 : (is_float ? 1 : 4));
         std::printf("  %-9s n=%6llu  max %llu ulp vs CRT%s  digest %016llx", r.name.c_str(),
                     static_cast<unsigned long long>(r.count), static_cast<unsigned long long>(r.max_ulp),
                     is_float ? " (double, rounded)" : "", static_cast<unsigned long long>(r.digest));

@@ -262,7 +262,7 @@ RejectReason GalacticSim::fleet_management(int32_t player, const commands::Event
                 continue;
             }
             out.push_back(s.contents[i]);
-            carried.push_back(i < s.carried.size() ? s.carried[i] : 0);
+            carried.push_back(i < s.carried.size() ? s.carried[i] : uint8_t{0});
             s.contents.erase(s.contents.begin() + static_cast<std::ptrdiff_t>(i));
             if (i < s.carried.size()) s.carried.erase(s.carried.begin() + static_cast<std::ptrdiff_t>(i));
         }

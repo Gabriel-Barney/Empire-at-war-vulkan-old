@@ -199,7 +199,7 @@ bool CommandScheduler::read(ByteReader& r) {
     if ((version != kSaveVersion && version != 1) || !r.ok()) return false;
     SchedulerConfig cfg;
     cfg.delay = r.u32();
-    cfg.max_players = version == 1 ? r.u8() : r.u16();
+    cfg.max_players = static_cast<uint16_t>(version == 1 ? r.u8() : r.u16());
     const uint8_t late = r.u8(), mode = r.u8();
     const uint32_t turn = r.u32(), max_ahead = r.u32();
     cfg.first_tick = r.u64();

@@ -24,7 +24,7 @@ static_assert(sizeof(HudPush) == 32);
 }  // namespace
 
 render::ViewMatrices hud_ortho_view(const HudCanvas& canvas, HudCameraId camera) {
-    const HudOrthoCamera& c = canvas.cameras[camera < kHudCameraCount ? camera : 0];
+    const HudOrthoCamera& c = canvas.cameras[camera < kHudCameraCount ? camera : size_t{0}];
     render::ViewMatrices v;
     v.view = render::Mat4::identity();
     v.view.m[2][3] = -c.eye_z();  // camera at (0, 0, eye_z) looking down -Z
@@ -257,7 +257,7 @@ bool HudRenderer::set_atlas_texture(const assets::TextureAsset& tex) {
 }
 
 bool HudRenderer::replace_image(uint16_t page, rhi::Image img) {
-    rhi::Image& slot = images_[page - kHudPageImageBase];
+    rhi::Image& slot = images_[static_cast<size_t>(page - kHudPageImageBase)];
     if (slot) {
         up_->forget(slot.handle);
         retired_.push_back({std::move(slot), records_});
@@ -322,7 +322,7 @@ bool HudRenderer::set_dynamic_page(uint16_t page, uint32_t width, uint32_t heigh
     if (!ctx_ || page < kHudPageRadar || page >= kHudPageFontBase || width == 0 || height == 0 ||
         rgba.size() < static_cast<size_t>(width) * height * 4)
         return false;
-    DynamicPage& d = dynamic_[page - kHudPageRadar];
+    DynamicPage& d = dynamic_[static_cast<size_t>(page - kHudPageRadar)];
     if (d.generation == generation && d.width == width && d.height == height && d.uploaded == generation) return true;
     d.rgba.assign(rgba.begin(), rgba.begin() + static_cast<std::ptrdiff_t>(static_cast<size_t>(width) * height * 4));
     if (d.image && (d.width != width || d.height != height)) {

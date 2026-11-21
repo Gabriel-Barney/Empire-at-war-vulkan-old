@@ -1443,7 +1443,7 @@ int m_has_attack_target(Call& c) {
 
 // ---------------------------------------------------------------- abilities
 
-uint8_t ability_param(Call& c, int i) { return c.is_string(i) ? ability_id(c.string(i)) : 0; }
+uint8_t ability_param(Call& c, int i) { return c.is_string(i) ? ability_id(c.string(i)) : uint8_t{0}; }
 
 int m_has_ability(Call& c) {
     if (c.nargs != 1)

@@ -1331,7 +1331,7 @@ public:
     std::span<const VictoryRecord> victory_records() const { return victory_records_; }
     // 0 = no records (neutral), 1 = Human_ list, 2 = AI_ list.
     uint8_t victory_side(int32_t player) const {
-        return valid_player(player) && static_cast<size_t>(player) < victory_side_.size() ? victory_side_[static_cast<size_t>(player)] : 0;
+        return valid_player(player) && static_cast<size_t>(player) < victory_side_.size() ? victory_side_[static_cast<size_t>(player)] : uint8_t{0};
     }
     // [port] (headless AI-vs-AI): a player counts as AI for the type 1 "both AI" skip only when it is AI-controlled, not
     // human and not on the Human_ side, so the Starting_Active_Player slot an AI plays stays "the human".

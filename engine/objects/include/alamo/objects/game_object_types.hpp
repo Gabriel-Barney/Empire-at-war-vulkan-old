@@ -100,9 +100,9 @@ struct TypeLoadStats {
 enum class BehaviorSet : uint8_t { Galactic = 0, Land = 1, Space = 2, Union = 3, Generic = 4 };
 struct BehaviorBits {
     std::array<uint64_t, 2> w{};
-    bool test(BehaviorTypeId id) const { return id < kBehaviorTypeCount && ((w[id >> 6] >> (id & 63)) & 1u) != 0; }
+    bool test(BehaviorTypeId id) const { return id < kBehaviorTypeCount && ((w[static_cast<size_t>(id >> 6)] >> (id & 63)) & 1u) != 0; }
     void set(BehaviorTypeId id) {
-        if (id < kBehaviorTypeCount) w[id >> 6] |= uint64_t{1} << (id & 63);
+        if (id < kBehaviorTypeCount) w[static_cast<size_t>(id >> 6)] |= uint64_t{1} << (id & 63);
     }
     friend bool operator==(const BehaviorBits& a, const BehaviorBits& b) { return a.w == b.w; }
 };

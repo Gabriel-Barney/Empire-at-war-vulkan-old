@@ -508,7 +508,7 @@ std::string retail_language_for_langid(uint16_t langid) {
     // docs/re/MCX2_T02_ASSET_SALVAGE.md 5: retail maps the Windows user LANGID (GetUserDefaultLangID) through a fixed
     // table to one of its languages; Japanese, Korean, Chinese and Thai are then overridden to English, and a LANGID outside the table is
     // English. The table lists these primary languages with these sublanguages.
-    const unsigned primary = langid & 0x3FFu, sub = langid >> 10;
+    const unsigned primary = langid & 0x3FFu, sub = static_cast<unsigned>(langid >> 10);
     switch (primary) {
         case 0x07: return sub >= 1 && sub <= 5 ? "GERMAN" : "ENGLISH";
         case 0x0C: return sub >= 1 && sub <= 6 ? "FRENCH" : "ENGLISH";
@@ -584,7 +584,7 @@ std::u32string utf8_to_utf32(std::string_view s) {
     std::u32string o;
     for (size_t i = 0; i < s.size();) {
         const auto b = static_cast<unsigned char>(s[i]);
-        size_t n = b < 0x80 ? 1 : (b >> 5) == 6 ? 2 : (b >> 4) == 14 ? 3 : (b >> 3) == 30 ? 4 : 0;
+        size_t n = static_cast<size_t>(b < 0x80 ? 1 : (b >> 5) == 6 ? 2 : (b >> 4) == 14 ? 3 : (b >> 3) == 30 ? 4 : 0);
         if (n == 0 || i + n > s.size()) {
             o.push_back(0xFFFD);
             ++i;

@@ -26,7 +26,7 @@ void write_scheduler(ByteWriter& w, const commands::SchedulerConfig& c) {
 
 bool read_scheduler(ByteReader& r, commands::SchedulerConfig& c, uint32_t version) {
     c.delay = r.u32();
-    c.max_players = version == 1 ? r.u8() : r.u16();
+    c.max_players = static_cast<uint16_t>(version == 1 ? r.u8() : r.u16());
     const uint8_t late = r.u8();
     c.first_tick = r.u64();
     const uint8_t mode = r.u8();

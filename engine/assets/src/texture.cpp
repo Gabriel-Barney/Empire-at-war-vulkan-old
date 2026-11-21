@@ -704,12 +704,12 @@ bool decode_tga(std::vector<std::uint8_t> file, TextureAsset& out, std::string* 
                     d[0] = x5(v & 0x1Fu);
                     d[1] = x5((v >> 5) & 0x1Fu);
                     d[2] = x5((v >> 10) & 0x1Fu);
-                    d[3] = (cmap_bits == 16 && alpha_bits > 0) ? ((v & 0x8000u) ? 255 : 0) : 255;
+                    d[3] = static_cast<uint8_t>((cmap_bits == 16 && alpha_bits > 0) ? ((v & 0x8000u) ? 255 : 0) : 255);
                 } else {
                     d[0] = e[0];
                     d[1] = e[1];
                     d[2] = e[2];
-                    d[3] = cmap_spp == 4 ? e[3] : 255;
+                    d[3] = static_cast<uint8_t>(cmap_spp == 4 ? e[3] : 255);
                 }
             } else if (grey) {
                 d[0] = s[0];
@@ -720,12 +720,12 @@ bool decode_tga(std::vector<std::uint8_t> file, TextureAsset& out, std::string* 
                 d[0] = x5(v & 0x1Fu);
                 d[1] = x5((v >> 5) & 0x1Fu);
                 d[2] = x5((v >> 10) & 0x1Fu);
-                d[3] = (bpp == 16 && alpha_bits > 0) ? ((v & 0x8000u) ? 255 : 0) : 255;
+                d[3] = static_cast<uint8_t>((bpp == 16 && alpha_bits > 0) ? ((v & 0x8000u) ? 255 : 0) : 255);
             } else {
                 d[0] = s[0];
                 d[1] = s[1];
                 d[2] = s[2];
-                d[3] = spp == 4 ? s[3] : 255;
+                d[3] = static_cast<uint8_t>(spp == 4 ? s[3] : 255);
             }
         }
     }

@@ -63,6 +63,15 @@ add_library(alamo_engine_flags INTERFACE)
 if(MSVC)
   # /fp:precise + no FMA contraction keeps float results identical between builds (lockstep CRC).
   target_compile_options(alamo_engine_flags INTERFACE /W4 /fp:precise /utf-8 /permissive-)
+  # Off-by-default MSVC warnings that stand in for clang's -Wconversion family per change, since clang checks nightly
+  # only (docs/DECISIONS.md, "Clang runs nightly only"; backlog b0547): signed/unsigned conversion (C4365) and
+  # comparison (C4388), int to float (C5219), narrowing to smaller ints and bit fields (C4242, C4254), sign extension
+  # (C4826), int to bool (C4800), constant-range checks (C4287, C4296), non-virtual destructors (C4265) and unhandled
+  # enum cases (C4062). C++ only (the vendored C sources keep /W4); angle-bracket includes (the STL, the SDK) are
+  # external and stay quiet, the engine's own headers are all quoted.
+  target_compile_options(alamo_engine_flags INTERFACE
+    "$<$<COMPILE_LANGUAGE:CXX>:/w44365;/w44388;/w45219;/w44242;/w44254;/w44826;/w44800;/w44287;/w44296;/w44265;/w44062>"
+    "$<$<COMPILE_LANGUAGE:CXX>:/external:anglebrackets;/external:W0>")
 else()
   target_compile_options(alamo_engine_flags INTERFACE -Wall -Wextra -Wpedantic -ffp-contract=off)
 endif()

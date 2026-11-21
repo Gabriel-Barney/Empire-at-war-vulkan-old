@@ -48,7 +48,7 @@ std::vector<PlanetMapPad> planet_map_pads(std::span<const PlanetMapMarker> marke
                 p.index = next++;
                 p.marker = m.id;
                 p.cls = cls;
-                p.tag = cls == MapMarkerClass::In || cls == MapMarkerClass::Out ? 1 : cls == MapMarkerClass::Specific ? 3 : 0;
+                p.tag = static_cast<uint8_t>(cls == MapMarkerClass::In || cls == MapMarkerClass::Out ? 1 : cls == MapMarkerClass::Specific ? 3 : 0);
                 p.x = m.x;
                 p.y = m.y;
                 p.specific = m.specific;

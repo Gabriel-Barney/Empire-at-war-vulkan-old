@@ -878,7 +878,7 @@ void GameAudioHost::battle_tick(const sim::TacticalBattle& battle, const objects
     // aud1 t02 (L1_S4_REMAINING §3.2): the land weather's type and intensity after the tick -> the weather audio manager
     // and the faction's SFXEvent_Weather_Begin / _End lines (GameAudio::set_weather; unchanged values do nothing). Weather
     // off (no scenario, space) = CLEAR at 1.0, as retail's 0x323110(0, 1.0).
-    weather(weather_name(battle.weather().active() ? static_cast<uint8_t>(battle.weather().type()) : 0),
+    weather(weather_name(battle.weather().active() ? static_cast<uint8_t>(battle.weather().type()) : uint8_t{0}),
             battle.weather().active() ? battle.weather().intensity() : 1.0f, local_player < 0 || ab.weather_affected(local_player));
     // aud1 t08 (AUDIO.md §9.8): this tick's hits on the local player's (or a community-property ally's) base objects.
     bool base_hit = false;

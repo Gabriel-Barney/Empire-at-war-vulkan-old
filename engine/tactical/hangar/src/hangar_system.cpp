@@ -627,7 +627,7 @@ bool HangarSystem::deploy_ready(ObjectId id) const {
 }
 uint8_t HangarSystem::state(ObjectId id) const {
     const Carrier* c = carrier(id);
-    return c ? c->state : 0;
+    return c ? c->state : uint8_t{0};
 }
 uint32_t HangarSystem::entry_count(ObjectId id) const {
     const Carrier* c = carrier(id);

@@ -530,7 +530,8 @@ int run_gpu(const std::string& src_dir) {
             const float la = ((bz - cz) * (wx - cx) + (cx - bx) * (wz - cz)) / den;
             const float lb = ((cz - az) * (wx - cx) + (ax - cx) * (wz - cz)) / den;
             const float f = la * vfog(ax, az) + lb * vfog(bx, bz) + (1.0f - la - lb) * vfog(cx, cz);
-            const float expect[3] = {255.0f * (1 - f) + c0[0] * f, c0[1] * f, c0[2] * f};
+            const float expect[3] = {255.0f * (1 - f) + static_cast<float>(c0[0]) * f, static_cast<float>(c0[1]) * f,
+                                    static_cast<float>(c0[2]) * f};
             std::printf("fog: off (%d,%d,%d) -> on (%d,%d,%d), expected (%.1f,%.1f,%.1f) for fog factor %.3f\n", c0[0], c0[1], c0[2],
                         p1[0], p1[1], p1[2], expect[0], expect[1], expect[2], f);
             for (int ch = 0; ch < 3; ++ch) CHECK(std::fabs(p1[ch] - expect[ch]) <= 4.0f);
@@ -671,7 +672,8 @@ int run_gpu(const std::string& src_dir) {
             const float la = ((bz - cz) * (wx - cx) + (cx - bx) * (wz - cz)) / den;
             const float lb = ((cz - az) * (wx - cx) + (ax - cx) * (wz - cz)) / den;
             const float f = la * vfog(ax, az) + lb * vfog(bx, bz) + (1.0f - la - lb) * vfog(cx, cz);
-            const float expect[3] = {255.0f * (1 - f) + c0[0] * f, c0[1] * f, c0[2] * f};
+            const float expect[3] = {255.0f * (1 - f) + static_cast<float>(c0[0]) * f, static_cast<float>(c0[1]) * f,
+                                    static_cast<float>(c0[2]) * f};
             std::printf("unlit: alpha test %s the alpha-0 texel; fog off (%d,%d,%d) -> on (%d,%d,%d), expected (%.1f,%.1f,%.1f) "
                         "for fog factor %.3f; discarded texel still clear %s\n",
                         discarded ? "discards" : "KEEPS", c0[0], c0[1], c0[2], k1[0], k1[1], k1[2], expect[0], expect[1],

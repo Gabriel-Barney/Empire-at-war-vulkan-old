@@ -27,7 +27,7 @@ public:
     static bool valid_utf8(std::string_view s) {
         for (size_t i = 0; i < s.size();) {
             const auto c = static_cast<unsigned char>(s[i]);
-            const size_t n = c < 0x80 ? 1 : (c >> 5) == 0x6 ? 2 : (c >> 4) == 0xE ? 3 : (c >> 3) == 0x1E ? 4 : 0;
+            const size_t n = static_cast<size_t>(c < 0x80 ? 1 : (c >> 5) == 0x6 ? 2 : (c >> 4) == 0xE ? 3 : (c >> 3) == 0x1E ? 4 : 0);
             if (n == 0 || i + n > s.size()) return false;
             for (size_t k = 1; k < n; ++k)
                 if ((static_cast<unsigned char>(s[i + k]) & 0xC0) != 0x80) return false;

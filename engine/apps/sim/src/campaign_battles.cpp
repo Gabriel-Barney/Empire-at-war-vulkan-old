@@ -341,7 +341,7 @@ void CampaignBattles::write_state(ByteWriter& w) const {
     w.u32(0);
 #endif
     // v2: the battle in flight (its request; a running battle's own state is in the battle chunks).
-    const uint8_t flight = battle_ ? 2 : pending_ ? 1 : 0;
+    const uint8_t flight = static_cast<uint8_t>(battle_ ? 2 : pending_ ? 1 : 0);
     w.u8(flight);
     if (flight != 0) {
         save_io::Out o(w);

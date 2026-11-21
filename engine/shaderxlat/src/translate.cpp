@@ -1058,7 +1058,7 @@ struct Emitter {
                 dc.present = true;
                 dc.usage = in.usage;
                 dc.index = in.usage_index;
-                dc.mask = d.mask ? d.mask : 0xF;
+                dc.mask = static_cast<uint8_t>(d.mask ? d.mask : 0xF);
                 dc.centroid = d.centroid;
                 if (vs && sm3 && d.type == reg::kOutput) {
                     if (d.index >= 12 || vout[d.index].present) return bad(in, "duplicate or out-of-range output dcl");

@@ -2381,7 +2381,7 @@ uint8_t fighter_chase_test(const FighterChaseInputs& in) {
     };
     if (in.moving && !within(in.unit, in.goal, rr)) return 0;  // rule 6 (state 3 skips it)
     if (within(in.candidate, in.goal, rr)) return 1;           // rule 7
-    return within(in.candidate, in.goal, rr + in.attack_range) ? static_cast<uint8_t>(base + 1) : 0;
+    return within(in.candidate, in.goal, rr + in.attack_range) ? static_cast<uint8_t>(base + 1) : uint8_t{0};
 }
 
 const FighterFormationRecord* TacticalBattle::fighter_formation(objects::ObjectId key) const {

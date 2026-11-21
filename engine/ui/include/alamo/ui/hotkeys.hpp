@@ -96,7 +96,7 @@ class HotkeyTable {
 public:
     HotkeyTable() { reset_defaults(); }
     void reset_defaults();
-    const HotkeyBinding& binding(uint16_t slot) const { return slots_[slot < kHotkeySlots ? slot : 0]; }
+    const HotkeyBinding& binding(uint16_t slot) const { return slots_[slot < kHotkeySlots ? slot : size_t{0}]; }
     // Binds `slot` (removing the same key + modifier from every other slot); slots 0..9 also rebind their derived
     // slots. key -1 unbinds.
     void bind(uint16_t slot, HotkeyBinding b);

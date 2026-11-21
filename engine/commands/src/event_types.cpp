@@ -164,7 +164,7 @@ int field_index(EventType t, std::string_view name) noexcept {
     return -1;
 }
 
-const Quantizer& quantizer(uint8_t index) noexcept { return kQuant[index < kQuantizerCount ? index : 0]; }
+const Quantizer& quantizer(uint8_t index) noexcept { return kQuant[index < kQuantizerCount ? index : size_t{0}]; }
 
 namespace {
 double step_d(const Quantizer& q) {

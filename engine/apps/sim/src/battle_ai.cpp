@@ -1418,7 +1418,7 @@ void BattleAi::fill(at::PerceptionWorld& w, std::vector<at::TacticalAiObject>& o
                 const bool hostile = c.is_enemy(static_cast<int32_t>(a), static_cast<int32_t>(bq));
                 // skm2 t02: an ally (relation 0: a skirmish team mate) is friendly to the perception, as the combat table says.
                 const bool ally = !hostile && b_->bt_relation(static_cast<int32_t>(a), static_cast<int32_t>(bq)) == 0;
-                w.relation[static_cast<size_t>(a) * players + bq] = hostile ? 1 : ally ? 0 : 2;
+                w.relation[static_cast<size_t>(a) * players + bq] = static_cast<uint8_t>(hostile ? 1 : ally ? 0 : 2);
             }
         }
         // S9 hard points (AI_TACTICAL_PERCEPTION �sec. 4): kind, weapon range, health; power = the unit's AI_Combat_Power

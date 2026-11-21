@@ -271,7 +271,7 @@ bool parse_map_info(std::span<const uint8_t> leaf, MapInfo& mi, Ctx& c) {
         switch (m.id) {
         case 0x00: mini_u32(m, mi.format); break;
         case 0x01: mini_u32(m, mi.map_type); break;
-        case 0x02: case 0x03: case 0x04: case 0x05: case 0x06: case 0x07: mini_u32(m, mi.counts[m.id - 0x02]); break;
+        case 0x02: case 0x03: case 0x04: case 0x05: case 0x06: case 0x07: mini_u32(m, mi.counts[static_cast<size_t>(m.id - 0x02)]); break;
         case 0x08: mi.name_key = mini_utf16(m); break;
         case 0x09: mi.planet_name = mini_utf16(m); break;
         case 0x0A: mi.text_0a = mini_utf16(m); break;

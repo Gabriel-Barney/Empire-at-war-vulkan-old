@@ -163,7 +163,7 @@ uint8_t TacticalBattle::land_scan_range(const objects::ObjectStore& store, objec
                                         float& rr) const {
     rr = 0.0f;
     const LandFormationRecord* r = land_formation(attack_mover(unit));
-    return r ? land_chase(store, *r, unit, cand, range, rr) : 0;
+    return r ? land_chase(store, *r, unit, cand, range, rr) : uint8_t{0};
 }
 
 void TacticalBattle::land_engage_service(TacticalMode& mode, SimRng& rng) {
