@@ -36,9 +36,14 @@ value game logic reads.
 
 ## Prove it with tests
 
-- Build and test both compilers on the changed modules: `& .\build_agent.cmd --% msvc wt "<modules>"` and
-  `& .\build_agent.cmd --% clang wt "<modules>"`. The clang build runs the CRC selfchecks; the two must agree with the same goldens.
-- Threading code (`engine/jobs`, anything adding parallel work): also `build_asan.cmd` (UBSan; `set ALAMO_SANITIZE=address` for ASan).
+- Build and test MSVC on the changed modules: `& .\build_agent.cmd --% msvc wt "<modules>"`, worker-count entries included.
+  Since 2026-11-21 clang builds, the MSVC-versus-clang scenario compare and the sanitizers run in the nightly gate only
+  (`docs/DECISIONS.md`, "Clang runs nightly only"). Run `& .\build_agent.cmd --% clang wt "<modules>"` and
+  `python -I tools/goldens/behaviour_check.py compilers` by hand when a change does something compilers may treat
+  differently (float-to-int of out-of-range values, signed overflow, shifts, `std::` math feeding game logic), or to fix a
+  nightly compiler difference.
+- Threading code (`engine/jobs`, anything adding parallel work): the nightly `build_asan.cmd` covers it; run it by hand
+  (UBSan; `set ALAMO_SANITIZE=address` for ASan) when you suspect a race or a lifetime bug.
 - A new long sim scenario gets one ctest entry per worker count with `alamo_add_worker_count_check` (`engine/CMakeLists.txt`;
   example `alamo_sim_fleet_groups_battle` in `engine/apps/CMakeLists.txt`), never one test running `--check-workers` over all counts.
   Label it `slow` when it takes over about 5 s.

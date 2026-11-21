@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
-"""Edit-time compile check on both compilers (wr3 t02; replaces the string-literal edit hook, which it runs first).
+"""Edit-time compile check on MSVC (wr3 t02; replaces the string-literal edit hook, which it runs first).
 
-After an edit to a C++ file the translation unit is compiled syntax-only (MSVC /Zs, clang -fsyntax-only) with the exact
-flags of the checkout's agent trees (build-wt-msvc, build-wt-clang: their compile_commands.json, so clang's conversion
-and shadow warnings and MSVC's /W4 /permissive- apply); both compilers run at once. A header edit checks up to two of its
+After an edit to a C++ file the translation unit is compiled syntax-only (MSVC /Zs) with the exact flags of the
+checkout's agent tree (build-wt-msvc: its compile_commands.json, so MSVC's /W4 /permissive- apply). Since 2026-11-21
+clang checks only in the nightly gate (docs/DECISIONS.md, "Clang runs nightly only"); ALAMO_COMPILE_CHECK_CLANG=1 adds
+clang -fsyntax-only from build-wt-clang (configure it with build_agent.cmd clang all configure), both compilers then
+running at once. A header edit checks up to two of its
 includers from the tree's dependency log (the same-stem source first, then the smallest one of the same module). A
 source file the build does not know (missing from a CMakeLists, or the tree not reconfigured) is reported as such:
 that is what later shows up as "Cannot open include file" or an unresolved symbol. It never blocks an edit: findings go
@@ -11,11 +13,12 @@ to stderr with exit 2 (Claude Code shows them to the agent), anything unexpected
 
   compile_check.py <file> ...     check these files, print findings, exit 1 when there are any
   compile_check.py --hook         PostToolUse hook: the edited file from the hook JSON on stdin
-  compile_check.py --repro        the common compile errors reproduced on both compilers (acceptance, wr3 t02)
+  compile_check.py --repro        the common compile errors reproduced on both compilers (acceptance, wr3 t02; needs
+                                  both trees)
   compile_check.py --selftest
 
-Trees missing: configure them once per checkout with build_agent.cmd clang all configure (and msvc). The MSVC
-environment (setup_x64.bat) is captured once into <tree>/msvc_env.json.
+Tree missing: configure it once per checkout with build_agent.cmd msvc all configure. The MSVC environment
+(setup_x64.bat) is captured once into <tree>/msvc_env.json.
 """
 
 from __future__ import annotations
@@ -37,7 +40,9 @@ SOURCES = {".c", ".cc", ".cpp", ".cxx"}
 HEADERS = {".h", ".hh", ".hpp", ".hxx", ".inl", ".ipp"}
 DIAG = re.compile(r"(?:\b(?:fatal error|error|warning) [A-Z]+\d+\b|: (?:fatal error|error|warning):)")
 NOISE = re.compile(r"^\s*$|^[^:]*\.c(?:pp|c|xx)?\s*$")  # MSVC echoes the file name
-COMPILERS = ("msvc", "clang")
+ALL_COMPILERS = ("msvc", "clang")
+# The edit check runs MSVC only; clang is opt-in (it checks nightly, docs/DECISIONS.md "Clang runs nightly only").
+COMPILERS = ALL_COMPILERS if os.environ.get("ALAMO_COMPILE_CHECK_CLANG") == "1" else ("msvc",)
 MAX_LINES = 14
 
 
@@ -178,7 +183,7 @@ def check(paths: list[str]) -> tuple[list[str], float]:
     known = [c for c in COMPILERS if cmds[c]]
     if not known:
         return [], time.time() - t0
-    env = {"msvc": msvc_env(trees["msvc"]) if cmds["msvc"] else None, "clang": None}
+    env: dict[str, dict | None] = {"msvc": msvc_env(trees["msvc"]) if cmds["msvc"] else None, "clang": None}
     for p in paths:
         ext = os.path.splitext(p)[1].lower()
         if ext in SOURCES:
@@ -223,7 +228,7 @@ def hook() -> int:
     except Exception:  # never get in the way of an edit
         return 0
     if findings:
-        sys.stderr.write(f"compile check ({secs:.1f} s, syntax only, both compilers) found problems after this edit:\n"
+        sys.stderr.write(f"compile check ({secs:.1f} s, syntax only, {' + '.join(COMPILERS)}) found problems after this edit:\n"
                          + "\n".join(findings) + "\n")
         return 2
     return 0
@@ -256,7 +261,7 @@ def repro() -> int:
     """Each REPROS snippet compiled with the flags of a real tactical source on both compilers: MSVC must report the
     code, clang an error or warning. Prints the median time per check."""
     src = os.path.join(ROOT, "engine", "tactical", "movement", "src", "movement_system.cpp")
-    trees = {c: tree_dir(c) for c in COMPILERS}
+    trees = {c: tree_dir(c) for c in ALL_COMPILERS}
     cmds = {c: load_commands(t).get(key(src)) for c, t in trees.items()}
     if not all(cmds.values()):
         print("compile_check repro: configure build-wt-msvc and build-wt-clang first")
@@ -276,7 +281,7 @@ def repro() -> int:
         f = os.path.join(tmp, f"repro_{REPROS.index((code, snippet)):02d}.cpp")
         with open(f, "w", encoding="utf-8", newline="\n") as fh:
             fh.write("#include <cstddef>\n" + snippet)
-        for c in COMPILERS:
+        for c in ALL_COMPILERS:
             e = dict(cmds[c])
             e["command"] = e["command"].replace(f'"{src}"', f'"{f}"')
             jobs.append((code, c, e))

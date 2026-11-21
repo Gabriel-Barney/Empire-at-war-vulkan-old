@@ -16,10 +16,10 @@ Each step ends in the state named after "Done when".
    approved in an earlier batch (`plan.approved`); every binary question and probe the plan needs has its answer in `docs/re/`.
    Set the session goal from the exit test (`/goal <exit test> and roadmap_store.py lint is clean`).
 3. **Build it.** Test first where the plan names tests (`tdd`); an unexplained failure goes through `diagnosing-bugs`. The
-   edit hook compiles each edited file on both compilers: fix what it reports before the next edit. Iterate with
-   `build_agent.cmd <msvc|clang> all changed` (affected tests only). Done when: `build_agent.cmd msvc all` (the landing tier)
-   passes with 0 warnings, plus `clang` when sim code changed and `build_asan.cmd` for `engine/jobs` or threading code; the
-   summary's `skips:` line read. Golden drift is not fixed by hand: if the behaviour change is intended, declare it (step 5).
+   edit hook compiles each edited file on MSVC: fix what it reports before the next edit. Iterate with
+   `build_agent.cmd msvc all changed` (affected tests only). Done when: `build_agent.cmd msvc all` (the landing tier)
+   passes with 0 warnings and the summary's `skips:` line is read. Clang and the sanitizers run nightly only
+   (`docs/DECISIONS.md`, "Clang runs nightly only"); run them by hand only to fix a nightly failure (`ngt1`). Golden drift is not fixed by hand: if the behaviour change is intended, declare it (step 5).
 4. **Review.** Run the `review` skill on the diff against `origin/dev`. Done when: each finding is fixed, filed by severity, or
    reported as rejected, and the landing diff's behaviour impact matches the plan's prediction (or the difference is explained).
 5. **Commit.** Commit with a message that lists the change, build and test results per compiler, skips and tasks closed. Every

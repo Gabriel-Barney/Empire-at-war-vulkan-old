@@ -57,8 +57,8 @@ uncommitted engine edits runs but never caches.
 
 ## 4. Determinism failures are never a declaration
 
-`behaviour_check.py workers` (every worker count against 0) and `compilers` (clang tree against MSVC tree; the verifier
-runs it on sim landings) must be identical: a difference there is a bug (`determinism-check`), not a behaviour change,
+`behaviour_check.py workers` (every worker count against 0) and `compilers` (clang tree against MSVC tree; the nightly
+gate runs it on every scenario) must be identical: a difference there is a bug (`determinism-check`), not a behaviour change,
 and no trailer excuses it.
 
 ## Nightly scenarios

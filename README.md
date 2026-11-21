@@ -214,11 +214,12 @@ It is checked by recording a per-tick CRC (with a per-system breakdown) and comp
 ## Quality and process
 
 - **Two compilers.** MSVC ships; clang 20 checks (`-Wconversion -Wshadow`) and is a second compiler for determinism.
-  Sim changes get both; threading changes also run under a sanitizer. **Zero warnings** at MSVC `/W4 /permissive-` and
+  Every change is built and tested with MSVC; clang, the sanitizers and the clang-versus-MSVC result compare run in the
+  nightly gate, which files each failure against the commit that caused it. **Zero warnings** at MSVC `/W4 /permissive-` and
   clang `-Wall -Wextra -Wpedantic -Wconversion -Wshadow`.
 - **About 300 tests**, with golden-file checks of whole battles and campaigns compared across worker counts. A fast tier
   (about 200 tests) is what quick iteration and landing run.
-- **Pre-merge gate** (`build_gate.cmd`): MSVC, clang and sanitizer builds. Landing on `dev` refuses a merged result without
+- **Pre-merge gate** (`build_gate.cmd`, nightly and before a release): MSVC, clang and sanitizer builds. Landing on `dev` refuses a merged result without
   a passing MSVC build and fast-tier run, so `dev` is never pushed red. **`dev`** is the development branch (GitHub's
   default); `main` is the released branch, updated from `dev` once the full gate passes.
 - **Parity is checked against the real game.** A question about the original goes first to the binary (read through

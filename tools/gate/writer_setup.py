@@ -6,8 +6,9 @@
                                                 from origin/dev, with the Data / extracted / toolchain / roadmap-store junctions
                                                 (tools/new_worktree.cmd), the role file .alamo_writer the path guard reads
                                                 (tools/lint/path_guard.py) and a git worktree lock, so the cleanup tools keep it
-  python -I tools/gate/writer_setup.py warm      configure and build the warm agent trees of both (msvc and clang;
-                                                no tests), which the compile hook and the affected-test selector read
+  python -I tools/gate/writer_setup.py warm      configure and build the warm MSVC agent tree of both (no tests; clang
+                                                builds run nightly only), which the compile hook, clangd and the
+                                                affected-test selector read
   python -I tools/gate/writer_setup.py status    each checkout: path, branch, role, lock, trees, commits not yet on dev
   python -I tools/gate/writer_setup.py sync <checkout>   after a landing: rebase the scratch branch onto origin/dev (commits
                                                 already on dev drop out); refuses with uncommitted edits
@@ -66,7 +67,7 @@ def warm(main: str) -> int:
     rc = 0
     for name, _ in WRITERS:
         wt = path_of(main, name)
-        for comp in ("msvc", "clang"):
+        for comp in ("msvc",):  # clang builds run nightly only (docs/DECISIONS.md, "Clang runs nightly only")
             r = subprocess.run(["cmd", "/d", "/c", os.path.join(wt, "build_agent.cmd"), comp, "all", "none"], cwd=wt,
                                capture_output=True, text=True, errors="replace")
             tail = (r.stdout + r.stderr).strip().splitlines()[-1:] or [""]

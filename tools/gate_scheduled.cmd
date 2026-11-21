@@ -71,6 +71,9 @@ if defined ALAMO_GATE_DRY (
 )
 rem wr2 t06: the nightly gate is one of the two runs that still write roadmap build records (tools\lint\record_build.py).
 set "ALAMO_RECORD_BUILD=1"
+rem Since 2026-11-21 the nightly gate is the only clang run (docs/DECISIONS.md, "Clang runs nightly only"): never let
+rem gate_scope.py skip clang or the sanitizers here.
+set "ALAMO_GATE_ALL=1"
 call "%WT%\build_gate.cmd"
 set RC=!ERRORLEVEL!
 if exist "%WT%\logs\gate_summary.txt" copy /y "%WT%\logs\gate_summary.txt" "%MAIN%\logs\gate_dev_summary.txt" >nul

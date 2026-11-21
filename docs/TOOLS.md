@@ -30,7 +30,7 @@ How it is wired:
 
 | Need | Use |
 |---|---|
-| Build and test a few modules (inner loop) | `build_agent.cmd msvc "<modules>" [changed\|regex\|all\|none]`; clang the same for sim code |
+| Build and test a few modules (inner loop) | `build_agent.cmd msvc "<modules>" [changed\|regex\|all\|none]`; clang the same, by hand only (clang runs nightly) |
 | One module in its own tree | `build_module.cmd <module> ["module;list"]` |
 | Everything / clang / sanitizers / pre-merge gate | `build_msvc.cmd`, `build_clang.cmd`, `build_asan.cmd`, `build_gate.cmd` |
 | Fuzz targets | `build_fuzz.cmd`, `tools\fuzz\run_fuzz.py` |
@@ -40,7 +40,7 @@ How it is wired:
 | Writer checkouts (wr4) | `python -I tools\gate\writer_setup.py create` / `warm` / `status` / `sync <checkout>`; path guard hook `tools\lint\path_guard.py` |
 | Which tests cover my change | `python -I tools\lint\affected_tests.py <tree> <out file>` (build graph; `--evaluate N`) |
 | Build-tree name or exe path | `python -I tools\lint\build_trees.py name agent wt msvc`, `exe alamo_headless.exe` (Python: `import build_trees`) |
-| Static checks | `python tools\lint\run_tidy.py` (clang-tidy), `check_mod_names.py`, `check_limits.py` (limit tags, §8), `check_mod_system.py` (mod-system shims, ums4), `check_string_literals.py`, `compile_check.py` (edit-time hook, both compilers; `--repro`) |
+| Static checks | `python tools\lint\run_tidy.py` (clang-tidy), `check_mod_names.py`, `check_limits.py` (limit tags, §8), `check_mod_system.py` (mod-system shims, ums4), `check_string_literals.py`, `compile_check.py` (edit-time hook, MSVC; `ALAMO_COMPILE_CHECK_CLANG=1` adds clang; `--repro`) |
 | Behaviour check | `python -I tools/goldens/behaviour_check.py commit\|range\|workers\|compilers\|nightly` (skill `behaviour-check`); scenarios `tools/goldens/scenarios.json`, results `tools/goldens/scenario_results.py`; screenshots `tools\visual\visual_check.cmd parent` (no stored goldens since wr1 t07) |
 | Grade every installed mod and stack (G0-G3) | `tools\modcorpus\run_corpus.cmd` (`tools/modcorpus/README.md`); weekly ASan sweep `tools\modcorpus\asan_sweep.cmd` |
 | Parity against retail baselines | `tools\parity\parity_harness.py` (`tools/parity/README.md`) |

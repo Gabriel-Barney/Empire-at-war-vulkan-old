@@ -21,8 +21,8 @@ Each iteration:
    as a task of the group that owns it, `roadmap_store.py backlog add ... --sev S1|S2 --to <group>`, or as an S3 backlog entry,
    `backlog add ... --from <group>`; a crash, hang, save corruption or tier-1 difference in this group is fixed here).
 
-When green on the changed tier: run the whole fast tier once (`& .\build_agent.cmd --% msvc wt "<modules>"` with no 4th argument),
-and clang too when sim code changed. Report: iterations used, what each fix was, final summary line, `skips:`, and anything left.
+When green on the changed tier: run the whole fast tier once (`& .\build_agent.cmd --% msvc wt "<modules>"` with no 4th argument;
+clang runs nightly only). Report: iterations used, what each fix was, final summary line, `skips:`, and anything left.
 
 ## Unattended use
 

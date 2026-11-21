@@ -32,7 +32,7 @@ tree's results with the MSVC tree's. Neither needs a stored file. Any difference
   python -I tools/goldens/behaviour_check.py nightly --history FILE [--build DIR]   the nightly gate's run of the
       scenarios marked `nightly` (GPU smoke, the long galactic AI campaign): range from the last gated night in FILE
       (tools/gate_scheduled.cmd's history) to HEAD, logged to logs/behaviour_nightly.txt; with --clang-build DIR
-      also their MSVC-versus-clang compare
+      also the MSVC-versus-clang compare of every scenario, nightly or not (the landing check builds MSVC only)
 
 Scenarios marked `nightly` in tools/goldens/scenarios.json are left out of commit / range / workers / compilers (the
 landing check) unless --nightly is given. Since wr1 t07 no derived golden is stored: these diffs are the behaviour check.
@@ -754,8 +754,15 @@ def main(argv: list[str]) -> int:
             return 0
         log = os.path.join(sr.main_checkout(ROOT), "logs", "behaviour_nightly.txt")
         ok, lines = check_range(base, head, scen, cache, build, a.compiler, log)
-        if a.clang_build:  # the nightly scenarios' MSVC-versus-clang check (the landing check leaves them out)
-            ok2, lines2 = check_compilers(scen, cache, build, os.path.abspath(a.clang_build))
+        if a.clang_build:
+            # Every scenario's MSVC-versus-clang check, landing and nightly ones alike: since 2026-11-21 the landing
+            # check builds MSVC only, so this is the one cross-compiler check (docs/DECISIONS.md, "Clang runs nightly only").
+            try:
+                every = pick(sr.discover(build), a.only, a.fast, slow_tests(build) if a.fast else set(), "all")
+            except RuntimeError as e:
+                print(f"behaviour_check: {e}", file=sys.stderr)
+                return 2
+            ok2, lines2 = check_compilers(every, cache, build, os.path.abspath(a.clang_build))
             ok &= ok2
             lines += lines2
         lines.append("RESULT " + ("PASS" if ok else "FAIL"))

@@ -117,11 +117,10 @@ findings) join the list above; `spec-review` and `codebase-design`'s design-it-t
      whole fast tier (no 4th argument, or `all`) once before landing; the verifier runs it on `dev`'s tip anyway.
    - An identical failing rerun is refused (exit 3, `tools\lint\build_state.py`): it prints the last summary again. Change the
      code first; for a flaky test or a changed environment set `ALAMO_RERUN=1`.
-   Read the summary it prints (`tools\lint\build_summary.py`), not the whole log; zero warnings at MSVC `/W4` and clang. Every
+   Read the summary it prints (`tools\lint\build_summary.py`), not the whole log; zero warnings at MSVC `/W4`. Every
    failed test is a real failure (no stored goldens since wr1 t07).
-   - Sim code (everything in `engine/` except render, audio, video, UI): also `& .\build_agent.cmd --% clang wt "<modules>"`
-     (`build-wt-clang`), including the CRC selfchecks.
-   - `engine/jobs` or other threading code: also `build_asan.cmd` (UBSan; `set ALAMO_SANITIZE=address` for ASan).
+   - Clang (`-Wconversion -Wshadow`, the CRC selfchecks, the compiler compare) and `build_asan.cmd` run in the nightly gate
+     only (`docs/DECISIONS.md`, "Clang runs nightly only"); run them by hand only to fix a nightly failure.
    - Data tests need `ALAMO_FOC_DATA` / `ALAMO_EAW_DATA`; the scripts default them (`tools\test_env.cmd`). A skip means less was
      proven: read the `skips:` line.
    - A header edit that a worktree build ignores is the shared compiler cache: rebuild with `set ALAMO_COMPILER_CACHE=OFF`.
@@ -163,7 +162,7 @@ findings) join the list above; `spec-review` and `codebase-design`'s design-it-t
   (keep the group id, claim, exit test, open items and the last build summary; drop logs and diffs). Read build summaries, not logs.
 - **C++ lookups.** Where a C++ symbol is defined, who calls it, what a header declares: the `LSP` tool first
   (`findReferences` / `incomingCalls` from a `.cpp` use, `documentSymbol`, `workspaceSymbol`), then read only the line range
-  it points at. Grep is for strings, Lua, XML, Python and docs. Needs `build_agent.cmd clang all configure` once per worktree
+  it points at. Grep is for strings, Lua, XML, Python and docs. Needs `build_agent.cmd msvc all configure` once per worktree
   (`/start-group` step 4).
 - **Side questions** go to `/btw` so they stay out of the lane's context; fixed commands (`roadmap_store.py claims`,
   `test_slot.py --status`) run in shell mode (`!`) with no model round trip.

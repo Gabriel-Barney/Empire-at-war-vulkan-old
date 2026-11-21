@@ -1,5 +1,6 @@
-# clangd config (2026-11-19). The compile database is this checkout's own clang tree, relative to this file, so each
-# worktree reads its own tree although Claude Code starts clangd from the main checkout. Create or refresh it with
-# build_agent.cmd clang all configure (seconds; no build). docs/BUILD.md, "C++ code intelligence".
+# clangd config (2026-11-19; MSVC tree since 2026-11-21, when clang builds moved to the nightly gate). The compile database
+# is this checkout's own MSVC agent tree, relative to this file, so each worktree reads its own tree although Claude Code
+# starts clangd from the main checkout; clangd reads its cl.exe commands in cl driver mode. Create or refresh it with
+# build_agent.cmd msvc all configure (seconds; no build). docs/BUILD.md, "C++ code intelligence".
 CompileFlags:
-  CompilationDatabase: build-wt-clang
+  CompilationDatabase: build-wt-msvc

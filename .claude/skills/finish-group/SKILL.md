@@ -5,9 +5,8 @@ argument-hint: <group-id>
 ---
 Finish roadmap group `$ARGUMENTS` in this worktree. Work through the checklist and report each line as done or not applicable:
 
-1. **Tests.** `& .\build_agent.cmd --% msvc wt "<modules>"` (fast tier) with 0 warnings; clang too when sim code changed
-   (`& .\build_agent.cmd --% clang wt "<modules>"`); `build_asan.cmd` when `engine/jobs` or other threading code changed.
-   Read `skips:`. Broad changes: `tools\pr_check.cmd --compiler both`. Sim commits end with a `Behaviour:` trailer;
+1. **Tests.** `& .\build_agent.cmd --% msvc wt "<modules>"` (fast tier) with 0 warnings (clang and ASan run nightly
+   only, `docs/DECISIONS.md` "Clang runs nightly only"). Read `skips:`. Broad changes: `tools\pr_check.cmd --compiler msvc`. Sim commits end with a `Behaviour:` trailer;
    `tools/goldens/behaviour_check.py commit HEAD` shows what moved (`behaviour-check` skill).
 2. **Review.** Commit the work first (a WIP commit is fine), then review this branch's diff against `origin/dev` before
    anything lands. A lane started by a coordinator (no `Agent` tool) sends a `REQUEST review` instead (`lane.md`, Coordinator

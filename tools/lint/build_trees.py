@@ -68,7 +68,9 @@ def module_tree(module: str) -> str:
 
 # The worktree's default trees, MSVC before clang (what a tool means by "the build" when given none).
 WARM_TREE = agent_tree('msvc')
-CLANGD_TREE = agent_tree('clang')
+# clangd reads the MSVC tree's database since 2026-11-21 (clang builds run nightly only; clangd takes cl commands).
+CLANGD_TREE = agent_tree('msvc')
+TIDY_TREE = agent_tree('clang')
 EXE_ORDER = (agent_tree('msvc'), main_tree('msvc'), agent_tree('clang'), main_tree('clang'))
 MAIN_FIRST_ORDER = (main_tree('msvc'), agent_tree('msvc'), main_tree('clang'), agent_tree('clang'))
 # The trees land_on_dev.cmd accepts a passing fast-tier stamp from.

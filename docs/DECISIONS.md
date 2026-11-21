@@ -8,7 +8,8 @@ The one record of the project's binding decisions (Gabriel's calls on scope, pla
   Loading the original game's save files is out of scope too (Gabriel, 2026-10-29): the port uses only its own save format (N1).
   Parity with the original is checked by behaviour, not by matching its CRC / hashes bit for bit (Gabriel, 2026-10-29);
   the port's own determinism rule 3 is unchanged. RenderDoc is out of scope: captures use apitrace.
-- **Two compilers: MSVC (ships) and clang (checks).**
+- **Two compilers: MSVC (ships) and clang (checks).** Since 2026-11-21 clang checks in the nightly gate only, not per
+  change ("Clang runs nightly only" below); the next bullet is the rule before that date.
 - Every change: MSVC build + tests. Changes to sim code (everything in `engine/` except render, audio,
   video and UI): also the clang build + tests, including the CRC selfchecks. Changes to `engine/jobs` or
   other threading code: also `build_asan.cmd` (clang UBSan by default; `set ALAMO_SANITIZE=address` for ASan, which then runs with `-asan-stack=0` (heap and globals only) because stack instrumentation crashes catch handlers on this toolchain, see `docs/BUILD.md` "Sanitizer limits"; the default module list is the 11 sim modules; no TSan runtime on Windows, so races are covered by the per-worker-count CRC tests).
@@ -541,3 +542,29 @@ and the docs it changes.
 - **Measured test tiers and one retry for flaky tests** (wr3 t03-t05, defaults taken). The landing tier is every test under 30 s of the last nightly's timings, held to 180 s wall; cheap hand-slow tests move to landing only while the estimate stays under 100 s and never when they compare a stored golden (a stale slow-tier golden would block every landing; the verifier's `Behaviour:` check covers the scenarios). Worker-count checks rotate one count per landing. A failed non-determinism test passing one immediate retry is flaky and does not fail the run; three in a week file an S2 task in `ngt1`.
 - **Two writers on the roadmap** (wr4 t04, default taken): the started-groups limit is 4 (two writers, each with one group in work and one in observation), not 2, because observation tasks keep a landed group started for days.
 - **Only the verifier pushes `dev`** (wr2 t04, applied 2026-11-21 at Gabriel's request): `.claude/settings.json` denies a session's `git push` to `dev` and allows `land_queue.py` without a prompt; `tools\land_on_dev.cmd` refuses with a pointer to the submit command. The verifier pushes from its per-user scheduled task, outside any session's rules. Fallback while the verifier is down: Gabriel sets `ALAMO_LAND_DIRECT=1` for one `land_on_dev.cmd` run.
+
+## Clang runs nightly only (Gabriel, 2026-11-21)
+
+Gabriel, 2026-11-21, picking "nightly-only clang" from the investigation of dropping clang to cut build time. MSVC is the
+only compiler of the per-change loop; clang stays as the nightly gate's second compiler. Replaces the per-change half of
+"Two compilers: MSVC (ships) and clang (checks)" (top of this file) and the clang step of the verifier ("Only the verifier
+pushes `dev`" under "Workflow redesign").
+- **Per change: MSVC only.** Writers build and test MSVC (`build_agent.cmd msvc ...`); the verifier's landing check is the
+  MSVC fast tier plus the behaviour check, with no clang build and no landing-time compiler compare; the edit-time compile
+  check (`tools/lint/compile_check.py`) runs MSVC only (`ALAMO_COMPILE_CHECK_CLANG=1` adds clang); `writer_setup.py warm`
+  warms only the MSVC tree. `build_asan.cmd` is no longer asked of a change either: the sanitizers run nightly.
+- **Nightly: clang, the sanitizers and the compiler compare.** `tools\gate_scheduled.cmd` sets `ALAMO_GATE_ALL=1`, so
+  `build_gate.cmd` always runs the clang build and tests (`-Wconversion -Wshadow`, 0 warnings) and `build_asan.cmd`, and
+  `behaviour_check.py nightly --clang-build` compares every scenario's clang result with its MSVC result (landing and
+  nightly scenarios). The nightly triage bisects each failure to its commit and files it as an S2 task of `ngt1`; a clang
+  warning, a sanitizer finding or an MSVC-versus-clang difference is fixed like any other S2.
+- **Unchanged:** CLAUDE.md rules 1 and 3 still name clang (zero clang warnings; results bit-identical across the MSVC and
+  clang builds), now enforced nightly instead of before landing. `build_gate.cmd` before a `dev` -> `main` release still
+  runs everything. clangd reads the MSVC tree's compile database (`.clangd` -> `build-wt-msvc`; clangd takes the cl.exe
+  commands in cl driver mode, `--check` on `engine/galactic/src/conflicts.cpp` gave the same result on both databases).
+  clang-tidy (`run_tidy.py`), coverage and fuzzing stay clang tools, run by hand.
+- **Why:** measured over 2026-10-30 .. 2026-11-21 (roadmap build records, verifier summaries): the clang fast tier took
+  112-117 s of a sim landing's ~240 s check, and clang builds held 41.5 of about 151 recorded test hours (28 %). On clean
+  commits clang failed where MSVC passed 14 times in about 1,000 clang builds, most of them flakes, a missing include or
+  golden drift; one was a real bug MSVC cannot show (mcx7, `9632d392`: undefined float-to-int overflow in the ability
+  timers that MSVC happened to resolve like retail). The nightly run still finds that class within a day.

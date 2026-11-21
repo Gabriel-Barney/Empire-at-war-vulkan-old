@@ -34,7 +34,7 @@ Behaviour source: docs/re pages, game data files, retail runs it rests on; open 
 Seam: the module, interface or function where the change goes, and why there
 Tests first: each test, what it asserts, where its expected value comes from (docs/re, retail probe, worked example)
 Predicted behaviour impact: scenarios and CRC system columns that should move (the Behaviour: trailer), or "none"
-Check tier: landing (default) | landing + clang | + ASan | + nightly slow tests named
+Check tier: landing (default, MSVC only) | + nightly slow tests named (clang and ASan run every night anyway)
 Out of scope: what this group will not do (and where it goes instead)
 Skills used: which planning skills ran and why the others were not needed
 ```

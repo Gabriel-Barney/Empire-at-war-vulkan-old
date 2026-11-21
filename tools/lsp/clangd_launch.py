@@ -6,7 +6,8 @@ The plugin (.claude/marketplace/plugins/eaw-clangd) runs `python -I tools/lsp/cl
 - the MSVC headers and Windows SDK are project-local too, so clangd needs the INCLUDE / LIB environment that
   toolchain\\msvc\\setup_x64.bat sets (the same call build_clang.cmd makes);
 - the compile database is in a build tree, not the source root. Since 2026-11-19 each checkout's `.clangd` names it
-  (`build-wt-clang`, relative to that file; `build_agent.cmd clang all configure` writes it in seconds) and this script
+  (`build-wt-msvc` since 2026-11-21, before that `build-wt-clang`; relative to that file; `build_agent.cmd msvc all
+  configure` writes it in seconds; clangd reads the cl.exe commands in --driver-mode=cl) and this script
   passes no --compile-commands-dir, which would override `.clangd`. Reason: Claude Code starts this script from the main
   checkout (CLAUDE_PROJECT_DIR and cwd are the main checkout even in a worktree session), so a tree picked here was the
   main checkout's, never the worktree's; `.clangd` is found next to each file, so every worktree reads its own tree.
@@ -63,7 +64,7 @@ def build_command(extra):
     # No --compile-commands-dir: it would override the per-checkout `.clangd` (see the module docstring).
     db = os.path.join(ROOT, CLANGD_TREE, 'compile_commands.json')
     if check and not os.path.isfile(db):
-        log('no %s yet: run build_agent.cmd clang all configure in this checkout' % db)
+        log('no %s yet: run build_agent.cmd msvc all configure in this checkout' % db)
     return cmd + extra
 
 

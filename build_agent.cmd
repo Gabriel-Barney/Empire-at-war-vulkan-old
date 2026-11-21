@@ -12,7 +12,7 @@ rem slow ones included; "all" runs every test (the gate scripts always do); "cha
 rem that depend on a file changed against origin/dev through the build graph (tools\lint\affected_tests.py, wr3 t01:
 rem a tactical change also runs the apps scenario tests that link tactical); "none" builds without running tests.
 rem "configure" (2026-11-19) only configures the tree: no lint, build, tests or build record. It writes the
-rem compile_commands.json clangd reads (.clangd points at build-wt-clang): build_agent.cmd clang all configure.
+rem compile_commands.json clangd reads (.clangd points at build-wt-msvc since 2026-11-21): build_agent.cmd msvc all configure.
 rem Repeat check (2026-11-13, tools\lint\build_state.py): when the last run in this tree FAILED on exactly the same source,
 rem modules and tests, it prints that run's summary again and exits 3 without building. ALAMO_RERUN=1 builds anyway.
 rem Output: a short summary (tools\lint\build_summary.py); set ALAMO_FULL_LOG=1 to also print the whole log.
