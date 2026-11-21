@@ -336,6 +336,30 @@ Terrain tiny_terrain() {
     return t;
 }
 
+// mov3 t08 (MOVEMENT §3.6 "Terrain height 0x135140", MOV2_RE_QUESTIONS Q6 [H]): the gameplay height is bilinear. On a warped
+// cell (h00 = h11 = 0, h10 = h01 = 8 x the height scale) the cell centre is the mean of the corners (4 units), where the
+// render mesh's triangle-linear sample reads the diagonal (0); a corner is exact; outside the map the edge height. The
+// 0.5 under-water test reads the bilinear height: a plane at 4.4 is under at the centre (4 < 3.9 fails), at 4.6 it is.
+void test_bilinear_height() {
+    Terrain t = tiny_terrain();
+    const auto raw = [&](int64_t x, int64_t y, int16_t h) { t.heights[static_cast<size_t>(y) * 32 + static_cast<size_t>(x)] = h; };
+    const int16_t r8 = static_cast<int16_t>(8.0f / kHeightScale);  // 8 world units
+    raw(3, 2, r8);  // (i + 1, j)
+    raw(2, 3, r8);  // (i, j + 1)
+    const float h8 = static_cast<float>(r8) * kHeightScale;
+    const auto close = [](float a, float b) { return std::fabs(a - b) < 1.0e-4f; };  // x / 20 by the reciprocal 0.05f
+    CHECK(close(t.sample_height_bilinear(50.0f, 50.0f), 0.5f * h8));  // cell (2, 2) centre: (0 + 8 + 8 + 0) / 4
+    CHECK(t.sample_height(50.0f, 50.0f) == 0.0f);                // the mesh diagonal (0, 0)-(1, 1)
+    CHECK(close(t.sample_height_bilinear(60.0f, 40.0f), h8));         // vertex (3, 2)
+    CHECK(close(t.sample_height_bilinear(45.0f, 40.0f), 0.25f * h8));  // along x on row j: a quarter of the way
+    CHECK(t.sample_height_bilinear(-500.0f, 40.0f) == 0.0f && t.sample_height_bilinear(1.0e7f, 1.0e7f) == 0.0f);
+    t.header.water_type = WaterType::Water;
+    t.header.water_height = 0.5f * h8 + 0.4f;
+    CHECK(!t.under_water(50.0f, 50.0f));
+    t.header.water_height = 0.5f * h8 + 0.6f;
+    CHECK(t.under_water(50.0f, 50.0f));
+}
+
 // trn1 (docs/re/TRN1_TERRAIN_GAMEPLAY.md §1, §2.1): the gameplay surface type of a world point - the nearest vertex's
 // material (floor(w / 20 + 0.5), clamped), the water types under the plane (more than 0.5 below it).
 void test_surface_types() {
@@ -2084,6 +2108,7 @@ void test_real_data() {
 
 int main() {
     test_chunks();
+    test_bilinear_height();
     test_round_trip();
     test_mesh_blend_rules();
     test_mesh_geometry();

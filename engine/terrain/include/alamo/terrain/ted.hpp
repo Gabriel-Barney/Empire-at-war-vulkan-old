@@ -265,12 +265,17 @@ struct Terrain {
     // Height of the rendered surface at world (wx, wy): linear over the mesh triangle containing
     // the point (diagonal (0,0)-(1,1) of each quad), clamped to the map.
     float sample_height(float wx, float wy) const;
+    // mov3 t08 (MOVEMENT §3.6 "Terrain height 0x135140", MOV2_RE_QUESTIONS Q6 [H]): the gameplay heightmap height - bilinear
+    // over the grid cell: i = floor(wx / 20), j = floor(wy / 20), the fractions taken before any clamp, each corner index
+    // clamped on its own (outside the map: the edge height); blended along y on columns i and i + 1, then along x.
+    float sample_height_bilinear(float wx, float wy) const;
     // trn1 (docs/re/TRN1_TERRAIN_GAMEPLAY.md §1): the gameplay surface type of a world point.
     // cell_surface_type: the TEM `surface_type` (mini 14) of the material at the grid vertex nearest (wx, wy) - indices
     //   floor(w / 20 + 0.5) clamped to the grid, no water test (0x133b10 + material +0x84; Get_Damage_Multiplier's cover
     //   test). 0 for a material slot past the table.
-    // under_water: the map has a water plane and the terrain height at (wx, wy) is below the water height - 0.5 (the
-    //   literal of 0x5efe50 and of the Destroy_When_Stunned_Over_Water test; local water patches [M] are not modelled).
+    // under_water: the map has a water plane and the terrain height at (wx, wy) (sample_height_bilinear, mov3 t08) is below
+    //   the water height - 0.5 (the literal of 0x5efe50 and of the Destroy_When_Stunned_Over_Water test; local water
+    //   patches [M] are not modelled).
     // water_surface_type: 4 water, 8 lava, 7 ice (table 0x140a123c8), 0 without a water plane.
     // surface_type_at: water_surface_type when under_water, else cell_surface_type (SurfaceFX 0x5efe50).
     uint32_t cell_surface_type(float wx, float wy) const;

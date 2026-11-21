@@ -174,7 +174,7 @@ uint32_t Terrain::cell_surface_type(float wx, float wy) const {
 }
 bool Terrain::under_water(float wx, float wy) const {
     if (header.water_type == WaterType::None) return false;
-    return sample_height(wx, wy) < header.water_height - 0.5f;
+    return sample_height_bilinear(wx, wy) < header.water_height - 0.5f;
 }
 uint32_t Terrain::water_surface_type() const {
     switch (header.water_type) {
@@ -201,6 +201,21 @@ float Terrain::sample_height(float wx, float wy) const {
     // Triangles (0,0)(1,0)(1,1) when fx >= fy, else (0,0)(1,1)(0,1).
     if (fx >= fy) return h00 + fx * (h10 - h00) + fy * (h11 - h10);
     return h00 + fy * (h01 - h00) + fx * (h11 - h01);
+}
+
+float Terrain::sample_height_bilinear(float wx, float wy) const {
+    if (width < 1 || height < 1 || !std::isfinite(wx) || !std::isfinite(wy)) return 0.0f;
+    constexpr float kInv = 1.0f / kVertexSpacing;  // heightmap +0xa0, the reciprocal of the spacing
+    const float gx = std::floor(wx * kInv), gy = std::floor(wy * kInv);
+    const float tx = wx * kInv - gx, ty = wy * kInv - gy;
+    // [port] indices far outside the map saturate (raw_height clamps every corner to the grid either way)
+    const auto index = [](float g) { return static_cast<int64_t>(std::clamp(g, -1.0e9f, 1.0e9f)); };
+    const int64_t i = index(gx), j = index(gy);
+    const float h00 = height_at(i, j), h01 = height_at(i, j + 1);
+    const float h10 = height_at(i + 1, j), h11 = height_at(i + 1, j + 1);
+    const float a = h00 + (h01 - h00) * ty;  // column i along y
+    const float b = h10 + (h11 - h10) * ty;  // column i + 1
+    return a + (b - a) * tx;
 }
 
 float CameraBlock::f32_or(uint8_t id, float fallback) const {
