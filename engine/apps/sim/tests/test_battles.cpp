@@ -3430,11 +3430,13 @@ void test_runtime_obstacles(bool space) {
 // SP5 (docs/SIM_PARALLEL_DESIGN.md §5): the tick's services phase graph. Every run mode gives the default run's per-tick
 // CRCs and fog digests (Serial = the declared order, Reverse = each phase backwards: an undeclared read or write between
 // services of one phase would show here, Parallel at 4 workers), and the debug write check (every service's changes to
-// the checkable components inside its declared writes) finds no violation.
-void test_service_modes(const Data& d) {
+// the checkable components inside its declared writes) finds no violation. One battle per call: each runs as its own ctest
+// entry (`--service-modes space|land`), since the write check alone costs about 13 s a battle and the two together put
+// alamo_sim_battle_tests over the landing tier's 30 s limit (tools/lint/test_tiers.py).
+void test_service_modes(const Data& d, bool land) {
     using tactical::services::RunMode;
     const TacticalBattle::ServiceRunDefaults saved = TacticalBattle::service_run_defaults();
-    for (const bool land : {false, true}) {
+    {
         const uint64_t ticks = 1500;
         const Run ref = run_campaign(d, land, true, 0, ticks);
         CHECK(ref.fought == 1);
@@ -3559,7 +3561,9 @@ void test_galactic_upgrade_spawns() {
 int main(int argc, char** argv) {
     std::setvbuf(stdout, nullptr, _IONBF, 0);
     g_temp_prefix = "alamo_sim_battle_tests";
+    std::string service_modes;  // --service-modes space|land: only the SP5 services-graph check of that battle
     for (int i = 1; i < argc; ++i) {
+        if (std::string(argv[i]) == "--service-modes" && i + 1 < argc) service_modes = argv[++i];
         if (std::string(argv[i]) == "--regen") g_regen = true;
         if (std::string(argv[i]) == "--golden-out" && i + 1 < argc) {  // wr1 t05
             g_regen = true;
@@ -3570,13 +3574,31 @@ int main(int argc, char** argv) {
         std::printf("%s: --regen / --write-golden needs --golden-out DIR (wr1 t07: no stored goldens in the source tree)\n", "alamo_sim_battle_tests");
         return 2;
     }
+    if (!service_modes.empty()) {
+        // The ctest entries alamo_sim_battle_service_modes_space / _land (engine/apps/CMakeLists.txt). Each has its own
+        // data folder, so the two can run beside the main entry without sharing a temp fixture.
+        if (service_modes != "space" && service_modes != "land") {
+            std::printf("alamo_sim_battle_tests: --service-modes takes space or land\n");
+            return 2;
+        }
+        const bool land = service_modes == "land";
+        g_temp_prefix = land ? "alamo_sim_battle_tests_svc_land" : "alamo_sim_battle_tests_svc_space";
+        auto ds = make_data();
+        std::printf("SP5 services graph (%s): serial / reverse / parallel / write check\n", service_modes.c_str());
+        test_service_modes(*ds, land);
+        if (g_fail) {
+            std::printf("%d check(s) FAILED\n", g_fail);
+            return 1;
+        }
+        std::printf("alamo_sim_battle_tests --service-modes %s: all passed\n", service_modes.c_str());
+        return 0;
+    }
     auto d = make_data();
     std::printf("space battle\n");
     test_space_battle(*d);
     std::printf("land battle\n");
     test_land_battle(*d);
-    std::printf("SP5 services graph: serial / reverse / parallel / write check\n");
-    test_service_modes(*d);
+    // SP5 services graph: its own ctest entries (--service-modes space / land), see test_service_modes.
     std::printf("retreat\n");
     test_retreat(*d);
     std::printf("auto-resolve only\n");

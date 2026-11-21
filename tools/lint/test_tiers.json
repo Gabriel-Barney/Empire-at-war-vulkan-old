@@ -1103,12 +1103,20 @@
    "s": 2.3,
    "tier": "landing"
   },
+  "alamo_sim_battle_service_modes_land": {
+   "s": 18.5,
+   "tier": "landing"
+  },
+  "alamo_sim_battle_service_modes_space": {
+   "s": 18.4,
+   "tier": "landing"
+  },
   "alamo_sim_battle_story_tests": {
    "s": 0.5,
    "tier": "landing"
   },
   "alamo_sim_battle_tests": {
-   "s": 28.9,
+   "s": 3.0,
    "tier": "landing"
   },
   "alamo_sim_bench_tests": {

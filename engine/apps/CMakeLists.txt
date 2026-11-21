@@ -137,6 +137,12 @@ if(TARGET alamo_objects AND TARGET alamo_commands AND TARGET alamo_tactical AND 
       add_test(NAME ${_exe} COMMAND ${_exe})
       set_tests_properties(${_exe} PROPERTIES TIMEOUT 900)
     endforeach()
+    # The SP5 services-graph check (serial / reverse / parallel / debug write check of one 1500-tick battle) runs as its own
+    # entry per battle: about 13 s each, which kept alamo_sim_battle_tests over the landing tier's 30 s per-test limit.
+    foreach(_b space land)
+      add_test(NAME alamo_sim_battle_service_modes_${_b} COMMAND alamo_sim_battle_tests --service-modes ${_b})
+      set_tests_properties(alamo_sim_battle_service_modes_${_b} PROPERTIES TIMEOUT 600)
+    endforeach()
     # bo3 t03: test_battles_ai.cpp is split into parts (same exe, same test): main in test_battles_ai.cpp, shared code in
     # test_battles_ai_common.hpp.
     target_sources(alamo_sim_battle_ai_tests PRIVATE sim/tests/test_battles_ai_part1.cpp sim/tests/test_battles_ai_part2.cpp
