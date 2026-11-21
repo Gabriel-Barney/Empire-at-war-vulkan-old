@@ -329,6 +329,10 @@ struct CornerPassIn {
 // zero / slowed: corners whose written fraction is 0 / in (0, 1) after item 6 (before the brake pass); stepdowns: v /= 1.5.
 struct CornerPassStats {
     uint32_t zero = 0, slowed = 0, stepdowns = 0;
+    // mov3 t05 (BKR2_RE_ANSWERS Q1, a measurement): the zero fractions split - at corner 0 (the unit's own position) or a
+    // later corner; by cause: the corridor alone failed (the last line test passed, v := vmin = 0), the line test failed
+    // (v := 0), or a fraction > 0 below f_min
+    uint32_t zero_first = 0, zero_corridor = 0, zero_line = 0, zero_fmin = 0;
 };
 // Items 2-7 over the polyline `poly` (point 0 = the unit's own position): one speed fraction per point (the +4 entry; the
 // last point 1.0). Corner j: d_in = the facing (j = 0) or unit(P_j - P_j-1); the leg to P_i (i = j + 1): L, d, theta =

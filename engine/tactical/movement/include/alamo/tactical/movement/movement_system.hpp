@@ -369,6 +369,8 @@ struct MovementStats {
     // s78n t26.3 (MOVEMENT §3.5.2 D): the corner-speed pass's corners written with fraction 0 / with a fraction in (0, 1),
     // and its probe step-downs (v /= 1.5).
     uint32_t corner_zero = 0, corner_slowed = 0, corner_stepdowns = 0;
+    // mov3 t05 (CornerPassStats): corner_zero split - at corner 0, and by cause (corridor alone, line test, below f_min)
+    uint32_t corner_zero_first = 0, corner_zero_corridor = 0, corner_zero_line = 0, corner_zero_fmin = 0;
     // s78n t26.4 (MOVEMENT §3.5.2 C): Walk move steps - End Move coast steps (C.4), 0x15 restarts away from the end, waypoints
     // skipped by tau = 0 (C.9) and by a degenerate segment (C.8).
     uint32_t walk_coasts = 0, walk_restarts = 0, walk_tau_skips = 0, walk_degen_skips = 0;

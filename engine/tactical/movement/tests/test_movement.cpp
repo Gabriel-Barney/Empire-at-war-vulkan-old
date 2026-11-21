@@ -1958,6 +1958,11 @@ static void test_land_group() {
         cycle = cycle && held && v.has_goal && v.speed == 0.0f;
     }
     std::printf("land group: %u unit(s) jammed in a Starved / Pass cycle (MOVEMENT 5.4.6 row 15), cycle %d\n", jammed, cycle ? 1 : 0);
+    // mov3 t05 (BKR2_RE_ANSWERS Q1): the zero-fraction corners split (corner 0 / later; corridor alone / line test / f_min)
+    std::printf("land group: corner fractions 0: %u (corner 0: %u; corridor alone %u, line test %u, below f_min %u), slowed %u\n",
+                st.corner_zero, st.corner_zero_first, st.corner_zero_corridor, st.corner_zero_line, st.corner_zero_fmin,
+                st.corner_slowed);
+    CHECK(st.corner_zero == st.corner_zero_corridor + st.corner_zero_line + st.corner_zero_fmin);
     for (const TerrainStop& t : tlog.stops) {
         const UnitView v = sys.view(t.id);
         std::printf("land group: unit %d stopped by its TerrainCollision record(s) at frame %u (kinds %s) at (%.3f, %.3f), %.1f "

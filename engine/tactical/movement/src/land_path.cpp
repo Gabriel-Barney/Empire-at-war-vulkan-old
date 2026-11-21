@@ -834,11 +834,13 @@ std::vector<float> corner_fractions(const std::vector<V2>& poly, const CornerPas
         }
         // item 5: the arc probe, the static line test and the corridor test; else v /= 1.5
         const float theta_s = cr > 0.0f ? -theta : theta;
+        bool line_passed = true;  // mov3 t05: the last line test's result
         while (v > 0.0f) {
             corner_arc_probe(pj, aim, v, omega, theta_s, in.seg, probe);
             bool line = true;
             for (size_t k = 0; k + 1 < probe.size() && line; ++k)
                 if (in.line_ok && !in.line_ok(in.ctx, probe[k], probe[k + 1])) line = false;
+            line_passed = line;
             if (line && ((v < 0.2f * in.vmax && j != 0) || !in.corridor_ok || in.corridor_ok(in.ctx, probe))) break;
             v /= 1.5f;
             if (stats) ++stats->stepdowns;
@@ -849,14 +851,21 @@ std::vector<float> corner_fractions(const std::vector<V2>& poly, const CornerPas
         }
         // item 6: the fraction; below f_min 0 on the unmerged leg's start only
         const float fr = v / in.vmax;
+        const auto count_zero = [&] {
+            ++stats->zero;
+            if (j == 0) ++stats->zero_first;
+            if (fr > 0.0f) ++stats->zero_fmin;
+            else if (line_passed) ++stats->zero_corridor;
+            else ++stats->zero_line;
+        };
         if (fr < in.f_min) {
             f[j] = 0.0f;
-            if (stats) ++stats->zero;
+            if (stats) count_zero();
             j += 1;
         } else {
             for (size_t k = j; k < i; ++k) f[k] = fr;
             if (stats) {
-                if (fr <= 0.0f) ++stats->zero;
+                if (fr <= 0.0f) count_zero();
                 else if (fr < 1.0f) ++stats->slowed;
             }
             j = i;

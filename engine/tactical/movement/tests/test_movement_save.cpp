@@ -1859,7 +1859,9 @@ void test_rejections() {
     CHECK(rejects(u.sys, bad));
     put_u32(bad, 0, 36);  // 36: before mov2 t01's member slot (Unit::mslot / slot_on) (37)
     CHECK(rejects(u.sys, bad));
-    put_u32(bad, 0, 38);
+    put_u32(bad, 0, 37);  // 37: before mov3 t05's corner-zero split counters (38)
+    CHECK(rejects(u.sys, bad));
+    put_u32(bad, 0, 39);
     CHECK(rejects(u.sys, bad));
     bad = good;
     bad[4] = static_cast<uint8_t>(bad[4] ^ 3);  // mode

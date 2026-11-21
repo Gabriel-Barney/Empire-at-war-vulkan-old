@@ -2238,6 +2238,10 @@ void MovementSystem::corner_pass(Unit& u) {
         f = corner_fractions(poly, in, &st);
     }
     stats_.corner_zero += st.zero;
+    stats_.corner_zero_first += st.zero_first;  // mov3 t05
+    stats_.corner_zero_corridor += st.zero_corridor;
+    stats_.corner_zero_line += st.zero_line;
+    stats_.corner_zero_fmin += st.zero_fmin;
     stats_.corner_slowed += st.slowed;
     stats_.corner_stepdowns += st.stepdowns;
     // every entry 1.0 is the default record (an empty vector)
