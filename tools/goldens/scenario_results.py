@@ -40,6 +40,8 @@ from typing import Callable
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(os.path.dirname(HERE))
+sys.path.insert(0, os.path.join(ROOT, "tools", "lint"))
+import build_trees  # noqa: E402  (tree names come from one place)
 
 # What a scenario's result can depend on besides game data: engine sources and their build files, and the benchmark
 # scenario definitions some runs read. Tools, docs and the roadmap are not in it, so commits touching only those keep
@@ -362,7 +364,7 @@ def result_for(cache: Cache, scenario: Scenario, commit: str, compiler: str = "m
     r = subprocess.run(["cmd", "/d", "/c", script, compiler, "base", "all", "none"], cwd=wt, env=env)
     if r.returncode != 0:
         raise RuntimeError(f"building {commit[:8]} in {wt} failed (exit {r.returncode}); see {wt}\\logs\\agent_base_{compiler}.txt")
-    build = os.path.join(wt, f"build-base-{compiler}")
+    build = os.path.join(wt, build_trees.agent_tree(compiler, "base"))
     return result_here(cache, scenario, wt, build, compiler, workers, env=env)
 
 
@@ -500,8 +502,9 @@ def selftest() -> int:
 
 # ---------------------------------------------------------------- command line
 
-def _default_build(compiler: str) -> str:
-    return os.path.join(ROOT, f"build-wt-{compiler}")
+def default_build(compiler: str) -> str:
+    """This worktree's agent tree for the compiler (the tree build_agent.cmd builds)."""
+    return os.path.join(ROOT, build_trees.agent_tree(compiler))
 
 
 def main(argv: list[str]) -> int:
@@ -524,7 +527,7 @@ def main(argv: list[str]) -> int:
         print(f"{cache.folder}: {len(ents)} entries, {sum(s for _, s, _ in ents) / 1e6:.1f} MB (cap {cache.cap / 1e6:.0f} MB)"
               + (f", dropped {n}" if n else ""))
         return 0
-    build = a.build or _default_build(a.compiler)
+    build = a.build or default_build(a.compiler)
     scen = discover(build)
     if a.command == "list" or not a.command:
         for s in scen:

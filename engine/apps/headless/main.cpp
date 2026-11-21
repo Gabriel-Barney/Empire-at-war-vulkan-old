@@ -1003,7 +1003,8 @@ static int headless_main(int argc, char** argv) {
     if (!opt.bench_regen.empty()) {  // BM1: remake a scenario with the arguments its manifest recorded
         alamo::sim::bench::Scenario sc;
         std::string err;
-        if (!alamo::sim::bench::Scenario::load(opt.bench_regen, sc, &err)) {
+        // wr1 t06: a recipe (definition only: name, make line, settings) is enough; a full manifest parses the same way.
+        if (!alamo::sim::bench::Scenario::load_recipe(opt.bench_regen, sc, &err)) {
             std::fprintf(stderr, "bench-regen: %s\n", err.c_str());
             return 1;
         }

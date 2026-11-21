@@ -579,11 +579,37 @@ if(_alamo_sim)
   # one timed run per worker count, CRCs compared with the 0-worker run. A scenario whose fingerprint no longer matches
   # (any sim behaviour change) only prints "scenario changed, not comparable" here (--bench-allow-changed); regenerate it
   # with tools\benchmark\regen_scenario.cmd. Skipped (exit 0) without ALAMO_FOC_DATA.
-  set(_bm_scenario ${CMAKE_SOURCE_DIR}/tests/benchmark/space_battle.abench)
-  if(EXISTS ${_bm_scenario})
+  # wr1 t06 (2026-11-21): benchmark scenarios are build products. A fixture per scenario makes it from its recipe in
+  # tests/benchmark/<name>.abench (tools/goldens/bench_scenarios.py materialize: cached in <main checkout>\.cache, keyed by
+  # the engine source, recipe, game data and compiler) and copies it to ${CMAKE_BINARY_DIR}/bench_scenarios; the bench tests
+  # read that copy, never a committed save, so a sim behaviour change no longer leaves a scenario stale. Without
+  # ALAMO_FOC_DATA the fixture makes nothing and the bench runs skip as before.
+  find_program(ALAMO_BENCH_PYTHON NAMES python PATHS ${CMAKE_SOURCE_DIR}/toolchain/venv/Scripts NO_DEFAULT_PATH)
+  find_program(ALAMO_BENCH_PYTHON NAMES python python3)
+  set(ALAMO_BENCH_SCENARIOS ${CMAKE_BINARY_DIR}/bench_scenarios)
+  function(alamo_bench_scenario_fixture scen)
+    if(NOT ALAMO_BENCH_PYTHON OR TEST alamo_bench_scenario_${scen})
+      return()
+    endif()
+    add_test(NAME alamo_bench_scenario_${scen}
+             COMMAND ${ALAMO_BENCH_PYTHON} -I ${CMAKE_SOURCE_DIR}/tools/goldens/bench_scenarios.py materialize ${scen}
+                     --build ${CMAKE_BINARY_DIR} --out ${ALAMO_BENCH_SCENARIOS})
+    set_tests_properties(alamo_bench_scenario_${scen} PROPERTIES FIXTURES_SETUP alamo_bench_scenario_${scen} TIMEOUT 1800
+                         LABELS slow RESOURCE_LOCK alamo_bench_scenario_${scen})
+  endfunction()
+  # the scenario's setup test (and through it every per-worker check) needs the made scenario
+  function(alamo_bench_needs test scen)
+    alamo_bench_scenario_fixture(${scen})
+    if(TEST alamo_bench_scenario_${scen})
+      set_property(TEST ${test} APPEND PROPERTY FIXTURES_REQUIRED alamo_bench_scenario_${scen})
+    endif()
+  endfunction()
+  set(_bm_scenario ${ALAMO_BENCH_SCENARIOS}/space_battle.abench)
+  if(EXISTS ${CMAKE_SOURCE_DIR}/tests/benchmark/space_battle.abench)
     alamo_add_worker_count_check(alamo_headless_bench_space_battle
         COMMAND alamo_headless --bench ${_bm_scenario} --runs 1 --warmup 0 --quiet --bench-allow-changed
         TIMEOUT 1800 SLOW)
+    alamo_bench_needs(alamo_headless_bench_space_battle space_battle)
   endif()
   # --- BM3 (owner: lane-bm3): the stress scenes' worker-count checks (same rule as above: the CRCs of 1/4/N workers match the
   # 0-worker run; a stale fingerprint only prints "not comparable"; skipped without ALAMO_FOC_DATA) and the result comparison
@@ -592,8 +618,9 @@ if(_alamo_sim)
   foreach(_bm_name galactic_late land_battle)
     if(EXISTS ${CMAKE_SOURCE_DIR}/tests/benchmark/${_bm_name}.abench)
       alamo_add_worker_count_check(alamo_headless_bench_${_bm_name}
-          COMMAND alamo_headless --bench ${CMAKE_SOURCE_DIR}/tests/benchmark/${_bm_name}.abench --runs 1 --warmup 0 --quiet --bench-allow-changed
+          COMMAND alamo_headless --bench ${ALAMO_BENCH_SCENARIOS}/${_bm_name}.abench --runs 1 --warmup 0 --quiet --bench-allow-changed
           TIMEOUT 1800 SLOW)
+      alamo_bench_needs(alamo_headless_bench_${_bm_name} ${_bm_name})
     endif()
   endforeach()
   # SP5 (docs/SIM_PARALLEL_DESIGN.md §5): the same check with the services' per-unit loops forced wide (--svc-parallel-min 1;
@@ -601,18 +628,18 @@ if(_alamo_sim)
   # streams too (--svc-streams hangar: moves draws, so its fingerprint only prints "not comparable"). Slow, FoC data.
   if(EXISTS ${CMAKE_SOURCE_DIR}/tests/benchmark/land_battle.abench)
     alamo_add_worker_count_check(alamo_headless_bench_land_battle_svc
-        COMMAND alamo_headless --bench ${CMAKE_SOURCE_DIR}/tests/benchmark/land_battle.abench --runs 1 --warmup 0 --quiet --bench-allow-changed
+        COMMAND alamo_headless --bench ${ALAMO_BENCH_SCENARIOS}/land_battle.abench --runs 1 --warmup 0 --quiet --bench-allow-changed
                 --svc-parallel-min 1
         TIMEOUT 1800 SLOW)
+    alamo_bench_needs(alamo_headless_bench_land_battle_svc land_battle)
   endif()
-  if(EXISTS ${_bm_scenario})
+  if(EXISTS ${CMAKE_SOURCE_DIR}/tests/benchmark/space_battle.abench)
     alamo_add_worker_count_check(alamo_headless_bench_space_battle_svc_streams
         COMMAND alamo_headless --bench ${_bm_scenario} --runs 1 --warmup 0 --quiet --bench-allow-changed --svc-parallel-min 1
                 --svc-streams hangar
         TIMEOUT 1800 SLOW)
+    alamo_bench_needs(alamo_headless_bench_space_battle_svc_streams space_battle)
   endif()
-  find_program(ALAMO_BENCH_PYTHON NAMES python PATHS ${CMAKE_SOURCE_DIR}/toolchain/venv/Scripts NO_DEFAULT_PATH)
-  find_program(ALAMO_BENCH_PYTHON NAMES python python3)
   if(ALAMO_BENCH_PYTHON)
     add_test(NAME alamo_bench_compare_tool
              COMMAND ${ALAMO_BENCH_PYTHON} -I ${CMAKE_SOURCE_DIR}/tools/benchmark/test_compare_results.py ${CMAKE_CURRENT_BINARY_DIR}/bench_compare)
@@ -666,7 +693,10 @@ if(ALAMO_GOLDEN_PYTHON)
            COMMAND ${ALAMO_GOLDEN_PYTHON} -I ${CMAKE_SOURCE_DIR}/tools/goldens/scenario_results.py --selftest)
   add_test(NAME alamo_goldens_behaviour_check_selftest
            COMMAND ${ALAMO_GOLDEN_PYTHON} -I ${CMAKE_SOURCE_DIR}/tools/goldens/behaviour_check.py --selftest)
-  set_tests_properties(alamo_goldens_scenario_results_selftest alamo_goldens_behaviour_check_selftest PROPERTIES TIMEOUT 120)
+  add_test(NAME alamo_goldens_bench_scenarios_selftest
+           COMMAND ${ALAMO_GOLDEN_PYTHON} -I ${CMAKE_SOURCE_DIR}/tools/goldens/bench_scenarios.py --selftest)
+  set_tests_properties(alamo_goldens_scenario_results_selftest alamo_goldens_behaviour_check_selftest
+                       alamo_goldens_bench_scenarios_selftest PROPERTIES TIMEOUT 120)
 endif()
 
 # mcx7 t04: mod goldens (docs/MOD_COMPAT_DESIGN.md 13.3): one short headless skirmish per reference mod, its checkpoint log in
@@ -708,16 +738,22 @@ if(TARGET alamo_headless AND TARGET alamo_game_core)
   foreach(_bm_scene space_battle_game nebula_battle water_battle)
     if(EXISTS ${CMAKE_SOURCE_DIR}/tests/benchmark/${_bm_scene}.abench)
       add_test(NAME alamo_headless_bench_game_${_bm_scene}
-               COMMAND ${CMAKE_COMMAND} -DEXE=$<TARGET_FILE:alamo_headless> -DSCENE=${CMAKE_SOURCE_DIR}/tests/benchmark/${_bm_scene}.abench
+               COMMAND ${CMAKE_COMMAND} -DEXE=$<TARGET_FILE:alamo_headless> -DSCENE=${ALAMO_BENCH_SCENARIOS}/${_bm_scene}.abench
                        -DOUT=${CMAKE_CURRENT_BINARY_DIR}/bench_game/${_bm_scene} -P ${CMAKE_CURRENT_SOURCE_DIR}/headless/check_bench_game.cmake)
       set_tests_properties(alamo_headless_bench_game_${_bm_scene} PROPERTIES TIMEOUT 900)
       alamo_label_slow(alamo_headless_bench_game_${_bm_scene})
+      if(COMMAND alamo_bench_needs)
+        alamo_bench_needs(alamo_headless_bench_game_${_bm_scene} ${_bm_scene})
+      endif()
     endif()
   endforeach()
   if(EXISTS ${CMAKE_SOURCE_DIR}/tests/benchmark/space_battle_game.abench)
     alamo_add_worker_count_check(alamo_headless_bench_space_battle_game
-        COMMAND alamo_headless --bench ${CMAKE_SOURCE_DIR}/tests/benchmark/space_battle_game.abench --runs 1 --warmup 0 --quiet --bench-allow-changed
+        COMMAND alamo_headless --bench ${ALAMO_BENCH_SCENARIOS}/space_battle_game.abench --runs 1 --warmup 0 --quiet --bench-allow-changed
         TIMEOUT 1800 SLOW)
+    if(COMMAND alamo_bench_needs)
+      alamo_bench_needs(alamo_headless_bench_space_battle_game space_battle_game)
+    endif()
   endif()
 endif()
 # --- end bm2c t02 ---

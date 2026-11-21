@@ -129,6 +129,13 @@ if errorlevel 1 (
   exit /b 1
 )
 
+rem wr1 t04 (expand phase, 2026-11-21): the computed Behaviour: check runs beside the stored goldens, report only. It diffs
+rem each golden-backed headless scenario over origin/dev..HEAD (tools\goldens\behaviour_check.py range; results cached in
+rem <main checkout>\.cache\scenario-results, a base commit not cached yet is built in .claude\worktrees\scenario-base) and
+rem appends one line per landing to <main checkout>\logs\behaviour_landings.txt; "CHECKER BUG?" marks a disagreement with
+rem the stored goldens. The stored goldens still decide. set ALAMO_BEHAVIOUR_CHECK=0 skips it.
+if not "%ALAMO_BEHAVIOUR_CHECK%"=="0" "%PY%" -I "%~dp0goldens\behaviour_check.py" range origin/dev HEAD --expand --log auto
+
 git push origin HEAD:refs/heads/dev
 if errorlevel 1 (
   echo.

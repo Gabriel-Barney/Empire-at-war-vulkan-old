@@ -19,6 +19,8 @@ artefact that replaces a regenerated golden.
 tree's results with the MSVC tree's. Neither needs a stored file. Any difference fails (determinism rule 3).
 
   python -I tools/goldens/behaviour_check.py commit [REV] [--only REGEX] [--fast] [--report FILE]
+  python -I tools/goldens/behaviour_check.py range BASE HEAD [--expand] [--log FILE]   the landing range (t04): every
+      commit's declarations together, plus whether each scenario's computed diff agrees with its stored golden changing
   python -I tools/goldens/behaviour_check.py workers [--counts 1,4,15,16] [--only REGEX] [--fast]
   python -I tools/goldens/behaviour_check.py compilers [--only REGEX] [--fast]
   python -I tools/goldens/behaviour_check.py trailer [REV]       prints what the commit declares and whether it needs to
@@ -37,6 +39,7 @@ import os
 import re
 import subprocess
 import sys
+import time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
@@ -246,6 +249,73 @@ def check_commit(rev: str, scen: list[sr.Scenario], cache: sr.Cache, build_dir: 
     return ok, lines
 
 
+def range_declarations(base: str, head: str, repo: str = ROOT) -> tuple[list[str] | None, list[str]]:
+    """The union of the Behaviour: trailers of the non-merge commits in base..head, and the sim commits without one.
+    None when no commit declares anything."""
+    shas = [s for s in sr.git(repo, "rev-list", "--no-merges", f"{base}..{head}").split() if s]
+    declared: set[str] | None = None
+    missing = []
+    for sha in shas:
+        msg = sr.git(repo, "log", "-1", "--format=%B", sha)
+        paths = [p for p in sr.git(repo, "diff-tree", "--no-commit-id", "--name-only", "-r", sha).splitlines() if p]
+        d = parse_trailer(msg)
+        if d is None:
+            if touches_sim(paths):
+                missing.append(sha[:8])
+            continue
+        declared = (declared or set()) | set(d)
+    return (sorted(declared) if declared is not None else None), missing
+
+
+def agreement(diff_same: bool, golden_changed: bool) -> str:
+    """Expand phase (wr1 t04): a stored golden is regenerated exactly when its scenario's result changes, so the computed
+    diff and the stored-golden change must coincide. Returns '' when they agree, else what disagrees."""
+    if diff_same and golden_changed:
+        return "stored golden changed but the computed results are identical"
+    if not diff_same and not golden_changed:
+        return "computed results differ but the stored golden did not change"
+    return ""
+
+
+def check_range(base: str, head: str, scen: list[sr.Scenario], cache: sr.Cache, build_dir: str, compiler: str,
+                log_path: str | None) -> tuple[bool, list[str]]:
+    """Landing check, expand phase: base..head (the landing range) per scenario, the range's declarations judged, and the
+    agreement with the stored goldens recorded. Report only: the stored goldens stay authoritative until wr1 t07."""
+    base_sha = sr.git(ROOT, "rev-parse", base).strip()
+    head_sha = sr.git(ROOT, "rev-parse", head).strip()
+    declared, missing = range_declarations(base_sha, head_sha)
+    lines = [f"behaviour check (expand, report only) {base_sha[:8]}..{head_sha[:8]}: "
+             + ("declares nothing" if declared is None else "declares none" if not declared else "declares " + ", ".join(declared))
+             + (f"; sim commits without a Behaviour: trailer: {', '.join(missing)}" if missing else "")]
+    ok, agree, disagree = True, 0, 0
+    for s in scen:
+        try:
+            old_p = sr.result_for(cache, s, base_sha, compiler)
+            new_p = sr.result_here(cache, s, ROOT, build_dir, compiler) if head_sha == sr.git(ROOT, "rev-parse", "HEAD").strip() \
+                else sr.result_for(cache, s, head_sha, compiler)
+        except RuntimeError as e:
+            ok = False
+            lines.append(f"  ERROR {s.name}: {e}")
+            continue
+        old, new = load(old_p), load(new_p)
+        d = column_diff(old, new)
+        v = judge(declared, d, old.parity_parts, True)
+        changed = bool(sr.git(ROOT, "diff", "--name-only", base_sha, head_sha, "--", s.golden).strip())
+        bug = agreement(d.same, changed)
+        agree += not bug
+        disagree += bool(bug)
+        ok &= v.ok
+        lines.append(f"  {'PASS' if v.ok else 'FAIL'} {s.name}: {v.reason}" + (f"  [CHECKER BUG? {bug}]" if bug else ""))
+    summary = (f"{time.strftime('%Y-%m-%dT%H:%M:%S')} {base_sha[:8]}..{head_sha[:8]} scenarios {len(scen)} agree {agree} "
+               f"disagree {disagree} declaration {'PASS' if ok else 'FAIL'}" + (f" missing-trailer {','.join(missing)}" if missing else ""))
+    lines.append("  landing record: " + summary)
+    if log_path:
+        os.makedirs(os.path.dirname(log_path), exist_ok=True)
+        with open(log_path, "a", encoding="utf-8") as f:
+            f.write(summary + "\n")
+    return ok and not disagree, lines
+
+
 def check_workers(counts: list[int], scen: list[sr.Scenario], cache: sr.Cache, build_dir: str, compiler: str) -> tuple[bool, list[str]]:
     lines = [f"worker-count check at HEAD {sr.git(ROOT, 'rev-parse', '--short', 'HEAD').strip()}: workers {counts} against 0"]
     ok = True
@@ -265,7 +335,7 @@ def check_workers(counts: list[int], scen: list[sr.Scenario], cache: sr.Cache, b
 def check_compilers(scen: list[sr.Scenario], cache: sr.Cache) -> tuple[bool, list[str]]:
     lines = [f"compiler check at HEAD {sr.git(ROOT, 'rev-parse', '--short', 'HEAD').strip()}: clang tree against MSVC tree"]
     ok = True
-    msvc, clang = os.path.join(ROOT, "build-wt-msvc"), os.path.join(ROOT, "build-wt-clang")
+    msvc, clang = sr.default_build("msvc"), sr.default_build("clang")
     for s in scen:
         try:
             d = column_diff(load(sr.result_here(cache, s, ROOT, msvc, "msvc")), load(sr.result_here(cache, s, ROOT, clang, "clang")))
@@ -370,6 +440,10 @@ def selftest() -> int:
     check(moves == ["outcome.planets_final[Rebel]: port 5 -> 4 (PASS -> FAIL)"], f"parity metric move reported: {moves}")
     check(parity_moves(rep, rep) == [], "no parity move for the same report")
 
+    # expand phase: computed diff and stored-golden change must coincide
+    check(agreement(True, False) == "" and agreement(False, True) == "", "agreement when both or neither change")
+    check("identical" in agreement(True, True) and "did not change" in agreement(False, False), "disagreement both ways")
+
     for b in bad:
         print("behaviour_check selftest FAIL: " + b)
     if bad:
@@ -383,7 +457,9 @@ def selftest() -> int:
 def main(argv: list[str]) -> int:
     import argparse
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
-    ap.add_argument("command", nargs="?", choices=("commit", "workers", "compilers", "trailer", "parity"))
+    ap.add_argument("command", nargs="?", choices=("commit", "range", "workers", "compilers", "trailer", "parity"))
+    ap.add_argument("--log", help="range: append the one-line landing record to this file")
+    ap.add_argument("--expand", action="store_true", help="range: report only, exit 0 (wr1 t04 expand phase)")
     ap.add_argument("rev", nargs="?", default="HEAD")
     ap.add_argument("rev2", nargs="?", help="parity: the after report.json (rev is the before one)")
     ap.add_argument("--parity-before", help="commit: the parent build's parity-harness report.json")
@@ -411,7 +487,7 @@ def main(argv: list[str]) -> int:
         return 0
     if not a.command:
         ap.error("a command is needed")
-    build = a.build or os.path.join(ROOT, f"build-wt-{a.compiler}")
+    build = a.build or sr.default_build(a.compiler)
     try:
         scen = pick(sr.discover(build), a.only, a.fast, slow_tests(build) if a.fast else set())
     except RuntimeError as e:
@@ -422,6 +498,16 @@ def main(argv: list[str]) -> int:
         ok, lines = check_commit(a.rev, scen, cache, build, a.compiler)
         if a.parity_before and a.parity_after:
             lines.append("  " + parity_line(a.parity_before, a.parity_after))
+    elif a.command == "range":
+        if not a.rev2:
+            ap.error("range BASE HEAD")
+        if a.log == "auto":
+            a.log = os.path.join(sr.main_checkout(ROOT), "logs", "behaviour_landings.txt")
+        ok, lines = check_range(a.rev, a.rev2, scen, cache, build, a.compiler, a.log)
+        if a.expand:
+            lines.append("RESULT " + ("PASS" if ok else "FAIL") + " (expand phase: report only, the stored goldens decide)")
+            print("\n".join(lines))
+            return 0
     elif a.command == "workers":
         ok, lines = check_workers([int(x) for x in a.counts.split(",") if x], scen, cache, build, a.compiler)
     else:

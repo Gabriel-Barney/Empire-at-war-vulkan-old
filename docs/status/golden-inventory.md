@@ -148,3 +148,16 @@ Out of scope, left out of the counts:
 - Test inputs read from `docs/` (`docs/formats/examples`, `docs/shaders/catalog.json` by the assets tests; `docs/re` by
   `alamo_tactical_movement_tests`) and `engine/rhi/tests/shaders/*.hlsl`: inputs, not expected results.
 - Golden values written inline in test sources (for example the Lua golden in `engine/lua/tests/test_lua.cpp`): not files.
+
+### Migration status (t04-t06, 2026-11-21)
+
+| Rows | Covered by | State |
+|---|---|---|
+| D1-D7 headless goldens (alamo_headless `--golden <tracked file>`) | `tools/goldens/scenario_results.py` scenarios, `behaviour_check.py commit/range/workers/compilers` | expand phase: `land_on_dev.cmd` runs `range --expand` and logs each landing to `logs\behaviour_landings.txt` (t04 counts twenty landings with no disagreement) |
+| Benchmark `.alsv` / `.acmd` / `.crc` and the derived manifest lines | `tools/goldens/bench_scenarios.py` (recipe in git, scenario made per build key); the headless bench ctests read `${CMAKE_BINARY_DIR}/bench_scenarios` through a fixture | t06: headless and `alamo_headless_bench_game_*` done; `alamo_game_bench_scene_*` (apps/game) still read `tests/benchmark` until t07 strips the files |
+| D17, D18, D20, D24, D25 (module exes with `--write-golden <file>`) | next: a scenario kind "test exe" whose result is the file `--write-golden <tmp>` writes; D24 / D25 are CRC v2, so columns apply; D17 / D18 / D20 compare as text (one value) | t05 open |
+| D9-D14 (`alamo_sim*_tests --regen`, rewrites tracked files in place) | next: give the sim exes `--regen-to DIR` (write beside, not over) so a scenario can take the output; D13 / D14 / D12 story logs are rule-level candidates (notes above) | t05 open |
+| D15, D16, D19, D21, D22 (own text formats, `--write-golden` without a path or `--golden-dir`) | as the module rows once each exe takes an output path | t05 open |
+| D8 game smoke `.crc` / `.rec` (GPU) | `alamo_game` smoke runs as scenarios on the GPU machine (nightly), like the rendered bench scenes | t05 open |
+| Mod goldens (`tests/goldens/mods/*.crc`) | scenarios of `mod_golden.py`'s command (skips without the workshop item) | t05 open |
+| Visual baselines (61 PNGs, no ctest) | computed by `tools\visual` on the parent and the commit at review time, never stored | t05 open (no test reads them; t07 can drop them once `visual_check` diffs two builds) |

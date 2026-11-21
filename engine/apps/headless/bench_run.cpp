@@ -673,7 +673,7 @@ int bench_make(const BenchOptions& opt) {
     sc.final_crc = replayed.records.empty() ? 0 : replayed.records.back().combined;
     sc.dir = dir.string();
     bench::Scenario old;
-    const bool had_old = bench::Scenario::load(opt.scenario, old, nullptr);
+    const bool had_old = bench::Scenario::load_recipe(opt.scenario, old, nullptr);  // wr1 t06: a recipe keeps its settings too
     sc.description = !opt.description.empty() ? opt.description : had_old ? old.description : std::string();
     if (had_old) {  // BM2 format-2 keys (the rendered run's settings and camera) stay with the scenario
         sc.copy_run_settings(old);
