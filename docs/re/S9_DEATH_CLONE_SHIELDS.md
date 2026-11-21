@@ -61,6 +61,14 @@ locomotor's state machine (0x61e930) that enters state 0x12 when that distance i
 branch that switches to state 0x19 (Deployed) and on the undeploy branch (state 0x1A). Read together, the remap covers **deploying and deployed** walkers. Undeploying (0x1A) walkers with the
 flag already cleared fall back to the plain kind.
 
+*Corrected s78n t26, 2026-11-10 [H] (MOVEMENT §3.2.1):* the flag means **walking while deployed**. It is set by
+0x3ac100 when a deployed or deploying unit whose type has `Max_Dist_Walk_While_Deployed` > 0 gets a move order whose
+path is shorter than that distance (else the unit undeploys), by Walk vf +0x148 `0x61e570` on the same length test,
+and by the 0x19 branch that starts a path. It is cleared when the walk ends (0x16 → 0x19 at once) and during 0x1A.
+Only `Destroyer_Droid` (150.0, and its variant `Destroyer_Droid_Attack`) has the field in FoC. So the remap applies to
+**deployed** walkers (state 0x19) and to a droid **walking deployed**; a unit that is merely deploying (0x18, flag
+clear) is not remapped. For the droid the same test gates its shield (`Shielded_Only_When_Deployed`).
+
 ### 1.3 Existence check, then spawn lookup [H]
 The per-type `Death_Clone` table (type +0xd58; hash map keyed by int, each key holds a list of clone types) is
 read by `Pick_Death_Clone` (0x3718f0) with (key, sub-key, index):
@@ -86,6 +94,7 @@ So one death can take **up to two** synced draws before the death-projectile dra
 | infected (not deployed) | check: key 20; missing → K = kind. Spawn: key 20 or the kind's path above |
 
 ### 1.4 How the XML keys map [H]
+> r3g t07 (2026-11-16): the death clip comes only from the clone's own Specific_Death_Anim_Type, never from the damage kind: R3G_ANIM_TIMED_RE.md §7.
 `Death_Clone` = `<key>, <TypeName>` (OBJECT_TYPES §3.5). The key is first converted through `tDamageType`. Otherwise
 it is a name from the GameConstants `Damage_Types` list and maps to **0x18 + its index**. The FoC list ends with
 copies of the `tDamageType` names (index 79 `Damage_Normal` …). The enum is tried first, so those copies never become
@@ -139,6 +148,10 @@ Suspend is vfunc +0xc0 (+1). What suspends it, if anything, was not traced [L: c
   HIDE_WHEN_FOGGED, 0x40 IMPOSING_PRESENCE, 0x14 LAND_OBSTACLE and 0x55 PROXIMITY_MINE (and a 0x5051d0 test), and
   K ≠ 4 (Force lightning), the clone is created through a different object manager (mode +0x20 → +0x20). It is
   probably a lighter corpse list. Whether that path also consumes a sim id was not checked.
+- **Correction (storyb t17 RE, 2026-11-17) [H]:** the clone is owned by the **neutral** player (not the dying object's)
+  and starts at health 0. The infantry special case is exact now: the behaviour tests read the clone type's generic
+  `<Behavior>` set only (not `LandBehavior`), `0x5051d0` is "collision-avoiding and `IsDeathCloneObstacle`", and the
+  other manager is the mode's secondary store (own ids, no primary id, not in the CRC). `STORYB_T17_SPAWNS_AND_DEATH.md` §3.2.
 
 ---
 
@@ -193,7 +206,8 @@ re-plan calls: it is passed in r8).
 Notation in this section: P = rocket position (obj +0x78), E = emitter position, `fn(v)` = the fast normalise
 0x16f570 (FIGHTER_FLYING §1.3; a zero vector is left unchanged), CD / CO = `Projectile_Rocket_Curve_Distance` (type
 +0x1ff0) / `Projectile_Rocket_Curve_Offset` (+0x1ff4), MFD = `Projectile_Max_Flight_Distance` (+0x4bc), h(x, y) =
-terrain heightmap height (0x135140 / 0x135350, bilinear; the two differ only in call shape [M]). All arithmetic is
+terrain heightmap height (0x135140 / 0x135350, bilinear; the two differ only in call shape, [H] since mov3 t08:
+0x135350 also returns a blended normal, MOVEMENT §3.6). All arithmetic is
 float (no double ops in any routine below except the 1e-6 tests of §2.4.3). Sums of three squares are written in
 the order the code adds them where it is not x, y, z.
 

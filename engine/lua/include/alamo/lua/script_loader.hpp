@@ -1,12 +1,15 @@
 // Script files: lookup through the VFS and a static scan of what scripts call.
 //
-// The original resolves `require` / script names with LUA_PATH "./?.lua;./?.lc" over the script roots
-// .\Data\Scripts\{AI, AI\SpaceMode, AI\LandMode, AI\StoryArc, Interventions, Evaluators, GameObject,
-// Story, Library, FreeStore, Miscellaneous}\ (docs/re/LUA_API.md, PE_OVERVIEW.md "Lua"). lua_load
-// accepts source and Lua 5.0 bytecode alike (signature "\033Lua"); retail 32-bit bytecode is rejected
-// by a 64-bit VM's header check, which is why the x64 patch ships plain sources (every FoC script in
-// 64Patch.meg / extracted/foc_data_text.zip is text).
-// PROVISIONAL: the root search order (listed order, .lua before .lc in each root).
+// The original resolves `require` / script names with LUA_PATH "./?.lua;./?.lc" followed by "R?.lua;R?.lc" for each
+// script root R in registration order: Data\Scripts\{Library, GameObject, FreeStore, Miscellaneous, Story, AI,
+// AI\SpaceMode, AI\LandMode, AI\StoryArc, Interventions, Evaluators}\ (mcx6 t07, docs/re/LUA_API.md "Script lookup and
+// require" [H]; the order of the AI and Evaluators roots [M]). lua_load accepts source and Lua 5.0 bytecode alike
+// (signature "\033Lua"); retail 32-bit bytecode is rejected by a 64-bit VM's header check, which is why the x64 patch
+// ships plain sources (every FoC script in 64Patch.meg / extracted/foc_data_text.zip is text).
+// The AI plan / evaluator discovery lists *.lua only (ai_lua_runtime.hpp), so a plan or evaluator that exists only as .lc
+// is never found. [port] The plan and evaluator loaders read the discovered .lua file itself instead of going through
+// LUA_PATH (retail's require: a same-named file in an earlier directory would shadow it; none in FoC / EaW). Names from XML
+// (the AI free store, story / object / scoring scripts) go through read_script, .lc included.
 #pragma once
 #include <cstdint>
 #include <map>
@@ -22,13 +25,13 @@ class FileProvider;
 
 namespace alamo::lua {
 
-std::span<const std::string_view> script_roots();  // "Data\\Scripts\\AI\\", ...
+std::span<const std::string_view> script_roots();  // "Data\\Scripts\\Library\\", ... (registration order)
 
 // True if `bytes` is a precompiled Lua chunk (starts with "\033Lua").
 bool is_bytecode(std::span<const uint8_t> bytes);
 
-// Finds `name` (no extension; '/' or '\\' allowed) in the script roots and reads it.
-// Returns the game-relative path found ("" if none).
+// Finds `name` (no extension; '/' or '\\' allowed) along LUA_PATH and reads it: NAME.lua then NAME.lc in the install
+// folder, then in each root in order. Returns the game-relative path found ("" if none).
 std::string read_script(const FileProvider& files, std::string_view name, std::vector<uint8_t>& out);
 
 // Static scan of script sources (no execution): which globals / methods they call and define.

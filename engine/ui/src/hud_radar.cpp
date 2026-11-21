@@ -2,7 +2,9 @@
 
 #include <algorithm>
 #include <cmath>
+#include <iterator>
 
+#include "alamo/core/ascii.hpp"
 #include "alamo/core/file_provider.hpp"
 #include "alamo/data/values.hpp"
 #include "alamo/data/xml.hpp"
@@ -11,12 +13,8 @@ namespace alamo::ui {
 
 namespace {
 
-std::string upper(std::string_view s) {
-    std::string o(data::trim(s));
-    for (char& c : o)
-        if (c >= 'a' && c <= 'z') c = static_cast<char>(c - 'a' + 'A');
-    return o;
-}
+// Trimmed (data::trim), then ASCII upper case.
+std::string upper(std::string_view s) { return ascii_upper(data::trim(s)); }
 
 Rgba8 color(std::string_view text, Rgba8 fallback) {
     float v[4] = {static_cast<float>(fallback.r), static_cast<float>(fallback.g), static_cast<float>(fallback.b),
@@ -35,40 +33,120 @@ constexpr const char* kPassNames[kPassabilityCount] = {"PASSABILITY_STEEP",    "
 
 }  // namespace
 
+// modc t30 (docs/re/xml_field_tables.md, "Elements read outside the descriptor tables", loader 0x359390 / walker 0x3572c0):
+// the original walks the whole file. It checks no element path (the root and the RadarMapEvents / RadarMapSettings
+// containers are not compared), descends into every child, and at any depth treats Passability_Color_Settings, Color and
+// Radar_Map_Event specially; every other element with text is a RadarMapClass table field. Two pieces of state carry from
+// one element to the next: the selected passability block and the current radar event, whose Event_* values pass
+// through one scratch record that is never reset, so a field one event leaves out keeps the previous event's value.
+namespace {
+
+constexpr const char* kBiomeBlocks[] = {"TEMPERATE", "ARCTIC", "DESERT", "FOREST", "SWAMP", "VOLCANIC", "URBAN", "SPACE"};
+constexpr int32_t kAllBlocks = 8;  // any other name: a write goes to every terrain block (vanilla "Default")
+
+struct RadarWalk {
+    RadarSettings& out;
+    int32_t block = -1;          // selected Passability_Color_Settings block, -1 none; kept when its element ends
+    std::string event;           // current Radar_Map_Event key (upper case; an empty name is a key too)
+    bool has_event = false;
+    RadarEventType scratch{};    // the Event_* scratch values ([port] start at the record defaults)
+    explicit RadarWalk(RadarSettings& s) : out(s) {
+        scratch.scale = 0.0125f;
+        scratch.duration = 2.0f;
+    }
+
+    static std::string name_attr(const data::XmlNode& n) { return upper(n.attribute("name", n.attribute("Name"))); }
+
+    void pass_color(const data::XmlNode& n, size_t cls) {
+        const Rgba8 fallback = out.palette(block == kAllBlocks ? "DEFAULT" : kBiomeBlocks[static_cast<size_t>(block)])[cls];
+        const Rgba8 c = color(n.text_trimmed(), fallback);
+        auto write = [&](const std::string& key) {
+            auto it = out.palettes.find(key);
+            if (it == out.palettes.end()) it = out.palettes.emplace(key, out.palette(key)).first;
+            it->second[cls] = c;
+        };
+        if (block == kAllBlocks) {
+            write("DEFAULT");
+            for (const char* b : kBiomeBlocks) write(b);
+        } else {
+            write(kBiomeBlocks[static_cast<size_t>(block)]);
+        }
+    }
+
+    void field(std::string_view tag, std::string_view text) {
+        if (ascii_iequals(text, "TBD")) return;  // the original only warns
+        RadarEventType* cur = nullptr;
+        if (has_event)
+            if (auto it = out.events.find(event); it != out.events.end()) cur = &it->second;
+        if (ascii_iequals(tag, "Event_Model_Name")) {
+            if (cur) cur->model = std::string(text);
+            return;
+        }
+        bool ev = true;
+        if (ascii_iequals(tag, "Event_Model_Scale")) scratch.scale = data::parse_float_or(text, scratch.scale);
+        else if (ascii_iequals(tag, "Event_Duration")) scratch.duration = data::parse_float_or(text, scratch.duration);
+        else if (ascii_iequals(tag, "Event_Single_Instance")) scratch.single_instance = data::parse_bool_or(text, false);
+        else if (ascii_iequals(tag, "Event_Persistent")) scratch.persistent = data::parse_bool_or(text, false);
+        else ev = false;
+        if (ev) {
+            if (cur) {  // all four scratch values, not only the one just read
+                cur->scale = scratch.scale;
+                cur->duration = scratch.duration;
+                cur->single_instance = scratch.single_instance;
+                cur->persistent = scratch.persistent;
+            }
+            return;
+        }
+        if (ascii_iequals(tag, "Space_Backdrop_Texture_Name")) out.space_backdrop = std::string(text);
+        else if (ascii_iequals(tag, "Land_Backdrop_Texture_Name")) out.land_backdrop = std::string(text);
+        else if (ascii_iequals(tag, "Space_FOW_Color")) out.space_fow = color(text, out.space_fow);
+        else if (ascii_iequals(tag, "Land_FOW_Color")) out.land_fow = color(text, out.land_fow);
+        else if (ascii_iequals(tag, "Space_Asteroid_Field_Color")) out.space_asteroid = color(text, out.space_asteroid);
+        else if (ascii_iequals(tag, "Space_Asteroid_Field_Border_Color"))
+            out.space_asteroid_border = color(text, out.space_asteroid_border);
+        // other table fields (the commented-out positions, category colours) are not used by the port's radar
+    }
+
+    void walk(const data::XmlNode& parent) {
+        for (data::XmlNode c = parent.first_child(); c; c = c.next_sibling()) {
+            const std::string_view tag = c.name();
+            if (ascii_iequals(tag, "Passability_Color_Settings")) {
+                const std::string b = name_attr(c);
+                block = kAllBlocks;
+                for (int32_t i = 0; i < kAllBlocks; ++i)
+                    if (b == kBiomeBlocks[i]) block = i;
+                has_event = false;
+            } else if (ascii_iequals(tag, "Color")) {
+                const std::string cn = name_attr(c);
+                for (size_t i = 0; i < kPassabilityCount; ++i)
+                    if (cn == kPassNames[i]) {
+                        if (block >= 0) pass_color(c, i);  // no block selected: "Unprocessed entry"
+                        has_event = false;
+                    }
+                // a terrain category colour (DEFAULT, GRASS, ...): read by the original, not used by the port's radar
+            } else if (ascii_iequals(tag, "Radar_Map_Event")) {
+                const std::string key = name_attr(c);
+                RadarEventType t;  // the record defaults: scale 0.0125, duration 2.0, both flags false
+                t.name = std::string(data::trim(c.attribute("name", c.attribute("Name"))));
+                t.scale = 0.0125f;
+                t.duration = 2.0f;
+                out.events[key] = std::move(t);
+                event = key;
+                has_event = true;
+            } else if (const std::string_view text = data::trim(c.text()); !text.empty() && c.child_count() == 0) {
+                field(tag, text);
+            }
+            if (c.child_count() > 0) walk(c);
+        }
+    }
+};
+
+}  // namespace
+
 bool RadarSettings::parse(const data::XmlNode& root) {
     if (!root) return false;
-    for (data::XmlNode e : root.child("RadarMapEvents").children("Radar_Map_Event")) {
-        RadarEventType t;
-        t.name = std::string(data::trim(e.attribute("name", e.attribute("Name"))));
-        if (t.name.empty()) continue;
-        t.model = std::string(e.child_text("Event_Model_Name"));
-        t.scale = data::parse_float_or(e.child_text("Event_Model_Scale"), t.scale);
-        t.duration = data::parse_float_or(e.child_text("Event_Duration"), 0.0f);
-        t.single_instance = data::parse_bool_or(e.child_text("Event_Single_Instance"), false);
-        t.persistent = data::parse_bool_or(e.child_text("Event_Persistent"), false);
-        if (t.duration <= 0.0f && !t.persistent) t.duration = 1.0f;
-        events[upper(t.name)] = std::move(t);
-    }
-    const data::XmlNode s = root.child("RadarMapSettings");
-    if (!s) return true;
-    if (const std::string_view v = s.child_text("Space_Backdrop_Texture_Name"); !v.empty()) space_backdrop = std::string(v);
-    if (const std::string_view v = s.child_text("Land_Backdrop_Texture_Name"); !v.empty()) land_backdrop = std::string(v);
-    space_fow = color(s.child_text("Space_FOW_Color"), space_fow);
-    land_fow = color(s.child_text("Land_FOW_Color"), land_fow);
-    space_asteroid = color(s.child_text("Space_Asteroid_Field_Color"), space_asteroid);
-    space_asteroid_border = color(s.child_text("Space_Asteroid_Field_Border_Color"), space_asteroid_border);
-    for (data::XmlNode p : s.children("Passability_Color_Settings")) {
-        const std::string biome = upper(p.attribute("name", p.attribute("Name")));
-        if (biome.empty()) continue;
-        // Default first (UI data comment: DEFAULT must precede the others); missing colours inherit it.
-        PassabilityPalette pal = palette("DEFAULT");
-        for (data::XmlNode c : p.children("Color")) {
-            const std::string n = upper(c.attribute("name", c.attribute("Name")));
-            for (size_t i = 0; i < kPassabilityCount; ++i)
-                if (n == kPassNames[i]) pal[i] = color(c.text_trimmed(), pal[i]);
-        }
-        palettes[biome] = pal;
-    }
+    RadarWalk w(*this);
+    w.walk(root);
     return true;
 }
 
@@ -112,6 +190,48 @@ std::vector<uint8_t> passability_rgba(std::span<const uint8_t> classes, const Pa
         out[i * 4 + 2] = c.b;
         out[i * 4 + 3] = c.a;
     }
+    return out;
+}
+
+std::string_view radar_biome(uint32_t index) {
+    return index < std::size(kBiomeBlocks) ? std::string_view(kBiomeBlocks[index]) : std::string_view();
+}
+
+Passability radar_cell_class(uint32_t bits, bool water_surface) {
+    if (water_surface || (bits & 0x20u) != 0) return Passability::Water;
+    if ((bits & 0x2u) != 0) return Passability::Steep;
+    if ((bits & 0x4u) != 0) return Passability::Obstacle;
+    if ((bits & 0x80u) != 0) return Passability::InfantryOnly;
+    if ((bits & 0x100u) != 0) return Passability::Impassable;
+    if ((bits & 0x18u) != 0) return Passability::Wall;
+    return Passability::Clear;
+}
+
+std::vector<uint8_t> radar_terrain_rgba(const RadarTerrainSource& src, const PassabilityPalette& palette, uint32_t size, float min_x,
+                                        float min_y, float max_x, float max_y) {
+    size = std::max<uint32_t>(size, 1);
+    std::vector<uint8_t> out(static_cast<size_t>(size) * size * 4, 0);
+    if (src.gw == 0 || src.gh == 0 || src.cells.size() < static_cast<size_t>(src.gw) * src.gh || src.cell <= 0.0f) return out;
+    const float w = max_x - min_x, h = max_y - min_y;
+    const float lo_x = min_x + 0.001f, hi_x = std::max(lo_x, max_x - 10.0f - 0.001f);
+    const float lo_y = min_y + 0.001f, hi_y = std::max(lo_y, max_y - 10.0f - 0.001f);
+    const float half = 0.5f * src.cell;
+    for (uint32_t row = 0; row < size; ++row)
+        for (uint32_t col = 0; col < size; ++col) {
+            const float x = std::clamp(min_x + w * static_cast<float>(col) / static_cast<float>(size), lo_x, hi_x);
+            const float y = std::clamp(min_y + h * static_cast<float>(row) / static_cast<float>(size), lo_y, hi_y);
+            if (x + half < 0.0f || y + half < 0.0f) continue;
+            const auto cx = static_cast<uint32_t>((x + half) / src.cell), cy = static_cast<uint32_t>((y + half) / src.cell);
+            if (cx >= src.gw || cy >= src.gh) continue;  // outside the grid: transparent
+            uint32_t bits = src.cells[static_cast<size_t>(cy) * src.gw + cx];
+            if (src.has_box && (x < src.box_min_x || x > src.box_max_x || y < src.box_min_y || y > src.box_max_y)) bits |= 0x4u;
+            const Rgba8 c = palette[static_cast<size_t>(radar_cell_class(bits, src.water && src.water(x, y)))];
+            uint8_t* px = &out[(static_cast<size_t>(row) * size + col) * 4];
+            px[0] = c.r;
+            px[1] = c.g;
+            px[2] = c.b;
+            px[3] = c.a;
+        }
     return out;
 }
 

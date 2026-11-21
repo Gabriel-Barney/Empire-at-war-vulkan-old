@@ -6,7 +6,6 @@
 // destroyed or created); sorts are stable with explicit keys; the markup records live in the VM's registry (integer
 // keys, read in index order); the landing machines are a vector sorted by id. No pointer-keyed container.
 #include <algorithm>
-#include <bit>
 #include <cstdarg>
 #include <cstdio>
 #include <string>
@@ -14,6 +13,8 @@
 #include <vector>
 
 #include "alamo/core/dmath.hpp"
+#include "alamo/core/frames.hpp"
+#include "alamo/core/ascii.hpp"
 #include "alamo/core/sim_crc.hpp"
 #include "alamo/lua/ai_bridge.hpp"
 #include "alamo/lua/object_bridge.hpp"
@@ -40,47 +41,14 @@ constexpr objects::BehaviorTypeId kBehSpecialWeapon = 0x2F, kBehLobbing = 0x37, 
 
 // ---------------------------------------------------------------- small helpers
 
-int push_nil(Call& c) {
-    lua_pushnil(c.L);
-    return 1;
-}
-int push_bool(Call& c, bool b) {
-    lua_pushboolean(c.L, b ? 1 : 0);
-    return 1;
-}
+using detail::push_nil;  // ref5 t03: vm_internal.hpp
+using detail::push_bool;  // ref5 t03: vm_internal.hpp
 
-// The original's script error / warning helpers: logged, no unwind; the binding returns nothing.
-int vlog(Call& c, const char* prefix, const char* fmt, va_list ap) {
-    char buf[512];
-    std::vsnprintf(buf, sizeof buf, fmt, ap);
-    c.vm->message(std::string(prefix) + buf);
-    return 0;
-}
-int script_error(Call& c, const char* fmt, ...) {
-    va_list ap;
-    va_start(ap, fmt);
-    vlog(c, "SCRIPT ERROR: ", fmt, ap);
-    va_end(ap);
-    c.vm->exit_requested = true;  // q6 t11: the original's error helper sets the stop flag (LUA_API.md "Binding error model")
-    return 0;
-}
-int script_warning(Call& c, const char* fmt, ...) {
-    va_list ap;
-    va_start(ap, fmt);
-    vlog(c, "SCRIPT WARNING: ", fmt, ap);
-    va_end(ap);
-    return 0;
-}
-
+// Errors and warnings: Call::script_error_stop / Call::script_warning (the original's helpers: logged, no unwind; the
+// binding returns nothing).
 uint32_t cls_of(const char* name) { return detail::class_id(name); }
-uint32_t cls_position() {
-    static const uint32_t c = cls_of("PositionWrapper");
-    return c;
-}
-uint32_t cls_target() {
-    static const uint32_t c = cls_of("AITargetLocationWrapper");
-    return c;
-}
+using detail::cls_position;
+using detail::cls_target;
 uint32_t cls_markup() {
     static const uint32_t c = cls_of("MarkupBlockStatus");
     return c;
@@ -95,18 +63,10 @@ objects::ObjectStore* store(Call& c) { return c.vm->host.store; }
 const objects::GameObjectTypes* types(Call& c) { return c.vm->host.types; }
 ObjectHandle self_object(Call& c) { return detail::object_handle(*c.self); }
 
-char upper(char ch) { return (ch >= 'a' && ch <= 'z') ? static_cast<char>(ch - 'a' + 'A') : ch; }
-bool iequal(std::string_view a, std::string_view b) {
-    if (a.size() != b.size()) return false;
-    for (size_t i = 0; i < a.size(); ++i)
-        if (upper(a[i]) != upper(b[i])) return false;
-    return true;
-}
-
 std::string_view type_name(Call& c, TypeIndex t) {
     const objects::GameObjectTypes* ty = types(c);
     if (!ty || t >= ty->raw().type_count()) return {};
-    return ty->raw().types().name[t];
+    return ty->name(t);
 }
 std::string object_name(Call& c, ObjectHandle h) { return std::string(type_name(c, store(c)->type(h))); }
 
@@ -126,11 +86,7 @@ TypeIndex type_arg(Call& c, int i, std::string& name) {
     return types(c) ? types(c)->raw().find(name) : objects::kNone;
 }
 
-// PositionWrapper layout of bind_objects.cpp (x / y float bits in Ud::value, z float bits in Ud::id).
-Vec3 position_of(const Ud& u) {
-    return {std::bit_cast<float>(static_cast<uint32_t>(u.value & 0xFFFFFFFFu)), std::bit_cast<float>(static_cast<uint32_t>(u.value >> 32)),
-            std::bit_cast<float>(u.id)};
-}
+using detail::position_of;
 
 // A target argument (§1.1 step 2): a game object or an AI target (its object through the attached AI host).
 enum class TargetArg : uint8_t { Object, AiTargetObject, AiTargetNoObject, Dead, Invalid };
@@ -183,46 +139,46 @@ bool upgrade_gate(Call& c, int32_t player) {
 
 int m_fire_special_weapon(Call& c) {
     constexpr const char* kName = "GameObjectWrapper::Fire_Special_Weapon";
-    if (c.nargs != 2) return script_error(c, "%s -- invalid number of parameters. Expected 2, got %d.", kName, c.nargs);
+    if (c.nargs != 2) return c.script_error_stop("%s -- invalid number of parameters. Expected 2, got %d.", kName, c.nargs);
     objects::ObjectStore* st = store(c);
     const ObjectHandle self = self_object(c);
     const bool sw = st->has_behavior(self, kBehSpecialWeapon), lob = st->has_behavior(self, kBehLobbing),
                station = st->has_behavior(self, kBehStarBase);
-    if (!sw && !lob && !station) return script_error(c, "%s -- object %s is not a special weapon", kName, object_name(c, self).c_str());
+    if (!sw && !lob && !station) return c.script_error_stop("%s -- object %s is not a special weapon", kName, object_name(c, self).c_str());
     ObjectHandle target;
     const TargetArg ta = target_arg(c, 1, target);
-    if (ta == TargetArg::Dead) return script_error(c, "%s -- target is already dead", kName);
-    if (ta == TargetArg::Invalid) return script_error(c, "%s -- invalid target", kName);
+    if (ta == TargetArg::Dead) return c.script_error_stop("%s -- target is already dead", kName);
+    if (ta == TargetArg::Invalid) return c.script_error_stop("%s -- invalid target", kName);
     const Ud* player = c.userdata(2, detail::cls_player());
-    if (!player) return script_error(c, "%s -- invalid type for parameter 2. Expected player.", kName);
+    if (!player) return c.script_error_stop("%s -- invalid type for parameter 2. Expected player.", kName);
     TacticalScriptHooks* hk = hooks(c);
     if (station) {
         // §1.1 step 5: the station's special-weapon hard point.
         const float r = (hk && hk->station_readiness) ? hk->station_readiness(self) : -1.0f;
-        if (r < 0.0f) return script_warning(c, "%s -- %s has no special weapon hard point", kName, object_name(c, self).c_str());
-        if (r < 1.0f) return script_warning(c, "%s -- special weapon not ready", kName);
+        if (r < 0.0f) return c.script_warning("%s -- %s has no special weapon hard point", kName, object_name(c, self).c_str());
+        if (r < 1.0f) return c.script_warning("%s -- special weapon not ready", kName);
         if (!upgrade_gate(c, player->id))
-            return script_warning(c, "%s -- special weapons not available. Purchase a special weapon upgrade", kName);
-        if (!target || !(hk->station_fire && hk->station_fire(self, target, player->id)))
-            return script_warning(c, "%s -- unable to fire at target", kName);
+            return c.script_warning("%s -- special weapons not available. Purchase a special weapon upgrade", kName);
+        if (!target || !(hk && hk->station_fire && hk->station_fire(self, target, player->id)))
+            return c.script_warning("%s -- unable to fire at target", kName);
     } else if (lob && !sw) {
         // §1.1 step 3: the lobbing superweapon fires at the target's position (no range / ally / fog check).
         const float r = readiness(hk, self);
-        if (r < 0.0f) return script_error(c, "%s -- %s has no special weapon data", kName, object_name(c, self).c_str());
-        if (r < 1.0f) return script_warning(c, "%s -- special weapon not ready", kName);
+        if (r < 0.0f) return c.script_error_stop("%s -- %s has no special weapon data", kName, object_name(c, self).c_str());
+        if (r < 1.0f) return c.script_warning("%s -- special weapon not ready", kName);
         // [port] an AI target without an object has no position through the AI bridge (AiScriptHost): refused.
-        if (!target) return script_error(c, "%s -- invalid target", kName);
+        if (!target) return c.script_error_stop("%s -- invalid target", kName);
         if (!(hk->fire_lobbing_at && hk->fire_lobbing_at(self, st->position(target))))
-            return script_warning(c, "%s -- unable to fire at target", kName);  // [port] 0x4ea3f0 refused (base power)
+            return c.script_warning("%s -- unable to fire at target", kName);  // [port] 0x4ea3f0 refused (base power)
     } else {
         // §1.1 step 4: special weapon at an object.
-        if (ta == TargetArg::AiTargetNoObject) return script_error(c, "%s -- special weapons may only be fired at objects", kName);
+        if (ta == TargetArg::AiTargetNoObject) return c.script_error_stop("%s -- special weapons may only be fired at objects", kName);
         const float r = readiness(hk, self);
-        if (r < 1.0f) return script_warning(c, "%s -- special weapon not ready", kName);
-        if (!(hk->begin_targeting && hk->begin_targeting(self))) return script_error(c, "%s -- unable to begin targeting", kName);
+        if (r < 1.0f) return c.script_warning("%s -- special weapon not ready", kName);
+        if (!(hk->begin_targeting && hk->begin_targeting(self))) return c.script_error_stop("%s -- unable to begin targeting", kName);
         if (!upgrade_gate(c, player->id))
-            return script_warning(c, "%s -- special weapons not available. Purchase a special weapon upgrade", kName);
-        if (!(hk->fire_at_object && hk->fire_at_object(self, target))) return script_error(c, "%s -- Unknown and confusing error", kName);
+            return c.script_warning("%s -- special weapons not available. Purchase a special weapon upgrade", kName);
+        if (!(hk->fire_at_object && hk->fire_at_object(self, target))) return c.script_error_stop("%s -- Unknown and confusing error", kName);
     }
     destroy_after_sweep(c, player->id);  // §1.1 step 6: for the player argument
     detail::push_object(c.L, *c.vm, self);
@@ -234,7 +190,7 @@ int m_fire_special_weapon(Call& c) {
 int m_fire_tactical_superweapon(Call& c) {
     const ObjectHandle self = self_object(c);
     if (!store(c)->has_behavior(self, objects::beh::TacticalSuperWeapon))
-        return script_error(c, "GameObjectWrapper::Fire_Tactical_Superweapon -- %s is not a tactical superweapon", object_name(c, self).c_str());
+        return c.script_error_stop("GameObjectWrapper::Fire_Tactical_Superweapon -- %s is not a tactical superweapon", object_name(c, self).c_str());
     TacticalScriptHooks* hk = hooks(c);
     return push_bool(c, hk && hk->tsw_fire && hk->tsw_fire(self));
 }
@@ -242,7 +198,7 @@ int m_fire_tactical_superweapon(Call& c) {
 int m_is_tactical_superweapon_ready(Call& c) {
     const ObjectHandle self = self_object(c);
     if (!store(c)->has_behavior(self, objects::beh::TacticalSuperWeapon))
-        return script_error(c, "GameObjectWrapper::Is_Tactical_Superweapon_Ready -- %s is not a tactical superweapon",
+        return c.script_error_stop("GameObjectWrapper::Is_Tactical_Superweapon_Ready -- %s is not a tactical superweapon",
                             object_name(c, self).c_str());
     TacticalScriptHooks* hk = hooks(c);
     return push_bool(c, hk && hk->tsw_state && hk->tsw_state(self) == 4);  // state 4 = ready [H]
@@ -259,27 +215,27 @@ ObjectHandle spawn(Call& c, const objects::SpawnParams& sp) {
 int g_spawn_special_weapon(Call& c) {
     constexpr const char* kName = "Spawn_Special_Weapon";
     objects::ObjectStore* st = store(c);
-    if (!st || st->mode() != objects::ModeKind::Space) return script_error(c, "%s -- only available in space tactical mode", kName);
-    if (c.nargs != 2) return script_error(c, "%s -- invalid number of parameters. Expected 2, got %d.", kName, c.nargs);
+    if (!st || st->mode() != objects::ModeKind::Space) return c.script_error_stop("%s -- only available in space tactical mode", kName);
+    if (c.nargs != 2) return c.script_error_stop("%s -- invalid number of parameters. Expected 2, got %d.", kName, c.nargs);
     std::string name;
     const TypeIndex t = type_arg(c, 1, name);
     const objects::GameObjectTypes* ty = types(c);
-    if (t == objects::kNone || !ty || t >= ty->size()) return script_error(c, "%s -- unknown object type %s", kName, name.c_str());
-    if (!ty->get_bool(t, "Is_Special_Weapon_In_Space"))
-        return script_error(c, "%s -- %s is not a space special weapon", kName, name.c_str());
-    if (ty->get_int(t, "Special_Weapon_Index") < 0)
-        return script_error(c, "%s -- %s has no special weapon index", kName, name.c_str());
+    if (t == objects::kNone || !ty || t >= ty->size()) return c.script_error_stop("%s -- unknown object type %s", kName, name.c_str());
+    if (!ty->get(t, objects::tags::Is_Special_Weapon_In_Space))
+        return c.script_error_stop("%s -- %s is not a space special weapon", kName, name.c_str());
+    if (ty->get(t, objects::tags::Special_Weapon_Index) < 0)
+        return c.script_error_stop("%s -- %s has no special weapon index", kName, name.c_str());
     const Ud* player = c.userdata(2, detail::cls_player());
-    if (!player || player->id < 0) return script_error(c, "%s -- invalid type for parameter 2. Expected player.", kName);
+    if (!player || player->id < 0) return c.script_error_stop("%s -- invalid type for parameter 2. Expected player.", kName);
     // The first object of the mode with DUMMY_SPECIAL_WEAPON_SOURCE (insertion order [M]).
     ObjectHandle source;
-    for (const ObjectHandle h : st->all_objects())
+    for (const ObjectHandle h : detail::script_objects(*st))
         if (st->alive(h) && st->has_behavior(h, kBehWeaponSource)) {
             source = h;
             break;
         }
     if (!source)
-        return script_error(c, "%s -- unable to find an object in the mode with SPECIAL_WEAPON_SOURCE behavior", kName);
+        return c.script_error_stop("%s -- unable to find an object in the mode with SPECIAL_WEAPON_SOURCE behavior", kName);
     objects::SpawnParams sp;
     sp.type = t;
     sp.owner = player->id;
@@ -296,9 +252,9 @@ int m_type_is_affected_by_laser_defense(Call& c) {
     const auto t = static_cast<TypeIndex>(c.self->value);
     if (!ty || t >= ty->size()) return push_bool(c, false);
     // Projectile_Category MISSILE (1), ROCKET (4), MPTL_ROCKET (6): mask 0x52 [H]. The field's text, else its enum.
-    const std::string_view cat = ty->get_string(t, "Projectile_Category");
-    if (!cat.empty()) return push_bool(c, iequal(cat, "MISSILE") || iequal(cat, "ROCKET") || iequal(cat, "MPTL_ROCKET"));
-    const int32_t v = ty->get_enum(t, "Projectile_Category");
+    const std::string_view cat = ty->get_string(t, objects::tags::Projectile_Category);
+    if (!cat.empty()) return push_bool(c, ascii_iequals(cat, "MISSILE") || ascii_iequals(cat, "ROCKET") || ascii_iequals(cat, "MPTL_ROCKET"));
+    const int32_t v = ty->get(t, objects::tags::Projectile_Category);
     return push_bool(c, v >= 0 && v < 32 && ((0x52u >> v) & 1u) != 0);
 }
 
@@ -320,13 +276,13 @@ int m_get_parent_mode_object(Call& c) {
 int g_create_cinematic_transport(Call& c) {
     constexpr const char* kName = "Create_Cinematic_Transport";
     objects::ObjectStore* st = store(c);
-    if (!st || st->mode() != objects::ModeKind::Land) return script_error(c, "%s -- only available in land tactical mode", kName);
-    if (c.nargs < 8) return script_error(c, "%s -- invalid number of parameters. Expected 8 or 9, got %d.", kName, c.nargs);
-    if (!c.is_string(1)) return script_error(c, "%s -- invalid type for parameter 1. Expected type name.", kName);
+    if (!st || st->mode() != objects::ModeKind::Land) return c.script_error_stop("%s -- only available in land tactical mode", kName);
+    if (c.nargs < 8) return c.script_error_stop("%s -- invalid number of parameters. Expected 8 or 9, got %d.", kName, c.nargs);
+    if (!c.is_string(1)) return c.script_error_stop("%s -- invalid type for parameter 1. Expected type name.", kName);
     // Arguments 2 and 4..8: a wrong type logs the error and keeps the default (§3.1 table).
     int32_t player = 0;
     if (c.is_number(2)) player = detail::to_int(c.number(2));
-    else script_error(c, "%s -- invalid type for parameter 2. Expected player id.", kName);
+    else c.script_error_stop("%s -- invalid type for parameter 2. Expected player id.", kName);
     Vec3 pos{};
     bool have_pos = false;
     if (const Ud* o = c.userdata(3, detail::cls_game_object()); o && detail::object_alive(*c.vm, *o)) {
@@ -336,10 +292,10 @@ int g_create_cinematic_transport(Call& c) {
         pos = position_of(*p);
         have_pos = true;
     }
-    if (!have_pos) return script_warning(c, "%s -- unable to get a position from parameter 3", kName);
+    if (!have_pos) return c.script_warning("%s -- unable to get a position from parameter 3", kName);
     auto number = [&c](int i, double fallback) {
         if (c.is_number(i)) return c.number(i);
-        script_error(c, "Create_Cinematic_Transport -- invalid type for parameter %d. Expected number.", i);
+        c.script_error_stop("Create_Cinematic_Transport -- invalid type for parameter %d. Expected number.", i);
         return fallback;
     };
     const float z_angle = static_cast<float>(number(4, 0.0));
@@ -350,17 +306,17 @@ int g_create_cinematic_transport(Call& c) {
     std::string hint;
     if (c.has(9)) {
         if (c.is_string(9)) hint = std::string(c.string(9));
-        else script_error(c, "%s -- invalid type for parameter 9. Expected hint name.", kName);
+        else c.script_error_stop("%s -- invalid type for parameter 9. Expected hint name.", kName);
     }
     const objects::GameObjectTypes* ty = types(c);
     const TypeIndex t = ty ? ty->raw().find(c.string(1)) : objects::kNone;
     if (t == objects::kNone || t >= ty->size()) return push_nil(c);
     // 0x2cb7a0: TRANSPORT and type byte +0x65 (Has_Space_Evaluator [M]) clear, else nothing is created.
-    if (!type_has(c, t, objects::beh::Transport) || ty->get_bool(t, "Has_Space_Evaluator")) return push_nil(c);
+    if (!type_has(c, t, objects::beh::Transport) || ty->get(t, objects::tags::Has_Space_Evaluator)) return push_nil(c);
     TacticalScriptHooks* hk = hooks(c);
     float z = pos.z;
     if (hk && hk->ground_height) z = std::max(z, hk->ground_height(pos.x, pos.y));
-    z += ty->get_float(t, "Hover_Offset");
+    z += ty->get(t, objects::tags::Hover_Offset);
     // Facing (0, 0, z_angle): a yaw in degrees [M] (shipped scripts pass 0) as the store's facing vector.
     const float yaw = z_angle * 0.017453292519943295f;
     objects::SpawnParams sp;
@@ -386,10 +342,10 @@ int g_create_cinematic_transport(Call& c) {
 int g_start_cinematic_space_retreat(Call& c) {
     constexpr const char* kName = "Start_Cinematic_Space_Retreat";
     objects::ObjectStore* st = store(c);
-    if (!st || st->mode() != objects::ModeKind::Space) return script_error(c, "%s -- only available in space tactical mode", kName);
+    if (!st || st->mode() != objects::ModeKind::Space) return c.script_error_stop("%s -- only available in space tactical mode", kName);
     int32_t player = 0;
     if (c.is_number(1)) player = detail::to_int(c.number(1));
-    else script_error(c, "%s -- invalid type for parameter 1. Expected player id.", kName);
+    else c.script_error_stop("%s -- invalid type for parameter 1. Expected player id.", kName);
     int32_t delay = 0;
     if (c.is_number(2)) delay = detail::to_int(c.number(2) * 30.0);
     const objects::GameObjectTypes* ty = types(c);
@@ -404,13 +360,13 @@ int g_start_cinematic_space_retreat(Call& c) {
     for (const ObjectHandle h : st->owned_by(player)) {
         if (!st->active(h) || !st->has_behavior(h, objects::beh::Locomotor) || st->attach_parent(h) || st->container(h)) continue;
         const TypeIndex t = st->type(h);
-        units.push_back({h, (ty && t < ty->size()) ? ty->get_float(t, "Max_Speed") : 0.0f, 0.0});
+        units.push_back({h, (ty && t < ty->size()) ? ty->get(t, objects::tags::Max_Speed) : 0.0f, 0.0});
     }
     // 2. Sort by speed, descending (0x3727a0 [M]: Max_Speed), stable.
     std::stable_sort(units.begin(), units.end(), [](const Entry& a, const Entry& b) { return a.speed > b.speed; });
     ObjectHandle marker;
-    for (const ObjectHandle h : st->all_objects())
-        if (st->active(h) && iequal(type_name(c, st->type(h)), "Attacker Entry Position")) {
+    for (const ObjectHandle h : detail::script_objects(*st))
+        if (st->active(h) && ascii_iequals(type_name(c, st->type(h)), "Attacker Entry Position")) {
             marker = h;
             break;
         }
@@ -449,15 +405,14 @@ int g_start_cinematic_space_retreat(Call& c) {
         }
         std::stable_sort(units.begin(), units.end(), [](const Entry& a, const Entry& b) { return a.dist < b.dist; });
     } else {
-        script_warning(c, "%s -- no ATTACKER ENTRY POSITION marker: units are not lined up", kName);  // [port]
+        c.script_warning("%s -- no ATTACKER ENTRY POSITION marker: units are not lined up", kName);  // [port]
     }
     // 3. Staggered hyperspace out.
     const int32_t increment = (hk && hk->retreat_increment_frames) ? hk->retreat_increment_frames(player) : 0;
-    if (!(hk && (hk->hyperspace_out || hk->hyperspace_out_link)) && !units.empty())
-        script_warning(c, "%s -- no hyperspace host: %d units lined up, none jumps", kName, static_cast<int>(units.size()));
+    if (!(hk && hk->hyperspace_out_link) && !units.empty())
+        c.script_warning("%s -- no hyperspace host: %d units lined up, none jumps", kName, static_cast<int>(units.size()));
     for (const Entry& e : units) {
         if (hk && hk->hyperspace_out_link) hk->hyperspace_out_link(e.h, delay, false);  // L1 final: keep = false (§3.4)
-        else if (hk && hk->hyperspace_out) hk->hyperspace_out(e.h, delay);
         delay += increment;
     }
     return 0;
@@ -465,13 +420,7 @@ int g_start_cinematic_space_retreat(Call& c) {
 
 // ---------------------------------------------------------------- §5.2 Apply_Markup
 
-ScriptMarkupHost* markup_of(lua_State* L) {
-    lua_pushstring(L, kMarkupHostKey);
-    lua_rawget(L, LUA_REGISTRYINDEX);
-    void* p = lua_type(L, -1) == LUA_TLIGHTUSERDATA ? lua_touserdata(L, -1) : nullptr;
-    lua_pop(L, 1);
-    return static_cast<ScriptMarkupHost*>(p);
-}
+ScriptMarkupHost* markup_of(lua_State* L) { return detail::registry_ptr<ScriptMarkupHost>(L, kMarkupHostKey); }
 
 // Pushes the markup record table of the VM (created on first use).
 void push_markup_table(lua_State* L) {
@@ -515,10 +464,10 @@ void markup_targets_of(Call& c, int i, int32_t caller, ScriptMarkupHost* host, s
 
 int g_apply_markup(Call& c) {
     constexpr const char* kName = "Apply_Markup";
-    if (c.nargs != 3 && c.nargs != 4) return script_error(c, "%s -- invalid number of parameters. Expected 3 or 4, got %d.", kName, c.nargs);
+    if (c.nargs != 3 && c.nargs != 4) return c.script_error_stop("%s -- invalid number of parameters. Expected 3 or 4, got %d.", kName, c.nargs);
     const Ud* player = c.userdata(1, detail::cls_player());
-    if (!player) return script_error(c, "%s -- invalid type for parameter 1. Expected player.", kName);
-    if (!c.is_number(3)) return script_error(c, "%s -- invalid type for parameter 3. Expected number.", kName);
+    if (!player) return c.script_error_stop("%s -- invalid type for parameter 1. Expected player.", kName);
+    if (!c.is_number(3)) return c.script_error_stop("%s -- invalid type for parameter 3. Expected number.", kName);
     const double amount = c.number(3);
     lua_State* L = c.L;
     ScriptMarkupHost* host = markup_of(L);
@@ -570,7 +519,7 @@ int g_apply_markup(Call& c) {
         markup_targets_of(c, arg2, player->id, host, targets);
     } else {
         lua_settop(L, mt - 1);
-        return script_error(c, "%s -- invalid type for parameter 2.", kName);
+        return c.script_error_stop("%s -- invalid type for parameter 2.", kName);
     }
     int count = 0;
     for (const int32_t t : targets) {
@@ -627,28 +576,20 @@ int land_task_force_fire_special_weapon(Call& c, const char* kName, const std::v
     objects::ObjectStore* st = store(c);
     const objects::GameObjectTypes* ty = types(c);
     TacticalScriptHooks* hk = hooks(c);
-    if (c.nargs != 2) return script_error(c, "%s -- invalid number of parameters: expected 2 got %d", kName, c.nargs);
-    if (!c.is_string(1)) return script_error(c, "%s -- invalid type for parameter 1. Expected string", kName);
+    if (c.nargs != 2) return c.script_error_stop("%s -- invalid number of parameters: expected 2 got %d", kName, c.nargs);
+    if (!c.is_string(1)) return c.script_error_stop("%s -- invalid type for parameter 1. Expected string", kName);
     const std::string name(c.string(1));
     const TypeIndex t = ty ? ty->raw().find(name) : objects::kNone;
     // 0x370320(type, 0x37, 1): the Land behaviour set only (a type with it in <Behavior> alone is refused).
     const bool lobbing = t != objects::kNone && t < ty->size() && ty->has_behavior(t, objects::BehaviorSet::Land, kBehLobbing);
-    if (!lobbing) return script_error(c, "%s -- %s is not a land special weapon!", kName, name.c_str());
+    if (!lobbing) return c.script_error_stop("%s -- %s is not a land special weapon!", kName, name.c_str());
+    // An AI target ([M] the unit target's position getter, vf +0x68: its object's position, else the host's target
+    // position) or a game object; ref5 t03: converted by detail::position_arg, the argument's class tested here first.
+    if (!c.userdata(2, cls_target()) && !c.userdata(2, detail::cls_game_object()))
+        return c.script_error_stop("%s -- Invalid type for parameter 1.  Expected game object or target location", kName);
     Vec3 point;
-    if (const Ud* a = c.userdata(2, cls_target())) {
-        AiScriptHost* ai = c.vm->owner ? ai_host(*c.vm->owner) : nullptr;
-        const ObjectHandle h = ai && ai->target_valid(a->id) ? ai->target_object(a->id) : ObjectHandle{};
-        if (h && st->alive(h)) {
-            point = st->position(h);  // [M] the unit target's position getter (vf +0x68): the object's position
-        } else if (!(ai && ai->target_valid(a->id) && ai->target_position(a->id, point))) {
-            return script_warning(c, "%s -- target is already dead.  Aborting.", kName);
-        }
-    } else if (const Ud* o = c.userdata(2, detail::cls_game_object())) {
-        if (!detail::object_alive(*c.vm, *o)) return script_warning(c, "%s -- target is already dead.  Aborting.", kName);
-        point = st->position(detail::object_handle(*o));
-    } else {
-        return script_error(c, "%s -- Invalid type for parameter 1.  Expected game object or target location", kName);
-    }
+    if (detail::position_arg(c, 2, point) != detail::PosArg::Ok)
+        return c.script_warning("%s -- target is already dead.  Aborting.", kName);
     const ObjectBridge* b = bridge(c);
     for (const ObjectHandle u : units) {
         if (!st->alive(u) || !st->has_behavior(u, kBehLobbing) || readiness(hk, u) < 1.0f) continue;
@@ -676,9 +617,9 @@ int detail::task_force_fire_special_weapon(Call& c, bool space, const std::vecto
     const TypeIndex t = type_arg(c, 1, name);
     ObjectHandle target;
     (void)target_arg(c, 2, target);
-    if (t == objects::kNone || !ty || t >= ty->size() || !ty->get_bool(t, "Is_Special_Weapon_In_Space"))
-        return script_error(c, "%s -- %s is not a space special weapon", kName, name.c_str());
-    if (!target) return script_error(c, "%s -- Expected game object", kName);
+    if (t == objects::kNone || !ty || t >= ty->size() || !ty->get(t, objects::tags::Is_Special_Weapon_In_Space))
+        return c.script_error_stop("%s -- %s is not a space special weapon", kName, name.c_str());
+    if (!target) return c.script_error_stop("%s -- Expected game object", kName);
     if (player < 0)
         for (const ObjectHandle u : units)
             if (st->alive(u)) {
@@ -686,20 +627,20 @@ int detail::task_force_fire_special_weapon(Call& c, bool space, const std::vecto
                 break;
             }
     if (!upgrade_gate(c, player)) {
-        script_warning(c, "%s -- special weapons not available. Purchase a special weapon upgrade", kName);
+        c.script_warning("%s -- special weapons not available. Purchase a special weapon upgrade", kName);
         return push_bool(c, false);
     }
     const TypeIndex tt = st->type(target);
     // Special_Weapon_Valid_Targets (+0x1df0): a list of GameObjectCategoryType names -> CategoryMask bits.
-    uint64_t valid = ty->get_mask(t, "Special_Weapon_Valid_Targets");
+    uint64_t valid = ty->get(t, objects::tags::Special_Weapon_Valid_Targets);
     if (valid == 0)
-        for (const std::string_view n : ty->get_list(t, "Special_Weapon_Valid_Targets"))
+        for (const std::string_view n : ty->get_list(t, objects::tags::Special_Weapon_Valid_Targets))
             if (const auto m = ty->enums().get(objects::EnumId::GameObjectCategory).convert(n)) valid |= static_cast<uint64_t>(*m);
-    if (tt >= ty->size() || (ty->get_mask(tt, "CategoryMask") & valid) == 0) return push_bool(c, false);
+    if (tt >= ty->size() || (ty->get(tt, objects::tags::CategoryMask) & valid) == 0) return push_bool(c, false);
     for (const ObjectHandle u : units) {
         if (!st->alive(u) || st->type(u) != t || !st->has_behavior(u, kBehSpecialWeapon) || readiness(hk, u) < 1.0f) continue;
-        if (!(hk && hk->begin_targeting && hk->begin_targeting(u))) return script_error(c, "%s -- unable to begin targeting", kName);
-        if (!(hk->fire_at_object && hk->fire_at_object(u, target))) return script_error(c, "%s -- unable to fire", kName);
+        if (!(hk && hk->begin_targeting && hk->begin_targeting(u))) return c.script_error_stop("%s -- unable to begin targeting", kName);
+        if (!(hk->fire_at_object && hk->fire_at_object(u, target))) return c.script_error_stop("%s -- unable to fire", kName);
         destroy_after_sweep(c, st->owner(u));
         detail::push_object(c.L, *c.vm, u);
         return 1;
@@ -710,13 +651,7 @@ int detail::task_force_fire_special_weapon(Call& c, bool space, const std::vecto
 // ---------------------------------------------------------------- markup host
 
 void attach_markup_host(LuaVm& vm, ScriptMarkupHost* host) {
-    lua_State* L = vm.state();
-    lua_pushstring(L, kMarkupHostKey);
-    if (host)
-        lua_pushlightuserdata(L, host);
-    else
-        lua_pushnil(L);
-    lua_rawset(L, LUA_REGISTRYINDEX);
+    detail::set_registry_ptr(vm.state(), kMarkupHostKey, host);
 }
 ScriptMarkupHost* markup_host(LuaVm& vm) { return markup_of(vm.state()); }
 
@@ -763,7 +698,7 @@ void CinematicTransports::service(uint32_t frame, const std::function<uint32_t(O
         const float played = static_cast<float>(l.anim_offset) + static_cast<float>(frame - l.anim_start) * l.anim_speed;
         return played / static_cast<float>(n);
     };
-    auto idle_frames = [](float seconds) { return seconds > 0.0f ? static_cast<uint32_t>(seconds * 30.0f) : 0u; };
+    auto idle_frames = [](float seconds) { return seconds > 0.0f ? static_cast<uint32_t>(frames_trunc(seconds * 30.0f)) : 0u; };
     std::vector<ObjectId> gone;
     for (CinematicLanding& l : list_) {
         if (!l.initialised) {  // 0x644040

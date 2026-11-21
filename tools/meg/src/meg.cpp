@@ -272,8 +272,55 @@ const Entry* Archive::find(std::string_view name) const {
     return nullptr;
 }
 
+size_t Archive::probe(uint32_t crc) const {
+    // The window [lo, lo + n) shrinks the way the CRT's bsearch shrinks it: an odd window probes its middle, an even one
+    // the lower of its two middles; the first equal record ends the search.
+    size_t lo = 0, n = entries_.size();
+    while (n > 0) {
+        const size_t half = n / 2;
+        if (half == 0) return entries_[lo].crc == crc ? lo : SIZE_MAX;
+        const size_t mid = lo + ((n & 1) ? half : half - 1);
+        const uint32_t at = entries_[mid].crc;
+        if (at == crc) return mid;
+        if (crc < at) {
+            n = mid - lo;
+        } else {
+            lo = mid + 1;
+            n = half;
+        }
+    }
+    return SIZE_MAX;
+}
+
+const Entry* Archive::lookup_crc(uint32_t crc) const {
+    const size_t p = probe(crc);
+    if (p == SIZE_MAX) return nullptr;
+    const uint32_t data = entries_[p].index;
+    return data < entries_.size() ? &entries_[data] : nullptr;
+}
+
+const Entry* Archive::lookup(std::string_view name) const { return lookup_crc(name_crc(name)); }
+
+Archive::TableIssues Archive::table_issues() const {
+    TableIssues t;
+    const auto note = [](uint32_t& count, std::string& first, const std::string& name) {
+        if (count++ == 0) first = name;
+    };
+    for (size_t i = 0; i < entries_.size(); ++i) {
+        const Entry& e = entries_[i];
+        if (i > 0 && e.crc < entries_[i - 1].crc) t.unsorted = true;
+        const size_t p = probe(e.crc);
+        if (p == SIZE_MAX) note(t.unreachable, t.first_unreachable, e.name);
+        else if (p != i) note(t.duplicate, t.first_duplicate, e.name);
+        if (name_crc(e.name) != e.crc) note(t.name_mismatch, t.first_name_mismatch, e.name);
+        if (e.index != i) note(t.index_redirect, t.first_index_redirect, e.name);
+    }
+    return t;
+}
+
 bool Archive::read(const Entry& e, std::vector<uint8_t>& out) const {
-    if (e.encrypted()) return false;
+    // Bounds first: a corrupt table can claim a 4 GB entry, which must fail here instead of allocating (found by fuzz_meg).
+    if (e.encrypted() || uint64_t(e.offset) + e.size > src_->size()) return false;
     out.resize(e.size);
     return src_->read(e.offset, out.data(), e.size);
 }

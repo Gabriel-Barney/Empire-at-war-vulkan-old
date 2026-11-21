@@ -8,6 +8,7 @@
 #include <utility>
 
 #include "alamo/core/bytes.hpp"
+#include "alamo/core/frames.hpp"
 #include "alamo/core/sim_crc.hpp"
 #include "alamo/lua/lua_vm.hpp"
 #include "vm_internal.hpp"
@@ -16,9 +17,8 @@ namespace alamo::lua {
 
 uint32_t seconds_to_frames(double seconds) {
     if (!(seconds > 0.0)) return 0;  // also NaN
-    const double f = std::ceil(seconds * static_cast<double>(kSimFramesPerSecond));
-    if (f >= 2147483648.0) return 0x80000000u;
-    return static_cast<uint32_t>(f);
+    // ref4 t03: alamo/core/frames.hpp; out of int32 range the x86 0x80000000, read unsigned.
+    return static_cast<uint32_t>(frames_ceil(seconds * static_cast<double>(kSimFramesPerSecond)));
 }
 
 std::string_view op_name(PresentationOp op) {
@@ -93,6 +93,8 @@ std::string_view op_name(PresentationOp op) {
         "Resume_Hyperspace_In",
         "GameObjectWrapper.Show_Emitter",
         "GameObjectWrapper.Play_Cinematic_Engine_Flyby",
+        "GameObjectWrapper.Highlight",
+        "GameObjectWrapper.Highlight_Small",
     };
     static_assert(std::size(kNames) == static_cast<size_t>(PresentationOp::Count));
     const auto i = static_cast<size_t>(op);
@@ -221,13 +223,11 @@ namespace {
 constexpr uint32_t kPresentationSaveVersion = 1;
 constexpr size_t kArgBytes = 1 + 1 + 8 + 4 + 4;
 
+// ByteReader::count, plus fail(): a rejected read leaves the reader !ok() (the tests rely on it).
 bool read_count(ByteReader& r, size_t record_bytes, uint32_t& n) {
-    n = r.u32();
-    if (!r.ok() || static_cast<uint64_t>(n) * record_bytes > r.remaining()) {
-        r.fail();
-        return false;
-    }
-    return true;
+    if (r.count(n, record_bytes)) return true;
+    r.fail();
+    return false;
 }
 
 void put_arg(ByteWriter& w, const PresentationArg& a) {
@@ -507,13 +507,7 @@ PresentationLog& detail::presentation_of(lua_State* L) {
 }
 
 void attach_presentation(LuaVm& vm, PresentationLog* log) {
-    lua_State* L = vm.state();
-    lua_pushstring(L, kLogKey);
-    if (log)
-        lua_pushlightuserdata(L, log);
-    else
-        lua_pushnil(L);
-    lua_rawset(L, LUA_REGISTRYINDEX);
+    detail::set_registry_ptr(vm.state(), kLogKey, log);
 }
 
 PresentationLog& presentation(LuaVm& vm) { return detail::presentation_of(vm.state()); }

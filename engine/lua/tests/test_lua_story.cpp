@@ -2,16 +2,19 @@
 // order, checksum) and the story bindings (Story_Event, Get_Story_Plot, StoryPlot/EventWrapper,
 // objectives, radar blips, planet highlights, Check_Story_Flag). With ALAMO_FOC_DATA: loads the
 // shipped FoC campaign plot sets through the VFS, runs them and drives PGStoryMode.lua.
+#include <algorithm>
 #include <cstdio>
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
+#include <initializer_list>
 #include <memory>
 #include <string>
 #include <vector>
 
 #include "alamo/core/bytes.hpp"
 #include "alamo/core/file_provider.hpp"
+#include "alamo/core/host_fs.hpp"
 #include "alamo/core/log.hpp"
 #include "alamo/core/sim_crc.hpp"
 #include "alamo/lua/ai_bridge.hpp"  // reset_script_threads
@@ -21,6 +24,7 @@
 #include "alamo/objects/game_object_types.hpp"
 #include "alamo/objects/object_store.hpp"
 #include "alamo/objects/object_types.hpp"
+#include "alamo/test/support.hpp"
 #ifdef ALAMO_LUA_HAVE_VFS
 #include "alamo/vfs/vfs.hpp"
 #endif
@@ -31,14 +35,7 @@ using namespace alamo;
 using namespace alamo::lua;
 namespace fs = std::filesystem;
 
-static int g_fail = 0;
-#define CHECK(c)                                                     \
-    do {                                                             \
-        if (!(c)) {                                                  \
-            std::printf("FAIL %s:%d: %s\n", __FILE__, __LINE__, #c); \
-            ++g_fail;                                                \
-        }                                                            \
-    } while (0)
+using ::alamo::test::g_fail;
 
 static std::string run(LuaVm& vm, const std::string& code) {
     std::string err;
@@ -67,10 +64,7 @@ static uint64_t digest(const StoryModel& m) {
     return h.digest();
 }
 
-static void write_file(const fs::path& p, const std::string& s) {
-    fs::create_directories(p.parent_path());
-    std::ofstream(p, std::ios::binary) << s;
-}
+using ::alamo::test::write_file;
 
 // ------------------------------------------------------------------------------------------
 // Synthetic plot: every firing rule with a hand-computed order.
@@ -231,6 +225,40 @@ static void test_synthetic() {
         std::printf("  t9 timer: ELAPSED 2 fired at frame %u\n", fired_at);
         CHECK(fired_at == 61 && t.fired().size() == 1);
     }
+    // bkc1 t04 (backlog b0012; Q6_T15_RETAIL_RUN.md row 3 [H]): a Perpetual prereq-less ELAPSED T driven by the host's T9
+    // series. Retail: T = 2 repeats every 61 frames (T x 30 + 1: the re-arm's next T9 only records LastTime), T = 0.7
+    // alternates 22 / 23 frames (T x 30 = 21 is not a whole frame count in float time).
+    {
+        auto periods = [](const char* t_param, uint32_t frames) {
+            const std::string xml = std::string("<Story><Event Name=\"Cycle\"><Event_Type>STORY_ELAPSED</Event_Type><Event_Param1>") +
+                                    t_param + "</Event_Param1><Perpetual>Yes</Perpetual></Event></Story>";
+            StoryModel c;
+            std::string ec;
+            CHECK(c.add_plot("Story_Cycle.xml", xml.c_str(), true, "", &ec) == 0);
+            std::vector<uint32_t> at;
+            size_t seen = 0;
+            for (uint32_t f = 1; f <= frames; ++f) {
+                c.update(f, StoryModel::t9_seconds(f, 1.0f / 30.0f));
+                for (; seen < c.fired().size(); ++seen) at.push_back(f);
+            }
+            std::vector<uint32_t> d;
+            for (size_t i = 1; i < at.size(); ++i) d.push_back(at[i] - at[i - 1]);
+            return d;
+        };
+        const std::vector<uint32_t> two = periods("2", 1300);
+        CHECK(two.size() >= 19);
+        for (uint32_t p : two) CHECK(p == 61 || p == 62);
+        CHECK(std::count(two.begin(), two.end(), 61u) * 10 >= static_cast<std::ptrdiff_t>(two.size()) * 9);  // 38 of 39 in retail
+        const std::vector<uint32_t> cyc07 = periods("0.7", 1300);
+        uint32_t n22 = 0, n23 = 0;
+        for (uint32_t p : cyc07) {
+            CHECK(p == 22 || p == 23);
+            n22 += p == 22;
+            n23 += p == 23;
+        }
+        std::printf("  perpetual ELAPSED: T=2 %zu periods, T=0.7 %u x 22 + %u x 23 frames\n", two.size(), n22, n23);
+        CHECK(n22 > 0 && n23 > 0);  // both lengths occur
+    }
     // A2i t01 (A2I_T01_FRAME_ORDER.md §6, 0x454980): a prereq-less ELAPSED 0 only records its start at its first T9 and
     // fires at the second (tick 2 of the host); a prereq-armed ELAPSED 0 was initialised at its arming (vf7) and fires at
     // the first T9 after it, the same frame.
@@ -387,6 +415,17 @@ static void test_plots_file() {
     CHECK(fired_names(m) == "A1,B1,");  // second T9 after activation
     StoryModel bad;
     CHECK(!bad.load_plots(dp, "Missing.xml", &err) && !err.empty());
+    // modc t39 (STORY.md §2.1): a listed plot file that does not exist is skipped with a warning; the others load, and its
+    // pending Lua_Script does not pass to the next plot.
+    write_file(root / "Data/XML/Story_Plots_M.xml", "<Story_Mode_Plots><Lua_Script>Gone_Script</Lua_Script>"
+                                                    "<Active_Plot>Not_Shipped.xml</Active_Plot><Active_Plot>B.xml</Active_Plot>"
+                                                    "</Story_Mode_Plots>");
+    DirectoryProvider dpm(root.string());
+    StoryModel partial;
+    err.clear();
+    CHECK(partial.load_plots(dpm, "Story_Plots_M.xml", &err) && err.empty());
+    CHECK(partial.plot_count() == 1 && partial.find_plot("B.xml") == 0 && partial.plot(0).lua_script.empty() &&
+          partial.warnings().size() == 1);
     // Q6: names with a folder below Data\XML (Thrawn's Revenge) are read as written; a folder that does not exist falls
     // back to the base name (the FoC rule).
     write_file(root / "Data/XML/Conquests/Sub/Story_Plots_S.xml",
@@ -399,6 +438,19 @@ static void test_plots_file() {
     CHECK(sub.load_plots(dp2, "Conquests\\Sub\\Story_Plots_S.xml", &err));
     CHECK(sub.plot_count() == 2 && sub.find_plot("Conquests\\Sub\\S1.xml") == 0 &&
           sub.find_plot("Nowhere/B.xml") == 1 && sub.find_plot("S1.xml") == 0xFFFFFFFFu);
+    // modc t06: the root element's name is not checked, for the plots file and for the story file (a mod uses another
+    // root tag for both).
+    write_file(root / "Data/XML/Story_Plots_R.xml",
+               "<Mod_Files><Lua_Script>Script_R</Lua_Script><Active_Plot>R.xml</Active_Plot></Mod_Files>");
+    write_file(root / "Data/XML/R.xml", "<Mod_Files><Event Name=\"R1\"><Event_Type>STORY_ELAPSED</Event_Type>"
+                                        "<Event_Param1>0</Event_Param1></Event></Mod_Files>");
+    DirectoryProvider dp3(root.string());
+    StoryModel other_root;
+    CHECK(other_root.load_plots(dp3, "Story_Plots_R.xml", &err));
+    CHECK(other_root.plot_count() == 1 && other_root.plot(0).lua_script == "Script_R" && other_root.plot(0).active);
+    other_root.update(0, 0);
+    other_root.update(1, 1.0 / 30.0);
+    CHECK(fired_names(other_root) == "R1,");
     fs::remove_all(root, ec);
 }
 
@@ -410,7 +462,7 @@ static void test_bindings() {
     std::error_code ec;
     fs::remove_all(root, ec);
     write_file(root / "Data/XML/GameObjectFiles.xml", "<L><File>S.xml</File></L>");
-    write_file(root / "Data/XML/S.xml", "<R><Planet Name=\"Kuat\"></Planet><Prop Name=\"Rock\"></Prop></R>");
+    write_file(root / "Data/XML/S.xml", "<R><Planet Name=\"Kuat\"><Behavior>PLANET</Behavior></Planet><Prop Name=\"Rock\"></Prop></R>");
     DirectoryProvider dp(root.string());
     objects::ObjectTypeDatabase raw;
     CHECK(raw.load(dp));
@@ -422,7 +474,7 @@ static void test_bindings() {
     sp.type = raw.find("Kuat");
     const objects::ObjectHandle planet = store.create(sp);
     sp.type = raw.find("Rock");
-    store.create(sp);
+    const objects::ObjectHandle rock_object = store.create(sp);
 
     LuaHost host;
     host.store = &store;
@@ -457,7 +509,7 @@ static void test_bindings() {
                   "ev.Set_Reward_Type('screen_text')\n"
                   "ev.Add_Dialog_Text('TEXT_A', Object) ev.Clear_Dialog_Text() ev.Add_Dialog_Text('TEXT_B', 3)\n"
                   "Add_Objective('TEXT_LUA_OBJ', true)\n"
-                  "Add_Radar_Blip(Object, 'blip_1') Add_Radar_Blip(Object, 'blip_2') Remove_Radar_Blip('blip_1')\n"
+                  "Add_Radar_Blip(Object) Add_Radar_Blip(Object)\n"
                   "Add_Planet_Highlight(Object, '0') Remove_Planet_Highlight('0') Add_Planet_Highlight(Object, '1')") == "");
     CHECK(gstr(vm, "v") == "true" && gstr(vm, "eq") == "true" && gstr(vm, "ev_valid") == "true");
     CHECK(!vm.exit_requested());
@@ -474,10 +526,21 @@ static void test_bindings() {
     CHECK(def.reward_params.size() == 2 && def.reward_params[1].text == "7" && def.reward_type == "SCREEN_TEXT");
     // q6 t03: Add_Dialog_Text appends the formatted line (no text table: ids show as themselves).
     CHECK(def.dialog.size() == 1 && def.dialog[0] == "TEXT_B");
-    CHECK(m.blips().size() == 1 && m.blips()[0].name == "blip_2" && m.blips()[0].object_id == planet_id);
+    // mcx8 t12 (MCX8_BINDINGS_PLAYERS_STORY.md "Add_Radar_Blip"): galactic Add_Radar_Blip(planet) = the planet's
+    // highlight on (twice = once); Remove_Radar_Blip(planet) turns it off; a non-planet or the tactical form is an error.
+    CHECK(m.blips().size() == 1 && m.blips()[0].name.empty() && m.blips()[0].object_id == planet_id);
+    vm.set_object_global("Rock", rock_object);
+    CHECK(run(vm, "Add_Radar_Blip(Rock)") == "" && vm.exit_requested() && m.blips().size() == 1 &&
+          vm.messages().back().find("Add_Radar_Blip -- invalid type for parameter 1.  Expected planet.") != std::string::npos);
+    reset_script_threads(vm);
+    CHECK(run(vm, "Add_Radar_Blip(Object, 'n')") == "" && vm.exit_requested() && m.blips().size() == 1 &&
+          vm.messages().back().find("Add_Radar_Blip -- invalid number of parameters.  Expected 1, got 2.") != std::string::npos);
+    reset_script_threads(vm);
+    CHECK(run(vm, "Remove_Radar_Blip(Object)") == "" && m.blips().empty() && !vm.exit_requested());
+    CHECK(run(vm, "Add_Radar_Blip(Object)") == "" && m.blips().size() == 1);
     CHECK(m.highlights().size() == 1 && m.highlights()[0].name == "1");
     bool lua_obj = false;
-    for (const StoryObjective& o : m.objectives()) lua_obj = lua_obj || (o.text == "TEXT_LUA_OBJ" && o.from_lua);
+    for (const StoryObjective& o : m.objectives()) lua_obj = lua_obj || (o.text == "TEXT_LUA_OBJ" && o.battle_info);
     CHECK(lua_obj);
 
     // The Lua-set planet goes through the ENTER rule (planet name list): the old Param1 no longer matches, the planet does.
@@ -503,7 +566,7 @@ static void test_bindings() {
     CHECK(run(vm, "Story_Event(3)") == "" && vm.exit_requested() && last_msg_has("Expected string"));
     CHECK(run(vm, "Get_Story_Plot()") == "" && vm.exit_requested() && last_msg_has("Get_Story_Plot -- invalid number of parameters"));
     CHECK(run(vm, "Add_Objective('x')") == "" && vm.exit_requested() && last_msg_has("Expected 2, got 1"));
-    CHECK(run(vm, "Add_Radar_Blip(5, 'n')") == "" && vm.exit_requested() && last_msg_has("could not deduce a position"));
+    CHECK(run(vm, "Add_Radar_Blip(5)") == "" && vm.exit_requested() && last_msg_has("Expected planet."));
     CHECK(run(vm, "Get_Story_Plot('Story_Test.xml').Get_Event('Enter').Set_Reward_Parameter('a', 1)") == "" &&
           last_msg_has("Set_Reward_Parameter -- invalid type for parameter 1. Expected number."));
     CHECK(run(vm, "Get_Story_Plot('Story_Test.xml').Get_Event('Enter').Set_Reward_Parameter(1, {})") == "" &&
@@ -882,10 +945,77 @@ static void test_ai_flags() {
     attach_story(vm, &m);
     m.raise_ai_flag(2, "Attack_Here", -1);
     // PlayerWrapper userdata come from the players family; use the C++ API for the flag itself.
-    CHECK(!m.check_ai_flag(1, "attack_here", -1, false));
-    CHECK(m.check_ai_flag(2, "ATTACK_HERE", -1, false));
-    CHECK(m.check_ai_flag(2, "attack_here", -1, true));
-    CHECK(!m.check_ai_flag(2, "attack_here", -1, true));
+    // mcx8 t12 (MCX8_BINDINGS_PLAYERS_STORY.md "Check_Story_Flag"): the name is compared exactly (case kept).
+    CHECK(!m.check_ai_flag(1, "Attack_Here", -1, false));
+    CHECK(!m.check_ai_flag(2, "ATTACK_HERE", -1, false) && !m.check_ai_flag(2, "attack_here", -1, true));
+    CHECK(m.check_ai_flag(2, "Attack_Here", -1, false));
+    CHECK(m.check_ai_flag(2, "Attack_Here", -1, true));
+    CHECK(!m.check_ai_flag(2, "Attack_Here", -1, true));
+}
+
+// mcx8 t12 (docs/re/MCX8_BINDINGS_PLAYERS_STORY.md "Add_Radar_Blip", "Add_Objective"): the tactical Add_Radar_Blip appends
+// (the same name twice = two blips), takes any position source (a PositionWrapper gives a fixed blip) and
+// Remove_Radar_Blip(name) removes the oldest blip of that name; Add_Objective keeps its section boolean.
+static void test_mcx8_t12_tactical() {
+    const fs::path root = fs::temp_directory_path() / "alamo_lua_story_mcx8_t12";
+    std::error_code ec;
+    fs::remove_all(root, ec);
+    write_file(root / "Data/XML/GameObjectFiles.xml", "<L><File>S.xml</File></L>");
+    write_file(root / "Data/XML/S.xml", "<R><Prop Name=\"Rock\"></Prop></R>");
+    DirectoryProvider dp(root.string());
+    objects::ObjectTypeDatabase raw;
+    CHECK(raw.load(dp));
+    objects::GameObjectTypes types;
+    CHECK(types.build(raw));
+    objects::IdCounter ids;
+    objects::ObjectStore store(objects::ModeKind::Land, objects::StoreKind::Primary, types, &ids);
+    objects::SpawnParams sp;
+    sp.type = raw.find("Rock");
+    sp.position = Vec3{10.0f, 20.0f, 0.0f};
+    const objects::ObjectHandle rock = store.create(sp);
+    const objects::ObjectHandle gone = store.create(sp);
+    StoryModel m;
+    LuaHost host;
+    host.store = &store;
+    host.types = &types;
+    LuaVm vm(host);
+    attach_story(vm, &m);
+    vm.set_object_global("Rock", rock);
+    vm.set_object_global("Gone", gone);
+    CHECK(store.destroy(gone));
+    CHECK(run(vm, "Add_Radar_Blip(Rock, 'b') Add_Radar_Blip(Create_Position(1, 2, 3), 'b') Add_Radar_Blip(Rock, 'c')") == "");
+    const int32_t rock_id = static_cast<int32_t>(store.id(rock));
+    CHECK(m.blips().size() == 3 && m.blips()[0].name == "b" && m.blips()[0].object_id == rock_id && m.blips()[1].name == "b" &&
+          m.blips()[1].object_id == -1 && m.blips()[1].x == 1.0f && m.blips()[1].y == 2.0f && m.blips()[1].z == 3.0f);
+    CHECK(run(vm, "Remove_Radar_Blip('b')") == "" && m.blips().size() == 2 && m.blips()[0].object_id == -1 &&
+          m.blips()[1].name == "c");
+    CHECK(run(vm, "Add_Radar_Blip(Gone, 'd')") == "" && vm.exit_requested() && m.blips().size() == 2 &&
+          vm.messages().back().find("Add_Radar_Blip -- could not deduce a position from parameter 1.") != std::string::npos);
+    reset_script_threads(vm);
+    CHECK(run(vm, "Add_Radar_Blip(Rock)") == "" && vm.exit_requested() &&
+          vm.messages().back().find("Expected 2, got 1.") != std::string::npos);
+    reset_script_threads(vm);
+    CHECK(run(vm, "Add_Radar_Blip(Rock, 5)") == "" && vm.exit_requested() &&
+          vm.messages().back().find("Add_Radar_Blip -- invalid type for parameter 2. Expected strng.") != std::string::npos);
+    reset_script_threads(vm);
+    // A fixed blip moves the story hash (an object blip hashes as before).
+    StoryModel a, b;
+    a.add_blip(StoryBlip{"x", -1, 1.0f, 0.0f, 0.0f});
+    b.add_blip(StoryBlip{"x", -1, 2.0f, 0.0f, 0.0f});
+    StateHasher ha, hb;
+    a.hash(ha);
+    b.hash(hb);
+    CHECK(ha.digest() != hb.digest());
+    // Save keeps the blip position (story save v3).
+    ByteWriter w;
+    m.write(w);
+    StoryModel back;
+    ByteReader r(w.bytes());
+    CHECK(back.read(r) && back.blips().size() == 2 && back.blips()[0].x == 1.0f && back.blips()[0].z == 3.0f);
+
+    // Add_Objective: the boolean picks the panel section (true = battle info, false = numbered objective).
+    CHECK(run(vm, "Add_Objective('TEXT_INFO', true) Add_Objective('TEXT_GOAL', false)") == "" && m.objectives().size() == 2 &&
+          m.objectives()[0].battle_info && !m.objectives()[1].battle_info);
 }
 
 // ------------------------------------------------------------------------------------------
@@ -1043,7 +1173,8 @@ static void test_branches() {
     CHECK(fired_count(m, "Loop") == 4 && m.plot(0).state[m.find_event(0, "Loop")].fire_count == 4);
 }
 
-// l1s3 t01 / t02: Timeout expiry fires the event [L]; the T9 paused flag stops ELAPSED accumulation.
+// l1s3 t01 / t02, storyb t17: Timeout expiry cancels the timeout and fires nothing (STORY.md §8 item 4 [M]); the event
+// stays armed for its own trigger. The T9 paused flag stops ELAPSED accumulation.
 static void test_timeouts_and_pause() {
     StoryModel m;
     std::string err;
@@ -1064,13 +1195,15 @@ static void test_timeouts_and_pause() {
     m.update(2, 2.9);
     CHECK(fired_count(m, "Timed") == 0);
     m.update(3, 3.0);
-    CHECK(fired_count(m, "Timed") == 1 && fired_count(m, "Early") == 1);
+    CHECK(fired_count(m, "Timed") == 0 && fired_count(m, "Early") == 1);  // expired: not fired
+    CHECK(m.plot(0).state[2].timeout_at < 0.0 && m.plot(0).state[2].armed);  // cancelled, still armed
+    CHECK(m.story_event("NEVER") == 1 && fired_count(m, "Timed") == 1);      // its own trigger still fires it
     m.update(4, 60.9);
-    CHECK(fired_count(m, "Speech") == 0);
+    CHECK(m.plot(0).state[1].timeout_at == 61.0);  // SPEECH_DONE's default 60 s Timeout, from its activation at 1.0
     m.update(5, 61.0);
-    CHECK(fired_count(m, "Speech") == 1);  // SPEECH_DONE's default 60 s Timeout, from its activation at 1.0
+    CHECK(fired_count(m, "Speech") == 0 && m.plot(0).state[1].timeout_at < 0.0);
     m.update(6, 100.0);
-    CHECK(fired_count(m, "Free") == 0);  // a Timeout is registered when an event is armed by prereqs, never at load
+    CHECK(fired_count(m, "Free") == 0 && m.plot(0).state[4].timeout_at < 0.0);  // registered only when armed by prereqs
 
     // Paused T9s add nothing even when the time argument moves; time goes on from the paused T9's value.
     StoryModel p;
@@ -1154,24 +1287,10 @@ static void test_coverage() {
 // ------------------------------------------------------------------------------------------
 // Shipped FoC campaigns (ALAMO_FOC_DATA).
 
-static std::string env(const char* name) {
-#ifdef _MSC_VER
-    char* v = nullptr;
-    size_t len = 0;
-    std::string out;
-    if (_dupenv_s(&v, &len, name) == 0 && v) {
-        out = v;
-        std::free(v);
-    }
-    return out;
-#else
-    const char* v = std::getenv(name);
-    return v ? std::string(v) : std::string();
-#endif
-}
+using ::alamo::test::env_or_empty;
 
 static void test_foc_campaigns() {
-    const std::string root = env("ALAMO_FOC_DATA");
+    const std::string root = env_or_empty("ALAMO_FOC_DATA");
     if (root.empty()) {
         std::printf("  ALAMO_FOC_DATA unset: shipped campaign plots skipped\n");
         return;
@@ -1326,7 +1445,7 @@ static void test_unknown_prereq() {
 // printed. Thrawn_Empire's Empire set has the two `Unlock_Wayland` warnings (a data error in the mod, see above).
 static void test_tr_campaign_plots() {
 #ifdef ALAMO_LUA_HAVE_VFS
-    const std::string foc = env("ALAMO_FOC_DATA");
+    const std::string foc = env_or_empty("ALAMO_FOC_DATA");
     const size_t at = foc.find("\\steamapps\\common\\");
     const std::string tr = at == std::string::npos ? std::string() : foc.substr(0, at) + "\\steamapps\\workshop\\content\\32470\\1125571106";
     if (tr.empty() || !fs::exists(path_from_utf8(tr + "\\Data\\XML\\GameObjectFiles.xml"))) {
@@ -1335,7 +1454,7 @@ static void test_tr_campaign_plots() {
     }
     vfs::VfsConfig cfg;
     cfg.foc_root = foc;
-    cfg.mod_paths = {tr};
+    cfg.mod_search = {{vfs::ModSearchEntry::Kind::Path, tr}};
     std::string err;
     std::unique_ptr<vfs::Vfs> files = vfs::Vfs::create(cfg, &err);
     CHECK(files != nullptr);
@@ -1359,14 +1478,135 @@ static void test_tr_campaign_plots() {
 #endif
 }
 
+// mcx6 t03: one event of `type` with Event_Param1.. (nullptr = absent) in a fresh model whose plot player is `player`;
+// the number of events one dispatch of `n` fires.
+static uint32_t one_event_fires(const char* type, std::initializer_list<const char*> params, const StoryNotification& n,
+                                int32_t player = 0) {
+    std::string xml = std::string("<Story><Event Name=\"E\"><Event_Type>") + type + "</Event_Type>";
+    int i = 1;
+    for (const char* p : params) {
+        if (p) xml += "<Event_Param" + std::to_string(i) + ">" + p + "</Event_Param" + std::to_string(i) + ">";
+        ++i;
+    }
+    xml += "</Event></Story>";
+    StoryModel m;
+    std::string err;
+    CHECK(m.add_plot("One.xml", xml, true, {}, &err) == 0);
+    m.set_player(player);
+    m.update(0, 0.0);
+    return m.dispatch(type, n);
+}
+
+// mcx6 t03 (docs/re/STORY.md §5 WIN/LOSE_BATTLES row and the note "Battle composition", mcx6 Q14): the location parse
+// and the space-only Ship_Class composition test of the retail match 0x455a50.
+static void test_battle_composition_rules() {
+    StoryNotification space;
+    space.planet = "KUAT";
+    space.location = 2;
+    space.local_player = 0;
+    space.local_classes = {3, 4, 0};  // corvette, frigate, fighter
+    space.other_classes = {5, -1};    // capital, a type without Ship_Class
+    StoryNotification land = space;
+    land.location = 1;
+    const char* W = "STORY_WIN_BATTLES";
+    const auto one = [](const char* type, std::initializer_list<const char*> p, const StoryNotification& n, int32_t player = 0) {
+        return one_event_fires(type, p, n, player);
+    };
+    // Param2: absent = EITHER; SPACE; EITHER; an unknown word reads GROUND ("Land" means land, BASE_SPACE reads GROUND).
+    CHECK(one(W, {"1"}, space) == 1 && one(W, {"1"}, land) == 1);
+    CHECK(one(W, {"1", "SPACE"}, space) == 1 && one(W, {"1", "SPACE"}, land) == 0);
+    CHECK(one(W, {"1", "EITHER"}, land) == 1 && one(W, {"1", "EITHER"}, space) == 1);
+    CHECK(one(W, {"1", "Land"}, land) == 1 && one(W, {"1", "Land"}, space) == 0);
+    CHECK(one(W, {"1", "BASE_SPACE"}, land) == 1 && one(W, {"1", "BASE_SPACE"}, space) == 0);
+    // Param3 with one value: no test (the shipped FILTER_FRIENDLY_ONLY).
+    CHECK(one(W, {"1", nullptr, "FILTER_FRIENDLY_ONLY"}, space) == 1 && one(W, {"1", nullptr, "ENEMY_CONTAINS"}, space) == 1);
+    // CONTAINS: every listed class in the side's list.
+    CHECK(one(W, {"1", nullptr, "FRIENDLY_CONTAINS CLASS_CORVETTE CLASS_FRIGATE"}, space) == 1);
+    CHECK(one(W, {"1", nullptr, "FRIENDLY_CONTAINS CLASS_CORVETTE CLASS_CAPITAL"}, space) == 0);
+    CHECK(one(W, {"1", nullptr, "ENEMY_CONTAINS CLASS_CAPITAL"}, space) == 1);
+    CHECK(one("STORY_LOSE_BATTLES", {"1", nullptr, "ENEMY_CONTAINS CLASS_SUPER"}, space) == 0);
+    // The keywords are exact: CLASS_Corvette is unknown and reads 0 (CLASS_FIGHTER); FILTER_FRIENDLY_ONLY (1) with a
+    // second value is FRIENDLY_CONTAINS.
+    CHECK(one(W, {"1", nullptr, "FRIENDLY_CONTAINS CLASS_Corvette"}, space) == 1);
+    CHECK(one(W, {"1", nullptr, "ENEMY_CONTAINS CLASS_Corvette"}, space) == 0);
+    CHECK(one(W, {"1", nullptr, "FILTER_FRIENDLY_ONLY CLASS_SUPER"}, space) == 0);
+    // ONLY_CONTAINS: every entry of the side's list is listed; a -1 entry never is; an empty side passes (CONTAINS fails).
+    CHECK(one(W, {"1", nullptr, "FRIENDLY_ONLY_CONTAINS CLASS_CORVETTE CLASS_FRIGATE CLASS_FIGHTER"}, space) == 1);
+    CHECK(one(W, {"1", nullptr, "FRIENDLY_ONLY_CONTAINS CLASS_CORVETTE CLASS_FRIGATE"}, space) == 0);
+    CHECK(one(W, {"1", nullptr, "ENEMY_ONLY_CONTAINS CLASS_CAPITAL CLASS_SUPER"}, space) == 0);
+    StoryNotification empty = space;
+    empty.local_classes.clear();
+    CHECK(one(W, {"1", nullptr, "FRIENDLY_ONLY_CONTAINS CLASS_FIGHTER"}, empty) == 1);
+    CHECK(one(W, {"1", nullptr, "FRIENDLY_CONTAINS CLASS_FIGHTER"}, empty) == 0);
+    // A plot of another player: FRIENDLY_* reads the other list, ENEMY_* the local one.
+    CHECK(one(W, {"1", nullptr, "FRIENDLY_CONTAINS CLASS_CAPITAL"}, space, 1) == 1);
+    CHECK(one(W, {"1", nullptr, "FRIENDLY_CONTAINS CLASS_FRIGATE"}, space, 1) == 0);
+    CHECK(one(W, {"1", nullptr, "ENEMY_CONTAINS CLASS_FRIGATE"}, space, 1) == 1);
+    // Land battles never test the composition.
+    CHECK(one(W, {"1", nullptr, "FRIENDLY_CONTAINS CLASS_SUPER"}, land) == 1);
+    // The test on and no planet: a space battle does not count; a test value outside 1..4 tests nothing else.
+    StoryNotification nowhere = space;
+    nowhere.planet.clear();
+    CHECK(one(W, {"1", nullptr, "FRIENDLY_CONTAINS CLASS_CORVETTE"}, nowhere) == 0 && one(W, {"1"}, nowhere) == 1);
+    CHECK(one(W, {"1", nullptr, "FILTER_FRIENDLY_AND_ENEMY CLASS_SUPER"}, space) == 1);
+    CHECK(one(W, {"1", nullptr, "FILTER_FRIENDLY_AND_ENEMY CLASS_SUPER"}, nowhere) == 0);
+}
+
+// mcx6 t03 (docs/re/STORY.md §5 Enter family row and the note "Enter family match"): P5 hidden fleets count too, P6
+// exact composition, P7 raid fleets only, P4 any unit in orbit, no planet = nothing, no P1 = only the hidden test.
+static void test_enter_family_rules() {
+    StoryNotification f;
+    f.planet = "KUAT";
+    f.owner = 0;
+    f.units = {"TIE", "ISD"};
+    f.fleet_direct = 2;
+    f.orbit_units = {"TIE", "ISD", "XWING"};
+    StoryNotification hid = f;
+    hid.fleet_hidden = true;
+    StoryNotification nf = hid;
+    nf.no_fleet = true;
+    StoryNotification raid = f;
+    raid.fleet_raid = true;
+    StoryNotification np = f;
+    np.planet.clear();
+    const char* E = "STORY_ENTER";
+    const auto one = [](const char* type, std::initializer_list<const char*> p, const StoryNotification& n) {
+        return one_event_fires(type, p, n);
+    };
+    CHECK(one(E, {}, np) == 0);  // no planet in the dispatch
+    // No P1 names: P2 / P3 / P4 are not tested, only "hidden fleets need P5".
+    CHECK(one(E, {nullptr, "FILTER_ENEMY_ONLY", "NOPE", "NOPE"}, f) == 1);
+    CHECK(one(E, {}, hid) == 0 && one(E, {nullptr, nullptr, nullptr, nullptr, "1"}, hid) == 1 && one(E, {}, nf) == 1);
+    // P1 without P3: a hidden fleet only with P5, which needs exactly one value.
+    CHECK(one(E, {"Kuat"}, f) == 1 && one(E, {"Kuat"}, hid) == 0);
+    CHECK(one(E, {"Kuat", nullptr, nullptr, nullptr, "1"}, hid) == 1 && one(E, {"Kuat", nullptr, nullptr, nullptr, "1 1"}, hid) == 0);
+    CHECK(one(E, {"Fondor"}, f) == 0);
+    // P3: a hidden fleet passes; P6 = the direct content count equals the P3 count; "True" reads 0.
+    CHECK(one(E, {"Kuat", nullptr, "Tie"}, hid) == 1 && one(E, {"Kuat", nullptr, "Tie Xwing"}, f) == 0);
+    CHECK(one(E, {"Kuat", nullptr, "Tie", nullptr, nullptr, "1"}, f) == 0);
+    CHECK(one(E, {"Kuat", nullptr, "Tie Isd", nullptr, nullptr, "1"}, f) == 1);
+    CHECK(one(E, {"Kuat", nullptr, "Tie", nullptr, nullptr, "True"}, f) == 1);
+    // P7: raid fleets only, in place of the P3 test.
+    CHECK(one(E, {"Kuat", nullptr, "Nope", nullptr, nullptr, nullptr, "1"}, f) == 0);
+    CHECK(one(E, {"Kuat", nullptr, "Nope", nullptr, nullptr, nullptr, "1"}, raid) == 1);
+    // P4: any one of the names among everything in orbit.
+    CHECK(one(E, {"Kuat", nullptr, nullptr, "Xwing"}, f) == 1 && one(E, {"Kuat", nullptr, nullptr, "Awing"}, f) == 0);
+    // No fleet: the filter, P3, P6 and P7 are not tested; P4 still is.
+    CHECK(one(E, {"Kuat", "FILTER_ENEMY_ONLY", "Nope", nullptr, nullptr, "1", "1"}, nf) == 1);
+    CHECK(one(E, {"Kuat", nullptr, nullptr, "Awing"}, nf) == 0);
+}
+
 int main() {
     std::setvbuf(stdout, nullptr, _IONBF, 0);
     log::set_min_level(log::Level::Warn);
     test_synthetic();
     test_story_rules();
+    test_battle_composition_rules();  // mcx6 t03
+    test_enter_family_rules();        // mcx6 t03
     test_plots_file();
     test_bindings();
     test_ai_flags();
+    test_mcx8_t12_tactical();
     test_story_table();      // q6 t03
     test_dialog_setters();   // q6 t03
     test_holocron();         // q6 t14

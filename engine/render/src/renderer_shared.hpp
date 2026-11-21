@@ -29,9 +29,6 @@
 
 namespace alamo::render::detail {
 
-// SHADOW_EXTRUSION_DISTANCE (FrameCB.shadow_params.x); the original's global, 200 world units.
-inline constexpr float kShadowExtrusion = kShadowExtrusionDistance;
-
 // Engine parameters of one draw in the ORIGINAL D3DX form (row-major, row-vector convention:
 // the transpose of the column-vector matrices used elsewhere in the renderer), RENDER.md 2.2.
 // The per-frame half lives in EngineFrame (once per build); this is the per-draw half.
@@ -73,24 +70,23 @@ bool engine_write(const EngineParams& e, const materials::ParamStore* store, con
 materials::ParamLookup draw_lookup(const DrawLookupCtx* c);
 void translated_draw_params(const Instance& inst, const GpuSubmesh& g, const ViewMatrices& view, const EngineFrame& f,
     std::vector<Mat3x4>& pal, EngineParams& e);
-void xt_analyse(Renderer::XTemplate& t, const fx::Effect& fxe, const materials::ResolvedPass& rp);
+void xt_analyse(RendererCore::XTemplate& t, const fx::Effect& fxe, const materials::ResolvedPass& rp);
 void mask_frame(const EngineFrame& f, uint64_t mask, EngineFrame& out);
-void xt_fill_slot(const Renderer::XTemplate& t, Renderer::XTemplate::Slot& s, const EngineFrame& masked, const fx::Effect& fxe,
+void xt_fill_slot(const RendererCore::XTemplate& t, RendererCore::XTemplate::Slot& s, const EngineFrame& masked, const fx::Effect& fxe,
     const materials::ResolvedPass& rp, const materials::ParamStore* store, bool int_bool);
-void xt_images(const Renderer::XTemplate& t, const Renderer::XTemplate::Slot& s, const fx::Effect& fxe,
+void xt_images(const RendererCore::XTemplate& t, const RendererCore::XTemplate::Slot& s, const fx::Effect& fxe,
     const materials::ResolvedPass& rp, const materials::ParamLookup& lookup, materials::VSConstants* vs,
     materials::PSConstants* ps, materials::IntBoolConstants* vib, materials::IntBoolConstants* pib);
 materials::CullMode mirrored_cull(materials::CullMode c);
 bool is_fow_binding(const materials::SamplerBinding& sb);
-void count_items(const Renderer::Built& bl, size_t b, size_t e, DrawStats& st);
-size_t bucket_begin(const std::vector<Renderer::Built::Item>& items, PhaseBucket b);
+void count_items(const RendererCore::Built& bl, size_t b, size_t e, DrawStats& st);
 
 }  // namespace alamo::render::detail
 
 namespace alamo::render {
 
 // Complete here (not in renderer_graph.cpp) because Renderer's destructor in renderer.cpp frees post_cache_.
-struct Renderer::PostCacheEntry {
+struct RendererCore::PostCacheEntry {
     uint64_t digest = 0;
     uint32_t last_use = 0;
     bool valid = false;  // images filled for `digest`

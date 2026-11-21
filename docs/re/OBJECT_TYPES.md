@@ -21,7 +21,8 @@ Confidence: **[H]** read in the code and cross-checked, **[M]** read in the code
 2. **The root element tag of a type (`SpaceUnit`, `Props_Story`, …) carries no behaviour.** It is stored
    (CRC of the upper-cased tag) and has exactly one reader found: a `MultiplayerStructureMarker` check. What
    a type *is* comes from its fields (behaviour lists, `CategoryMask`, …). [H] for storage, [M] for "no
-   other reader". §2.
+   other reader". §2. (2026-11-17: an exe-wide scan found no other direct reader, so [H]; the galactic role comes from the
+   generic `Behavior` DUMMY_* ids: `MCX1_RE_ANSWERS.md` Q7.)
 3. **Names are case-insensitive; the first definition of a name wins lookups** but later duplicates are
    still created and keep their own type index. [H] (0x407e00, 0x408290; PHASE2_ANSWERS §13)
 4. **Variant = full copy of the fully resolved parent, then the child's own XML is re-applied on top.**
@@ -126,7 +127,7 @@ The only element attributes used are `Name` (all 3345) and `Description` (4, ign
   `SpecialStructure` parents.
 - The only reader of the stored tag found is 0x295cf0, which compares it case-insensitively with
   `MultiplayerStructureMarker` (multiplayer start-marker / ownership remap). [M] that nothing else reads
-  +0x118.
+  +0x118. (Raised to [H] for direct reads by the exe-wide displacement scan of `MCX1_RE_ANSWERS.md` Q7.1.)
 - **Port:** keep the tag string on the type, but drive every behaviour from fields. The root/element tag
   names in the task brief (SpaceUnit, UniqueUnit, …) are conventions for readers, not loader classes.
 - **Galactic role (2026-11-03, q6 t03, data survey, no new binary reading).** The galactic code tests the generic
@@ -147,6 +148,8 @@ The only element attributes used are `Name` (all 3345) and `Description` (4, ign
   Port (`galactic_unit_kind`): the behaviour decides when the type has one, the S3 tag table otherwise; the vanilla
   tags listed above keep Other (as before) so base-game behaviour is unchanged [port, open: the original would place
   those by their behaviour too].
+  Binary reading (2026-11-17): the create-at-planet dispatch 0x400b40 tests only the generic `Behavior` bitset, first match
+  in the order 0x5B, 0x5C, 0x5F, 0x60, 0x5D, 0x5E, 0x61, and creates nothing for a type with none; `MCX1_RE_ANSWERS.md` Q7.2.
 
 ---
 
@@ -291,6 +294,8 @@ At the end of the top-level parse:
 ### 4.3 XML text, whitespace, case [H]
 - The game XML reader trims leading and trailing space, tab, CR and LF from every value (0x23a4b0, trim
   enabled by the loader). Vanilla has thousands of values like ` true ` or `\n\t\tYes` that rely on this.
+  Every XML file the game reads is trimmed (all 62 reader calls enable it); the reader also requires the `<?xml ...?>`
+  declaration and rejects UTF-16 and multi-root files: `MCX1_RE_ANSWERS.md` Q1, Q4, Q5.
 - Character data must come before any child element. Otherwise the reader logs an error and skips the
   extra text.
 - **Tag names are case-insensitive** (upper-cased before the CRC lookup). The `Name` attribute and every
@@ -303,6 +308,9 @@ At the end of the top-level parse:
   `Targeting_Fire_Inaccuracy` (107 elements repeat it), `Death_Clone` (66), `SFXEvent_Attack_Hardpoint`,
   `Starting_Spawned_Units_Tech_0`, `Squadron_Units` and `Death_Explosions`.
 - In a variant, see §3.3. Most list kinds keep only the last occurrence; type-name lists keep all of them.
+- The same per-child rule (last wins / append, `TBD` skipped, empty = no change) holds for Faction, Campaign,
+  GameConstants, TradeRoute and HardPoint; the ability loaders convert `TBD` and ignore nested elements:
+  `MCX1_RE_ANSWERS.md` Q1.
 - Vanilla FoC variants that repeat a clearing list tag: `Targeting_Fire_Inaccuracy` 14 variants,
   `Attack_Category_Restrictions` 3, `SFXEvent_Hardpoint_Destroyed` 3. **In those variants only the last
   line is effective.** Reproduce this exactly.
@@ -310,6 +318,8 @@ At the end of the top-level parse:
 ### 4.5 Converters by type code (0x51a280) [H] unless marked
 Lists are tokenised with the delimiters space, comma, tab, CR and LF (consecutive delimiters collapse). For
 many list and vector codes, a value of 8192 or more characters is ignored.
+These converters serve every XML class through the dispatcher 0x5180d0 (bools included); `atoi` is the clamping UCRT one,
+and the overflow rules of the int8 / ≤ 100 / float codes are in `MCX1_RE_ANSWERS.md` Q2, Q3.
 
 | code | kind | parse rule |
 |---|---|---|
@@ -376,6 +386,10 @@ Lazy references:
   - `Destroy_Previous_Upgrade_Level`, `Show_In_Sidebar_While_Building`, `Show_In_Sidebar_When_Complete`,
     `Show_In_Sidebar_Tray`, `Tactically_Built_Child_Object_Persists`;
   - `Auto_Deploys`, `Should_Reinforcements_Move`, `Use_Transported_Object_Bounds_For_Landing_Z`;
+    (*s78n t26 RE 3, confirmed [H]:* `0x367250` calls `0x367100` on type +0x10; its dword write at block +0xbf =
+    0x100 gives `Auto_Deploys` +0xd0 = 1 and `Deploys` +0xd1 = 0. So every `Deploys` type that omits the tag is an
+    auto-deployer; in FoC only `AT_AT_Walker`, `Veers_AT_AT_Walker` and `AT_AA_Walker` (and their variants) write
+    No. List and consequences: MOVEMENT §3.2.1.)
   - `Terrain_Texture_Modifier_Square`;
   - `Destroy_When_Used_As_Corruption_Prereq`, `Respects_Skirmish_Pre_Build_Bases_Option`.
 - **All other bools default false**, e.g. `Is_Visible_On_Radar`, `Victory_Relevant`,
@@ -653,7 +667,8 @@ using the tag.
   error and no load failure.** The only load-failure path is a list file that cannot be read.
 - Errors that are logged:
   - a missing listed file;
-  - XML syntax errors (file skipped from the first error on) [M];
+  - XML syntax errors (file skipped from the first error on) [M]; corrected 2026-11-17: the **whole** file is skipped,
+    after a message box, and for other loaders the same failure can be fatal (`MCX1_RE_ANSWERS.md` Q4, Q6) [H];
   - `TBD` values;
   - enum conversion failures;
   - out-of-range [0,1] values;

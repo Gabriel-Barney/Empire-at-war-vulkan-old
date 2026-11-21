@@ -21,6 +21,12 @@ struct MovementConstants {
     float close_enough_angle_for_move_start = 180.0f;
     uint32_t frames_per_collision_check = 4;
     float moving_vs_moving_look_ahead_time = 1.5f;  // seconds (x 30 frames)
+    // mov1 t04 (BKR1_RE_ANSWERS Q5 [H]): the position approximation 0x505fe0 - look-ahead L = max(MinLandPredictionDistance,
+    // 30 x max(the type's MovementPredictionInterval, LandPredictionTimeInterval) x max speed), rebuilt every
+    // FramesPerPositionApproximationRebuild frames per unit (not in the FoC XML: the exe default 8)
+    float land_prediction_time_interval = 2.0f;  // seconds
+    float min_land_prediction_distance = 60.0f;
+    uint32_t frames_per_position_approximation_rebuild = 8;
     float minimum_stopped_vs_stopped_overlap = 0.15f;
     // Space (§2.7)
     uint32_t space_pathfind_max_expansions = 3500;
@@ -57,7 +63,18 @@ struct MovementConstants {
     float spread_out_spacing_coefficient = 1.8f;
     float infantry_formation_recruitment_distance = 60.0f;
     float vehicle_formation_recruitment_distance = 100.0f;
+    // s78n t26 review round 2 (MOVEMENT §4.2 step 2 item 4 [H]): a candidate whose straight line to the nearest member
+    // is blocked joins only when its path there is <= this x their distance
+    float formation_recruit_path_ratio = 1.4f;
     float double_click_move_max_speed_ratio = 1.25f;
+    // s78n t20 (MOVEMENT §4.3.1 item 4): BetweenFormationSpacing (GC +0x14ec), the margin of the destination check's
+    // formation and slot rectangles; the destination query extension (GC +0x14f0, Destination_Collision_Query_Extension,
+    // 60; s78n t20 batch 2: read from GameConstants).
+    float between_formation_spacing = 5.0f;
+    float destination_query_extension = 60.0f;
+    // s78n t14 part B (FIGHTER_FLYING §7.1, MOVEMENT §3.4): Fleeing_Infantry_Speed_Bonus (GC +0x150c, read as a float; FoC 2),
+    // the factor on a fleeing squad's speeds and turn rates (its container's current path is a crush-flee push, kind 7).
+    float fleeing_infantry_speed_bonus = 2.0f;
     // Mode speed multipliers (§3.4)
     float land_speed_multiplier = 1.56f;
     float space_speed_multiplier = 1.2f;
@@ -66,6 +83,38 @@ struct MovementConstants {
     float land_guard_range = 150.0f;
     // s78f t02 (FIGHTER_FLYING §4.11 B 1): the waypoint append's limit of queued (0x08) blocks per formation (GC +0x13f0).
     uint32_t max_waypoints_per_path = 6;
+    // s78n t25.2 (MOVEMENT §4.3.2 item 2, §4.2 item 6): Base_Land_Targeting_Arc_Angle_Coefficient (GC +0x154c), the first
+    // coefficient try of the attack slots; Solo_Attack_Range (GC +0x1548), the solo rule's margin; and
+    // Short_Range_Attack_Formation_Coefficient (GC +0x1544; [port] parsed, unused: the recruitment's "engagement distance
+    // is compatible" test is not in the spec).
+    float base_land_targeting_arc_angle_coefficient = 0.2f;
+    float solo_attack_range = 60.0f;
+    float short_range_attack_formation_coefficient = 1.6f;
+    // mcx4 t11 (MOVEMENT §4.4, 0x41dbb0 [H]): the formation side-error pull (e -+ min) / max, 0 when |e| <= min.
+    float formation_minimum_side_error = 0.1f;
+    float formation_maximum_side_error = 30.0f;
+    // mcx4 t11 (BKR1_RE_ANSWERS Q5 [H], MOVEMENT §1.6): ApproximationForwardDistance (GC +0x14d8), the longest straight
+    // step of the path approximation 0x505fe0 - the spacing of the moving-vs-stopped sweep's points (foot_path_contact).
+    float approximation_forward_distance = 2.0f;
+    // mcx4 t11 (BKR2_RE_ANSWERS Q8 [H], MOVEMENT §4.2 step 2 item 7 test 3): ShouldInfantryTeamsSplitAcrossFormations
+    // (GC +0x149d); set, a seed with a parent team recruits nobody (its team splits across formations).
+    bool should_infantry_teams_split_across_formations = true;
+    // mcx4 t11 (MOVEMENT §2.2 obstacle test item 1): SpaceStaticObstacleAvoidanceBonusDistance (GC +0x1414, int), added
+    // to the clearance of the space planner's static-map test ([port] read as a radius margin).
+    float space_static_obstacle_avoidance_bonus_distance = 0.0f;
+    // mcx4 t11 (MCX4_T11_T12_RE_ANSWERS §B2 / §B4): SpaceLocomotorFacingLookaheadAcc (GC +0x144c), the LANDBOMBER facing
+    // lookahead's growth per step (capped by the type's MaxFacingLookAheadFrames).
+    float space_locomotor_facing_lookahead_acc = 1.0f;
+    // mcx4 t11 (MCX4_T11_T12_RE_ANSWERS §B4, MOVEMENT §4.4): the final-facing rotation of a land formation (0x411980,
+    // final_formation_facing): FinalFormationFacingMinimumAngle (GC +0x14fc, degrees) and ...DeltaCoefficient (+0x1500); and
+    // Rotate_Formation_Facing_Moves (+0x1550): the destination check 0x439360 orients its rectangles by the ordered facing
+    // instead of the path's last segment.
+    float final_formation_facing_minimum_angle = 10.0f;
+    float final_formation_facing_delta_coefficient = 0.5f;
+    bool rotate_formation_facing_moves = true;
+    // mcx4 t11 (MCX4_T11_T12_RE_ANSWERS §B4 "Blend times", 0x620190 [H]): InfantryTurnBlendTime (GC +0x1528 = 0x140b16d28,
+    // FoC 0.2), the cap of the Walk arrival turn's TURNL / TURNR blend (seconds).
+    float infantry_turn_blend_time = 0.2f;
 
     static MovementConstants from_game_constants(const data::GameConstants& gc);
 };

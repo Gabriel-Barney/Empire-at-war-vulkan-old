@@ -33,8 +33,8 @@
 //   * GlobalValueStore (below) - the session-wide GlobalValue table for VMs without an AI host;
 //   * ScriptWrapperHost (below) - the VMs a LuaScriptWrapper refers to.
 // Error discipline: as script_gaps.hpp ("SCRIPT ERROR: ..." / "SCRIPT WARNING: ..." messages, nil result) where the
-// original logs; Call::fail (a Lua error) for the argument errors LUA_API.md lists as raising helpers [port: the
-// same choice the other families made for these helpers].
+// original logs; the argument errors LUA_API.md lists as raising helpers are script errors too
+// (Call::script_error_stop, no Lua error: q6 t11, the rule of every family).
 #pragma once
 #include <cstdint>
 #include <functional>
@@ -89,6 +89,16 @@ struct RemainingScriptHooks {
     std::function<bool(objects::ObjectHandle unit, Vec3 position)> move_to;
     // The unit's current (last) move goal: false when it has none (idle / arrived).
     std::function<bool(objects::ObjectHandle unit, Vec3& goal)> move_goal;
+    // s78n t06 (HERO_CLASH §3.2 / §3.8): the unit is in a hero clash (obj +0x3b4): its movement orders are locked by the
+    // clash (detail::movement_locked) and Unlock_Current_Orders refuses ("...is locked by a hero clash.  Cannot unlock.").
+    // Unset: no hero clashes.
+    std::function<bool(objects::ObjectHandle unit)> in_hero_clash;
+    // s78n t06 review (A1_READINGS §28.9 item 4): the clash's share of the unit's movement lock is held (unset: in_hero_clash
+    // answers), and its release: Unlock_Current_Orders through a land TEAM object decrements each locked member's lock
+    // counter, so a duelling member's clash share goes (its +0x3b4 stays set); true when a share was released. Unset:
+    // nothing to release.
+    std::function<bool(objects::ObjectHandle unit)> hero_clash_locked;
+    std::function<bool(objects::ObjectHandle unit)> release_hero_clash_lock;
     // ---- builds / build pads (§2.2, §3.6) ----
     // GameObjectWrapper.Build(type, check_rules) on a pad: 1 started, 0 refused by the game rules (check_rules only),
     // -1 start failed. Unset: the binding's own start build [port] (rules check, the UC type created at the pad,
@@ -103,19 +113,20 @@ struct RemainingScriptHooks {
     // Can_Garrison_Fire of a holder. Unset: the type's Property_Flags GarrisonCanFire (OBJECT_TYPES.md 9.1.2) [port].
     std::function<bool(objects::ObjectHandle holder)> can_garrison_fire;
     // ---- combat (tactical combat system) ----
-    // Enable_Behavior(behavior id, on): unset -> the family state keeps the override (no system reads it yet).
-    std::function<bool(objects::ObjectHandle unit, int32_t behavior, bool on)> enable_behavior;
-    // Set_Targeting_Stickiness_Time_Threshold (TACTICAL_COMBAT.md 2.5: the Lua override +0x158). Kept in the state too.
-    std::function<void(objects::ObjectHandle unit, float seconds)> set_stickiness;
-    std::function<void(objects::ObjectHandle unit, bool prefer_ground)> set_prefer_ground;
+    // (cu8 t08: Enable_Behavior needs no hook: it drives the store's behaviour disable counter directly, §2.6.)
+    // (cu8f t04: Set_Targeting_Stickiness_Time_Threshold needs no hook: it writes the battle's CombatSystem through
+    // ObjectBridge::abilities (set_stickiness_override, TD +0x158); Set_Prefer_Ground_Over_Space writes the player
+    // world's GalacticSim (set_prefer_ground_over_space), read by the galactic AI's auto-land. CU8F_T04_T06_RE.md.)
     // Every projectile type the unit can fire (weapon and hard points, the combat system's order). Unset: the data
     // fallback [port] = the type's Projectile_Types (hard point data is not in GameObjectTypes).
     std::function<std::vector<objects::TypeIndex>(objects::ObjectHandle unit)> projectile_types;
     // Current projectile type (kNone = unknown -> the first of the list above).
     std::function<objects::TypeIndex(objects::ObjectHandle unit)> current_projectile;
-    // Get_Energy (§2.12: tactical only, a fraction 0..1). energy_fraction first; else energy (absolute pool) divided
-    // by Energy_Capacity; < 0 = no pool / unknown. Unset: 1 for a type with Energy_Capacity > 0, else 0 [port].
-    std::function<float(objects::ObjectHandle unit)> energy_fraction;
+    // aitac t06 (AI_TACTICAL §8.1): Should_Switch_Weapons(target): 0 false, 1 true, -1 no value; a null `target` asks the
+    // before-the-arguments test (0: fewer than two Projectile_Types entries -> false; 2: go on). Unset: false [port].
+    std::function<int32_t(objects::ObjectHandle unit, objects::ObjectHandle target)> should_switch_weapons;
+    // Get_Energy (§2.12: tactical only, a fraction 0..1): energy (absolute pool) divided by Energy_Capacity; < 0 = no
+    // pool / unknown. Unset: 1 for a type with Energy_Capacity > 0, else 0 [port].
     std::function<float(objects::ObjectHandle unit)> energy;
     // Damage tracking (§2.4): rate (damage / s) and the time until death (s); < 0 = unknown. Unset: 0 / 1e18.
     std::function<double(objects::ObjectHandle unit)> rate_of_damage;
@@ -123,15 +134,17 @@ struct RemainingScriptHooks {
     // The final-blow player id (obj +0x330, §2.4); -1 = none -> the neutral player. Unset: -1.
     std::function<int32_t(objects::ObjectHandle object)> final_blow_player;
     // The AI power-versus weight of `unit`'s type against `other`'s categories (§2.12 M_s; the WeightedTypeList table);
-    // < 0 unknown -> 1 [port].
+    // < 0 unknown -> 1 [port]. hook-optional: no host sets it yet; GameObjectWrapper.Get_AI_Power_Vs_Unit is Partial for it
+    // (binding-effect in bind_script_remaining.cpp), the task-force form asks the AI host first.
     std::function<double(objects::ObjectHandle unit, objects::ObjectHandle other)> ai_power_vs;
     // ---- galactic ----
-    // Force_Test_Space_Conflict on a fleet (§2.12: re-run the arrival; conflict -> Initiate_Space_Conflict). True = a
-    // conflict was started. Unset: the GalacticSim conflict hooks when the players family has a sim, else false.
-    std::function<bool(objects::ObjectHandle fleet)> test_space_conflict;
+    // (cu8 t08: Force_Test_Space_Conflict needs no hook: it runs the arrival test on the players family's GalacticSim
+    // and its conflict hooks.)
     // Give_Random_Sliceable_Tech(player) -> the chosen type (kNone = none). Unset: §2.9 on the players world.
+    // hook-optional: the binding's own §2.9 path on the players world is the rule.
     std::function<objects::TypeIndex(int32_t player)> give_random_sliceable_tech;
     // GameObjectTypeWrapper.Is_Obsolete(player). Unset: the player's obsolete list (players.hpp LuaPlayerState).
+    // hook-optional: the binding reads the galactic sim's locked list itself (STRATEGIC_GAPS §5.1).
     std::function<bool(objects::TypeIndex type, int32_t player)> type_obsolete;
     // Get_Bribe_Cost (§2.8): the battle planet of the parent galactic mode: -1 none (the base cost), 0 uncorrupted,
     // 1 corrupted. Unset: -1.
@@ -158,9 +171,10 @@ inline constexpr int32_t kBlockBombingRun = 5;
 struct RemainingObjectState {
     bool dynamic_lod = true;              // Enable_Dynamic_LOD (model +0x198, default on: RENDER.md)
     bool build_pad_locked = false;        // Lock_Build_Pad_Contents
-    int8_t prefer_ground = -1;            // Set_Prefer_Ground_Over_Space; -1 = never set
-    float stickiness = -1.0f;             // Set_Targeting_Stickiness_Time_Threshold; < 0 = the type's value
-    std::map<int32_t, bool> behaviors;    // Enable_Behavior overrides (behaviour id -> enabled)
+    int8_t prefer_ground = -1;            // Set_Prefer_Ground_Over_Space; -1 = never set (record only)
+    float stickiness = -1.0f;             // last Set_Targeting_Stickiness_Time_Threshold value; record only (the live
+                                          // threshold is the combat system's, spawn 0.0)
+    std::map<int32_t, bool> behaviors;    // Enable_Behavior calls (behaviour id -> last state; the effect is the store's counter)
     bool diverted = false;                // Divert: move flag 0x40 on the current move (§2.3)
     Vec3 divert_goal{};                   // the goal reported right after the diversion move
     objects::ObjectId pad_uc = objects::kNoObjectId;     // Build without a host: the pad's under-construction object

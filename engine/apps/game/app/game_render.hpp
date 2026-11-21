@@ -2,9 +2,12 @@
 // view (R1 + R3 + R4 + R5 over a running S10 battle). Both views only read the sim through immutable snapshots taken
 // between ticks (capture*), so the per-tick CRC is the same with presentation on or off.
 #pragma once
+#include <chrono>
 #include <cstdint>
 #include <functional>
+#include <map>
 #include <memory>
+#include <optional>
 #include <span>
 #include <string>
 #include <string_view>
@@ -14,9 +17,12 @@
 #include "alamo/game/battle_fx.hpp"  // S8 t31: lobbing charge-up cues
 #include "alamo/game/game_data.hpp"
 #include "alamo/game/game_session.hpp"
+#include "alamo/game/script_cinematics.hpp"  // mcx6 t05
 #include "alamo/jobs/job_system.hpp"
 #include "alamo/render/fleet.hpp"
+#include "alamo/render/ability_fx.hpp"  // vis1 t06 ability target / status particles
 #include "alamo/render/beams.hpp"       // R5 ability beams
+#include "alamo/render/blob_shadows.hpp"  // vis1 t02 object blob shadows
 #include "alamo/render/fog_view.hpp"
 #include "alamo/render/galactic/galactic_snapshot.hpp"
 #include "alamo/render/galactic/galactic_view.hpp"
@@ -30,6 +36,7 @@
 #include "alamo/render/sim_snapshot.hpp"
 #include "alamo/render/sim_view.hpp"
 #include "alamo/render/surface_fx.hpp"
+#include "alamo/render/weather_fx.hpp"  // vis1 t01 weather emitter / lightning / fog plane
 #include "alamo/rhi/rhi.hpp"
 #include "alamo/ui/camera.hpp"
 #include "alamo/ui/hud_renderer.hpp"
@@ -100,6 +107,10 @@ public:
     }
 
     ui::GalacticCameraController& camera() { return camera_; }
+    // ui4 t06: the fleet drag preview segments of the next prepare() (GalacticSceneBuilder::set_drag_lines).
+    void set_drag_lines(std::vector<render::GalacticDragLine> lines) {
+        if (builder_) builder_->set_drag_lines(std::move(lines));
+    }
     // The camera's planet box (ui::galactic_scroll_box; the camera widens it by 15 %).
     void set_camera_bounds(const ui::CameraBox& b) { camera_.set_bounds(b); }
     ui::CameraParams camera_params(uint32_t w, uint32_t h) const;
@@ -135,7 +146,9 @@ private:
     std::vector<render::FactionColor> colors_;
     render::RouteLineStyle style_;
     render::CorruptionPathSettings corruption_path_;  // FIXPASS_GALACTIC §3.2 (GameConstants)
-    std::string evil_side_name_ = "EMPIRE";           // GameConstants Evil_Side_Name (route sides, §3.1)
+    float cycle_speed_ = 5.0f, cycle_darken_ = 0.5f;   // mcx4 t14: GUI_Cycle_Speed / GUI_Darken_Level
+    uint32_t cycle_planet_ = 0;                        // the selection the cycle started for
+    double cycle_t0_ = 0.0;
     ui::GalacticCameraController camera_;
     GpuCore* gpu_ = nullptr;
     int32_t local_ = -1;  // fog viewpoint (attach)
@@ -143,7 +156,6 @@ private:
     // galactic_corruption_effects are synced by key every frame (each Particle type's Galactic_Model_Name).
     render::GalacticCorruptionSettings corruption_;
     std::vector<render::GalacticCorruptionEffect> corruption_fx_;
-    uint32_t corruption_live_ = 0;
     double last_frame_s_ = -1.0;
 #ifdef ALAMO_PARTICLES_HAVE_SIM
     std::unique_ptr<render::particles::ParticleWorld> pworld_;
@@ -151,9 +163,6 @@ private:
     render::particles::ParticleRenderer prender_;
     std::unique_ptr<render::particles::ProxyAttachments> pattach_;
 #endif
-
-public:
-    uint32_t corruption_effects() const { return corruption_live_; }  // effects synced by the last prepare()
 };
 
 // ---- battle -------------------------------------------------------------------------------------------------
@@ -179,6 +188,12 @@ public:
     void set_particle_detail(float detail) {
         if (pworld_) pworld_->set_detail(detail);
     }
+    // vis1 t02: shadow detail of the object blob shadows (render::blob_shadow_mode; 0 = Off, kPortShadowDetailOn = On).
+    void set_shadow_detail(int32_t detail) { shadow_detail_ = detail; }
+    // vis1 t06: GameConstants Object_Visual_Status_Particle_Attach_Bone_Names (stun / infection particle bones).
+    void set_status_particle_bones(std::string bones) { status_bones_ = std::move(bones); }
+    // vis1 t01: the weather the last capture read (land battles; inactive otherwise).
+    const render::WeatherView& weather() const { return weather_; }
     // Scripted runs: every model the frame requests is loaded and resident before it is built (ModelStreamer::
     // finish_pending), so a new type's first drawn frame and its particles do not depend on load timing; likewise each
     // snapshot's fog texture (WorldRenderer::finish_fow_upload).
@@ -203,9 +218,31 @@ public:
     bool space() const { return space_; }
     const BattleViewStats& stats() const { return stats_; }
     float clear_color(int i) const;
-    // P2 selection circles of this frame (TacticalHud::selection_blobs): flat blob instances in the main list (land: at
-    // the terrain height under the unit). Set before prepare().
+    // P2 selection circles of this frame (TacticalHud::selection_blobs): blob instances in the main list, one model per
+    // ShadowBlobMaterials entry (vis1 t03: the blob's own material, UI.md 1.3; unknown / empty: the first Selection*
+    // material); land: on the terrain under the unit (ui::selection_blob_ground_instance). Set before prepare().
     void set_selection_blobs(std::span<const ui::SelectionBlob> blobs) { blobs_.assign(blobs.begin(), blobs.end()); }
+    // vis1 t08: the local player's selected object ids (ascending; empty in a cinematic / outside the battle screen): the
+    // Force_Healing range blob is drawn under a selected owner (also while an ability target is picked). Set before prepare().
+    void set_heal_selection(std::vector<uint32_t> ids) { heal_sel_ = std::move(ids); }
+    // mcx4 t14: the object under the cursor (0 = none), brightened by Mouse_Over_Highlight_Scale. Set before prepare().
+    void set_hover(uint32_t id) { hover_ = id; }
+    // mcx4 t15 (MCX4_PRES_RE_ANSWERS_2 Q7): start an object light effect at wall time `now`, unless one is running on
+    // the object (0x48e4d0: a running pulse is not replaced). set_pulse_time sets the clock of the next prepare().
+    void start_light_pulse(uint32_t id, render::LightPulse p, double now);
+    void set_pulse_time(double now) { pulse_now_ = now; }
+    float shield_flash_duration() const { return shield_flash_duration_; }
+    // mcx4 t14 (MCX4_PRES_RE_ANSWERS_3 Q10, 0x392ba0 mode 3): the rapid GUI flash of a click-selected object - the colour
+    // x (1 + GUI_Flash_Level x remaining / GUI_Rapid_Flash_Duration), three times; a new flash replaces a running one.
+    void rapid_flash(uint32_t id, double now);
+    const float* shield_flash_color() const { return shield_flash_color_; }
+    // cu9g t03: the bombing-run targeting blob of this frame (HUD_GAPS §9.5; nullopt = none). Set before prepare().
+    void set_bombing_blob(const std::optional<render::JamBlob>& blob) { bombing_blob_ = blob; }
+    // ui2 t08 (STORY_PRESENTATION_LUA.md 4.1 / 4.2): the story script's Play_Lightning_Effect bolts of this frame (extra beams
+    // drawn with the ability beams, lightning only) and its Enable_Fog / Enable_Distance_Fog switches (scene fog off when either
+    // is false; the environment's own setting decides otherwise). Presentation only.
+    void set_script_beams(std::vector<render::BeamInstance> beams) { script_beams_ = std::move(beams); }
+    void set_fog_switches(bool master, bool distance) { fog_master_ = master; fog_distance_ = distance; }
     const render::FogRenderer& fog() const { return fog_; }
     // --- R3/R5 render ---
     // Space reinforcement overlay (palette 3 + W_Space_Reinforce_FOW_Grid): on while the local player picks a space
@@ -219,7 +256,6 @@ public:
     bool spawn_move_ack(std::string_view type, ui::Vec3 p, float scale, bool normal);
     // The nearest live normal move ack to `p` (no radius) is removed silently (hidden, no linger). False when none.
     bool kill_nearest_move_ack(ui::Vec3 p);
-    uint32_t move_acks_spawned() const { return acks_spawned_; }
 
     std::vector<render::Instance> main, sky;
     render::RecordOptions ropt;
@@ -232,6 +268,29 @@ private:
     GpuCore* gpu_ = nullptr;
     const objects::GameObjectTypes* types_ = nullptr;  // S8 t31: the lobbing XML tags
     std::vector<TswCue> lob_chargeups_;               // S8 t31: track_lob_chargeups (battle_fx.hpp)
+    render::AbilityFxTracker ability_fx_;             // vis1 t06 (ability_fx.hpp)
+    std::string status_bones_ = "B_HEAD, Turret_00, B_Turret_00, B_Turret, B_Turret_Base, ROOT";  // vis1 t06 (vanilla value)
+    // cu8g t03: the battle's active environment at the last capture (TacticalBattle::environment_index); prepare()
+    // re-applies it on the scene (MapScene::set_environment) and the particle wind when it changed.
+    uint32_t env_wanted_ = 0;
+    // mcx6 t05: the story's Show_Emitter state at the last capture (lua::PresentationState::emitters as particle group bits,
+    // game::emitter_overrides); the builder's emitter source reads it.
+    std::map<objects::ObjectId, game::EmitterGroups> emitter_groups_;
+    std::vector<render::BeamInstance> script_beams_;  // ui2 t08
+    bool fog_master_ = true, fog_distance_ = true;     // ui2 t08
+    void apply_environment();
+    // vis1 t01 (WEATHER_VISUALS §1): the scenario emitter in the particle world, its intensity as the Detail scalar.
+    void sync_weather_emitter();
+    render::WeatherView weather_;
+    render::LightningFlash lightning_;
+    std::chrono::steady_clock::time_point last_prepare_{};
+    bool have_last_prepare_ = false;
+    uint64_t weather_fx_ = 0;  // ParticleWorld::Handle of the weather emitter (0 = none)
+    std::string weather_fx_name_;
+    // vis1 t02: object blob shadows (land).
+    render::BlobShadowBuilder blob_shadows_;
+    std::vector<terrain::ShadowBlob> shadow_blobs_;
+    int32_t shadow_detail_ = render::kPortShadowDetailOn;
     bool space_ = true;
     bool blocking_models_ = false;
     int32_t local_ = 0;
@@ -241,6 +300,15 @@ private:
     std::unique_ptr<render::StreamedSimModels> models_;
     std::unique_ptr<render::SimInstanceBuilder> builder_;
     render::InterpolatedFrame frame_;
+    std::vector<render::SimWorldEffect> world_fx_;  // vis1 t08: decoration effects + the frame's (shield penetration)
+    std::vector<uint32_t> heal_sel_;                  // vis1 t08: set_heal_selection
+    uint32_t hover_ = 0;                              // mcx4 t14: set_hover
+    std::map<uint64_t, render::LightPulse> pulses_;   // mcx4 t15: running object light effects
+    double pulse_now_ = 0.0;
+    float shield_flash_duration_ = 0.1f;              // GameConstants Shield_Flash_Duration
+    float gui_flash_level_ = 3.0f, gui_rapid_flash_duration_ = 0.1f;  // mcx4 t14: GUI_Flash_Level / GUI_Rapid_Flash_Duration
+    float shield_flash_color_[3] = {1.0f, 1.1f, 1.25f};  // GameConstants Shield_Flash_Scale
+    float hover_scale_ = 1.5f;                        // GameConstants Mouse_Over_Highlight_Scale
     std::vector<render::Instance> bg_;
     render::SimInstanceStats istats_;
     ui::TacticalCameraController camera_;
@@ -265,10 +333,19 @@ private:
         bool normal = false;
     };
     std::vector<MoveAckFx> acks_;
-    uint32_t acks_spawned_ = 0;
     std::vector<ui::SelectionBlob> blobs_;
-    render::GpuModel blob_model_;
-    bool blob_ok_ = false;
+    // vis1 t03: selection blob models, uploaded on first use per material (index into blob_mats_; ok = false: the upload
+    // failed, not retried).
+    struct SelectionModel {
+        uint32_t material = 0;
+        render::GpuModel model;
+        bool ok = false;
+    };
+    std::vector<terrain::ShadowBlobMaterial> blob_mats_;
+    uint32_t blob_fallback_ = UINT32_MAX;  // the first Selection* material (UINT32_MAX: none)
+    std::vector<std::unique_ptr<SelectionModel>> sel_models_;
+    render::GpuModel* selection_model(GpuCore& gpu, const std::string& material);
+    std::optional<render::JamBlob> bombing_blob_;  // cu9g t03: the land bombing-run targeting blob (drawn through jam_models_)
     render::JamBlobModels jam_models_;  // R5 sensor jamming radius blobs (one model per material + colour)
     render::BeamStyleTable beam_styles_;  // R5 ability beams: per-special styles over the GameConstants fallbacks (ABILITY_VISUALS 4.2)
     render::BeamBoneFn beam_bone_;        // bone world positions (HP_trac_bone, hardpoint / muzzle bones)

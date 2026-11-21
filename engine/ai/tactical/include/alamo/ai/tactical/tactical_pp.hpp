@@ -110,7 +110,6 @@ struct TacticalPpInput {
 };
 
 enum class PpSource : uint8_t { FreeStore = 0, Reinforcement = 1, Build = 2, Produce = 3 };
-const char* pp_source_name(PpSource s);
 
 struct TacticalPpPick {
     int32_t type = -1;
@@ -118,14 +117,35 @@ struct TacticalPpPick {
     int32_t ref = -1;   // unit id / pool key / pad id
     int32_t tf = 0;     // task force index of the plan
     int32_t team = -1;  // team index within the task force (-1 = unplaced)
+    int32_t contrast_entry = -1;  // skai t15: its contrast entry (PP +0x70), read by the running-plan re-test
 };
+// contrast_entry of a unit a land reinforcement appended to a running plan's unit list (0x6bf3d0): no selection entry.
+inline constexpr int32_t kPickNotSelected = -2;
 
 struct TacticalPpResult {
     bool ok = false;
     std::vector<TacticalPpPick> picks;
     size_t candidates = 0;
     std::string last_veto;  // marshaller whose Finalize failed the solve (diagnostics), "-" none
+    // skai t15: the contrast layer flags of the solve (PP +0x1a0 space / +0x1a1 ground, Setup C), read by the re-test.
+    bool layer_space = false, layer_ground = false;
 };
+
+// skai t15 (docs/re/SKAI_T15_PLAN_RETEST.md §1): one selection of a running plan's PotentialPlan as the re-test commits it.
+struct PpRetestPick {
+    int32_t type = -1;
+    int32_t tf = -1, team = -1;   // its team slot (-1: in no team: the main list)
+    int32_t contrast_entry = -1;  // as solved
+    float health = -1.0f;         // the live unit's hull fraction; < 0 = no live unit (dead, captured, not yet arrived):
+                                  // full type power
+};
+
+// The running-plan contrast re-test 0x6c47c0 step 2: the main (and escort) list rebuilt from `in` as Setup A builds them
+// (current perception, current recent failures), the stored selection committed (0x6c4b20), the contrast Finalize
+// (0x72af80) under the solve's layer flags. True = the plan stays valid. No target / IgnoreTarget / no lists: true.
+// No RNG. `why` (optional): the failing check.
+bool retest_tactical_pp(const TacticalPpInput& in, const std::vector<PpRetestPick>& picks, bool layer_space, bool layer_ground,
+                        std::string* why = nullptr);
 
 // Runs the mode's marshaller list. Consumes synced draws (Plan Setup C, IgnoreTarget contrast) from input.rng.
 bool solve_tactical_pp(const TacticalPpInput& input, TacticalPpResult& out);

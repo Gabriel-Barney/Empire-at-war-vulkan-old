@@ -5,13 +5,20 @@
 // writes sim state, draws random numbers or changes anything a sim CRC hashes.
 // Argument contracts and messages: docs/re/LUA_API.md "Binding map" (the original's own strings).
 // Behaviour the docs do not give is marked [inferred].
+// Exception (mcx6 t05): Promote_To_Space_Cinematic_Layer moves the object (TacticalScriptHooks::teleport); likewise (mcx6)
+// Do_End_Cinematic_Cleanup suspends and moves the objects it cleans up (ObjectBridge state + the teleport hook).
 // Exception (story t12): Resume_Hyperspace_In also clears the host's reinforcement hold through
-// TacticalScriptHooks::resume_hyperspace_in (script_gaps.hpp) when a tactical host installed it.
+// TacticalScriptHooks::resume_hyperspace_in (script_gaps.hpp) when a tactical host installed it; likewise (cu8g t03)
+// Set_New_Environment changes the mode's environment through TacticalScriptHooks::set_new_environment.
+#include <map>
 #include <string>
+#include <vector>
 
 #include "alamo/lua/object_bridge.hpp"
+#include "alamo/core/ascii.hpp"
 #include "alamo/lua/presentation.hpp"
 #include "alamo/lua/script_gaps.hpp"
+#include "alamo/objects/behaviors.hpp"
 #include "alamo/objects/game_object_types.hpp"
 #include "vm_internal.hpp"
 
@@ -25,7 +32,7 @@ namespace {
 PresentationLog& log_of(Call& c) { return detail::presentation_of(c.L); }
 uint32_t frame_of(const Call& c) { return c.vm->frame; }
 
-bool is_bool(const Call& c, int i) { return c.has(i) && lua_type(c.L, c.idx(i)) == LUA_TBOOLEAN; }
+using detail::is_bool;  // ref5 t03: vm_internal.hpp
 bool boolean(const Call& c, int i) { return lua_toboolean(c.L, c.idx(i)) != 0; }
 
 const detail::Ud* engine_ud(const Call& c, int i) {
@@ -36,10 +43,8 @@ const detail::Ud* engine_ud(const Call& c, int i) {
 // "Position of some sort": a game object (markers, units), a PositionWrapper or an AI target.
 // [inferred] dead objects are accepted (their last id is recorded).
 bool is_position(const Call& c, int i) {
-    static const uint32_t pos = detail::class_id("PositionWrapper");
-    static const uint32_t target = detail::class_id("AITargetLocationWrapper");
     const detail::Ud* ud = engine_ud(c, i);
-    return ud && (ud->cls == detail::cls_game_object() || ud->cls == pos || ud->cls == target);
+    return ud && (ud->cls == detail::cls_game_object() || ud->cls == detail::cls_position() || ud->cls == detail::cls_target());
 }
 
 bool is_object(const Call& c, int i) {
@@ -106,6 +111,33 @@ PresentationEvent& record(Call& c, PresentationOp op, bool with_self = false) {
 }
 
 PresentationState& state(Call& c) { return log_of(c).mutable_state(); }
+
+// ui2 t03 (STORY_PRESENTATION_LUA.md 2.4): the position argument is resolved when the script calls, so the host that draws
+// the camera needs its coordinates: after the call's own arguments the event carries a String "@pos" and the three Number
+// coordinates (an object's position, or the PositionWrapper's). Nothing is appended for a dead object or an AI target.
+void append_position(Call& c, PresentationEvent& e, int i) {
+    const detail::Ud* ud = engine_ud(c, i);
+    if (!ud) return;
+    Vec3 p;
+    if (ud->cls == detail::cls_game_object()) {
+        if (!c.vm->host.store || !detail::object_alive(*c.vm, *ud)) return;
+        p = c.vm->host.store->position(detail::object_handle(*ud));
+    } else if (ud->cls == detail::cls_position()) {
+        p = detail::position_of(*ud);
+    } else {
+        return;
+    }
+    Arg tag;
+    tag.kind = Arg::Kind::String;
+    tag.text = "@pos";
+    e.args.push_back(tag);
+    for (const float v : {p.x, p.y, p.z}) {
+        Arg n;
+        n.kind = Arg::Kind::Number;
+        n.number = static_cast<double>(v);
+        e.args.push_back(n);
+    }
+}
 
 // ---------------------------------------------------------------- block statuses
 //
@@ -243,7 +275,7 @@ int set_key(Call& c, const char* cls, PresentationOp op, bool camera, bool trans
     if (at_least ? c.nargs < expected : c.nargs != expected) return c.script_error_stop("%s -- Expected %d parameters", cls, expected);
     if (!is_position(c, 1)) return c.script_warning("%s -- Invalid parameter 1, expected a position.", cls);
     if (!c.is_number(2)) return c.script_error_stop("%s -- Invalid parameter 2, expected a float", cls);
-    record(c, op);
+    append_position(c, record(c, op), 1);
     PresentationState& s = state(c);
     CameraKey& k = camera ? s.camera_key : s.target_key;
     k.set = true;
@@ -282,7 +314,7 @@ int g_transition_to_tactical(Call& c) {
 
 int focus(Call& c, const char* msg, PresentationOp op) {
     if (!is_position(c, 1)) return c.script_warning("%s", msg);  // q6 t11: a warning (LUA_API.md, the warning list)
-    record(c, op);
+    append_position(c, record(c, op), 1);
     PresentationState& s = state(c);
     s.camera_focus = to_arg(c, 1);
     s.following = false;
@@ -333,25 +365,79 @@ int g_set_cinematic_environment(Call& c) {
     if (!need_bool1(c, "LuaSetCinematicEnvironment")) return 0;
     record(c, PresentationOp::SetCinematicEnvironment);
     state(c).cinematic_environment = boolean(c, 1);
+    if (ObjectBridge* b = c.vm->owner ? attached_object_bridge(*c.vm->owner) : nullptr; b && b->tactical && b->tactical->set_cinematic_environment)
+        b->tactical->set_cinematic_environment(boolean(c, 1));  // ui2 t08: the sim-side environment switch
     return 0;
 }
 
-// No contract strings, no shipped call sites: recorded as is. [inferred]
+// Set_New_Environment(int) (0x5448a0; LUA_API.md contract strings; no shipped call sites): recorded, then (cu8g t03)
+// the tactical host's TacticalScriptHooks::set_new_environment with the int argument (the mode clamps it,
+// CU8F_T03_T05_RE §2.2). [port] the number is truncated toward zero like every int argument (detail::to_int).
 int g_set_new_environment(Call& c) {
+    if (!c.has(1)) return c.script_error_stop("LuaSetNewEnvironment -- Expected int parameter 1");
+    if (!c.is_number(1)) return c.script_error_stop("LuaSetNewEnvironment -- invalid type for parameter 1. Expected int.");
     record(c, PresentationOp::SetNewEnvironment);
+    if (ObjectBridge* b = c.vm->owner ? attached_object_bridge(*c.vm->owner) : nullptr; b && b->tactical && b->tactical->set_new_environment)
+        b->tactical->set_new_environment(detail::to_int(c.number(1)));
     return 0;
 }
 
+// mcx6 t05 (docs/re/MCX6_T05_CINEMATIC_BINDINGS.md §3, 0x5433f0): the object moves to its own position raised by 20000 on z
+// (the cinematic layer above the battlefield) through the reposition 0x3abb80, which Teleport uses too: the tactical host's
+// TacticalScriptHooks::teleport (store, movement, combat, trees), the facing kept; without one the store position. Its
+// cinematic camera keys and the scripts' Get_Position then see the raised object. Outside a tactical mode retail's
+// "Command only valid in a tactical game." is a script error: the dispatcher's mode gate (bindings.cpp kTacticalGlobals /
+// kGateTexts, before the argument checks). [port] Its "... only valid in a land or space tactical game." for another
+// tactical kind has no port case (every port tactical store is land or space).
+// binding-effect: Promote_To_Space_Cinematic_Layer full z + 20000 through TacticalScriptHooks::teleport (docs/re/MCX6_T05_CINEMATIC_BINDINGS.md §3)
 int g_promote_to_space_cinematic_layer(Call& c) {
     if (!c.has(1)) return c.script_error_stop("LuaPromoteToSpaceCinematicLayer -- Expected gameobject parameter 1");
     if (!is_object(c, 1)) return c.script_error_stop("LuaPromoteToSpaceCinematicLayer -- Invalid parameter 1, expected a game object");
     record(c, PresentationOp::PromoteToSpaceCinematicLayer);
+    const detail::Ud* ud = engine_ud(c, 1);
+    objects::ObjectStore* st = c.vm->host.store;
+    if (!st || !detail::object_alive(*c.vm, *ud)) return 0;
+    const objects::ObjectHandle h = detail::object_handle(*ud);
+    Vec3 p = st->position(h);
+    p.z += 20000.0f;
+    if (ObjectBridge* b = c.vm->owner ? attached_object_bridge(*c.vm->owner) : nullptr; b && b->tactical && b->tactical->teleport)
+        b->tactical->teleport(h, p, st->facing(h));
+    else
+        st->set_position(h, p);
     return 0;
 }
 
-// [inferred] recorded only: what the original resets is not documented.
+// Do_End_Cinematic_Cleanup() (0x541e20 -> 0x38ed10 per object; MCX6_T05_CINEMATIC_BINDINGS §2): recorded, and the game
+// host hides the objects it cleans up (GameSession::script_cinematics). The sim part (mcx6): only in a tactical mode (a
+// bridge with TacticalScriptHooks), every live object of the VM's store with a LOCOMOTOR behaviour, not owned by the
+// neutral player and not marked by In_End_Cinematic(true), in store order, has its behaviours suspended and is moved to
+// (1, 1, 0) through TacticalScriptHooks::teleport (store, movement, trees; the facing kept; without the hook the store
+// position). The suspension is ScriptObjectState::end_cinematic_suspended, which the battle host reads every tick; nothing
+// lifts it, as in retail. [port] It stands for retail's per-behaviour suspend virtual (+0xc0) as the port's per-tick unit
+// controls: the locomotor does not run and the weapons do not fire (Suspend_Locomotor + Prevent_All_Fire's effects).
+// binding-effect: Do_End_Cinematic_Cleanup full locomotor objects suspended (no locomotor run, no fire) and moved to (1, 1, 0) through TacticalScriptHooks::teleport; alamo_game hides them (docs/re/MCX6_T05_CINEMATIC_BINDINGS.md §2)
 int g_do_end_cinematic_cleanup(Call& c) {
     record(c, PresentationOp::DoEndCinematicCleanup);
+    ObjectBridge* b = c.vm->owner ? attached_object_bridge(*c.vm->owner) : nullptr;
+    objects::ObjectStore* st = c.vm->host.store;
+    if (!b || !b->tactical || !st) return 0;
+    const int32_t neutral = detail::neutral_player_id(c);
+    const std::map<int32_t, bool>& marks = state(c).in_end_cinematic;
+    std::vector<objects::ObjectHandle> gone;
+    for (const objects::ObjectHandle h : st->all_objects()) {
+        if (!st->alive(h) || !st->has_behavior(h, objects::beh::Locomotor) || st->owner(h) == neutral) continue;
+        const auto it = marks.find(st->id(h));
+        if (it != marks.end() && it->second) continue;  // obj +0x3c9 set: 0x38ed10 leaves it alone
+        gone.push_back(h);
+    }
+    for (const objects::ObjectHandle h : gone) {
+        b->state(st->id(h)).end_cinematic_suspended = true;
+        const Vec3 corner{1.0f, 1.0f, 0.0f};
+        if (b->tactical->teleport)
+            b->tactical->teleport(h, corner, st->facing(h));
+        else
+            st->set_position(h, corner);
+    }
     return 0;
 }
 
@@ -522,12 +608,6 @@ int m_stop_sfx_event(Call& c) { return object_sfx(c, "Stop_SFX_Event", Presentat
 // Visual only: recorded for R1 (visibility of sub-objects / emitters) and R4 (particles); none of them
 // touches sim state. [inferred] Hide_Sub_Object's float: non-zero hides.
 
-std::string upper_copy(std::string_view s) {
-    std::string out(s);
-    for (char& ch : out) ch = (ch >= 'a' && ch <= 'z') ? static_cast<char>(ch - 'a' + 'A') : ch;
-    return out;
-}
-
 int g_hide_sub_object(Call& c) {
     if (c.nargs != 3)
         return c.script_error_stop("LuaHideSubObject -- Expected gameobject pointer parameter 1, float parameter 2, string parameter 3");
@@ -536,7 +616,12 @@ int g_hide_sub_object(Call& c) {
     if (!c.is_string(3)) return c.script_error_stop("LuaHideSubObject -- invalid type for parameter 3. Expected string.");
     record(c, PresentationOp::HideSubObject);
     const int32_t id = engine_ud(c, 1)->id;
-    state(c).hidden_sub_objects[std::to_string(id) + "|" + upper_copy(c.string(3))] = c.number(2) != 0.0;
+    const std::string mesh = ascii_upper(c.string(3));
+    const bool hide = c.number(2) != 0.0;
+    state(c).hidden_sub_objects[std::to_string(id) + "|" + mesh] = hide;
+    // mcx6 t04: the bridge's hidden-mesh map, which the renderer reads (CampaignBattles::hidden_sub_objects). Not a
+    // per-object script state: presentation only, so the bridge's state hash does not change.
+    if (ObjectBridge* b = c.vm->owner ? attached_object_bridge(*c.vm->owner) : nullptr) b->set_sub_object_hidden(id, mesh, hide);
     return 0;
 }
 
@@ -559,7 +644,7 @@ int m_attach_particle_effect(Call& c) {
     if (t && t->cls == detail::cls_type()) {
         if (types && t->value < types->raw().type_count()) {
             r.type = static_cast<int32_t>(t->value);
-            r.type_name = std::string(types->raw().types().name[t->value]);
+            r.type_name = std::string(types->name(static_cast<objects::TypeIndex>(t->value)));
         }
     } else {
         r.type_name = std::string(c.string(1));
@@ -567,13 +652,28 @@ int m_attach_particle_effect(Call& c) {
             const objects::TypeIndex ti = types->raw().find(r.type_name);
             if (ti != objects::kNone) {
                 r.type = static_cast<int32_t>(ti);
-                r.type_name = std::string(types->raw().types().name[ti]);
+                r.type_name = std::string(types->name(ti));
             }
         }
     }
     if (c.nargs == 2) r.bone = std::string(c.string(2));
-    log_of(c).record_particle_effect(std::move(r));
-    return 0;
+    // storyb t17 (STORYB_T17_SPAWNS_AND_DEATH.md §2 [H]): the effect is an object of the type in the parent's store (whatever
+    // its Is_Decoration says), owned by the parent's owner, at the parent's position and facing, attached to the parent (it
+    // dies with it; a PARTICLE type's Particle_Lifetime_Frames ends it on time); the call returns it. [port] It draws at its
+    // own position (the bone only placed the render attachment): the render request is kept only when no object was made.
+    // [port] A PARTICLE type stays a render request (no object): the store has no lifetime service for a Lua-made object.
+    objects::ObjectStore* st = c.vm->host.store;
+    const objects::ObjectHandle parent = detail::object_handle(*c.self);
+    objects::ObjectHandle made{};
+    if (st && st->alive(parent) && r.type >= 0 && types &&
+        !types->has_behavior(static_cast<objects::TypeIndex>(r.type), objects::BehaviorSet::Union, objects::beh::Particle))
+        made = detail::spawn_attached_effect(c, parent, static_cast<objects::TypeIndex>(r.type), st->owner(parent), 0.0f, false);
+    if (!made) {
+        log_of(c).record_particle_effect(std::move(r));
+        return 0;
+    }
+    detail::push_object(c.L, *c.vm, made);
+    return 1;
 }
 
 int m_cinematic_hyperspace_in(Call& c) {
@@ -582,6 +682,11 @@ int m_cinematic_hyperspace_in(Call& c) {
                       "delay frames");
     if (!c.is_number(1)) return c.script_error_stop("GameObjectWrapper::Cinematic_Hyperspace_In -- invalid type for parameter 1. Expected number.");
     record(c, PresentationOp::ObjectCinematicHyperspaceIn, true);
+    // modc t43 (L1_S4_REMAINING, 0x5c9a80): the arrival hides the model and shows it again 35 frames into the entry, so a
+    // Lua Hide(true) before the call ends with it (the EAW-Remake hides each arriving ship, then hyperspaces it in).
+    // [port] the hide clears at the call, not delay + 10 frames later (the state has no timer; the sim never reads it).
+    if (ObjectBridge* b = c.vm->owner ? attached_object_bridge(*c.vm->owner) : nullptr; b && b->find_state(c.self->id))
+        b->state(c.self->id).hidden = false;
     return 0;
 }
 
@@ -605,7 +710,7 @@ int m_show_emitter(Call& c) {
     if (!c.is_string(1)) return c.script_error_stop("GameObjectWrapper::Show_Emitter -- invalid type for parameter 1. Expected string.");
     if (!is_bool(c, 2)) return c.script_error_stop("GameObjectWrapper::Show_Emitter -- invalid type for parameter 2. Expected boolean.");
     record(c, PresentationOp::ObjectShowEmitter, true);
-    state(c).emitters[std::to_string(c.self->id) + "|" + upper_copy(c.string(1))] = boolean(c, 2);
+    state(c).emitters[std::to_string(c.self->id) + "|" + ascii_upper(c.string(1))] = boolean(c, 2);
     return 0;
 }
 
@@ -646,6 +751,8 @@ int g_play_lightning_effect(Call& c) {
         if (!engine_ud(c, i)) return c.script_error_stop("%s -- invalid type for parameter %d. Expected position of some sort.", n, i);
     PresentationLog& log = log_of(c);
     PresentationEvent& e = record(c, PresentationOp::PlayLightningEffect);
+    append_position(c, e, 2);  // ui2 t08: the end (param 2) then the start (param 3), read once at the call (a moving bone is not tracked)
+    append_position(c, e, 3);
     const PresentationConfig& cfg = log.config();
     const uint32_t frames = cfg.lightning_frames_of ? cfg.lightning_frames_of(c.string(1)) : cfg.lightning_frames;
     e.block = log.open_block(frame_of(c) + frames);

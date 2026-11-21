@@ -42,7 +42,7 @@
 
 #include "alamo/core/galaxy.hpp"
 #include "alamo/core/bytes.hpp"
-#include "alamo/core/sim_crc.hpp"
+#include "alamo/core/sim_crc_fwd.hpp"
 #include "alamo/core/sim_rng.hpp"
 #include "alamo/objects/behaviors.hpp"
 #include "alamo/objects/object_types.hpp"
@@ -98,6 +98,20 @@ struct SpawnParams {
 enum ObjectFlag : uint8_t {
     kFlagDead = 0x02,                // destroyed; unlinked at the next flush
     kFlagMarkedByChildMode = 0x04,   // a tactical counterpart died (parent-mode death marking)
+    // skai t15 (SKAI_T15_TARGET_CHOICE Q5 [H]): pre-built at the skirmish start (team pads, before the start deletes and
+    // rebuilds the threat grid); UNIT_AI never registers it again, so it is missing from every AI owner list all battle.
+    kFlagNoAiOwnerList = 0x08,
+    // storyb t16 (STORY_T04_KESSEL_RUN §7.1 [H], object reader 0x2b0a20): an Is_Decoration map object, which retail
+    // registers in the mode's secondary store. [port] It stays in the primary store (ids, trees, obstacles, drawing),
+    // but is left out of what the secondary store keeps it out of: the store's CRC, the tactical trace and every Lua
+    // object search (lua detail::script_objects). Not one of the original's +0x3A0 bits.
+    kFlagMapDecoration = 0x10,
+    // storyb t17 (STORYB_T17_SPAWNS_AND_DEATH.md §3.1 [H]): a dead object that retail has already unlinked. Retail's battle
+    // deaths happen inside the store update and leave the store at its end-of-step flush, the same frame; the port's battle
+    // runs after the store update (SimHost T5), so its dead objects wait for the next frame's flush. [port] The host marks
+    // the ones dead by the end of T5 (TacticalMode::mark_step_deaths): the tactical trace leaves them out, as retail's
+    // sample does, while a later death (a T9 story script) is sampled once, dead. Not one of the original's +0x3A0 bits.
+    kFlagUnlinkedInRetail = 0x20,
     // refix t01 (S9_DEATH_CLONE_SHIELDS.md §1.6 [H], AI_TACTICAL.md §2, L1_S4_REMAINING.md): +0x3a0 bit 0x40 = dying /
     // dead state (Die sets it; death clones are created with it), bit 0x80 = removing. A death clone gets both (0xc0).
     // Such an object still exists and is alive() (it is drawn and runs its death sequence), but gameplay searches skip
@@ -239,6 +253,7 @@ public:
     ObjectId id(ObjectHandle h) const { return id_[h.slot()]; }
     ObjectId parent_mode_id(ObjectHandle h) const { return parent_mode_id_[h.slot()]; }
     TypeIndex type(ObjectHandle h) const { return type_[h.slot()]; }
+    const GameObjectTypes& object_types() const { return *types_; }
     int32_t owner(ObjectHandle h) const { return owner_[h.slot()]; }
     Vec3 position(ObjectHandle h) const { return position_[h.slot()]; }
     Vec3 facing(ObjectHandle h) const { return facing_[h.slot()]; }
@@ -355,7 +370,8 @@ private:
 // Parent-mode death marking (§2.5), for use as the tactical store's on_parent_mode_death: the
 // counterpart (by parent-mode id in parent) gets kFlagMarkedByChildMode when it has the dying
 // object's type; otherwise it is a container (fleet / transport) and its first not-yet-marked
-// child of that type (insertion order) is marked. Returns the marked object (null if none).
+// child of that type (insertion order) is marked. Exception (§2.5): a type with placed_at_markers (+0xE3) is not
+// marked while another live object of that type and owner remains in child_store. Returns the marked object (null if none).
 ObjectHandle mark_parent_mode_object_for_death(ObjectStore& parent, const ObjectStore& child_store, ObjectHandle dying);
 
 }  // namespace alamo::objects

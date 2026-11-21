@@ -3,24 +3,19 @@
 #include <fstream>
 #include <stdexcept>
 
+#include "alamo/core/ascii.hpp"
 #include "alamo/core/compress.hpp"
 #include "alamo/core/sim_crc.hpp"
 
 namespace alamo {
 namespace {
 constexpr uint8_t kBodyStored = 0, kBodyLz = 1;
+// limit: guard save decode: unpacked body size (allocation), refuses
 constexpr uint32_t kMaxBodyBytes = 1u << 30;  // a plausibility cap on the unpacked size (allocation)
 
 bool fail(std::string* err, std::string msg) {
     if (err) *err = std::move(msg);
     return false;
-}
-
-bool valid_name(std::string_view n) {
-    if (n.empty()) return false;
-    for (const char c : n)
-        if (c == ' ' || c == '\t' || c == '\r' || c == '\n') return false;
-    return true;
 }
 
 uint64_t digest_of(std::span<const uint8_t> bytes) {
@@ -33,7 +28,7 @@ uint64_t digest_of(std::span<const uint8_t> bytes) {
 void SaveFile::add(std::string name, uint32_t version, const ByteWriter& w) { add(std::move(name), version, w.bytes()); }
 
 void SaveFile::add(std::string name, uint32_t version, std::vector<uint8_t> data) {
-    if (!valid_name(name)) throw std::invalid_argument("SaveFile::add: bad chunk name '" + name + "'");
+    if (!valid_chunk_name(name)) throw std::invalid_argument("SaveFile::add: bad chunk name '" + name + "'");
     if (find(name)) throw std::invalid_argument("SaveFile::add: duplicate chunk '" + name + "'");
     chunks_.push_back(SaveChunk{std::move(name), version, std::move(data)});
 }
@@ -102,7 +97,7 @@ bool SaveFile::decode(std::span<const uint8_t> bytes, SaveFile& out, std::string
         const uint32_t len = b.u32();
         const auto data = b.raw(len);
         if (!b.ok()) break;
-        if (!valid_name(c.name) || f.find(c.name)) return fail(err, "bad or duplicate chunk name '" + c.name + "'");
+        if (!valid_chunk_name(c.name) || f.find(c.name)) return fail(err, "bad or duplicate chunk name '" + c.name + "'");
         c.data.assign(data.begin(), data.end());
         f.chunks_.push_back(std::move(c));
     }

@@ -21,6 +21,7 @@
 #include "alamo/ai/tactical/constants.hpp"
 #include "alamo/ai/tactical/hint_zones.hpp"
 #include "alamo/ai/tactical/target_list.hpp"
+#include "alamo/core/ascii.hpp"
 
 namespace alamo {
 class ByteWriter;
@@ -54,6 +55,9 @@ struct PerceptionType {
     // some type's Squadron_Units, +0x21 Cinematic_Object_Only, or behaviour DUMMY_STAR_BASE / DUMMY_GROUND_BASE.
     bool pp_excluded = false;
     bool under_construction = false;       // behaviour 0x2A TACTICAL_UNDER_CONSTRUCTION (pad structures, UC_)
+    // skai t12: an under-construction type's Tactical_Buildable_Constructed type (index into the type table), -1 none.
+    // TacticalBuiltStructureCount names a structure being built by this type (host-filled, not hashed).
+    int32_t constructed_type = -1;
     bool generic_hero = false;             // +0x14
     bool special_weapon = false;           // Is_Special_Weapon_In_Space (+0x1E) or behaviour 0x37 (Hero Setup C)
     bool has_ai_script = false;            // a Lua script (Lua_Script) the Hero marshaller could load (§2.1 item 4) [M]
@@ -107,10 +111,13 @@ struct PerceptionObject {
     int32_t garrison_occupants = 0;  // obj +0x210 -> +0x34
     float additional_population_capacity = 0.0f;  // [L]
     std::vector<int32_t> contained_types;  // garrison / contained objects (+0xf8) and team members (types)
-    bool valid_bombing_target = false;     // unused: IsValidBombingTarget is computed (A1_READINGS §21); kept for saves
     bool engines_online = true;            // [L]
     // player-token inputs
     bool dummy_ground_structure = false;   // behaviour 0x5F (BaseLevel, land skirmish)
+    // skai t15: pre-built at the skirmish start, never in the grid owner lists (skai t22: also a space skirmish's
+    // team-marker start station, SKAI_T22_SPACE_AI_RE Part 3). Not saved: the host fills it from the
+    // store flag (objects::kFlagNoAiOwnerList, saved with the store) every AI frame; the grid's owner lists are saved.
+    bool no_owner_list = false;
     bool dummy_star_base = false;          // behaviour 0x5C (BaseLevel, space)
     int32_t starbase_level = 0;            // 0x397540
     bool built_structure = false;          // counted by TacticalBuiltStructureCount (free-store table) [M]
@@ -152,6 +159,10 @@ struct PerceptionWorld {
     bool land_control = false;       // IsLandControlGame [L]
     bool setup_phase = false;        // 0x35f790 [M]
     bool story_campaign = false;
+    // mcx8 t09 Game.InterventionsEnabled (0x6e1fb0, registered by the base Game evaluator, so battles have it too;
+    // AI_GALACTIC_TOKENS §4 [H]): the game-settings flags, 1.0 unless an option was changed with random events off.
+    // Refreshed from the battle config every update (not saved).
+    bool interventions_enabled = true;
     // A1_READINGS §30.3 [H; M 3 = local skirmish]: GMM mode set, GMM +0x20 != 1 and game type (+0x18) in {1, 2, 3, 4}
     // (networked 1 / 2 / 4, skirmish 3). Gates the TRANSPORT_LANDING sums' parent-object resolution.
     bool skirmish_or_mp = false;
@@ -172,6 +183,9 @@ struct PerceptionWorld {
     // Land: the passability cell at a point ((int)((x + 10) / 20), (int)((y + 10) / 20)) is off the grid or its base
     // word (.ted 0x10A) has Steep | Water (0x22); TimeLastSeen skips those cells (A1_READINGS §26). Absent => none.
     std::function<bool(float x, float y)> point_blocked;
+    // aitac t07 (L1_S4_REMAINING §2.3.1): the same cell test with Steep | Obstacle | Water (0x26) - the Explore_Area point
+    // pickers' land test. Absent => none.
+    std::function<bool(float x, float y)> point_explore_blocked;
     // Base shield test (land mode 0x3b8790): point inside an enemy (true) / allied (false) shield of `self`. Left unset by
     // the host: the original reads the active state through SHIELDED, which no shipped BASE_SHIELD type has, so the
     // IsInside*Shield leaves are always 0 (A1_READINGS §30.4).
@@ -204,7 +218,7 @@ struct PerceptionWorld {
     const PerceptionType* rep_type_of(const PerceptionObject& o) const;
     void object_hard_points(const PerceptionObject& o, std::vector<PerceptionHardPoint>& out) const;
 
-    // N1 save / load (contract: alamo/core/save_file.hpp; part of TacticalAiWorld's chunk). Layout: u32 version (1), the
+    // N1 save / load (contract: alamo/core/save_file.hpp; part of TacticalAiWorld's chunk). Layout: u32 version (3), the
     // scalar fields, players (every field), the relation table, `types` as its count + types_digest() only (definitions:
     // the host's fill() rebuilds them), objects in GOM order (every field, hard points included), markers. Not saved:
     // the callbacks (host wiring) and `types`. read() keeps this world's callbacks and types: it fails (unchanged) when
@@ -218,7 +232,7 @@ private:
     std::vector<std::pair<int32_t, uint32_t>> id_index_;  // sorted (id, index); lookup only
 };
 
-// ASCII case-insensitive equality (names, factions).
-bool iequal(std::string_view a, std::string_view b);
+// ASCII case-insensitive equality (names, factions): alamo::ascii_iequals.
+inline bool iequal(std::string_view a, std::string_view b) { return ascii_iequals(a, b); }
 
 }  // namespace alamo::ai::tactical

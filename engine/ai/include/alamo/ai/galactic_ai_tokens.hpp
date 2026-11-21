@@ -36,15 +36,19 @@
 #include <span>
 #include <string>
 #include <string_view>
+#include <tuple>
+#include <utility>
 #include <vector>
 
 #include "alamo/ai/galactic_perception.hpp"
 #include "alamo/ai/perception_equations.hpp"
+#include "alamo/ai/pp_marshallers.hpp"  // ref5 t05: PpContrastEntry and the shared contrast arithmetic
 #include "alamo/core/galaxy.hpp"
 
 namespace alamo {
 class ByteReader;
 class ByteWriter;
+class StateHasher;
 }  // namespace alamo
 namespace alamo::galactic {
 class GalacticSim;
@@ -61,6 +65,7 @@ struct SpawnMember {
     uint32_t type = 0;
     int32_t count = 0;
 };
+// limit: retail A2F_RE_READS §2.1 (Starting_Spawned_Units_Tech_0..5, +0xAD0)
 inline constexpr size_t kSpawnTechSlots = 6;  // Starting_Spawned_Units_Tech_0..5
 
 // Per object type facts the galactic AI needs beyond galactic::TypeInfo (index = TypeIndex).
@@ -78,6 +83,7 @@ struct GalacticAiTypeInfo {
     bool transport_behavior = false;   // a TRANSPORT behaviour (behaviour 5: company transports, IG-2000): not buildable
     bool generic_hero = false;         // Is_Generic_Hero (+0x14, §2.1)
     bool special_weapon_space = false; // Is_Special_Weapon_In_Space (+0x1E, §2.1)
+    bool lobbing_superweapon = false;  // LOBBING_SUPERWEAPON (0x37) in the Land behaviour set (0x370320(type, 0x37, 1))
     // Structure mask +0x1658: Garrison_Category (a company: its members' OR, OBJECT_TYPES §6.2), else
     // Space_Or_Garrison_Category [port: the original keeps the tag written last]; 0 = unset (galactic_ai_structure_mask
     // reads it as Capital).
@@ -98,13 +104,17 @@ struct GalacticAiTypeInfo {
     // Starting_Spawned_Units_Tech_0..5 (list order, repeated tags appended): the "per-tech members" a fleet unit, starbase or
     // ground structure adds to the force totals (AI_GALACTIC_TOKENS §2; 0x373f40 / 0x373e30 / 0x373d30).
     std::array<std::vector<SpawnMember>, kSpawnTechSlots> spawn_tech;
+    // mcx8 t07: planet types' Potential_Indigenous_Power ("Type, power" entries, repeated tags appended; type +0x20C8, 0x18-byte
+    // entries: type +8, power +0x10), read by Target.HasIndigenousUnits (AI_GALACTIC_TOKENS §1). `count` = the power.
+    std::vector<SpawnMember> indigenous_power;
     // (terrain, restrictions, population: GalacticSim's A2 galactic queries / TypeInfo)
     bool has_category(std::string_view c) const;
 };
 
 // GameObjectCategoryType name -> bits; 0 if unknown. `categories` = the loaded enum (GameObjectTypes::enums(), so a mod's
-// renumbered / renamed categories resolve as the game resolves them); null or a discarded converter = the vanilla FoC
-// table (objects::EnumRegistry fallback). Vanilla data loads an enum equal to that table.
+// renumbered / renamed categories resolve as the game resolves them); null = the vanilla FoC table (objects::EnumRegistry
+// fallback); a discarded converter converts nothing (0, OBJECT_TYPES §9.1, A2k t06). Vanilla data loads an enum equal to
+// that table.
 uint64_t ai_category_bit(std::string_view name, const objects::EnumConverter* categories = nullptr);
 // Fills category_mask of every entry from its category names (same enum rule).
 void fill_category_masks(std::vector<GalacticAiTypeInfo>& types, const objects::EnumConverter* categories = nullptr);
@@ -153,13 +163,22 @@ double galactic_ai_enemy_strength(const galactic::GalacticSim& sim, std::span<co
                                   PlanetIndex planet, int32_t self, bool space, uint64_t mask,
                                   const objects::EnumConverter* categories = nullptr,
                                   const GalacticSimTokenResolver* leaves = nullptr);
-// One entry of the PotentialPlan Contrast requirement list (0x5f1990): `row` = the EnemyContrastTypes row, -1 for a layer
-// total; `space` = layer byte 0 (space) / false = layer byte 1 (ground); `target` = the required strength.
-struct GalacticContrastEntry {
-    int32_t row = -1;
-    bool space = false;
-    double target = 0.0;
-};
+// A2k t02: the hull fraction 0x396df0 a PotentialPlan's P = AI_Combat_Power x hull uses (A2K_T02_RE_ANSWERS Q2(b)) [H]:
+// health / the type's Tactical_Health; 1.0 when the type has no maximum or the stored health is not > 0 ([port] an
+// untyped store keeps health 0).
+double galactic_ai_hull_fraction(float health, float max_health);
+// a2m t09 (A2M_T08_T10_T14_RE.md t08) [H]: the AI clock leaves. spf = FrameSynchronizer +0x24 = 1.0f / (float)FPS, a
+// float (0.033333335f). Game.Age (0x6e1f20) = (double)frame x (double)spf, one double multiply.
+// TimeSinceCorruptionChange (0x65f110) = (double)(float)((float)(uint32)(frame - stamp) x spf): the 32-bit difference is
+// converted as an unsigned value to float, multiplied in float, then widened. TimeSinceConversion / GroundConflict /
+// SpaceConflict (0x65f0c0 / 0x65f160 / 0x65f1b0) = (double)1e18f for a stamp < 0, else (double)(int32)(frame - stamp) x
+// (double)spf. Off by one frame against frame / 30 at threshold crossings (Age > 120 first holds at frame 3600).
+inline constexpr float kAiSecondsPerFrame = 1.0f / 30.0f;
+double galactic_ai_game_age(int32_t frame);
+double galactic_ai_time_since_corruption_change(int32_t frame, int32_t stamp);
+double galactic_ai_time_since_stamp(int32_t frame, int32_t stamp);
+// One entry of the PotentialPlan Contrast requirement list (0x5f1990); ref5 t05: the shape tactical shares (pp_marshallers.hpp).
+using GalacticContrastEntry = PpContrastEntry;
 // 0x5f1990 (AI_GALACTIC_TOKENS §9.2 layer order, AI_GALACTIC_2 Contrast Setup A) [H]: entry 0 = the ground total (0x5f2430
 // flag 1, mask 0), entry 1 = the space total (flag 0), then one row per `row_masks` entry for ground, then one per entry for
 // space, each = galactic_ai_enemy_strength(row mask) x `scale`, or 0 when its layer total is <= 0. The totals are unscaled.
@@ -167,18 +186,22 @@ std::vector<GalacticContrastEntry> galactic_ai_contrast_list(const galactic::Gal
                                                              PlanetIndex planet, int32_t self, std::span<const uint64_t> row_masks,
                                                              double scale, const objects::EnumConverter* categories = nullptr,
                                                              const GalacticSimTokenResolver* leaves = nullptr);
-// The contrast marshaller's arithmetic (AI_GALACTIC_TOKENS §9.8, AI_GALACTIC_2 Contrast) [H]:
-// - 0x5f1990 typed-row scale: ((double)MaxContrastScale + (double)(float)(f x PerFailureContrastAdjust)) x (double)multiplier
-//   (`failure_adjust` = the float product f x PFCA).
-double galactic_contrast_scale(float max_contrast_scale, float failure_adjust, float multiplier);
-// - 0x72ac70 satisfied test, in float: total = Σ (float)target over the layer's typed entries (row >= 0); residual =
-//   Σ (rem / target) x (target / total) over those with target > 0 and rem > 0; satisfied <=> residual <= tolerance.
-bool galactic_contrast_layer_satisfied(std::span<const GalacticContrastEntry> entries, std::span<const double> remaining,
-                                       bool space, float tolerance);
-// - 0x72b940 "still allowed" rule after v <= 0: an untyped total (row -1) still has remaining > 0 and the candidate covers
-//   that entry's layer (layer byte 1 ground -> rec+0x90, byte 0 space -> rec+0x91). Found by layer byte, not position.
-bool galactic_contrast_total_open(std::span<const GalacticContrastEntry> entries, std::span<const double> remaining,
-                                  bool covers_space, bool covers_ground);
+// The contrast marshaller's arithmetic (AI_GALACTIC_TOKENS §9.8, AI_GALACTIC_2 Contrast) [H], shared with tactical since
+// ref5 t05 (pp_marshallers.hpp pp_contrast_*; the rules are in their comments):
+// - 0x5f1990 typed-row scale.
+inline double galactic_contrast_scale(float max_contrast_scale, float failure_adjust, float multiplier) {
+    return pp_contrast_scale(max_contrast_scale, failure_adjust, multiplier);
+}
+// - 0x72ac70 satisfied test, in float.
+inline bool galactic_contrast_layer_satisfied(std::span<const GalacticContrastEntry> entries, std::span<const double> remaining,
+                                              bool space, float tolerance) {
+    return pp_contrast_layer_satisfied(entries, remaining, space, tolerance);
+}
+// - 0x72b940 "still allowed" rule after v <= 0: an open untyped total of a layer the candidate covers.
+inline bool galactic_contrast_total_open(std::span<const GalacticContrastEntry> entries, std::span<const double> remaining,
+                                         bool covers_space, bool covers_ground) {
+    return pp_contrast_total_open(entries, remaining, covers_space, covers_ground);
+}
 // - 0x72b940 gate: the "still allowed" checks run only when the plan-wide flag 0x140b3a528 (every active layer satisfied,
 //   0x6bff00) is set and the candidate has a non-escort team (rec+0xB0), or 0x140b3a529 and an escort team (rec+0xB1);
 //   otherwise v <= 0 is a veto.
@@ -258,8 +281,13 @@ public:
         std::function<int32_t(int32_t player)> difficulty;
         // Script_<name>.Evaluate (AI_GALACTIC_2 §4.4); null = fails.
         std::function<bool(const EvalContext&, std::string_view name, std::span<const Param>, double&)> script;
-        // Variable_Self.StoryTrigger{Parameter_Name} (story flag); null = 0.
-        std::function<bool(int32_t player, std::string_view name)> story_flag;
+        // StoryTrigger{Parameter_Name}: the AI story flag of (`player`, name, `location`), never cleared; null = 0.
+        // `location` = -1 (target none) on a player root (0x6e08e0), the planet's game object id on a planet root
+        // (0x65eb10; STORYB_T10_TRIGGER_AI §3.2).
+        std::function<bool(int32_t player, std::string_view name, int32_t location)> story_flag;
+        // mcx8 t07 Game.InterventionsEnabled (0x6e1fb0, AI_GALACTIC_TOKENS §4): 1.0 unless the campaign started with
+        // changed advanced game options (settings flag 0x20) and random events off (flag 0x10).
+        bool interventions_enabled = true;
         // q6 t03 BudgetAllocation (AI_GALACTIC_TOKENS §8.3): the normalised weight (+0x3C) of `player`'s budget category
         // `key` (an AIGoalCategoryType value), 0.0 for a key the budget does not hold; false = no goal system (fails).
         std::function<bool(int32_t player, int32_t key, double& out)> budget_weight;
@@ -318,25 +346,42 @@ public:
 
     bool resolve(const EvalContext& ctx, const TokenRef& token, double& out) const override;
     bool implements(Root root, std::span<const TokenId> path, const TokenTable& tokens) const override;
+    // mcx0 t05 (docs/MOD_COMPAT_DESIGN.md §9.4): the token path registry. path_registered: the root-relative, upper-case
+    // path ("ENEMYFORCE.SPACETOTAL", "HOMEPLANET.TYPE.TOKEN") is one a handler evaluates on that root; implements() and
+    // the load report's ai.token_coverage use it (no sim needed). registered_paths: every listed path (player paths
+    // under Root::Self, target / force paths under Root::Target).
+    static bool path_registered(Root root, std::string_view path);
+    static std::vector<std::pair<Root, std::string>> registered_paths();
+    // ref6 t03 (tests): the fogged leaves of the token spec table - the Target-relative path ("ENEMYFORCE.SPACETOTAL"), the
+    // cache key its leaf stores under and the fog mask M - and whether the leaf cache holds an entry of (leaf, inst, self).
+    struct FoggedLeaf {
+        std::string path, key;
+        uint32_t mask = 0;
+    };
+    static std::vector<FoggedLeaf> fogged_leaves();
+    bool cache_holds(std::string_view leaf, int32_t inst, int32_t self) const;
+    // Tests only: runs the handler chain for `path` (no parameters) and says whether some branch took it, whatever the
+    // value. It evaluates the token, so it may fill the leaf cache: never call it on a resolver a session uses.
+    bool dispatches(const EvalContext& ctx, Root root, std::string_view path) const;
     bool resolve_script(const EvalContext& ctx, std::string_view name, std::span<const Param> params,
                         double& out) const override;
 
-    // "Variable_Self.HasStructure" style key of a token path (upper-case, '.'-joined) for diagnostics.
-    static std::string path_key(Root root, std::span<const TokenId> path, const TokenTable& tokens);
-    static std::span<const std::string_view> known_paths();
     uint64_t cache_hits() const;
 
-    // N1 save / load: frame, the per-planet event stamps and last-seen values, the leaf cache (key order) and the hit
-    // counter; version 2 (q6 t03) adds the logic frame, the per-player conflict stamps and the conflict observer (log
-    // position, active record). Version 3 (q6 t18): the cache key is (leaf, instance, system player, parameter key) and
-    // every entry keeps its parameters (for the 0xE recompute); then the visible flags and the last seen surface units.
-    // A version-1 / 2 image loads with an empty leaf cache (its keys carried Target / Enemy / Human), no visible flags and
-    // the surface units taken from the sim. A version-1 image loads with no player stamps (-1) and the observer
-    // re-synchronised at its next pass (no stamp for log entries written before). The neighbour lists are rebuilt from the
-    // sim (static map data). read() fails (unchanged) unless the saved planet count is 0 (never refreshed) or the sim's.
+    // N1 save / load (version 4): frame, the per-planet event stamps and last-seen values, the leaf cache (key order; key
+    // = leaf, instance, system player, parameter key, and every entry keeps its parameters for the 0xE recompute, each
+    // with its converted enum value since version 4: a version-3 image loads with those 0), the
+    // hit counter, the logic frame, the per-player conflict stamps, the conflict observer (log position, active record),
+    // the visible flags and the last seen surface units. read() accepts versions 4 and 3 only, like the other AI chunks
+    // (the version 1 / 2 images were dropped in cu6; the 2026-11-05 kGoalsVersion 2 -> 3 bump had already made saves of
+    // that time unloadable). The neighbour lists are rebuilt from the sim (static map data). read() fails (unchanged)
+    // unless the saved planet count is 0 (never refreshed) or the sim's.
     // A load is a restore: it raises no visibility signal (the original refreshes every object at a load) [port].
     void write(ByteWriter& w) const;
     bool read(ByteReader& r);
+    // REF4 t02: the CRC of the saved state (GalacticAiWorld::hash adds it last): the fields write() saves after the version,
+    // through the same list (visit_saved), the hit counter left out.
+    void hash(StateHasher& h) const;
 
     // One token node's cache entry key (§9.9): the node = (leaf, inst, self), the entry = the parameter set.
     struct CacheKey {
@@ -347,11 +392,31 @@ public:
         friend auto operator<=>(const CacheKey&, const CacheKey&) = default;
         friend bool operator==(const CacheKey&, const CacheKey&) = default;
     };
+    // sp4a: a lookup key that owns no strings, and the transparent order of the cache (the same order as CacheKey's: leaf,
+    // inst, self, params, strings compared by char_traits), so a hit allocates nothing and the saved key order is unchanged.
+    struct CacheKeyView {
+        std::string_view leaf;
+        int32_t inst = -1;
+        int32_t self = -1;
+        std::string_view params;
+    };
+    struct CacheLess {
+        using is_transparent = void;
+        using Tied = std::tuple<std::string_view, int32_t, int32_t, std::string_view>;
+        static Tied tie(const CacheKey& k) { return {k.leaf, k.inst, k.self, k.params}; }
+        static Tied tie(const CacheKeyView& k) { return {k.leaf, k.inst, k.self, k.params}; }
+        template <class A, class B>
+        bool operator()(const A& a, const B& b) const {
+            return tie(a) < tie(b);
+        }
+    };
 
     struct Impl;  // evaluation helpers (galactic_ai_tokens.cpp)
 
 private:
     friend struct Impl;
+    template <class W>
+    void visit_saved(W& w) const;  // galactic_ai_save.cpp
     void build_neighbours();  // planet evaluator neighbour lists (0x661da0)
     const galactic::GalacticSim* sim_;
     std::span<const GalacticAiTypeInfo> types_;
@@ -394,7 +459,11 @@ private:
         std::vector<Param> params;  // the bindings copy (0x64c840): what the 0xE recompute evaluates with
     };
     mutable std::mutex mu_;
-    mutable std::map<CacheKey, Entry> cache_;
+public:
+    using LeafCache = std::map<CacheKey, Entry, CacheLess>;  // sp4a: transparent lookups (CacheLess)
+
+private:
+    mutable LeafCache cache_;
     mutable uint64_t hits_ = 0;
 };
 

@@ -5,7 +5,9 @@
 
 #include "alamo/data/values.hpp"
 #include "alamo/data/xml.hpp"
+#include "alamo/data/xml_values.hpp"
 #include "alamo/ui/hud_font.hpp"
+#include "ui_strings.hpp"
 
 namespace alamo::ui {
 
@@ -34,12 +36,6 @@ Rgba8 with_alpha(Rgba8 c, float a) {
 Rgba8 mul(Rgba8 a, Rgba8 b) {
     auto m = [](uint8_t x, uint8_t y) { return static_cast<uint8_t>((static_cast<uint32_t>(x) * y + 127u) / 255u); };
     return {m(a.r, b.r), m(a.g, b.g), m(a.b, b.b), m(a.a, b.a)};
-}
-
-std::u32string ascii32(std::string_view s) {
-    std::u32string o;
-    for (char c : s) o.push_back(static_cast<char32_t>(static_cast<unsigned char>(c)));
-    return o;
 }
 
 }  // namespace
@@ -135,7 +131,7 @@ namespace {
 // A raw Yes / True / 1 flag (fields CommandBarComponent does not model).
 bool raw_flag(const CommandBarComponent& c, std::string_view upper_tag) {
     const std::string_view v = c.raw_value(upper_tag);
-    return !v.empty() && (v[0] == 'T' || v[0] == 't' || v[0] == 'Y' || v[0] == 'y' || v[0] == '1');
+    return data::parse_flag_char(v);
 }
 }  // namespace
 
@@ -220,12 +216,16 @@ Vec2f HudButtons::draw(HudDrawList& dl, const TextureAtlas& atlas, FontCache* fo
         if (const std::string* fl = pick(c.flash_texture, alt))
             if ((static_cast<int64_t>(std::floor(now / 0.25)) % 2) == 0)
                 add_atlas_quad(dl, layer, HudList::Alpha, atlas, *fl, center, {}, c.scale, base);
-    // Build / recharge dials (radial wipe lists).
+    // Build / recharge dials (radial wipe lists). cu9h t03 (CU9H_T02_BOMBING_HUD_RUN item 1b): a dial at value v leaves the
+    // first v % clockwise from 12 o'clock uncovered and draws the texture over the rest, so the wipe gets 100 - v (v = 100:
+    // nothing drawn).
     if (const std::string* bt = pick(c.build_texture, 0)) {
         if (r.build_fill >= 0.0f)
-            add_atlas_quad(dl, layer, HudList::Alpha, atlas, *bt, offset_down(center, c.build_dial_offset), {}, c.scale, base, {}, std::clamp(r.build_fill, 0.0f, 100.0f));
+            add_atlas_quad(dl, layer, HudList::Alpha, atlas, *bt, offset_down(center, c.build_dial_offset), {}, c.scale, base, {},
+                           100.0f - std::clamp(r.build_fill, 0.0f, 100.0f));
         if (r.build_fill2 >= 0.0f)
-            add_atlas_quad(dl, layer, HudList::Additive, atlas, *bt, offset_down(center, c.build_dial2_offset), {}, c.scale, base, {}, std::clamp(r.build_fill2, 0.0f, 100.0f));
+            add_atlas_quad(dl, layer, HudList::Additive, atlas, *bt, offset_down(center, c.build_dial2_offset), {}, c.scale, base, {},
+                           100.0f - std::clamp(r.build_fill2, 0.0f, 100.0f));
     }
     if (r.overlay)
         if (const std::string* ov = pick(c.overlay_texture, 0))
@@ -239,8 +239,7 @@ Vec2f HudButtons::draw(HudDrawList& dl, const TextureAtlas& atlas, FontCache* fo
     // Text.
     if (fonts && (!r.text.empty() || !r.text2.empty())) {
         HudTextStyle st;
-        st.font = fonts->font(c.font_name.empty() ? std::string(kFallbackFontFace) : c.font_name,
-                              c.font_point_size > 0 ? c.font_point_size : 7.0f, canvas.screen_height);
+        st.font = fonts->component_font(c.font_name, c.font_point_size, FontUse::Button, canvas.font_height());
         st.color = with_alpha(r.text_color_set ? r.text_color : c.has_text_color ? c.text_color : Rgba8{}, blink);
         st.outline = c.text_outline;
         st.emboss = c.text_emboss;
@@ -301,13 +300,93 @@ TooltipConfig tooltip_config_from(const data::XmlNode& root) {
     if (const std::string_view t = root.child_text("Encyclopedia_Min_Display_Time"); !t.empty())
         cfg.encyclopedia_min_display =
             static_cast<double>(data::parse_float_or(t, static_cast<float>(cfg.encyclopedia_min_display)));
+    // mcx4 t14: the encyclopedia pop-up layout (HUD_GAPS §2.2).
+    const auto num = [&root](std::string_view tag, float& out) {
+        if (const std::string_view t = root.child_text(tag); !t.empty()) out = data::parse_float_or(t, out);
+    };
+    num("Encyclopedia_Population_Offset", cfg.enc_population_x);
+    num("Encyclopedia_Name_Offset", cfg.enc_name_x);
+    num("Encyclopedia_Cost_Offset", cfg.enc_cost_x);
+    num("Encyclopedia_Icon_X_Offset", cfg.enc_icon_x);
+    num("Encyclopedia_Icon_Y_Offset", cfg.enc_icon_y);
+    num("Encyclopedia_Class_Y_Offset", cfg.enc_class_y);
     return cfg;
+}
+
+bool parse_rgba8(std::string_view text, Rgba8& out) {
+    float v[4] = {0.0f, 0.0f, 0.0f, 255.0f};
+    if (data::parse_floats(text, v, 4) < 3) return false;
+    const auto byte = [](float f) { return static_cast<uint8_t>(std::clamp(std::lround(f), 0L, 255L)); };
+    out = Rgba8{byte(v[0]), byte(v[1]), byte(v[2]), byte(v[3])};
+    return true;
+}
+
+HudConstants hud_constants_from(const data::XmlNode& root) {
+    HudConstants c;
+    if (const std::string_view t = root.child_text("Health_Bar_Spacing"); !t.empty())
+        c.health_bar_spacing = data::parse_float_or(t, c.health_bar_spacing);
+    if (const std::string_view t = root.child_text("Radar_Colorize_Selected_Units"); !t.empty())
+        c.radar_colorize_selected = data::parse_bool_or(t, c.radar_colorize_selected);
+    parse_rgba8(root.child_text("Radar_Selected_Units_Color"), c.radar_selected_color);
+    parse_rgba8(root.child_text("Battle_Pending_Message_Color"), c.battle_pending_color);
+    parse_rgba8(root.child_text("Droid_Date_Color"), c.droid_date_color);
+    parse_rgba8(root.child_text("Droid_Seperator_Color"), c.droid_separator_color);
+    const auto last = [&root](std::string_view tag) {
+        const data::XmlNode n = data::xml_values::last_child(root, tag);
+        return n ? n.text_trimmed() : std::string_view();
+    };
+    if (const std::string_view t = last("Win_Lose_Message_Font"); !t.empty()) c.win_lose_font = std::string(t);
+    if (const std::string_view t = last("Win_Lose_Message_Font_Size"); !t.empty())
+        c.win_lose_font_size = data::parse_float_or(t, c.win_lose_font_size);
+    parse_rgba8(last("Win_Message_Color"), c.win_message_color);
+    parse_rgba8(last("Lose_Message_Color"), c.lose_message_color);
+    if (const std::string_view t = last("CB_Flash_Count"); !t.empty())
+        c.cb_flash_count = static_cast<int32_t>(data::parse_float_or(t, static_cast<float>(c.cb_flash_count)));
+    // mcx4 t14 (MCX4_T14_RE_ANSWERS font families): the default fonts
+    const auto face = [&last](std::string_view tag, std::string& v) {
+        if (const std::string_view t = last(tag); !t.empty()) v = std::string(t);
+    };
+    const auto pts = [&last](std::string_view tag, float& v) {
+        if (const std::string_view t = last(tag); !t.empty()) v = data::parse_float_or(t, v);
+    };
+    face("Command_Bar_Default_Font_Name", c.fonts.text_face);  // ledger: consumes GameConstants.Command_Bar_Default_Font_Name
+    pts("Command_Bar_Default_Font_Size", c.fonts.text_size);   // ledger: consumes GameConstants.Command_Bar_Default_Font_Size
+    face("Text_Button_Default_Font_Name", c.fonts.button_face);  // ledger: consumes GameConstants.Text_Button_Default_Font_Name
+    pts("Text_Button_Default_Font_Size", c.fonts.button_size);   // ledger: consumes GameConstants.Text_Button_Default_Font_Size
+    face("Game_Object_Name_Font_Name", c.fonts.world_face);  // ledger: consumes GameConstants.Game_Object_Name_Font_Name
+    pts("Game_Object_Name_Font_Size", c.fonts.world_size);   // ledger: consumes GameConstants.Game_Object_Name_Font_Size
+    face("Tool_Tip_Font_Name", c.fonts.tooltip_face);  // ledger: consumes GameConstants.Tool_Tip_Font_Name
+    pts("Tool_Tip_Font_Size", c.fonts.tooltip_size);   // ledger: consumes GameConstants.Tool_Tip_Font_Size
+    pts("Text_Reveal_Rate", c.text_reveal_rate);  // ledger: consumes GameConstants.Text_Reveal_Rate
+    const auto count = [&last](std::string_view tag, int32_t& v) {
+        if (const std::string_view t = last(tag); !t.empty()) v = data::parse_int_or(t, v);
+    };
+    // ledger: consumes GameConstants.Num_Structures_For_Medium_Planet_Name
+    count("Num_Structures_For_Medium_Planet_Name", c.medium_planet_structures);
+    // ledger: consumes GameConstants.Num_Structures_For_Large_Planet_Name
+    count("Num_Structures_For_Large_Planet_Name", c.large_planet_structures);
+    // mcx4 t14 (MCX4_PRES_RE_ANSWERS_2 Q1): the countdown timer column
+    const auto num = [&last](std::string_view tag, float& v) {
+        if (const std::string_view t = last(tag); !t.empty()) v = data::parse_float_or(t, v);
+    };
+    // ledger: consumes GameConstants.Game_Play_UI_Countdown_Font_Name
+    if (const std::string_view t = last("Game_Play_UI_Countdown_Font_Name"); !t.empty()) c.countdown_font = std::string(t);
+    num("Game_Play_UI_Countdown_Font_Size", c.countdown_font_size);  // ledger: consumes GameConstants.Game_Play_UI_Countdown_Font_Size
+    num("GUI_Tactical_Countdown_Timers_Screen_X", c.tactical_countdown_x);  // ledger: consumes GameConstants.GUI_Tactical_Countdown_Timers_Screen_X
+    num("GUI_Tactical_Countdown_Timers_Screen_Y", c.tactical_countdown_y);  // ledger: consumes GameConstants.GUI_Tactical_Countdown_Timers_Screen_Y
+    num("GUI_Strategic_Countdown_Timers_Screen_X", c.strategic_countdown_x);  // ledger: consumes GameConstants.GUI_Strategic_Countdown_Timers_Screen_X
+    num("GUI_Strategic_Countdown_Timers_Screen_Y", c.strategic_countdown_y);  // ledger: consumes GameConstants.GUI_Strategic_Countdown_Timers_Screen_Y
+    // ledger: consumes GameConstants.GUI_Strategic_Countdown_Timers_Screen_Spacing
+    num("GUI_Strategic_Countdown_Timers_Screen_Spacing", c.strategic_countdown_spacing);
+    return c;
 }
 
 void TooltipState::update(const HudButtons& buttons, const ComponentTable& table, const TooltipConfig& cfg, double now) {
     component_ = -1;
     const int32_t h = buttons.hover();
-    if (h < 0 || static_cast<size_t>(h) >= table.size() || table[static_cast<size_t>(h)].tooltip_text.empty()) return;
+    if (h < 0 || static_cast<size_t>(h) >= table.size()) return;
+    const ButtonRuntime* r = buttons.find_state(static_cast<uint32_t>(h));
+    if (table[static_cast<size_t>(h)].tooltip_text.empty() && (!r || (r->tooltip_key.empty() && r->tooltip_text.empty()))) return;
     if (buttons.pressed() >= 0) return;  // no tooltip while a button is held
     if (now - buttons.hover_since() + 1e-9 < cfg.delay) return;
     component_ = h;
@@ -316,10 +395,11 @@ void TooltipState::update(const HudButtons& buttons, const ComponentTable& table
 std::string TooltipState::key(const HudButtons& buttons, const ComponentTable& table) const {
     if (component_ < 0 || static_cast<size_t>(component_) >= table.size()) return {};
     const CommandBarComponent& c = table[static_cast<size_t>(component_)];
-    if (c.tooltip_text.empty()) return {};
     const ButtonRuntime* r = buttons.find_state(static_cast<uint32_t>(component_));
     const int32_t i = r ? r->tooltip_index : 0;
     if (i < 0) return {};
+    if (r && !r->tooltip_key.empty()) return r->tooltip_key;  // ui3 t07: ability / unit text
+    if (c.tooltip_text.empty()) return {};
     return *pick(c.tooltip_text, i);
 }
 
@@ -327,8 +407,26 @@ bool TooltipState::draw(HudDrawList& dl, const TextureAtlas& atlas, FontCache& f
                         const ComponentTable& table, const HudButtons& buttons, const TextDatabase* text, Vec2f cursor_px,
                         int32_t faction_alt, const TooltipConfig& cfg) const {
     const std::string k = key(buttons, table);
-    if (k.empty()) return false;
-    const std::u32string body = text ? utf16_to_utf32(text->text(k)) : ascii32(k);
+    const ButtonRuntime* rt = component_ >= 0 ? buttons.find_state(static_cast<uint32_t>(component_)) : nullptr;
+    const std::u32string literal = rt ? rt->tooltip_text : std::u32string();  // [port] a player-given name
+    if (k.empty() && literal.empty()) return false;
+    // ui3 t07: a runtime tooltip_key may list several keys separated by spaces (ability name + description): one line each.
+    std::u32string body;
+    size_t at = 0;
+    while (at < k.size()) {
+        size_t e = k.find(' ', at);
+        if (e == std::string::npos) e = k.size();
+        if (e > at) {
+            const std::string one = k.substr(at, e - at);
+            if (!body.empty()) body += U'\n';
+            body += text ? utf16_to_utf32(text->text(one)) : ascii32(one);
+        }
+        at = e + 1;
+    }
+    if (!literal.empty()) {
+        if (!body.empty()) body += U'\n';
+        body += literal;
+    }
     return draw_text(dl, atlas, fonts, canvas, table, body, cursor_px, faction_alt, cfg);
 }
 
@@ -340,8 +438,8 @@ bool TooltipState::draw_text(HudDrawList& dl, const TextureAtlas& atlas, FontCac
     const CommandBarComponent* font_c = table.get("tooltip_left_text");
     const uint32_t layer = back ? static_cast<uint32_t>(back->base_layer) : 10u;
     HudTextStyle st;
-    st.font = fonts.font(font_c && !font_c->font_name.empty() ? font_c->font_name : std::string("Arial"),
-                         font_c && font_c->font_point_size > 0 ? font_c->font_point_size : 7.0f, canvas.screen_height);
+    st.font = fonts.component_font(font_c ? std::string_view(font_c->font_name) : std::string_view(),
+                                   font_c ? font_c->font_point_size : 0.0f, FontUse::Tooltip, canvas.font_height());
     // [port] the tooltip text uses the frame's light colour: tooltip_left_text's Color is a dark blue meant for the
     // encyclopedia panel; white keeps it readable on i_tooltip_back.
     st.color = Rgba8{230, 230, 230, 255};

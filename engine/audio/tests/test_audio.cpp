@@ -18,6 +18,7 @@
 #include <map>
 #include <memory>
 #include <optional>
+#include <random>
 #include <set>
 #include <string>
 #include <vector>
@@ -32,20 +33,16 @@
 #include "alamo/audio/sample_source.hpp"
 #include "alamo/core/file_provider.hpp"
 #include "alamo/core/hash.hpp"
+#include "alamo/core/host_fs.hpp"
 #include "alamo/core/sim_rng.hpp"
+#include "alamo/meg/meg.h"
 #include "alamo/vfs/vfs.hpp"
+#include "alamo/test/support.hpp"
 
 using namespace alamo;
 using namespace alamo::audio;
 
-static int g_fail = 0;
-#define CHECK(c)                                                     \
-    do {                                                             \
-        if (!(c)) {                                                  \
-            std::printf("FAIL %s:%d: %s\n", __FILE__, __LINE__, #c); \
-            ++g_fail;                                                \
-        }                                                            \
-    } while (0)
+using ::alamo::test::g_fail;
 
 namespace {
 
@@ -384,6 +381,11 @@ void test_parse() {
     const MusicEvent& g = db.music()[db.find_music("Galactic")];
     CHECK(g.files.size() == 3 && g.files[1] == "G2.MP3" && g.loop && g.fade_in_seconds == 2.0f && g.volume_percent == 60);
     CHECK(db.speech()[db.find_speech("Line_2")].overlap_test == "Tut");
+    // mcx4 t13 (docs/re/MCX4_T13_RE_ANSWERS.md "DynamicTrack.Files family" [H]): the music parser's Files (playlist) and
+    // Volume_Percent, which xml_field_tables.md files under DynamicTrack; checked on "Galactic" above (Files, Volume_Percent).
+    // ledger: verifies DynamicTrack.Files
+    // ledger: verifies DynamicTrack.Volume_Percent
+    CHECK(g.files.size() == 3 && g.volume_percent == 60);
     const AudioConstants& c = db.constants();
     CHECK(c.saturation_distance_mod[1] == 1.5f && c.rolloff_distance_mod[2] == 10.0f && c.listener_z_pullback[2] == 60.0f);
     CHECK(c.ambient_map_sounds.size() == 1 && c.ambient_map_sounds[0].second == "Ambient_Map_Sounds_Temperate");
@@ -616,6 +618,27 @@ void test_state_machine() {
         a.update(0.01);
         CHECK(a.live_instances() == 0);
     }
+    {  // b0282 (§1.7, §5): a missing sample is skipped before a voice is taken - it never steals a playing voice and
+       // takes no slot (the backend is never started for it).
+        MemoryProvider tree = make_tree();
+        tree.add("Data\\XML\\SFXEventsTest.xml",
+                 R"(<SFXEvents><SFXEvent Name="Low"><Is_3D>No</Is_3D><Priority>5</Priority><Samples>LOW.WAV</Samples></SFXEvent>)"
+                 R"(<SFXEvent Name="M"><Is_3D>No</Is_3D><Priority>1</Priority><Samples>MISSING.WAV</Samples></SFXEvent></SFXEvents>)");
+        AudioDatabase db;
+        db.load(tree);
+        NullBackend nb{test_duration};
+        SimRng rng{1};
+        AudioConfig cfg;
+        cfg.max_voices_2d = 1;
+        AudioSystem a(db, nb, rng, cfg);
+        const uint32_t low = a.play_sfx("Low");
+        a.update(0.0);
+        CHECK(voice_of(a, low) != 0);
+        const uint32_t m = a.play_sfx("M");
+        a.update(0.0);
+        CHECK(m != 0 && last_op(a, LogOp::SfxVoice)->reason == "sample_missing" && last_op(a, LogOp::SfxSteal) == nullptr);
+        CHECK(voice_of(a, low) != 0 && a.active_voices(Bus::Sfx2D) == 1 && nb.active_count() == 1);
+    }
     {  // Localized samples take the language suffix (captured at instance creation).
         AudioConfig cfg;
         cfg.language = "German";
@@ -718,6 +741,20 @@ void test_voices() {
         });
         a.update(0.0);
         CHECK(a.sfx_live(o) && rig.backend.voice(voice_of(a, o))->params.gain == 0.0f);
+        // b0280 (§1.6): a cinematic skips only the fog test - a fogged object is heard, a hidden / stealthed one is not.
+        a.set_cinematic(true);
+        a.update(0.0);
+        CHECK(rig.backend.voice(voice_of(a, o))->params.gain > 0.0f);
+        a.set_object_query([](uint64_t id) -> std::optional<AudioSystem::ObjectAudio> {
+            if (id != 77) return std::nullopt;
+            AudioSystem::ObjectAudio oa;
+            oa.audible = false;
+            oa.hidden = true;
+            return oa;
+        });
+        a.update(0.0);
+        CHECK(rig.backend.voice(voice_of(a, o))->params.gain == 0.0f);
+        a.set_cinematic(false);
         a.set_3d_scale(0.0f);  // battle-load screen
         a.update(0.0);
         CHECK(rig.backend.voice(voice_of(a, g))->params.gain == 0.0f);
@@ -790,6 +827,11 @@ void test_music() {
         return "Galactic";
     });
     a.set_mode(AudioMode::Land);
+    // aud1 t06 (AUDIO.md §9.2): combat refuses in Lua mode 12 (the play_music default the music above used) ...
+    a.notify_combat(true);
+    CHECK(a.current_music() == "Galactic" && a.music_mode() == music_mode::kLua);
+    // ... so the battle starts from tactical ambient (mode 6), as enter_tactical leaves it.
+    CHECK(a.play_music("Galactic", music_mode::kTacticalAmbient, false, true));
     a.notify_combat(false);
     CHECK(a.current_music() == "Galactic");
     a.notify_combat(true);
@@ -1214,10 +1256,7 @@ void test_lua_bridge() {
 
 // ------------------------------------------------------------------ real data
 
-std::string env(const char* name) {
-    const char* v = std::getenv(name);
-    return v ? std::string(v) : std::string();
-}
+using ::alamo::test::env_or_empty;
 
 void write_report(const std::string& game, const std::string& text) {
 #ifdef ALAMO_AUDIO_LOG_DIR
@@ -1373,12 +1412,198 @@ void test_real(const std::string& game, const std::string& root, bool is_eaw) {
     write_report(game, rep);
 }
 
+// ------------------------------------------------------------------ aud2 (mixer order, music pause, SFX file lookup)
+
+// aud2 t06 (AUDIO.md §1.6 / §3.2): the 0.3 speech cap applies to the voice gain before the 3D distance attenuation (Miles
+// attenuates on top), so a distant 3D SFX is ducked as much as a near one. aud2 t04 (§2.3 / §6.1): the music manager's
+// pause counter holds the music voice and stops the playlist until the last resume.
+void test_aud2_mixer() {
+    {
+        Rig rig;
+        AudioSystem& a = *rig.a;
+        a.set_mode(AudioMode::Land);
+        Listener flat;
+        flat.position = {0, 0, 0};
+        flat.forward = {0, 1, 0};
+        flat.up = {0, 0, 1};
+        a.set_listener(flat);
+        const float att = 200.0f / (200.0f + 10.0f * 800.0f);  // Gun3D at 1000 units, Land (as test_voices)
+        const uint32_t g = a.play_sfx("Gun3D", at(1000.0f));
+        const uint32_t c = a.play_sfx("Click");
+        a.update(0.0);
+        CHECK(near(rig.backend.voice(voice_of(a, g))->params.gain, kSfxBus * att, 1e-6f));
+        a.play_speech("Line_1");
+        a.update(0.0);  // speech starts after the SFX update
+        a.update(0.0);
+        CHECK(a.speech_playing());
+        // Ducked: min(0.64, 0.3) x attenuation - before the fix min(0.64 x att, 0.3) left it at 0.64 x att.
+        CHECK(near(rig.backend.voice(voice_of(a, g))->params.gain, 0.3f * att, 1e-6f));
+        CHECK(near(rig.backend.voice(voice_of(a, c))->params.gain, 0.3f));  // 2D: the cap as before
+        a.set_modal_dialog(true);  // a modal dialog turns the duck off
+        a.update(0.0);
+        CHECK(near(rig.backend.voice(voice_of(a, g))->params.gain, kSfxBus * att, 1e-6f));
+    }
+    {
+        Rig rig;
+        AudioSystem& a = *rig.a;
+        auto tracks = [&a] {
+            int n = 0;
+            for (const LogEntry& e : a.log()) n += e.op == LogOp::MusicTrack ? 1 : 0;
+            return n;
+        };
+        CHECK(a.play_music("Menu"));
+        a.update(0.0);
+        const uint32_t v = last_op(a, LogOp::MusicTrack)->voice;
+        a.update(4.0);
+        const double pos = rig.backend.voice(v)->position;
+        CHECK(near(static_cast<float>(pos), 4.0f) && tracks() == 1 && !a.music_paused());
+        a.pause_music();
+        a.pause_music();  // a counter: two pauses need two resumes
+        CHECK(a.music_paused() && rig.backend.voice(v)->paused && rig.backend.playing(v));
+        a.update(20.0);  // past the 10 s file: held, the playlist does not move on
+        CHECK(rig.backend.voice(v)->position == pos && tracks() == 1 && a.current_music() == "Menu");
+        CHECK(a.play_music("Galactic"));  // queued; nothing starts while paused
+        a.update(0.0);
+        CHECK(tracks() == 1 && a.active_voices(Bus::Music) == 1);
+        a.resume_music();
+        CHECK(a.music_paused() && rig.backend.voice(v)->paused);
+        a.resume_music();
+        a.resume_music();  // never below 0
+        CHECK(!a.music_paused() && !rig.backend.voice(v)->paused);
+        a.update(0.0);
+        CHECK(tracks() == 2 && a.current_music() == "Galactic");  // the queued event starts with the first update
+        a.pause_music();
+        CHECK(a.music_paused());
+        a.resume_music();
+        CHECK(!a.music_paused());
+    }
+}
+
+// aud2 t05 (AUDIO.md §5): SFX samples resolve by leaf name through the normal file layer, loose files first - a loose
+// Data\Audio\SFX\<name> overrides the archive copy - and a mod's own SFX archive layers over FoC's (names it lacks
+// still come from FoC's copy) instead of replacing it.
+void test_aud2_sfx_lookup() {
+    namespace fs = std::filesystem;
+    const fs::path root = fs::temp_directory_path() / ("alamo_audio_aud2_" + std::to_string(std::random_device{}()));
+    std::error_code ec;
+    fs::remove_all(root, ec);
+    const fs::path foc = root / "corruption", mod = root / "Mod";
+    using Files = std::vector<std::pair<std::string, std::string>>;
+    auto put_u16 = [](std::string& s, uint32_t v) {
+        s.push_back(static_cast<char>(v & 0xFFu));
+        s.push_back(static_cast<char>((v >> 8) & 0xFFu));
+    };
+    auto put_u32 = [](std::string& s, uint32_t v) {
+        for (int i = 0; i < 4; ++i) s.push_back(static_cast<char>((v >> (8 * i)) & 0xFFu));
+    };
+    auto write_meg = [&](const fs::path& p, const Files& files) {  // retail-style MEG V1 (as test_vfs)
+        const uint32_t n = static_cast<uint32_t>(files.size());
+        std::string head;
+        put_u32(head, n);
+        put_u32(head, n);
+        for (const auto& f : files) {
+            put_u16(head, static_cast<uint32_t>(f.first.size()));
+            head += f.first;
+        }
+        struct Rec {
+            uint32_t crc, name_index;
+        };
+        std::vector<Rec> recs;
+        for (uint32_t i = 0; i < n; ++i) recs.push_back({meg::name_crc(files[i].first), i});
+        std::sort(recs.begin(), recs.end(), [](const Rec& x, const Rec& y) { return x.crc < y.crc; });
+        uint32_t offset = static_cast<uint32_t>(head.size()) + 20u * n;
+        std::string table, data;
+        for (uint32_t i = 0; i < n; ++i) {
+            const std::string& payload = files[recs[i].name_index].second;
+            put_u32(table, recs[i].crc);
+            put_u32(table, i);
+            put_u32(table, static_cast<uint32_t>(payload.size()));
+            put_u32(table, offset);
+            put_u32(table, recs[i].name_index);
+            offset += static_cast<uint32_t>(payload.size());
+            data += payload;
+        }
+        test::write_file(p, head + table + data);
+    };
+    write_meg(foc / "Data" / "Audio" / "SFX" / "SFX2D_Non_Localized.meg", {{"A.WAV", "base-a"}, {"B.WAV", "base-b"}, {"C.WAV", "base-c"}});
+    write_meg(mod / "Data" / "Audio" / "SFX" / "SFX2D_Non_Localized.meg", {{"A.WAV", "mod-a"}});
+    test::write_file(foc / "Data" / "Audio" / "SFX" / "B.WAV", "loose-b");
+    test::write_file(mod / "Data" / "Audio" / "SFX" / "C.WAV", "mod-loose-c");
+    vfs::VfsConfig cfg;
+    cfg.foc_root = path_to_utf8(foc);
+    cfg.eaw_root = std::string();
+    cfg.mod_search.push_back({vfs::ModSearchEntry::Kind::Path, path_to_utf8(mod)});
+    std::string err;
+    auto v = vfs::Vfs::create(cfg, &err);
+    CHECK(v != nullptr);
+    if (v) {
+        GameSampleConfig sc;
+        sc.sfx_megs = GameSampleSource::default_sfx_megs(*v, "English");
+        CHECK(sc.sfx_megs.size() == 2);  // the mod's copy, then FoC's (layered, not replaced)
+        if (sc.sfx_megs.size() == 2) {
+            CHECK(sc.sfx_megs[0].find("Mod") != std::string::npos && sc.sfx_megs[1].find("corruption") != std::string::npos);
+        }
+        GameSampleSource src(*v, sc);
+        auto get = [&src](const char* name) {
+            std::vector<uint8_t> out;
+            if (!src.read(SampleRef{Bus::Sfx2D, name}, out)) return std::string("<missing>");
+            return std::string(out.begin(), out.end());
+        };
+        CHECK(get("A.WAV") == "mod-a");        // the mod's archive first
+        CHECK(get("b.wav") == "loose-b");      // FoC's loose file beats every archive
+        CHECK(get("C.WAV") == "mod-loose-c");  // a mod's loose file too
+        CHECK(get("D.WAV") == "<missing>");
+        CHECK(src.exists(SampleRef{Bus::Sfx3D, "B.WAV"}) && !src.exists(SampleRef{Bus::Sfx2D, "D.WAV"}));
+        CHECK(src.origin(SampleRef{Bus::Sfx2D, "B.WAV"}).find("B.WAV") != std::string::npos &&
+              src.origin(SampleRef{Bus::Sfx2D, "B.WAV"}).find('#') == std::string::npos);
+        CHECK(src.origin(SampleRef{Bus::Sfx2D, "A.WAV"}).find('#') != std::string::npos);
+        // Without the mod: FoC's archive alone (A from it), the loose B still first.
+        vfs::VfsConfig base = cfg;
+        base.mod_search.clear();
+        auto vb = vfs::Vfs::create(base, &err);
+        CHECK(vb != nullptr);
+        if (vb) {
+            GameSampleConfig sb;
+            sb.sfx_megs = GameSampleSource::default_sfx_megs(*vb, "English");
+            CHECK(sb.sfx_megs.size() == 1);
+            GameSampleSource s2(*vb, sb);
+            std::vector<uint8_t> out;
+            CHECK(s2.read(SampleRef{Bus::Sfx2D, "A.WAV"}, out) && std::string(out.begin(), out.end()) == "base-a");
+            CHECK(s2.read(SampleRef{Bus::Sfx2D, "B.WAV"}, out) && std::string(out.begin(), out.end()) == "loose-b");
+        }
+    }
+    fs::remove_all(root, ec);
+}
+
 }  // namespace
+
+// [port] Bounded event log (AudioConfig::log_limit): the live game keeps only the newest events, so a long battle
+// neither regrows the log on the frame thread nor leaks it (docs/PERFORMANCE.md "Audio event log hitches").
+void test_log_limit() {
+    Rig rig;
+    AudioSystem& a = *rig.a;
+    CHECK(a.config().log_limit == static_cast<size_t>(-1));  // tests keep everything by default
+    a.set_log_limit(8);
+    size_t cap = 0;
+    for (int i = 0; i < 200; ++i) {
+        CHECK(a.play_sfx("NoSuchEvent") == 0);  // one SfxReject entry each
+        CHECK(a.log().size() <= 8);
+        if (i == 20) cap = a.log().capacity();
+    }
+    CHECK(a.log().size() >= 4 && last_reason(a) == "unknown_event");  // the newest entry survives every trim
+    CHECK(a.log().capacity() == cap);                                   // trimming never regrows the vector
+    a.set_log_limit(2);  // lowering the limit trims at once
+    CHECK(a.log().size() == 2);
+    a.set_log_limit(0);  // 0: nothing is kept (the log is emptied at once)
+    CHECK(a.log().empty());
+    CHECK(a.play_sfx("NoSuchEvent") == 0 && a.log().empty());
+}
 
 int main() {
     test_parse();
     test_draws();
     test_gates();
+    test_log_limit();
     test_state_machine();
     test_voices();
     test_music();
@@ -1386,12 +1611,14 @@ int main() {
     test_determinism();
     test_decode_backend();
     test_streams();
+    test_aud2_mixer();
+    test_aud2_sfx_lookup();
 #ifdef ALAMO_AUDIO_HAVE_LUA
     test_lua_bridge();
 #else
     std::printf("lua bridge: lua module not configured, skipped\n");
 #endif
-    const std::string foc = env("ALAMO_FOC_DATA"), eaw = env("ALAMO_EAW_DATA");
+    const std::string foc = env_or_empty("ALAMO_FOC_DATA"), eaw = env_or_empty("ALAMO_EAW_DATA");
     if (foc.empty() && eaw.empty()) std::printf("real data: ALAMO_FOC_DATA / ALAMO_EAW_DATA not set, skipped\n");
     if (!foc.empty()) test_real("foc", foc, false);
     if (!eaw.empty()) test_real("eaw", eaw, true);

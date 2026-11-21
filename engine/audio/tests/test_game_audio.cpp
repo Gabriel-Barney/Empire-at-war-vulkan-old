@@ -40,18 +40,12 @@
 #include "alamo/data/values.hpp"
 #include "alamo/data/xml.hpp"
 #include "alamo/vfs/vfs.hpp"
+#include "alamo/test/support.hpp"
 
 using namespace alamo;
 using namespace alamo::audio;
 
-static int g_fail = 0;
-#define CHECK(c)                                                     \
-    do {                                                             \
-        if (!(c)) {                                                  \
-            std::printf("FAIL %s:%d: %s\n", __FILE__, __LINE__, #c); \
-            ++g_fail;                                                \
-        }                                                            \
-    } while (0)
+using ::alamo::test::g_fail;
 
 namespace {
 
@@ -119,6 +113,7 @@ const char* kSfx = R"(<?xml version="1.0"?>
   <SFXEvent Name="HUD_Base_Attack"><Use_Preset>Preset_HUD</Use_Preset><Samples>BA_ENG.WAV</Samples></SFXEvent>
   <SFXEvent Name="HUD_Rain_Begin"><Use_Preset>Preset_HUD</Use_Preset><Samples>RB_ENG.WAV</Samples></SFXEvent>
   <SFXEvent Name="HUD_Enemy_Spotted"><Use_Preset>Preset_HUD</Use_Preset><Samples>ES_ENG.WAV</Samples></SFXEvent>
+  <SFXEvent Name="HUD_Generic_Spotted"><Use_Preset>Preset_HUD</Use_Preset><Samples>GS_ENG.WAV</Samples></SFXEvent>
   <SFXEvent Name="HUD_Spot_Vader"><Use_Preset>Preset_HUD</Use_Preset><Samples>SV_ENG.WAV</Samples></SFXEvent>
   <SFXEvent Name="HUD_Pending"><Use_Preset>Preset_HUD</Use_Preset><Samples>PE_ENG.WAV</Samples></SFXEvent>
   <SFXEvent Name="GUI_Click"><Is_2D>Yes</Is_2D><Is_3D>No</Is_3D><Is_GUI>Yes</Is_GUI><Samples>CLICK.WAV</Samples><Max_Instances>4</Max_Instances></SFXEvent>
@@ -207,6 +202,7 @@ const char* kFactions = R"(<?xml version="1.0" ?>
     <Music_Event_Tactical_Lose> Lose </Music_Event_Tactical_Lose>
     <Music_Event_Space_Battle_Super_Weapon> Bat_Space_DS </Music_Event_Space_Battle_Super_Weapon>
     <Music_Event_Space_Ambient_Super_Weapon> </Music_Event_Space_Ambient_Super_Weapon>
+    <Faction_Super_Weapon> Death_Star </Faction_Super_Weapon>
     <SFX_Event_Tactical_Land_Battle_Pending> HUD_Pending </SFX_Event_Tactical_Land_Battle_Pending>
     <Music_Event_Tactical_Land_Battle_Pending> Pending </Music_Event_Tactical_Land_Battle_Pending>
     <Music_Event_List_Ambient> Space, Amb_Space </Music_Event_List_Ambient>
@@ -217,6 +213,7 @@ const char* kFactions = R"(<?xml version="1.0" ?>
     <SFXEvent_Land_Base_Under_Attack_Announcement> HUD_Base_Attack </SFXEvent_Land_Base_Under_Attack_Announcement>
     <SFXEvent_Unit_Type_Spotted> Darth_Vader, HUD_Spot_Vader </SFXEvent_Unit_Type_Spotted>
     <SFXEvent_Enemy_Spotted> HUD_Enemy_Spotted </SFXEvent_Enemy_Spotted>
+    <SFXEvent_Generic_Unit_Spotted> HUD_Generic_Spotted </SFXEvent_Generic_Unit_Spotted>
     <SFXEvent_Weather_Begin> RAIN, HUD_Rain_Begin </SFXEvent_Weather_Begin>
     <SFXEvent_Weather_End> RAIN, </SFXEvent_Weather_End>
     <Credits> 100 </Credits>
@@ -328,6 +325,7 @@ void test_data() {
     CHECK(f && f->get("Strategic_Map_Music_Event") == "Gal_Rebel");  // the duplicate faction is not kept
     CHECK(f->get("Credits").empty());                                 // only SFX/Music/Speech tags are kept
     CHECK(f->get("Music_Event_Space_Ambient_Super_Weapon").empty());
+    CHECK(f->get("Faction_Super_Weapon") == "Death_Star");  // b0286: kept for the super-weapon music choice
     CHECK((f->pair_values("Music_Event_List_Ambient", "temperate") ==
            std::vector<std::string>{"Amb_Temperate", "Amb_Temperate_2"}));
     CHECK(f->pair_values("SFXEvent_Weather_End", "RAIN").empty());  // "RAIN, " = no event
@@ -575,13 +573,19 @@ void test_music_modes() {
     CHECK(a.music_mode() == music_mode::kTacticalBattle);
     g.sim_tick();
     CHECK(a.music_mode() == music_mode::kTacticalAmbient);
-    // Victory against the Empire: the _Vs_Faction row; combat no longer changes the music.
+    // ledger: verifies Faction.Music_Event_Tactical_Win
+    // ledger: verifies Faction.Music_Event_Tactical_Lose
+    // (docs/re/MCX4_T13_RE_ANSWERS.md "Faction.Music_Event_Tactical_Win family": Music_Event_Tactical_Win / _Lose.)
+    // Victory against the Empire: the local record's _Vs_Faction row keyed by the loser, music mode 9. Mode 9 is not
+    // excluded from the battle switch (AUDIO.md §9.2), so combat afterwards switches to battle music.
     g.battle_end({true, "Empire", false});
-    CHECK(a.current_music() == "Win_Vs_Empire" && a.music_mode() == music_mode::kBattleEnd && a.music_mode() == 16);
+    CHECK(a.current_music() == "Win_Vs_Empire" && a.music_mode() == music_mode::kTacticalWin && a.music_mode() == 9);
     g.combat({true, false});
-    CHECK(a.current_music() == "Win_Vs_Empire");
-    g.battle_end({false, "Hutts", false});
-    CHECK(a.current_music() == "Lose");
+    CHECK(a.music_mode() == music_mode::kTacticalBattle);
+    g.battle_end({false, "Hutts", false});  // a loss to the Hutts: no Hutts row, the plain lose music, mode 10
+    CHECK(a.current_music() == "Lose" && a.music_mode() == music_mode::kTacticalLose && a.music_mode() == 10);
+    g.tactical_result_music(false, "Empire");  // the dialog's second call while mode 10 runs: no change
+    CHECK(a.current_music() == "Lose" && a.music_mode() == 10);
     g.battle_summary_screen(true);
     CHECK(a.current_music() == "Summary_Win");
     CHECK(a.music_mode() == music_mode::kBattleEnd);
@@ -602,10 +606,18 @@ void test_music_modes() {
     g.enter_tactical(space);
     g.combat({true, false});
     CHECK(a.current_music() == "Bat_Space");
+    // b0286: the host's first battle report (presence learnt one tick after enter_tactical) re-picks the mode's event;
+    // later reports only change the flag, read at the next mode switch.
+    g.set_super_weapon_present(true, true);
+    CHECK(g.super_weapon_present() && a.current_music() == "Bat_Space_DS" && a.music_mode() == music_mode::kTacticalBattle);
+    g.set_super_weapon_present(false, false);
+    CHECK(!g.super_weapon_present() && a.current_music() == "Bat_Space_DS");
+    g.set_super_weapon_present(false, true);  // no change: nothing restarts
+    CHECK(a.current_music() == "Bat_Space_DS");
     // An unknown faction resolves nothing (music unchanged).
     g.set_local_faction("Nobody");
     g.enter_galactic();
-    CHECK(a.current_music() == "Bat_Space");
+    CHECK(a.current_music() == "Bat_Space_DS");
 }
 
 // STRATEGIC_GAPS §7.4: modes 4, 8, 11, 13 (lock), 14, 17.
@@ -765,7 +777,7 @@ void test_hooks() {
     CHECK(count_op(a, LogOp::SfxStart, "Engine_Move") == 1);
 
     // Battle events.
-    CHECK(g.weapon_fire(60, "Gun_Fire", p) != 0 && last_op(a, LogOp::SfxStart)->owner == 60);
+    CHECK(g.weapon_fire(60, "Gun_Fire", p) != 0 && last_op(a, LogOp::SfxStart)->owner == 0);  // aud1 t04: positional (§9.5)
     CHECK(g.weapon_fire(60, "", p) == 0);
     CHECK(g.explosion("Impact_Boom", p) != 0 && rig.positions.back().x == 5.0f);
     CHECK(g.object_sfx(61, "Ambient_Hum", p, 0.5f) != 0);
@@ -807,15 +819,29 @@ void test_hooks() {
     settle();
     g.set_weather("RAIN", 0.2f);
     CHECK(count_op(a, LogOp::SfxStart, "HUD_Rain_Begin") == 2);
+    // aud1 t02 (AUDIO.md §9.3): a type change at intensity > 0 announces nothing; a Weatherproof local player hears nothing.
+    const int starts_before = count_op(a, LogOp::SfxStart, "");
+    g.set_weather("SNOW", 0.4f);
+    g.set_weather("RAIN", 0.4f);
+    CHECK(count_op(a, LogOp::SfxStart, "") == starts_before);
+    g.set_weather("RAIN", 0.0f);
+    settle();
+    g.set_weather("RAIN", 0.6f, false);
+    CHECK(count_op(a, LogOp::SfxStart, "HUD_Rain_Begin") == 2);
 
-    // Enemy spotted: per-type line, else the generic one; Lua flag off -> nothing.
+    // mcx4 t13 (docs/re/MCX4_T13_RE_ANSWERS.md "GameObjectType.Play_SFXEvent_On_Sighting"): a flagged type sighted -> its
+    // SFXEvent_Unit_Type_Spotted entry, else SFXEvent_Generic_Unit_Spotted; an enemy -> SFXEvent_Enemy_Spotted; the Lua
+    // flag off -> nothing.
+    // ledger: verifies Faction.SFXEvent_Generic_Unit_Spotted
     settle();
-    CHECK(g.enemy_spotted("darth_vader") != 0 && last_op(a, LogOp::SfxStart)->event == "HUD_Spot_Vader");
+    CHECK(g.unit_type_spotted("darth_vader") != 0 && last_op(a, LogOp::SfxStart)->event == "HUD_Spot_Vader");
     settle();
-    CHECK(g.enemy_spotted("Boba_Fett") != 0 && last_op(a, LogOp::SfxStart)->event == "HUD_Enemy_Spotted");
+    CHECK(g.unit_type_spotted("Boba_Fett") != 0 && last_op(a, LogOp::SfxStart)->event == "HUD_Generic_Spotted");
+    settle();
+    CHECK(g.enemy_spotted() != 0 && last_op(a, LogOp::SfxStart)->event == "HUD_Enemy_Spotted");
     g.allow_enemy_sighted_vo(false);
     settle();
-    CHECK(g.enemy_spotted("Boba_Fett") == 0);
+    CHECK(g.unit_type_spotted("Boba_Fett") == 0 && g.enemy_spotted() == 0);
 
     // GUI: pumped once, so the click's voice exists before the next update.
     const size_t before_click = a.log().size();
@@ -1114,7 +1140,7 @@ void test_lua_game() {
     uint32_t next = 0;
     LuaAudioResult r = apply_presentation_audio(g, ev, &next);
     CHECK(r.applied == 3 && r.unhandled == 0 && r.bad_args == 1 && next == 4);
-    CHECK(g.ambience().paused() && g.enemy_spotted("Darth_Vader") == 0 && near(a.bus_level(AudioBus::Master), 0.8f));
+    CHECK(g.ambience().paused() && g.unit_type_spotted("Darth_Vader") == 0 && near(a.bus_level(AudioBus::Master), 0.8f));
     // The AudioSystem overload has no GameAudio: Weather_Audio_Pause x2 and Allow_Enemy_Sighted_VO unhandled.
     uint32_t n2 = 0;
     r = apply_presentation_audio(a, ev, &n2);
@@ -1170,10 +1196,7 @@ void test_determinism() {
 
 // ------------------------------------------------------------------ real data
 
-std::string env(const char* name) {
-    const char* v = std::getenv(name);
-    return v ? std::string(v) : std::string();
-}
+using ::alamo::test::env_or_empty;
 
 void test_real(const std::string& game, const std::string& root, bool is_eaw) {
     vfs::VfsConfig vc;
@@ -1457,7 +1480,7 @@ int main() {
     std::printf("lua bridge: lua module not configured, skipped\n");
 #endif
     test_determinism();
-    const std::string foc = env("ALAMO_FOC_DATA"), eaw = env("ALAMO_EAW_DATA");
+    const std::string foc = env_or_empty("ALAMO_FOC_DATA"), eaw = env_or_empty("ALAMO_EAW_DATA");
     if (foc.empty() && eaw.empty()) std::printf("real data: ALAMO_FOC_DATA / ALAMO_EAW_DATA not set, skipped\n");
     if (!foc.empty()) test_real("foc", foc, false);
     if (!eaw.empty()) test_real("eaw", eaw, true);

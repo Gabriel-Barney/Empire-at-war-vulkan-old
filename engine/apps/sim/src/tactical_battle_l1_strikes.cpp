@@ -8,11 +8,13 @@
 #include <string>
 
 #include "alamo/core/dmath.hpp"
+#include "alamo/core/frames.hpp"
+#include "alamo/core/ascii.hpp"
 #include "alamo/data/game_database.hpp"
 #include "alamo/data/xml.hpp"
 #include "alamo/objects/game_object_types.hpp"
 #include "alamo/objects/type_fields.hpp"
-#include "alamo/sim/campaign_battles.hpp"
+#include "alamo/sim/l1_loaders.hpp"
 #include "alamo/sim/tactical_battle.hpp"
 
 namespace alamo::sim {
@@ -38,16 +40,6 @@ std::vector<std::string> split_names(std::string_view s) {
     return out;
 }
 
-bool same_name(std::string_view a, std::string_view b) {
-    if (a.size() != b.size()) return false;
-    for (size_t i = 0; i < a.size(); ++i) {
-        const char x = (a[i] >= 'a' && a[i] <= 'z') ? static_cast<char>(a[i] - 'a' + 'A') : a[i];
-        const char y = (b[i] >= 'a' && b[i] <= 'z') ? static_cast<char>(b[i] - 'a' + 'A') : b[i];
-        if (x != y) return false;
-    }
-    return true;
-}
-
 constexpr float kBomberAltitude = 150.0f;  // [port] flight height over the ground (the LandBomber path height is not specified)
 
 }  // namespace
@@ -64,6 +56,16 @@ TacticalBattle::L1Constants load_l1_constants(const data::GameConstants& gc) {
         static_cast<int32_t>(gc.get_float("Bombing_Run_Reduction_Per_Squadron_Percent", static_cast<float>(k.bombing_run_reduction_per_squadron)));
     k.max_bombard_interval = gc.get_float("Max_Bombard_Interval_Seconds", k.max_bombard_interval);
     k.min_bombard_interval = gc.get_float("Min_Bombard_Interval_Seconds", k.min_bombard_interval);
+    if (const auto v = gc.get("MP_Default_Allow_SuperWeapons")) {  // cu9h t01: the skirmish special-weapons option default
+        const std::string_view t = ascii_trim(*v);
+        if (ascii_iequals(t, "yes") || ascii_iequals(t, "true") || t == "1") k.skirmish_superweapons = true;
+        else if (ascii_iequals(t, "no") || ascii_iequals(t, "false") || t == "0") k.skirmish_superweapons = false;
+    }
+    if (const auto v = gc.get("In_Game_Cinematics")) {  // cu8l t03: a gate of the start fleet's hyperspace arrival
+        const std::string_view t = ascii_trim(*v);
+        if (ascii_iequals(t, "yes") || ascii_iequals(t, "true") || t == "1") k.in_game_cinematics = true;
+        else if (ascii_iequals(t, "no") || ascii_iequals(t, "false") || t == "0") k.in_game_cinematics = false;
+    }
     // battle host: Bombardment_Offset ("0 0 600": x y z) and Bombardment_Distribution (comma / space list of ints) from the
     // data; a missing tag or a malformed / empty value keeps the shipped default.
     auto numbers = [](std::string_view s) {
@@ -101,36 +103,29 @@ TacticalBattle::L1Constants load_l1_constants(const data::GameConstants& gc) {
     return k;
 }
 
-std::vector<TacticalBattle::L1Faction> load_l1_factions(const FileProvider& provider, const galactic::GalacticRules& rules) {
+std::vector<TacticalBattle::L1Faction> load_l1_factions(const galactic::GalacticRules& rules) {
     std::vector<TacticalBattle::L1Faction> out(rules.factions.size());
-    std::vector<uint8_t> bytes;
-    if (!provider.read("Data\\XML\\FactionFiles.xml", bytes)) return out;
-    const data::XmlDocument list = data::XmlDocument::parse(bytes, "FactionFiles.xml");
-    for (data::XmlNode file : list.root().children("File")) {
-        std::vector<uint8_t> fb;
-        const std::string path = "Data\\XML\\" + std::string(file.text_trimmed());
-        if (!provider.read(path, fb)) continue;
-        const data::XmlDocument doc = data::XmlDocument::parse(fb, path);
-        for (data::XmlNode n : doc.root().children("Faction")) {
-            const uint32_t fi = rules.find_faction(n.attribute("Name"));
-            if (fi >= out.size()) continue;
-            TacticalBattle::L1Faction& f = out[fi];
-            if (auto v = n.child_text("Bombardment_Required_Orbital_Ships"); !v.empty()) f.bombard_ships = split_names(v);
-            if (auto v = n.child_text("Bombardment_Projectile"); !v.empty()) f.bombard_projectiles = split_names(v);
-            if (auto v = n.child_text("Bombardment_Particle"); !v.empty()) f.bombard_particles = split_names(v);
-            if (auto v = n.child_text("Bombardment_Number_Of_Salvos"); !v.empty()) f.salvos = objects::c_atoi(v);
-            if (auto v = n.child_text("Bombardment_Shots_Per_Salvo"); !v.empty()) f.shots_per_salvo = objects::c_atoi(v);
-            if (auto v = n.child_text("Bombardment_Shot_Delay"); !v.empty()) f.shot_delay = static_cast<float>(objects::c_atof(v));
-            if (auto v = n.child_text("Bombardment_Salvo_Delay"); !v.empty()) f.salvo_delay = static_cast<float>(objects::c_atof(v));
-            if (auto v = n.child_text("Bombardment_Initial_Delay"); !v.empty()) f.initial_delay = static_cast<float>(objects::c_atof(v));
-        }
+    for (const galactic::FactionRules& n : rules.factions) {  // every definition, list order (cu5 t01)
+        const uint32_t fi = rules.find_faction(n.name);
+        if (fi >= out.size()) continue;
+        TacticalBattle::L1Faction& f = out[fi];
+        f.playable = n.is_playable;
+        f.skirmish_land_bomber = std::string(n.xml_text("Skirmish_Land_Bomber"));
+        if (const std::string v = n.xml_list("Bombardment_Required_Orbital_Ships"); !v.empty()) f.bombard_ships = split_names(v);
+        if (const std::string v = n.xml_list("Bombardment_Projectile"); !v.empty()) f.bombard_projectiles = split_names(v);
+        if (const std::string v = n.xml_list("Bombardment_Particle"); !v.empty()) f.bombard_particles = split_names(v);
+        if (auto v = n.xml_text("Bombardment_Number_Of_Salvos"); !v.empty()) f.salvos = objects::c_atoi(v);
+        if (auto v = n.xml_text("Bombardment_Shots_Per_Salvo"); !v.empty()) f.shots_per_salvo = objects::c_atoi(v);
+        if (auto v = n.xml_text("Bombardment_Shot_Delay"); !v.empty()) f.shot_delay = static_cast<float>(objects::c_atof(v));
+        if (auto v = n.xml_text("Bombardment_Salvo_Delay"); !v.empty()) f.salvo_delay = static_cast<float>(objects::c_atof(v));
+        if (auto v = n.xml_text("Bombardment_Initial_Delay"); !v.empty()) f.initial_delay = static_cast<float>(objects::c_atof(v));
     }
     return out;
 }
 
-// [port] the Bombardment_Projectile types are not unit weapons, so the battle tables do not hold them: a minimal
-// ProjectileDesc (speed, damage, damage type, blast area, lifetime / flight distance, shield / hitpoint flags,
-// category) is appended per type at setup.
+// The Bombardment_Projectile types are not unit weapons, so the unit build does not reach them: each is added at setup
+// through the catalog's one projectile builder (ref5 t01: BattleCatalog::extend_projectile, the same ProjectileDesc and
+// visuals as a unit-fired projectile of that type; a type a unit already fires keeps its entry).
 void TacticalBattle::l1_add_strike_projectiles() {
     if (space_) return;
     const objects::GameObjectTypes& types = catalog_->types();
@@ -138,22 +133,8 @@ void TacticalBattle::l1_add_strike_projectiles() {
         for (const std::string& name : f.bombard_projectiles) {
             const objects::TypeIndex t = types.resolve_name(name);
             if (t == objects::kNone || l1_projectile_of_type(static_cast<int32_t>(t)) >= 0) continue;
-            tc::ProjectileDesc pd;
-            pd.name = std::string(types.raw().types().name[t]);
-            pd.max_speed = types.columns().max_speed[t];
-            pd.damage = types.get_float(t, "Projectile_Damage");
-            pd.damage_type = catalog_->damage().damage_index(types.get_string(t, "Damage_Type"));
-            pd.max_flight_distance = types.get_float(t, "Projectile_Max_Flight_Distance");
-            pd.max_lifetime = types.get_float(t, "Projectile_Max_Lifetime");
-            pd.blast_area_damage = types.get_float(t, "Projectile_Blast_Area_Damage");
-            pd.blast_area_range = types.get_float(t, "Projectile_Blast_Area_Range");
-            pd.blast_max_victims = types.get_int(t, "Projectile_Blast_Area_Max_Victims");
-            if (!types.get_string(t, "Projectile_Does_Shield_Damage").empty()) pd.does_shield_damage = types.get_bool(t, "Projectile_Does_Shield_Damage");
-            if (!types.get_string(t, "Projectile_Does_Hitpoint_Damage").empty()) pd.does_hitpoint_damage = types.get_bool(t, "Projectile_Does_Hitpoint_Damage");
-            const int32_t cat = tc::projectile_category_index(types.get_string(t, "Projectile_Category"));
-            pd.category = static_cast<tc::ProjectileCategory>(cat < 0 ? 0 : cat);
-            tables_->combat.projectiles.push_back(pd);
-            l1_extra_projectiles_.emplace_back(static_cast<int32_t>(t), static_cast<int32_t>(tables_->combat.projectiles.size() - 1));
+            const int32_t idx = catalog_->extend_projectile(*tables_build_, static_cast<uint32_t>(t));
+            if (idx >= 0) l1_extra_projectiles_.emplace_back(static_cast<int32_t>(t), idx);
         }
 }
 
@@ -161,9 +142,9 @@ int32_t TacticalBattle::l1_projectile_of_type(int32_t type) const {
     for (const auto& [t, p] : l1_extra_projectiles_)
         if (t == type) return p;
     if (type < 0) return -1;
-    const std::string_view name = catalog_->types().raw().types().name[static_cast<size_t>(type)];
+    const std::string_view name = catalog_->types().name(static_cast<objects::TypeIndex>(type));
     for (size_t i = 0; i < tables_->combat.projectiles.size(); ++i)
-        if (same_name(tables_->combat.projectiles[i].name, name)) return static_cast<int32_t>(i);
+        if (ascii_iequals(tables_->combat.projectiles[i].name, name)) return static_cast<int32_t>(i);
     return -1;
 }
 
@@ -174,6 +155,32 @@ void TacticalBattle::l1_strikes_setup(TacticalMode& mode) {
     l1_bombard_.clear();
     l1_runs_.clear();
     if (space_) return;
+    const uint32_t fps = 30;
+    if (cfg_.skirmish) {
+        // cu9h t01 (0x493d50 skirmish branch, L1_S4_REMAINING §3.7, HUD_GAPS §9.8): every player, in index order, whose
+        // faction has Is_Playable and a Skirmish_Land_Bomber gets an enabled, available record: interval = int(FPS x
+        // Max_Bombing_Run_Interval_Seconds), ready = now + interval, last start -1. The service then keeps `available` from
+        // the gate list (empty = refused in a skirmish: an Enable_Bombing_Runs upgrade opens it) and the ready frame.
+        const objects::GameObjectTypes& types = catalog_->types();
+        const auto& players = galaxy_->players();
+        for (size_t p = 0; p < players.size(); ++p) {
+            const uint32_t fi = players[p].faction;
+            if (fi >= l1_factions_.size() || !l1_factions_[fi].playable || l1_factions_[fi].skirmish_land_bomber.empty()) continue;
+            const objects::TypeIndex bt = types.resolve_name(l1_factions_[fi].skirmish_land_bomber);
+            if (bt == objects::kNone || bt >= types.size()) continue;
+            L1BombingRun r;
+            r.player = static_cast<int32_t>(p);
+            r.enabled = true;
+            r.available = true;
+            r.bomber_type = static_cast<int32_t>(bt);
+            r.interval = static_cast<uint32_t>(frames_trunc(static_cast<float>(fps) * l1_k_.max_bombing_run_interval));
+            r.ready = frame_ + r.interval;
+            r.last_start = 0xFFFFFFFFu;
+            l1_runs_.push_back(r);
+        }
+        if (!l1_runs_.empty()) l1_used_ = true;
+        return;
+    }
     const int32_t player = req_.info.attacker;  // battle record [1] [M]
     if (player < 0 || static_cast<size_t>(player) >= galaxy_->players().size()) return;
     const uint32_t faction = galaxy_->players()[static_cast<size_t>(player)].faction;
@@ -193,20 +200,19 @@ void TacticalBattle::l1_strikes_setup(TacticalMode& mode) {
             }
         }
     }
-    const uint32_t fps = 30;
     // Orbital bombardment (0x5284b0): a required-ship type in orbit (ship count irrelevant).
     if (faction < l1_factions_.size()) {
         const L1Faction& f = l1_factions_[faction];
         bool any = false;
         for (const uint32_t t : orbit_types)
-            for (const std::string& s : f.bombard_ships) any = any || same_name(types.raw().types().name[t], s);
+            for (const std::string& s : f.bombard_ships) any = any || ascii_iequals(types.name(t), s);
         if (any && !f.bombard_projectiles.empty()) {
             L1Bombard r;
             r.player = player;
             r.faction = faction;
             r.enabled = true;
             r.timer_only = false;
-            r.interval = static_cast<uint32_t>(static_cast<float>(fps) * l1_k_.min_bombard_interval);
+            r.interval = static_cast<uint32_t>(frames_trunc(static_cast<float>(fps) * l1_k_.min_bombard_interval));
             r.ready = frame_ + r.interval;
             r.start = frame_;
             l1_bombard_.push_back(r);
@@ -217,21 +223,21 @@ void TacticalBattle::l1_strikes_setup(TacticalMode& mode) {
     // interval = max(int(FPS x Min), int(int(FPS x Max) x f)).
     int32_t bombers = 0, bomber_type = -1;
     for (const uint32_t t : orbit_types)
-        if (types.get_int(t, "Ship_Class") == 1 || same_name(types.get_string(t, "Ship_Class"), "bomber")) {  // fighter 0, bomber 1
+        if (types.get(t, objects::tags::Ship_Class) == 1 || ascii_iequals(types.get_string(t, objects::tags::Ship_Class), "bomber")) {  // fighter 0, bomber 1
             ++bombers;
-            const objects::TypeIndex bt = types.get_type_ref(t, "Land_Bomber_Type");
+            const objects::TypeIndex bt = types.get(t, objects::tags::Land_Bomber_Type);
             if (bt != objects::kNone && bomber_type < 0) bomber_type = static_cast<int32_t>(bt);
         }
     if (bombers > 0 && bomber_type >= 0) {
         const float n = static_cast<float>(std::max(bombers, 3));
         const float red = (n / 3.0f - 1.0f) * static_cast<float>(l1_k_.bombing_run_reduction_per_squadron) / 100.0f;  // [M] percent
         const float fct = std::max(0.0f, 0.0f + 1.0f - red);
-        const uint32_t base = static_cast<uint32_t>(static_cast<float>(fps) * l1_k_.max_bombing_run_interval);
+        const uint32_t base = static_cast<uint32_t>(frames_trunc(static_cast<float>(fps) * l1_k_.max_bombing_run_interval));
         L1BombingRun r;
         r.player = player;
         r.enabled = true;
         r.bomber_type = bomber_type;
-        r.interval = std::max(static_cast<uint32_t>(static_cast<float>(fps) * l1_k_.min_bombing_run_interval),
+        r.interval = std::max(static_cast<uint32_t>(frames_trunc(static_cast<float>(fps) * l1_k_.min_bombing_run_interval)),
                               static_cast<uint32_t>(static_cast<float>(base) * fct));
         r.ready = frame_ + r.interval;
         r.last_start = frame_;
@@ -248,7 +254,9 @@ bool TacticalBattle::l1_base_shield_covers(Vec3 p) const {
     const objects::ObjectStore& st = l1_mode_->primary();
     for (const objects::ObjectHandle h : st.all_objects()) {
         if (!st.active(h) || kBaseShield == objects::kNoBehavior || !st.has_behavior(h, kBaseShield)) continue;
-        const float r = catalog_->types().get_float(st.type(h), "Base_Shield_Radius");  // [port] a live shield is active
+        // tru1 t02: the shield must be on (combat's BASE_SHIELD state machine; TRU1_A_RE_ANSWERS A1)
+        if (combat_->has_unit(st.id(h)) && !combat_->base_shield_active(st.id(h))) continue;
+        const float r = catalog_->types().get(st.type(h), objects::tags::Base_Shield_Radius);
         const Vec3 c = st.position(h);
         const float dx = p.x - c.x, dy = p.y - c.y, dz = p.z - c.z;
         if (r > 0.0f && dx * dx + dy * dy + dz * dz < r * r) return true;
@@ -257,11 +265,7 @@ bool TacticalBattle::l1_base_shield_covers(Vec3 p) const {
 }
 
 bool TacticalBattle::bombardment_target_valid(int32_t player, Vec3 target) const {
-#ifdef ALAMO_SIM_HAVE_FOG
     if (fog_point_fogged(player, target.x, target.y, true)) return false;  // force 1
-#else
-    (void)player;
-#endif
     return !l1_base_shield_covers(target);
 }
 
@@ -270,7 +274,7 @@ bool TacticalBattle::bombing_run_target_valid(int32_t player, Vec3 target) const
     const objects::ObjectStore& st = l1_mode_->primary();
     for (const objects::ObjectHandle h : st.all_objects()) {  // Bombing_Run_Prevention_Radius of objects not the player's
         if (!st.active(h) || st.owner(h) == player) continue;
-        const float r = static_cast<float>(catalog_->types().get_int(st.type(h), "Bombing_Run_Prevention_Radius"));
+        const float r = catalog_->types().get(st.type(h), objects::tags::Bombing_Run_Prevention_Radius);  // float field (bkc1 t07)
         if (!(r > 0.0f)) continue;
         const Vec3 c = st.position(h);
         const float dx = target.x - c.x, dy = target.y - c.y, dz = target.z - c.z;
@@ -279,29 +283,55 @@ bool TacticalBattle::bombing_run_target_valid(int32_t player, Vec3 target) const
     return true;
 }
 
+namespace {
+// cu8f t06: the key of the Lua Disable_Bombing_Run / Disable_Orbital_Bombardment entry (0x1407ff8a8 in the original) [port].
+constexpr uint32_t kLuaGateKey = 0x407ff8a8u;
+}  // namespace
+
+bool TacticalBattle::player_gate_allows(int32_t player, tactical::abilities::PlayerGate g) const {
+    // cu8f t06 (CU8F_T04_T06_RE §3.3 [H]): 0x527550 / 0x5275a0 - the AND of the player's list; empty = allowed except in a
+    // stand-alone skirmish (0x28afb0).
+    bool all = true;
+    const uint32_t n = abilities_ ? abilities_->player_gate(player, g, all) : 0u;
+    return n == 0 ? !cfg_.skirmish : all;
+}
+
 bool TacticalBattle::bombardment_available(int32_t player) const {
+    // [port] the service's list gate (0x52a110) is also applied here, so a Lua disable takes effect at once. cu8f t06: the
+    // record's `disabled` byte mirrors the Lua entry (kept for older saves, which have no list entry).
     for (const L1Bombard& r : l1_bombard_)
-        if (r.player == player) return r.enabled && r.available && !r.in_progress && !r.disabled;
+        if (r.player == player)
+            return r.enabled && r.available && !r.in_progress && !r.disabled &&
+                   player_gate_allows(player, tactical::abilities::PlayerGate::Bombardment);
     return false;
 }
 
 bool TacticalBattle::bombing_run_available(int32_t player) const {
+    // 0x494410: in a skirmish only with the special-weapons option (cu9h t01; skm1 t02: the session's option when set).
+    if (cfg_.skirmish && !(cfg_.skirmish_options.set ? cfg_.skirmish_options.super_weapons : l1_k_.skirmish_superweapons)) return false;
     for (const L1BombingRun& r : l1_runs_)
-        if (r.player == player) return r.enabled && r.available && !r.in_progress && !r.disabled;
+        if (r.player == player)
+            return r.enabled && r.available && !r.in_progress && !r.disabled &&
+                   player_gate_allows(player, tactical::abilities::PlayerGate::BombingRuns);
     return false;
 }
 
 void TacticalBattle::set_bombardment_disabled(int32_t player, bool disabled) {
+    // Disable_Orbital_Bombardment: one keyed entry in tactical list +0x250, value = !disabled [M high] (cu8f t06).
     for (L1Bombard& r : l1_bombard_)
         if (r.player == player) r.disabled = disabled;
+    if (abilities_) abilities_->set_player_gate_entry(player, tactical::abilities::PlayerGate::Bombardment, kLuaGateKey, !disabled);
 }
 void TacticalBattle::remove_bombardment(int32_t player, bool removed) {
     for (L1Bombard& r : l1_bombard_)
         if (r.player == player) r.enabled = !removed;
 }
 void TacticalBattle::set_bombing_run_disabled(int32_t player, bool disabled) {
+    // Disable_Bombing_Run (0x601aa0): one keyed entry in tactical list +0x1c8 (the list Enable_Bombing_Runs writes), value
+    // = !disabled [M high] (cu8f t06, CU8F_T04_T06_RE §3.3).
     for (L1BombingRun& r : l1_runs_)
         if (r.player == player) r.disabled = disabled;
+    if (abilities_) abilities_->set_player_gate_entry(player, tactical::abilities::PlayerGate::BombingRuns, kLuaGateKey, !disabled);
 }
 
 bool TacticalBattle::bombing_run_finished(int32_t player) const {
@@ -314,10 +344,50 @@ float TacticalBattle::bombing_run_result(int32_t player) const {
         if (r.player == player) return r.total ? 1.0f : 0.0f;  // [port] bombers cannot be shot down here
     return 0.0f;
 }
+// 0x4950f0 (HUD_GAPS §9.3): the absolute frame the player's bombing run is available again; -1 = no record / disabled.
+// Available and not in progress: now; not in progress: the ready frame; in progress: now + interval + int(F) with F the
+// largest remaining flight (distance to the exit along the path / per-frame speed) over the live bombers. cu9g t02.
+int64_t TacticalBattle::l1_bombing_run_ready_frame(const L1BombingRun& r) const {
+    if (!r.enabled) return -1;
+    const int64_t now = static_cast<int64_t>(frame_);
+    if (!r.in_progress) return r.available ? now : static_cast<int64_t>(r.ready);
+    float longest = 0.0f;
+    for (const L1Bomber& bm : r.bombers) {
+        if (!(bm.speed > 0.0f)) continue;
+        const float left = (bm.exit.x - bm.pos.x) * bm.dir.x + (bm.exit.y - bm.pos.y) * bm.dir.y;
+        longest = std::max(longest, left / bm.speed);
+    }
+    return now + static_cast<int64_t>(r.interval) + static_cast<int64_t>(longest);
+}
+
 uint32_t TacticalBattle::bombing_run_frames_until_available(int32_t player) const {
     for (const L1BombingRun& r : l1_runs_)
-        if (r.player == player) return r.ready > frame_ ? r.ready - frame_ : 0u;
+        if (r.player == player) {
+            const int64_t ready = l1_bombing_run_ready_frame(r);
+            return ready > static_cast<int64_t>(frame_) ? static_cast<uint32_t>(ready - static_cast<int64_t>(frame_)) : 0u;
+        }
     return 0u;
+}
+
+// 0x495250 (HUD_GAPS §9.3): the cooldown dial of the bombing-run button, 0..1. No record / disabled / the tactical gate
+// closed: 0; ready (R <= now): 1; R <= last start or now <= last start: 0; else (now - S) / (R - S). The caller shows 0
+// as a full dial. Const, presentation only: the sim never reads it back.
+float TacticalBattle::bombing_run_cooldown_fraction(int32_t player) const {
+    for (const L1BombingRun& r : l1_runs_) {
+        if (r.player != player) continue;
+        if (!r.enabled || !player_gate_allows(player, tactical::abilities::PlayerGate::BombingRuns)) return 0.0f;
+        const int64_t now = static_cast<int64_t>(frame_), ready = l1_bombing_run_ready_frame(r), start = static_cast<int64_t>(r.last_start);
+        if (now >= ready) return 1.0f;
+        if (ready <= start || r.last_start == 0xFFFFFFFFu || now <= start) return 0.0f;
+        return static_cast<float>(now - start) / static_cast<float>(ready - start);
+    }
+    return 0.0f;
+}
+
+objects::TypeIndex TacticalBattle::bombing_run_bomber_type(int32_t player) const {
+    for (const L1BombingRun& r : l1_runs_)
+        if (r.player == player && r.enabled && r.bomber_type >= 0) return static_cast<objects::TypeIndex>(r.bomber_type);
+    return objects::kNone;
 }
 
 // ---- start ----
@@ -335,9 +405,11 @@ bool TacticalBattle::start_bombardment(TacticalMode& mode, int32_t player, Vec3 
         r.start = frame_;
         r.shot = r.salvo = 0;
         r.target = target;
-        const uint32_t init = static_cast<uint32_t>(30.0f * f.initial_delay);
-        const uint32_t d = init;  // the BOMBARD_DELAY story override (mgr +0x50) is not modelled [port]
-        r.next_shot = frame_ + static_cast<uint32_t>(30.0f * f.shot_delay) + d;
+        const uint32_t init = static_cast<uint32_t>(frames_trunc(30.0f * f.initial_delay));
+        // BOMBARD_DELAY (STY1 t06, §4.3): a story override above 0 replaces the faction's initial delay. [port] the extra time
+        // over the faction value is not applied to the first particle.
+        const uint32_t d = bombard_delay_override_ > 0.0f ? static_cast<uint32_t>(frames_trunc(30.0f * bombard_delay_override_)) : init;
+        r.next_shot = frame_ + static_cast<uint32_t>(frames_trunc(30.0f * f.shot_delay)) + d;
         const int32_t count = static_cast<int32_t>(l1_k_.bombardment_distribution.size());
         r.cursor = static_cast<uint32_t>(rng.range_int(0, std::max(0, count - 1)));  // drawn even without scatter [H]
         if (!f.bombard_particles.empty() && l1_mode_) {  // extra == 0: particle[0] now
@@ -345,6 +417,18 @@ bool TacticalBattle::start_bombardment(TacticalMode& mode, int32_t player, Vec3 
             if (pt != objects::kNone) spawn_particle(*l1_mode_, static_cast<int32_t>(pt), target, player);
         }
         r.deferred = -1;
+        {  // mcx4 t13: presentation feed (SFXEvent_Bombard_Incoming)
+            StrikeEvent e;
+            e.player = player;
+            e.bombard = true;
+            for (const std::string& n : f.bombard_ships)
+                if (const objects::TypeIndex t = catalog_->types().resolve_name(n); t != objects::kNone) {
+                    e.ship_type = t;
+                    break;
+                }
+            strike_starts_.push_back(e);
+        }
+        story_generics_.push_back({"start_bombard", player});  // STY1 t03 (0x528140): raised last, every player
         return true;
     }
     return false;
@@ -382,8 +466,8 @@ bool TacticalBattle::start_bombing_run(TacticalMode& mode, int32_t player, Vec3 
             bm.exit = Vec3{exit.x + o.x, exit.y + o.y, gz};
             bm.speed = std::max(types.columns().max_speed[bt], 0.0f) * 1.56f;  // land mode multiplier
             bm.range = types.columns().targeting_max_attack_distance[bt];
-            bm.recharge = types.get_float(bt, "Projectile_Fire_Recharge_Seconds");
-            const auto refs = types.get_type_refs(bt, "Projectile_Types");
+            bm.recharge = types.get(bt, objects::tags::Projectile_Fire_Recharge_Seconds);
+            const auto refs = types.get_type_refs(bt, objects::tags::Projectile_Types);
             bm.projectile = refs.empty() ? -1 : l1_projectile_of_type(static_cast<int32_t>(refs.front()));
             bm.next_fire = frame_;
             if (mt != objects::kNone) {
@@ -397,6 +481,8 @@ bool TacticalBattle::start_bombing_run(TacticalMode& mode, int32_t player, Vec3 
             r.bombers.push_back(bm);
         }
         r.total = static_cast<uint32_t>(r.bombers.size());
+        // mcx4 t13: presentation feed (SFXEvent_Bombing_Run_Begin_Crosstalk on the first bomber)
+        strike_starts_.push_back({player, false, r.bombers.empty() ? objects::kNoObjectId : r.bombers.front().id, bt});
         return true;
     }
     return false;
@@ -410,7 +496,8 @@ void TacticalBattle::l1_strikes(TacticalMode& mode, SimRng& rng) {
     // Orbital bombardment (0x52a110).
     for (L1Bombard& r : l1_bombard_) {
         if (!r.in_progress) {
-            r.available = r.timer_only ? r.ready <= frame_ : (!r.disabled && r.ready <= frame_);
+            r.available = r.timer_only ? r.ready <= frame_
+                                       : (!r.disabled && player_gate_allows(r.player, tactical::abilities::PlayerGate::Bombardment) && r.ready <= frame_);
             continue;
         }
         const L1Faction& f = l1_factions_[r.faction];
@@ -443,11 +530,11 @@ void TacticalBattle::l1_strikes(TacticalMode& mode, SimRng& rng) {
         // Advance: next shot / next salvo (particle) / finish.
         if (r.shot + 1 < f.shots_per_salvo) {
             ++r.shot;
-            r.next_shot += static_cast<uint32_t>(30.0f * f.shot_delay);
+            r.next_shot += static_cast<uint32_t>(frames_trunc(30.0f * f.shot_delay));
         } else if (r.salvo + 1 < f.salvos) {
             r.shot = 0;
             ++r.salvo;
-            r.next_shot += static_cast<uint32_t>(30.0f * f.salvo_delay);
+            r.next_shot += static_cast<uint32_t>(frames_trunc(30.0f * f.salvo_delay));
             if (!f.bombard_particles.empty()) {
                 const size_t k = std::min<size_t>(static_cast<size_t>(r.salvo), f.bombard_particles.size() - 1);
                 const objects::TypeIndex pt = catalog_->types().resolve_name(f.bombard_particles[k]);
@@ -467,7 +554,7 @@ void TacticalBattle::l1_strikes(TacticalMode& mode, SimRng& rng) {
     // Bombing runs (0x495dd0): bombers fly the path, bomb while within range of their marker, leave at the exit.
     for (L1BombingRun& r : l1_runs_) {
         if (!r.in_progress) {
-            r.available = !r.disabled && r.ready <= frame_;
+            r.available = !r.disabled && player_gate_allows(r.player, tactical::abilities::PlayerGate::BombingRuns) && r.ready <= frame_;
             continue;
         }
         for (L1Bomber& bm : r.bombers) {
@@ -492,7 +579,7 @@ void TacticalBattle::l1_strikes(TacticalMode& mode, SimRng& rng) {
                     l.from = tv3(bm.pos);
                     l.point = tv3(m);
                     combat_->launch_projectile(l, frame_);
-                    bm.next_fire = frame_ + std::max(1u, static_cast<uint32_t>(30.0f * bm.recharge));
+                    bm.next_fire = frame_ + std::max(1u, static_cast<uint32_t>(frames_trunc(30.0f * bm.recharge)));
                 }
             }
             if ((bm.exit.x - bm.pos.x) * bm.dir.x + (bm.exit.y - bm.pos.y) * bm.dir.y <= 0.0f) {  // past the exit

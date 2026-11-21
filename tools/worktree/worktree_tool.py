@@ -1,22 +1,24 @@
 #!/usr/bin/env python
 """Create and clean git worktrees for parallel agents (Windows, standard library only).
 
-  python tools/worktree/worktree_tool.py new <name> [--base main] [--fetch] [--no-sync] [--modules "core;x"]
+  python tools/worktree/worktree_tool.py new <name> [--base origin/dev] [--fetch] [--no-sync] [--modules "core;x"]
   python tools/worktree/worktree_tool.py clean [--apply] [--days N] [--keep a,b] [--only a,b]
                                                [--pushed] [--trees] [--main] [--no-size] [--fetch]
+  python tools/worktree/worktree_tool.py link [--quiet]
   python tools/worktree/worktree_tool.py --selftest
 
 Wrappers: tools\\new_worktree.cmd and tools\\clean_worktrees.cmd.
 
-new    `git worktree add .claude/worktrees/<name> -b claude/<name> <base>` run from the MAIN checkout (found with
-       `git worktree list`), then directory junctions (`mklink /J`, no admin) for Data, extracted, toolchain and
-       roadmap-store pointing at the main checkout's folders, `roadmap_store.py sync` (a failure only warns),
-       `tools\\setup_git.cmd` when the new tree has it, and the exact next commands. re_reference/ is never linked
+new    `git worktree add --no-track .claude/worktrees/<name> -b claude/<name> <base>` run from the MAIN checkout (found
+       with `git worktree list`). <base> defaults to origin/dev, the development branch (CLAUDE.md "Branches"; origin/main
+       when origin has no dev). Then directory junctions (`mklink /J`, no admin) for Data, extracted, toolchain and
+       roadmap-store pointing at the main checkout's folders, `roadmap_store.py sync` (a failure only warns), and the
+       exact next commands. re_reference/ is never linked
        (clean-room rule: only RE/doc tasks open it, from the main checkout).
-clean  dry run by default: a table of every worktree (branch, merged into origin/main, uncommitted changes, unpushed
+clean  dry run by default: a table of every worktree (branch, merged into origin/dev or origin/main, uncommitted changes, unpushed
        commits, age, build-tree GB) and what --apply would do. --apply removes a worktree only when its HEAD is
-       reachable from origin/main (merged), the tree is clean (the two generated ROADMAP pages may differ), nothing
-       is unpushed, it has been idle for --days days (default 2: a fresh worktree on the main tip looks "merged"),
+       reachable from origin/dev or origin/main (merged), the tree is clean, nothing
+       is unpushed, it has been idle for --days days (default 2: a fresh worktree on the dev tip looks "merged"),
        it is not locked, not the main checkout, not the worktree this was started from and not in --keep.
        Links are removed first with `cmd /c rmdir` (never recursive: that would delete the real Data / toolchain),
        then `git worktree remove`. --pushed also allows clean worktrees whose commits are all on some remote branch.
@@ -39,8 +41,13 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 LINKED = ("Data", "extracted", "toolchain", "roadmap-store")
-PAGES = {"ROADMAP.html", "docs/ROADMAP.html"}  # generated, tracked; a diff in them alone does not block removal
-MAIN_TREES_KEPT = {"build-msvc", "build-clang", "build-asan"}
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "lint"))
+import build_trees  # noqa: E402
+
+MAIN_TREES_KEPT = build_trees.MAIN_TREES_KEPT
+# The tree build_agent.cmd uses by default (bo1 t06): every kept worktree keeps it warm however long it has been idle, so the
+# next task there starts from an incremental build, not a clean one. Other trees (per-task, bench, clang) are pruned by age.
+WARM_TREE = build_trees.WARM_TREE
 NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
 REPARSE_ATTR = 0x400
 DIR_ATTR = 0x10
@@ -242,13 +249,21 @@ def activity_ts(wt: Worktree, commit_ts: float) -> float:
     return best
 
 
+LANDED = ("origin/dev", "origin/main")  # dev first: the development branch and the default base (CLAUDE.md "Branches")
+
+
+def landed_refs(ctx: Ctx) -> list:
+    # Remote branches that count as "landed", in preference order, keeping only those that exist.
+    return [r for r in LANDED
+            if git(ctx.main, "rev-parse", "--verify", "--quiet", r, check=False).returncode == 0]
+
+
 @dataclass
 class Info:
     wt: Worktree
     exists: bool = True
     merged: bool | None = None
     dirty: int = 0
-    pages_only: bool = False
     unpushed: int = 0
     commit_ts: float = 0.0
     idle_days: float = 0.0
@@ -279,28 +294,32 @@ def inspect(ctx: Ctx, wt: Worktree, keep: set, only: set, days: float, pushed_ok
         inf.reasons.append("folder missing (git worktree prune)")
         return inf
     if wt.head:
-        p = git(ctx.main, "merge-base", "--is-ancestor", wt.head, "origin/main", check=False)
-        inf.merged = (p.returncode == 0) if p.returncode in (0, 1) else None
+        inf.merged = None
+        for ref in landed_refs(ctx):
+            p = git(ctx.main, "merge-base", "--is-ancestor", wt.head, ref, check=False)
+            if p.returncode == 0:
+                inf.merged = True
+                break
+            if p.returncode == 1:
+                inf.merged = False
         n = git(ctx.main, "rev-list", "--count", wt.head, "--not", "--remotes", check=False).stdout.strip()
         inf.unpushed = int(n) if n.isdigit() else 0
         t = git(ctx.main, "log", "-1", "--format=%ct", wt.head, check=False).stdout.strip()
         inf.commit_ts = float(t) if t.isdigit() else 0.0
     st = git(wt.path, "status", "--porcelain", check=False).stdout.splitlines()
     inf.dirty = len(st)
-    paths = {ln[3:].strip().strip('"') for ln in st}
-    inf.pages_only = bool(st) and paths <= PAGES
     inf.idle_days = (time.time() - activity_ts(wt, inf.commit_ts)) / DAY
     if sizes:
         for e in sorted(os.listdir(wt.path)):
             full = os.path.join(wt.path, e)
-            if e.startswith("build-") and os.path.isdir(full) and not is_link_dir(full):
+            if build_trees.is_tree_name(e) and os.path.isdir(full) and not is_link_dir(full):
                 inf.build_bytes += tree_scan(full)[0]
                 inf.build_trees += 1
     if inf.merged is None:
-        inf.reasons.append("origin/main missing")
+        inf.reasons.append("origin/dev and origin/main missing")
     elif not inf.merged and not (pushed_ok and inf.unpushed == 0):
-        inf.reasons.append("not merged into origin/main")
-    if inf.dirty and not inf.pages_only:
+        inf.reasons.append("not merged into origin/dev or origin/main")
+    if inf.dirty:
         inf.reasons.append("uncommitted changes")
     if inf.unpushed:
         inf.reasons.append("unpushed commits")
@@ -314,7 +333,7 @@ def print_table(infos: list, out=print):
     for i in infos:
         w = i.wt
         merged = "?" if i.merged is None else ("yes" if i.merged else "no")
-        dirty = "-" if not i.exists else ("pages" if i.pages_only else (str(i.dirty) if i.dirty else "no"))
+        dirty = "-" if not i.exists else (str(i.dirty) if i.dirty else "no")
         age = f"{(time.time() - i.commit_ts) / DAY:.1f}" if i.commit_ts else "-"
         build = f"{gb(i.build_bytes):.2f} ({i.build_trees})" if i.build_trees else "-"
         branch = w.branch or ("(detached)" if w.detached else "-")
@@ -327,7 +346,37 @@ def print_table(infos: list, out=print):
 
 # ---------------------------------------------------------------- new
 
-def cmd_new(ctx: Ctx, name: str, base: str = "main", fetch: bool = False, sync: bool = True,
+def ensure_links(ctx: Ctx, target: Path, out=print, quiet: bool = False) -> list:
+    """Junction each LINKED folder of the main checkout into `target` when it is missing there. Never replaces or
+    deletes anything already present. Returns the names it linked. No-op for the main checkout itself."""
+    made: list = []
+    if norm(target) == norm(ctx.main):
+        return made
+    for d in LINKED:
+        src = ctx.main / d
+        dst = target / d
+        if not src.exists():
+            if not quiet:
+                out(f"  skip {d}: {src} does not exist")
+        elif os.path.lexists(dst):
+            if not quiet:
+                out(f"  skip {d}: already present")
+        else:
+            make_junction(dst, src)
+            made.append(d)
+            out(f"  junction {d} -> {src}")
+    return made
+
+
+def cmd_link(ctx: Ctx, target: Path, quiet: bool = False, out=print) -> list:
+    """`link`: add the missing junctions to an existing worktree (app-made worktrees have none; SessionStart hook)."""
+    made = ensure_links(ctx, target, out, quiet)
+    if not quiet and not made:
+        out("links: nothing to add")
+    return made
+
+
+def cmd_new(ctx: Ctx, name: str, base: str | None = None, fetch: bool = False, sync: bool = True,
             modules: str = "<modules>", out=print) -> Path:
     if not NAME_RE.match(name):
         raise ToolError(f"bad worktree name {name!r}: use letters, digits, '.', '_', '-'")
@@ -342,19 +391,15 @@ def cmd_new(ctx: Ctx, name: str, base: str = "main", fetch: bool = False, sync: 
         p = git(ctx.main, "fetch", "origin", "--prune", check=False)
         if p.returncode:
             out(f"warning: fetch failed: {(p.stderr or '').strip()}")
-    out(f"git worktree add {target} -b {branch} {base}")
-    git(ctx.main, "worktree", "add", str(target), "-b", branch, base)
+    if base is None:
+        refs = landed_refs(ctx)
+        if not refs:
+            raise ToolError("origin/dev and origin/main not found (run `git fetch origin`), or pass --base")
+        base = refs[0]
+    out(f"git worktree add --no-track {target} -b {branch} {base}")
+    git(ctx.main, "worktree", "add", "--no-track", str(target), "-b", branch, base)
 
-    for d in LINKED:
-        src = ctx.main / d
-        dst = target / d
-        if not src.exists():
-            out(f"  skip {d}: {src} does not exist")
-        elif os.path.lexists(dst):
-            out(f"  skip {d}: already present in the new worktree")
-        else:
-            make_junction(dst, src)
-            out(f"  junction {d} -> {src}")
+    ensure_links(ctx, target, out)
 
     store = target / "roadmap-store" / "roadmap_store.py"
     if sync and store.is_file():
@@ -368,28 +413,18 @@ def cmd_new(ctx: Ctx, name: str, base: str = "main", fetch: bool = False, sync: 
     elif sync:
         out("  skip sync: roadmap-store/roadmap_store.py not found")
 
-    setup = target / "tools" / "setup_git.cmd"
-    if setup.is_file():
-        out("tools\\setup_git.cmd ...")
-        p = run(["cmd", "/c", "tools\\setup_git.cmd"], cwd=target, timeout=120)
-        out("  setup_git ok" if p.returncode == 0
-            else f"  warning: setup_git exit {p.returncode}: {(p.stdout + p.stderr).strip()[-300:]}")
-    else:
-        out(f"  note: tools\\setup_git.cmd is not in {base}; run it after merging main into the branch")
-
     if not modules.split(";")[0] == "core":
         modules = "core;" + modules
     out("")
     out(f"Worktree ready: {target}")
-    out(f"Branch {branch} from {base} (stack at most 2 deep: a branch on a branch on main).")
+    out(f"Branch {branch} from {base}.")
     out("Next, in PowerShell (one build tree per worktree: `wt` gives build-wt-msvc / build-wt-clang):")
     out(f'  cd "{target}"')
-    out(f"  python roadmap-store\\roadmap_store.py claim <group> --by {name}")
     out(f'  & .\\build_agent.cmd --% msvc wt "{modules}"     # fast tier; read the summary, not the log')
     out(f'  & .\\build_agent.cmd --% clang wt "{modules}"    # sim code too (everything but render/audio/video/UI)')
     out("  .\\build_asan.cmd                                      # engine/jobs or other threading code")
-    out("Finish: commit, push, PR against main (the roadmap page lives in roadmap-store/ only).")
-    out(f"Remove it after the PR merges:  tools\\clean_worktrees.cmd --apply --only {name}")
+    out("Finish: commit, then .\\tools\\land_on_dev.cmd (merges origin/dev, checks, pushes dev; no step of Gabriel's).")
+    out(f"Remove it once it is on dev:  tools\\clean_worktrees.cmd --apply --only {name}")
     return target
 
 
@@ -412,8 +447,8 @@ def cmd_clean(ctx: Ctx, apply: bool = False, days: float = 2.0, keep=(), only=()
     if fetch:
         out("git fetch origin --prune ...")
         git(ctx.main, "fetch", "origin", "--prune", check=False)
-    if git(ctx.main, "rev-parse", "--verify", "--quiet", "origin/main", check=False).returncode != 0:
-        out("warning: origin/main not found: nothing counts as merged (run `git fetch origin`)")
+    if not landed_refs(ctx):
+        out("warning: origin/dev and origin/main not found: nothing counts as merged (run `git fetch origin`)")
     keep, only = set(keep), set(only)
     wts = list_worktrees(ctx)
     infos = [inspect(ctx, w, keep, only, days, pushed_ok, sizes) for w in wts]
@@ -461,14 +496,14 @@ def cmd_clean(ctx: Ctx, apply: bool = False, days: float = 2.0, keep=(), only=()
 def _prune_trees(wt: Worktree, days: float, apply: bool, out, result: dict):
     for e in sorted(os.listdir(wt.path)):
         full = os.path.join(wt.path, e)
-        if not (e.startswith("build-") and os.path.isdir(full)) or is_link_dir(full):
+        if not (build_trees.is_tree_name(e) and os.path.isdir(full)) or is_link_dir(full):
             continue
         if wt.is_main and e in MAIN_TREES_KEPT:
             continue
         age = (time.time() - newest_activity(full)) / DAY
         size = tree_scan(full)[0]
-        stale = age >= days
-        label = "DELETE" if stale and apply else ("stale " if stale else "recent")
+        stale = age >= days and not (e == WARM_TREE and not wt.is_main)
+        label = "warm  " if e == WARM_TREE and age >= days and not wt.is_main else "DELETE" if stale and apply else ("stale " if stale else "recent")
         out(f"  {label} {wt.name}/{e}  {gb(size):.2f} GB  idle {age:.1f} d")
         if stale and apply:
             try:
@@ -502,7 +537,6 @@ def selftest() -> int:
         g(main, "config", "user.email", "selftest@example.invalid")
         (main / ".gitignore").write_text(
             "/.claude/worktrees/\n/Data/\n/extracted/\n/toolchain/\n/roadmap-store/\n/build-*/\n")
-        (main / "ROADMAP.html").write_text("a\n")
         (main / "x.txt").write_text("x\n")
         g(main, "add", "-A")
         g(main, "commit", "-q", "-m", "init")
@@ -515,7 +549,10 @@ def selftest() -> int:
             "import sys\nprint('fake sync', sys.argv[1:])\nsys.exit(1)\n")  # a failing sync must only warn
         ctx = Ctx(root=main, main=main, current={norm(main)})
 
-        a = cmd_new(ctx, "st-a", out=log.append)
+        a = cmd_new(ctx, "st-a", out=log.append)                     # no origin/dev yet: falls back to origin/main
+        check(g(a, "rev-parse", "HEAD") == g(main, "rev-parse", "origin/main"), "fallback base is not origin/main")
+        check(git(a, "config", "--get", "branch.claude/st-a.remote", check=False).stdout.strip() == "",
+              "worktree branch must not track its base")
         for d in LINKED:
             check(is_link_dir(a / d), f"{d} is not a junction")
             check(os.path.isdir(a / d), f"{d} junction does not resolve")
@@ -529,6 +566,14 @@ def selftest() -> int:
             except ToolError:
                 pass
 
+        dv = cmd_new(ctx, "st-dev", sync=False, out=log.append)       # work that landed on dev, not on main
+        (dv / "z.txt").write_text("z\n")
+        g(dv, "add", "z.txt")
+        g(dv, "commit", "-q", "-m", "landed")
+        g(main, "update-ref", "refs/remotes/origin/dev", g(dv, "rev-parse", "HEAD"))
+        c_ = cmd_new(ctx, "st-c", sync=False, out=log.append)         # default base is now origin/dev
+        check(g(c_, "rev-parse", "HEAD") == g(main, "rev-parse", "origin/dev"), "default base is not origin/dev")
+
         b = cmd_new(ctx, "st-b", sync=False, out=log.append)          # unmerged work
         (b / "y.txt").write_text("y\n")
         g(b, "add", "y.txt")
@@ -536,8 +581,6 @@ def selftest() -> int:
         d_ = cmd_new(ctx, "st-dirty", sync=False, out=log.append)     # merged but dirty
         (d_ / "scratch.txt").write_text("wip\n")
         k = cmd_new(ctx, "st-keep", sync=False, out=log.append)       # merged, in --keep
-        p_ = cmd_new(ctx, "st-pages", sync=False, out=log.append)     # merged, only a generated page differs
-        (p_ / "ROADMAP.html").write_text("regenerated\n")
         cur = cmd_new(ctx, "st-current", sync=False, out=log.append)  # merged, the tool is "run from" here
         ctx.current.add(norm(cur))
 
@@ -556,8 +599,8 @@ def selftest() -> int:
         check(not res["removed"] and a.exists(), "dry run removed something")
 
         res = cmd_clean(ctx, apply=True, days=0, keep=["st-keep"], out=log.append)
-        check(sorted(res["removed"]) == ["st-a", "st-pages"], f"removed set: {res['removed']}")
-        check(not a.exists() and not p_.exists(), "removed folders still exist")
+        check(sorted(res["removed"]) == ["st-a", "st-c", "st-dev"], f"removed set: {res['removed']}")
+        check(not a.exists() and not dv.exists(), "removed folders still exist")
         for kept in (b, d_, k, cur):
             check(kept.exists(), f"{kept.name} was removed")
         check((main / "Data" / "keep.txt").read_text() == "real\n", "REAL DATA WAS TOUCHED")
@@ -572,6 +615,17 @@ def selftest() -> int:
 
         res = cmd_clean(ctx, apply=True, days=0, only=["st-dirty"], out=log.append)
         check(not res["removed"], "dirty worktree removed")
+
+        # link: an app-made worktree (plain `git worktree add`, no junctions) gets them; reruns change nothing
+        raw = main / ".claude" / "worktrees" / "st-raw"
+        g(main, "worktree", "add", "-q", "--no-track", str(raw), "-b", "claude/st-raw", "origin/main")
+        (raw / "toolchain").mkdir()                                  # something real already there: left alone
+        made = cmd_link(ctx, raw, out=log.append)
+        check(sorted(made) == ["Data", "extracted", "roadmap-store"], f"link made {made}")
+        check(not is_link_dir(raw / "toolchain"), "link replaced an existing folder")
+        check((raw / "Data" / "keep.txt").read_text() == "real\n", "linked Data content")
+        check(cmd_link(ctx, raw, quiet=True, out=log.append) == [], "second link run changed something")
+        check(cmd_link(ctx, main, out=log.append) == [], "link touched the main checkout")
         print("\n".join(log[-14:]))
         print(f"selftest OK ({checks['n']} checks)")
         return 0
@@ -607,10 +661,12 @@ def main(argv=None) -> int:
     sub = ap.add_subparsers(dest="cmd", required=True)
     n = sub.add_parser("new", help="create a worktree + junctions")
     n.add_argument("name")
-    n.add_argument("--base", default="main")
+    n.add_argument("--base", default=None, help="start point (default origin/dev, else origin/main)")
     n.add_argument("--fetch", action="store_true", help="git fetch origin first")
     n.add_argument("--no-sync", action="store_true", help="skip roadmap_store.py sync")
     n.add_argument("--modules", default="<modules>", help="module list shown in the next-step commands")
+    lk = sub.add_parser("link", help="add missing junctions to the worktree this runs in (idempotent)")
+    lk.add_argument("--quiet", action="store_true", help="print only what was linked; never fail (SessionStart hook)")
     c = sub.add_parser("clean", help="list / remove merged worktrees (dry run unless --apply)")
     c.add_argument("--apply", action="store_true")
     c.add_argument("--days", type=float, default=2.0,
@@ -624,6 +680,16 @@ def main(argv=None) -> int:
     c.add_argument("--no-size", action="store_true", help="skip the build-tree size column")
     c.add_argument("--fetch", action="store_true", help="git fetch origin first")
     a = ap.parse_args(argv)
+    if a.cmd == "link":
+        try:
+            ctx = Ctx.discover()
+            top = git(Path(os.getcwd()), "rev-parse", "--show-toplevel").stdout.strip()
+            cmd_link(ctx, Path(top), a.quiet)
+        except (ToolError, OSError) as ex:
+            if not a.quiet:
+                print(f"error: {ex}", file=sys.stderr)
+                return 1
+        return 0
     try:
         ctx = Ctx.discover()
         if a.cmd == "new":

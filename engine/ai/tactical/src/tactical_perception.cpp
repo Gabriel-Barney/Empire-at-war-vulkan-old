@@ -6,6 +6,7 @@
 #include <cstdio>
 #include <string>
 
+#include "alamo/core/ascii.hpp"
 #include "alamo/core/sim_crc.hpp"
 #include "alamo/objects/enums.hpp"
 
@@ -14,62 +15,47 @@ namespace alamo::ai::tactical {
 namespace {
 
 // ---------------------------------------------------------------------------------- leaves
-enum class Leaf : uint16_t {
-    None = 0,
-    // sub-evaluator tokens
-    Location, Owner, Hints, Type,
-    // unit (TacticalObject / TacticalUnit / LandUnit / SpaceShip)
-    Health, Shield, Energy, ForceUnnormalized, Force, ForceNBTP, ForceNBTD, HasTakenDamage, IsBuildPad, HasBuiltObject,
-    NearbyOpenBuildPadCount, ContainsHero, DistanceToNearestFriendly, DistanceToNearestEnemy, IsContestable,
-    GarrisonSlotsAvailable, AdditionalPopulationCapacity, IsCashPoint, CashPointValue, IsInsideEnemyShield,
-    IsInsideFriendlyShield, IsValidBombingTarget, HardPointHealth, AreEnginesOnline,
-    // location
-    FriendlyForceUnnormalized, EnemyForceUnnormalized, FriendlyForce, EnemyForce, FriendlyForceNBTD, EnemyForceNBTD,
-    FriendlyUnitConcentrationUnnormalized, EnemyUnitConcentrationUnnormalized, FriendlyUnitConcentration,
-    EnemyUnitConcentration, FriendlyUnitConcentrationNBTD, EnemyUnitConcentrationNBTD, FriendlyUnitsBitfield,
-    EnemyUnitsBitfield, TimeLastSeenUnnormalized, TimeLastSeen, IsFriendlyStartLocation, IsEnemyStartLocation,
-    // player
-    LandedForceUnnormalized, IsDefender, CanRetreat, IsRetreating, BaseLevel, OpenBuildPadCount,
-    TacticalBuiltStructureCount, ReinforcementsUnnormalized, UnitSpaceAvailable, IsBombingRunAvailable,
-    IsOrbitalBombardmentAvailable, HasUnit, IsFaction, IsDifficulty, CreditsUnnormalized, TechLevel, BudgetAllocation,
-    StoryTrigger, ActiveGoals,
-    // game
-    Age, IsCampaignGame, IsLandControlGame, IsSetupPhase, ForceVisibility, Timeline, InterventionsEnabled,
-    TimeSinceStoryPopup, ActiveStoryGoalCount, IsStoryCampaign,
-    // type / hints
-    IsType, HintValue,
-};
+// ref6 t03: one list makes the Leaf enum and the token names (N: a leaf the evaluators register by that name; I: an internal
+// leaf with no name entry - Type is matched by name in leaf_of, HintValue is the hint-set value). Order = the enum's.
+#define ALAMO_TACTICAL_LEAVES(N, I)                                                                                         \
+    /* sub-evaluator tokens */                                                                                              \
+    N(Location) N(Owner) N(Hints) I(Type)                                                                                   \
+    /* unit (TacticalObject / TacticalUnit / LandUnit / SpaceShip) */                                                       \
+    N(Health) N(Shield) N(Energy) N(ForceUnnormalized) N(Force) N(ForceNBTP) N(ForceNBTD) N(HasTakenDamage) N(IsBuildPad)  \
+    N(HasBuiltObject) N(NearbyOpenBuildPadCount) N(ContainsHero) N(DistanceToNearestFriendly) N(DistanceToNearestEnemy)     \
+    N(IsContestable) N(GarrisonSlotsAvailable) N(AdditionalPopulationCapacity) N(IsCashPoint) N(CashPointValue)            \
+    N(IsInsideEnemyShield) N(IsInsideFriendlyShield) N(IsValidBombingTarget) N(HardPointHealth) N(AreEnginesOnline)        \
+    /* location */                                                                                                          \
+    N(FriendlyForceUnnormalized) N(EnemyForceUnnormalized) N(FriendlyForce) N(EnemyForce) N(FriendlyForceNBTD)              \
+    N(EnemyForceNBTD) N(FriendlyUnitConcentrationUnnormalized) N(EnemyUnitConcentrationUnnormalized)                         \
+    N(FriendlyUnitConcentration) N(EnemyUnitConcentration) N(FriendlyUnitConcentrationNBTD) N(EnemyUnitConcentrationNBTD)  \
+    N(FriendlyUnitsBitfield) N(EnemyUnitsBitfield) N(TimeLastSeenUnnormalized) N(TimeLastSeen) N(IsFriendlyStartLocation)  \
+    N(IsEnemyStartLocation)                                                                                                 \
+    /* player */                                                                                                            \
+    N(LandedForceUnnormalized) N(IsDefender) N(CanRetreat) N(IsRetreating) N(BaseLevel) N(OpenBuildPadCount)                \
+    N(TacticalBuiltStructureCount) N(ReinforcementsUnnormalized) N(UnitSpaceAvailable) N(IsBombingRunAvailable)            \
+    N(IsOrbitalBombardmentAvailable) N(HasUnit) N(IsFaction) N(IsDifficulty) N(CreditsUnnormalized) N(TechLevel)            \
+    N(BudgetAllocation) N(StoryTrigger) N(ActiveGoals)                                                                      \
+    /* game */                                                                                                              \
+    N(Age) N(IsCampaignGame) N(IsLandControlGame) N(IsSetupPhase) N(ForceVisibility) N(Timeline) N(InterventionsEnabled)   \
+    N(TimeSinceStoryPopup) N(ActiveStoryGoalCount) N(IsStoryCampaign)                                                       \
+    /* type / hints */                                                                                                      \
+    N(IsType) I(HintValue)
+
+#define ALAMO_LEAF_ENUM(x) x,
+enum class Leaf : uint16_t { None = 0, ALAMO_TACTICAL_LEAVES(ALAMO_LEAF_ENUM, ALAMO_LEAF_ENUM) };
+#undef ALAMO_LEAF_ENUM
 
 struct LeafName {
     std::string_view name;
     Leaf leaf;
 };
-#define ALAMO_LEAF(x) {#x, Leaf::x}
-constexpr LeafName kLeafNames[] = {
-    ALAMO_LEAF(Location), ALAMO_LEAF(Owner), ALAMO_LEAF(Hints),
-    ALAMO_LEAF(Health), ALAMO_LEAF(Shield), ALAMO_LEAF(Energy), ALAMO_LEAF(ForceUnnormalized), ALAMO_LEAF(Force),
-    ALAMO_LEAF(ForceNBTP), ALAMO_LEAF(ForceNBTD), ALAMO_LEAF(HasTakenDamage), ALAMO_LEAF(IsBuildPad),
-    ALAMO_LEAF(HasBuiltObject), ALAMO_LEAF(NearbyOpenBuildPadCount), ALAMO_LEAF(ContainsHero),
-    ALAMO_LEAF(DistanceToNearestFriendly), ALAMO_LEAF(DistanceToNearestEnemy), ALAMO_LEAF(IsContestable),
-    ALAMO_LEAF(GarrisonSlotsAvailable), ALAMO_LEAF(AdditionalPopulationCapacity), ALAMO_LEAF(IsCashPoint),
-    ALAMO_LEAF(CashPointValue), ALAMO_LEAF(IsInsideEnemyShield), ALAMO_LEAF(IsInsideFriendlyShield),
-    ALAMO_LEAF(IsValidBombingTarget), ALAMO_LEAF(HardPointHealth), ALAMO_LEAF(AreEnginesOnline),
-    ALAMO_LEAF(FriendlyForceUnnormalized), ALAMO_LEAF(EnemyForceUnnormalized), ALAMO_LEAF(FriendlyForce),
-    ALAMO_LEAF(EnemyForce), ALAMO_LEAF(FriendlyForceNBTD), ALAMO_LEAF(EnemyForceNBTD),
-    ALAMO_LEAF(FriendlyUnitConcentrationUnnormalized), ALAMO_LEAF(EnemyUnitConcentrationUnnormalized),
-    ALAMO_LEAF(FriendlyUnitConcentration), ALAMO_LEAF(EnemyUnitConcentration), ALAMO_LEAF(FriendlyUnitConcentrationNBTD),
-    ALAMO_LEAF(EnemyUnitConcentrationNBTD), ALAMO_LEAF(FriendlyUnitsBitfield), ALAMO_LEAF(EnemyUnitsBitfield),
-    ALAMO_LEAF(TimeLastSeenUnnormalized), ALAMO_LEAF(TimeLastSeen), ALAMO_LEAF(IsFriendlyStartLocation),
-    ALAMO_LEAF(IsEnemyStartLocation), ALAMO_LEAF(LandedForceUnnormalized), ALAMO_LEAF(IsDefender), ALAMO_LEAF(CanRetreat),
-    ALAMO_LEAF(IsRetreating), ALAMO_LEAF(BaseLevel), ALAMO_LEAF(OpenBuildPadCount), ALAMO_LEAF(TacticalBuiltStructureCount),
-    ALAMO_LEAF(ReinforcementsUnnormalized), ALAMO_LEAF(UnitSpaceAvailable), ALAMO_LEAF(IsBombingRunAvailable),
-    ALAMO_LEAF(IsOrbitalBombardmentAvailable), ALAMO_LEAF(HasUnit), ALAMO_LEAF(IsFaction), ALAMO_LEAF(IsDifficulty),
-    ALAMO_LEAF(CreditsUnnormalized), ALAMO_LEAF(TechLevel), ALAMO_LEAF(BudgetAllocation), ALAMO_LEAF(StoryTrigger),
-    ALAMO_LEAF(ActiveGoals), ALAMO_LEAF(Age), ALAMO_LEAF(IsCampaignGame), ALAMO_LEAF(IsLandControlGame),
-    ALAMO_LEAF(IsSetupPhase), ALAMO_LEAF(ForceVisibility), ALAMO_LEAF(Timeline), ALAMO_LEAF(InterventionsEnabled),
-    ALAMO_LEAF(TimeSinceStoryPopup), ALAMO_LEAF(ActiveStoryGoalCount), ALAMO_LEAF(IsStoryCampaign), ALAMO_LEAF(IsType),
-};
-#undef ALAMO_LEAF
+#define ALAMO_LEAF_NAME(x) {#x, Leaf::x},
+#define ALAMO_LEAF_NONE(x)
+constexpr LeafName kLeafNames[] = {ALAMO_TACTICAL_LEAVES(ALAMO_LEAF_NAME, ALAMO_LEAF_NONE)};
+#undef ALAMO_LEAF_NAME
+#undef ALAMO_LEAF_NONE
+#undef ALAMO_TACTICAL_LEAVES
 
 const std::vector<Leaf>& registry_leaves() {
     static const std::vector<Leaf> table = [] {
@@ -456,6 +442,11 @@ struct Eval {
             for (const int32_t id : p.grid().player_objects(q)) {
                 const PerceptionObject* o = w.object(id);
                 if (!o) continue;
+                // skai t12 / b0422 [H, three retail traces: SKAI_T06_LAND_RUNS s7, B0418_UTAPAU_AI_RUNS s8]: the
+                // pre-placed base structures are not in the per-player list this sum walks. Why (skai t15,
+                // SKAI_T15_TARGET_CHOICE Q5 [H]): they were registered in the threat grid the skirmish start deleted, so
+                // the grid's owner list (player_objects) never holds them (PerceptionObject::no_owner_list); a structure
+                // built later (pad-built refinery, turret, a rebuilt barracks) is in it and counts.
                 const PerceptionType* t = w.type_of(*o);
                 if (!t || (t->category & cat) == 0) continue;
                 sum += o->combat_power * (1.0f - (1.0f - o->health) * a);
@@ -794,7 +785,6 @@ struct Eval {
         GridQuery q;
         q.self = ctx.self;
         q.exclude = a.attached;
-        q.memory_counted_when_not_fogged = p.config().memory_counted_when_not_fogged;
         switch (l) {
             case Leaf::FriendlyForceUnnormalized: case Leaf::EnemyForceUnnormalized: {
                 if (!w.is_player(ctx.self)) return false;
@@ -960,8 +950,13 @@ struct Eval {
                 std::vector<std::string_view> types;
                 param_names(ps, "Parameter_Type", types);
                 uint32_t c = 0;
-                for (const PerceptionObject& o : w.objects)
-                    if (o.owner == P && o.alive && o.built_structure && (types.empty() || listed(types, type_name(o.type)))) ++c;
+                for (const PerceptionObject& o : w.objects) {
+                    if (o.owner != P || !o.alive || !o.built_structure) continue;
+                    // skai t12: a structure under construction counts as the type it becomes.
+                    const PerceptionType* t = w.type_of(o);
+                    const int32_t ty = t && t->under_construction && t->constructed_type >= 0 ? t->constructed_type : o.type;
+                    if (types.empty() || listed(types, type_name(ty))) ++c;
+                }
                 out = static_cast<double>(c);
                 return true;
             }
@@ -1069,7 +1064,8 @@ struct Eval {
                 out = static_cast<double>(visible / total);  // 0/0 -> NaN (vanilla)
                 return true;
             }
-            case Leaf::Timeline: case Leaf::InterventionsEnabled: case Leaf::TimeSinceStoryPopup: case Leaf::ActiveStoryGoalCount:
+            case Leaf::InterventionsEnabled: out = w.interventions_enabled ? 1.0 : 0.0; return true;  // mcx8 t09
+            case Leaf::Timeline: case Leaf::TimeSinceStoryPopup: case Leaf::ActiveStoryGoalCount:
                 out = 0.0;  // [L] story / galactic
                 return true;
             default: return false;
@@ -1083,16 +1079,20 @@ uint64_t default_category_mask(std::string_view name) {
     return v ? static_cast<uint64_t>(*v) : 0;
 }
 
-// TACTICAL_GAPS 6.8 name-id match [M: ASCII case-insensitive].
-bool zone_names_equal(std::string_view a, std::string_view b) {
-    if (a.size() != b.size()) return false;
-    for (size_t i = 0; i < a.size(); ++i) {
-        const char x = (a[i] >= 'A' && a[i] <= 'Z') ? static_cast<char>(a[i] - 'A' + 'a') : a[i];
-        const char y = (b[i] >= 'A' && b[i] <= 'Z') ? static_cast<char>(b[i] - 'A' + 'a') : b[i];
-        if (x != y) return false;
-    }
-    return true;
+}  // namespace
+
+std::function<uint64_t(std::string_view)> category_mask_from(const objects::EnumRegistry& enums) {
+    const objects::EnumConverter* cat = &enums.get(objects::EnumId::GameObjectCategory);
+    return [cat](std::string_view name) -> uint64_t {
+        const auto v = cat->lookup(name);
+        return v ? static_cast<uint64_t>(*v) : 0;
+    };
 }
+
+namespace {
+
+// TACTICAL_GAPS 6.8 name-id match [M: ASCII case-insensitive].
+bool zone_names_equal(std::string_view a, std::string_view b) { return ascii_iequals(a, b); }
 
 }  // namespace
 
@@ -1108,6 +1108,10 @@ bool TacticalTokenResolver::resolve_script(const EvalContext& ctx, std::string_v
 }
 
 bool TacticalTokenResolver::implements(Root root, std::span<const TokenId> path, const TokenTable& tokens) const {
+    return path_implemented(root, path, tokens);
+}
+
+bool TacticalTokenResolver::path_implemented(Root root, std::span<const TokenId> path, const TokenTable& tokens) {
     if (path.empty()) return false;
     std::vector<Ev> kinds;
     switch (root) {
@@ -1359,28 +1363,10 @@ int32_t TacticalPerception::register_cell(int32_t x, int32_t y, const Rect2& rec
     return h;
 }
 
-void TacticalPerception::register_targets(const PerceptionWorld& w, const TacticalTargetList& list, std::vector<int32_t>* handles) {
-    if (handles) handles->clear();
-    for (const TacticalTarget& t : list.targets()) {
-        int32_t h = -1;
-        if (t.is_unit()) h = register_unit(w, t.object_id);
-        else if (t.zone >= 0) h = register_zone(t.zone);
-        else h = register_cell(t.cell_x, t.cell_y, t.eval_rect);
-        if (handles) handles->push_back(h);
-    }
-}
-
-int32_t TacticalPerception::handle_for(const TacticalTarget& t) const {
-    if (t.is_unit()) return handle_of_object(t.object_id);
-    if (t.zone >= 0) {
-        for (const auto& [z, h] : zone_handles_)
-            if (z == t.zone) return h;
-        return -1;
-    }
-    const int64_t key = (static_cast<int64_t>(t.cell_x) << 32) | static_cast<int64_t>(static_cast<uint32_t>(t.cell_y));
-    for (const auto& [k, h] : cell_handles_)
-        if (k == key) return h;
-    return -1;
+int32_t TacticalPerception::register_target(const PerceptionWorld& w, const TacticalTarget& t) {
+    if (t.is_unit()) return register_unit(w, t.object_id);
+    if (t.zone >= 0) return register_zone(t.zone);
+    return register_cell(t.cell_x, t.cell_y, t.eval_rect);
 }
 
 void TacticalPerception::on_object_destroyed(int32_t object_id) {

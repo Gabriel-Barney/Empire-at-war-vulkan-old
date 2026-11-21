@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Factions>
+  <Faction Name="Base_Empire"><Is_Playable>Yes</Is_Playable></Faction>
+  <Faction Name="Base_Neutral"><Is_Neutral>Yes</Is_Neutral></Faction>
+</Factions>

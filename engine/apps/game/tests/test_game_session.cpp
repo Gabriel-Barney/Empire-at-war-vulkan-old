@@ -22,6 +22,7 @@
 #include <filesystem>
 #include <fstream>
 #include <functional>
+#include <initializer_list>
 #include <iterator>
 #include <map>
 #include <memory>
@@ -29,32 +30,33 @@
 #include <string>
 #include <vector>
 
+#include "alamo/core/ascii.hpp"
 #include "alamo/core/file_provider.hpp"
+#include "alamo/core/sim_crc.hpp"
+#include "alamo/core/host_fs.hpp"
 #include "alamo/data/xml.hpp"
 #include "alamo/game/attract_mode.hpp"
 #include "alamo/game/game_controls.hpp"
 #include "alamo/game/hud_feeds.hpp"
+#include "alamo/game/planet_map.hpp"
 #include "alamo/game/radar_feed.hpp"
 #include "alamo/game/game_session.hpp"
 #include "alamo/game/save_games.hpp"
 #include "alamo/game/story_script.hpp"
 #include "alamo/game/story_ui.hpp"
 #include "alamo/jobs/crc_recorder.hpp"
+#include "alamo/sim/l1_loaders.hpp"  // skm1: skirmish_option_defaults
 #include "alamo/sim/save_session.hpp"
 #include "alamo/sim/tactical_battle.hpp"
 #include "alamo/vfs/vfs.hpp"
+#include "alamo/sim/ship_names.hpp"
+#include "alamo/test/support.hpp"
+#include "alamo/test/galactic_dummies.hpp"
 
 using namespace alamo;
 namespace fs = std::filesystem;
 
-static int g_fail = 0;
-#define CHECK(c)                                                     \
-    do {                                                             \
-        if (!(c)) {                                                  \
-            std::printf("FAIL %s:%d: %s\n", __FILE__, __LINE__, #c); \
-            ++g_fail;                                                \
-        }                                                            \
-    } while (0)
+using ::alamo::test::g_fail;
 
 namespace {
 
@@ -121,19 +123,36 @@ const char* kHardpoints = R"(<HardPoints>
 </HardPoints>
 )";
 const char* kFactions = R"(<Factions>
- <Faction Name="Empire"><Is_Playable>Yes</Is_Playable><Can_Control_Planets>Yes</Can_Control_Planets>
+ <Faction Name="Empire"><Is_Playable>Yes</Is_Playable><Basic_AI>BasicEmpire</Basic_AI><Can_Control_Planets>Yes</Can_Control_Planets>
   <Space_Tactical_Unit_Cap>20</Space_Tactical_Unit_Cap><Space_Retreat_Countdown_Seconds>5</Space_Retreat_Countdown_Seconds></Faction>
- <Faction Name="Rebel"><Is_Playable>Yes</Is_Playable><Can_Control_Planets>Yes</Can_Control_Planets>
+ <Faction Name="Rebel"><Is_Playable>Yes</Is_Playable><Basic_AI>BasicRebel</Basic_AI><Can_Control_Planets>Yes</Can_Control_Planets>
   <Space_Tactical_Unit_Cap>5</Space_Tactical_Unit_Cap><Space_Retreat_Countdown_Seconds>5</Space_Retreat_Countdown_Seconds></Faction>
  <Faction Name="Neutral"><Is_Neutral>Yes</Is_Neutral></Faction>
  <Faction Name="Underworld"><Can_Control_Planets>Yes</Can_Control_Planets></Faction>
 </Factions>
 )";
 
-void write_file(const fs::path& p, const std::string& s) {
-    fs::create_directories(p.parent_path());
-    std::ofstream(p, std::ios::binary) << s;
-}
+// modc t18: the DEMO_CONTROLLER marker's Lua_Script for the attract tests. A test stand-in written here (the shipped
+// Demo_Attract_Controller.lua needs the PG library scripts; real data runs it in attract_demo_real_test): the same engine
+// calls in the same order - FogOfWar.Reveal_All for the three players (results kept, as the shipped script keeps them),
+// then every unit of each player Attack_Moves to a GameRandom(1, 3) zone of its side.
+const char* kDemoControllerLua = R"(
+function Base_Definitions() ServiceRate = 0.1 Moves = 0 end
+function main()
+  local sides = { {"Empire", "STORY_TRIGGER_ZONE_02"}, {"Rebel", "STORY_TRIGGER_ZONE_00"}, {"Underworld", "STORY_TRIGGER_ZONE_01"} }
+  Reveals = {}
+  for i, side in ipairs(sides) do Reveals[i] = FogOfWar.Reveal_All(Find_Player(side[1])) end
+  for i, side in ipairs(sides) do
+    local zones = Find_All_Objects_Of_Type(side[2])
+    for k, unit in pairs(Find_All_Objects_Of_Type(Find_Player(side[1]))) do
+      unit.Attack_Move(zones[GameRandom(1, 3)].Get_Position())
+      Moves = Moves + 1
+    end
+  end
+end
+)";
+
+using ::alamo::test::write_file;
 
 std::string make_data() {
     const fs::path root = fs::temp_directory_path() / "alamo_game_session_tests";
@@ -141,7 +160,8 @@ std::string make_data() {
     remove_all_long(root, ec);
     const fs::path x = root / "Data/XML";
     write_file(x / "GameObjectFiles.xml", "<GameObjectFiles><File>GSTypes.xml</File></GameObjectFiles>\n");
-    write_file(x / "GSTypes.xml", kTypes);
+    write_file(x / "GSTypes.xml", ::alamo::test::with_galactic_dummies(kTypes));
+    write_file(root / "Data/Scripts/GameObject/Demo_Attract_Controller.lua", kDemoControllerLua);
     write_file(x / "HardPointDataFiles.xml", "<Hard_Point_Files><File>GSHardPoints.xml</File></Hard_Point_Files>\n");
     write_file(x / "GSHardPoints.xml", kHardpoints);
     write_file(x / "FactionFiles.xml", "<FactionFiles><File>GSFactions.xml</File></FactionFiles>\n");
@@ -196,6 +216,7 @@ game::SessionSpec spec_for(const std::shared_ptr<terrain::MapData>& map) {
     s.seed = 7;
     s.battle_max_frames = 900;
     s.ask_battle_choice = true;
+    s.skirmish_hop = true;  // skm1 t01: these runs test the galactic conflict flows (battle choice, auto-resolve, retreat)
     return s;
 }
 
@@ -308,6 +329,21 @@ bool live_run(const game::GameData& data, const game::SessionSpec& spec, command
     for (int i = 0; i < 5; ++i) s.tick();
     t += 5;
     CHECK(s.order_stats().attacks == 1);
+    // ref5 t04 (MCX8_BINDINGS_OBJECTS §"Ship names"): the shipped lists load (EaW GameData\Data through the fallback)
+    // and the battle's ships carry their galactic objects' names.
+    const sim::ShipNames* names = s.host().ship_names();
+    CHECK(!data.db.constants().get("ShipNameTextFiles") || (names && names->list_count() > 0));  // synthetic data: none
+    if (names) {
+        const objects::ObjectStore& tac = s.host().modes().top_tactical()->primary();
+        size_t named = 0, copied = 0;
+        for (const objects::ObjectHandle h : tac.all_objects()) {
+            if (names->name(tac.id(h)).empty()) continue;
+            ++named;
+            const objects::ObjectId p = tac.parent_mode_id(h);
+            if (p != objects::kNoObjectId && names->name(p) == names->name(tac.id(h))) ++copied;
+        }
+        std::printf("ship names: %zu lists, %zu named tactical objects, %zu with their galactic name\n", names->list_count(), named, copied);
+    }
     if (s.battle()) CHECK(s.battle()->combat().current_target(static_cast<tactical::combat::ObjectId>(mine[0])) ==
                           static_cast<tactical::combat::ObjectId>(enemy));
     CHECK(s.submit(commands::ev::select({mine[0]})).ok());
@@ -340,6 +376,45 @@ bool live_run(const game::GameData& data, const game::SessionSpec& spec, command
         t += 3;
         CHECK(s.order_stats().moves == 2 && s.order_stats().rejected == 0);
         if (s.battle()) CHECK(s.battle()->movement().view(static_cast<objects::ObjectId>(mine[0])).has_goal);
+    }
+    // Reinforce (human, through the command stream): the frigate left in the pool by the cap is refused while the cap is
+    // full (QueueFull), then (below, after the queued orders) lands at the requested point once a human unit died and
+    // freed the population. A2k integration: the refusal is checked here, while all three human units still live; after
+    // the queued hard point attack (up to 600 ticks) one of them may already be dead (stream-dependent), and then the
+    // cap is no longer full.
+    uint32_t reserve = 0;
+    if (const sim::TacticalBattle* bt = s.battle()) {
+        const auto pool = bt->reserves(s.local_player());
+        std::printf("reinforce: %zu reserve(s) in the pool\n", pool.size());
+        CHECK(pool.size() == 1);
+        if (!pool.empty()) reserve = static_cast<uint32_t>(pool[0].galactic_id);
+    }
+    // Drop point: next to a live human unit (battle host: the space drop validity 0x4d6fd0 refuses fogged points, TACTICAL_GAPS §4.2).
+    float rx = -1500.0f, ry = 0.0f;
+    const auto drop_point = [&] {
+        if (const sim::TacticalBattle* bt = s.battle())
+            for (const uint32_t id : mine)
+                if (bt->movement().has_unit(static_cast<objects::ObjectId>(id))) {
+                    const auto v = bt->movement().view(static_cast<objects::ObjectId>(id));
+                    rx = v.pos.x;
+                    ry = v.pos.y + 300.0f;
+                    break;
+                }
+    };
+    if (reserve != 0) {
+        for (const uint32_t id : mine) CHECK(store.alive(store.find(static_cast<objects::ObjectId>(id))));  // the cap is full
+        drop_point();
+        // ui3 t04: the HUD's read of the same gate (the pad entry is disabled while the cap is full); an unknown key is
+        // not a reserve.
+        if (const sim::TacticalBattle* bt = s.battle()) {
+            CHECK(bt->reinforce_block(s.local_player(), static_cast<objects::ObjectId>(reserve)) == commands::RejectReason::QueueFull);
+            CHECK(bt->reinforce_block(s.local_player(), static_cast<objects::ObjectId>(0x7FFFFFF0u)) == commands::RejectReason::InvalidUnit);
+        }
+        const uint64_t rej0 = s.order_stats().rejected;
+        CHECK(s.submit(commands::EventData(commands::EventType::Reinforce).set("unit", reserve).set_f("x", rx).set_f("y", ry)).ok());
+        for (int i = 0; i < 3; ++i) s.tick();
+        t += 3;
+        CHECK(s.order_stats().reinforcements == 0 && s.order_stats().rejected == rej0 + 1);  // QueueFull: the cap is used
     }
 #ifdef ALAMO_GAME_HAVE_UI
     // Pause / resume through the command stream: once the pause entry drained, no tick runs until the resume.
@@ -389,31 +464,9 @@ bool live_run(const game::GameData& data, const game::SessionSpec& spec, command
                       bt->movement().view(static_cast<objects::ObjectId>(mine[1])).arrived);
         }
     }
-    // Reinforce (human, through the command stream): the frigate left in the pool by the cap is refused while the cap is
-    // full (QueueFull), then lands at the requested point once a human unit died and freed the population.
-    uint32_t reserve = 0;
-    if (const sim::TacticalBattle* bt = s.battle()) {
-        const auto pool = bt->reserves(s.local_player());
-        std::printf("reinforce: %zu reserve(s) in the pool\n", pool.size());
-        CHECK(pool.size() == 1);
-        if (!pool.empty()) reserve = static_cast<uint32_t>(pool[0].galactic_id);
-    }
-    // Drop point: next to a live human unit (battle host: the space drop validity 0x4d6fd0 refuses fogged points, TACTICAL_GAPS §4.2).
-    float rx = -1500.0f, ry = 0.0f;
-    if (const sim::TacticalBattle* bt = s.battle())
-        for (const uint32_t id : mine)
-            if (bt->movement().has_unit(static_cast<objects::ObjectId>(id))) {
-                const auto v = bt->movement().view(static_cast<objects::ObjectId>(id));
-                rx = v.pos.x;
-                ry = v.pos.y + 300.0f;
-                break;
-            }
+    // The refused reserve lands once a human unit died and freed the population.
     if (reserve != 0) {
-        const uint64_t rej0 = s.order_stats().rejected;
-        CHECK(s.submit(commands::EventData(commands::EventType::Reinforce).set("unit", reserve).set_f("x", rx).set_f("y", ry)).ok());
-        for (int i = 0; i < 3; ++i) s.tick();
-        t += 3;
-        CHECK(s.order_stats().reinforcements == 0 && s.order_stats().rejected == rej0 + 1);  // QueueFull: the cap is used
+        drop_point();
         uint64_t waited = 0;
 #ifdef ALAMO_GAME_HAVE_CONTROLS
         game::RadarFeed radar_feed;  // read-only radar feed over the live battle: one Default_Unit_Die ping per visible death
@@ -574,7 +627,7 @@ bool auto_resolve_run(const game::GameData& data, const game::SessionSpec& spec,
         if (!chose && s.battle_choice_pending()) chose = s.choose_battle(galactic::BattleChoice::AutoResolve);
         if (s.auto_resolving() && !saw_running) {  // the dialog's Withdraw while the auto-resolve runs
             saw_running = true;
-            CHECK(s.can_withdraw());  // the Withdraw enable rule: the human is a side of the head conflict
+            CHECK(s.local_in_head_conflict());  // the Withdraw enable rule: the human is a side of the head conflict
             CHECK(s.withdraw());
         }
         CHECK(!s.in_battle());
@@ -601,6 +654,13 @@ bool auto_resolve_run(const game::GameData& data, const game::SessionSpec& spec,
     for (int i = 0; i < 3; ++i) s.tick();
     t += 3;
     CHECK(s.port_stats().withdraw == early + 1 && s.port_stats().withdraw_dropped == 1 && s.host().commands_rejected() == rej0);
+    // bkc1 t01: without a cinematic camera (here: no story session) Esc is the host's (pause menu); a story Esc command
+    // sent anyway is applied at the command phase for the local player and offers nothing (no story).
+    CHECK(!s.story_esc() && s.port_stats().story_esc == 0);
+    CHECK(s.submit(game::story_esc_event()).ok());
+    for (int i = 0; i < 3; ++i) s.tick();
+    t += 3;
+    CHECK(s.port_stats().story_esc == 1 && s.host().commands_rejected() == rej0);
     out.crc = s.host().crc_log();
     out.ticks = s.ticks();
     std::printf("auto-resolve run: %" PRIu64 " ticks, final CRC %016" PRIx64 "\n", t, out.crc.records.empty() ? 0 : out.crc.records.back().combined);
@@ -622,8 +682,15 @@ bool battle_auto_resolve_run(const game::GameData& data, const game::SessionSpec
     }
     CHECK(s.in_battle());
     if (!s.in_battle()) return false;
+    // ui3 t03: the b_retreat state - reason 2 and a partial dial while the retreat-allowed countdown runs.
+    if (const sim::TacticalBattle* bt = s.battle()) {
+        CHECK(bt->retreat_block(s.local_player()) == 2 && bt->retreat_allowed_progress() < 1.0f && bt->retreat_countdown_progress() < 0.0f);
+        CHECK(bt->retreat_block(-5) == 1);
+    }
     // Past the retreat countdown (Space_Retreat_Allowed_Countdown_Seconds 5 = 150 frames): the gate lets it through.
     for (int i = 0; i < 200 && s.in_battle(); ++i, ++t) s.tick();
+    if (const sim::TacticalBattle* bt = s.battle())
+        CHECK(bt->retreat_allowed_progress() == 1.0f && (bt->retreat_block(s.local_player()) == 0 || bt->retreat_block(s.local_player()) == 6));
     CHECK(s.in_battle() && s.auto_resolve_battle());
     uint64_t waited = 0;
     while (waited < 10 && s.in_battle()) {
@@ -798,6 +865,164 @@ bool special_run(const game::GameData& data, const game::SessionSpec& spec, comm
 // story t13: the P10 bars are fully in from the first frame and stay until a script letterbox op (or the fallback); the
 // P11 block holds until a script control op (or the fallback), then follows the scripts' lock; a plain battle holds nothing
 // but still draws the scripts' letterbox.
+// mcx4 t19 (docs/re/MCX5_RE_ANSWERS.md Q3.1, 0x292590 [H]): the custom options' start / max tech get -1 for a faction
+// with a non-zero Displayed_Tech_Level_Adjustment (FoC Rebel +1), 0 otherwise or without a faction.
+// mcx4 t14 (docs/re/SKIRMISH_SETUP.md §0, 0x4acf00 / 0x4ad000): a chosen condition the kind's set holds is kept; else the
+// kind's default (MP_Default_Land_Tactical_Win_Condition / MP_Default_Space_Tactical_Win_Condition), stepped to the next
+// valid value (wrapping to 0x12) when it is not valid.
+// ledger: verifies GameConstants.MP_Default_Land_Tactical_Win_Condition
+// ledger: verifies GameConstants.MP_Default_Space_Tactical_Win_Condition
+void skirmish_win_condition_test() {
+    CHECK(sim::skirmish_win_condition(0x14, false, 0x13, 0x16) == 0x14 && sim::skirmish_win_condition(0x12, true, 0x13, 0x16) == 0x12);
+    CHECK(sim::skirmish_win_condition(0, false, 0x13, 0x16) == 0x13 && sim::skirmish_win_condition(0, true, 0x13, 0x16) == 0x16);
+    CHECK(sim::skirmish_win_condition(0x16, false, 0x12, 0x16) == 0x12);  // a space condition in a land battle: the land default
+    CHECK(sim::skirmish_win_condition(0, true, 0x13, 0x13) == 0x16);      // invalid space default 0x13 steps to 0x16
+    CHECK(sim::skirmish_win_condition(0, false, 0x13, 0x16) == 0x13 && sim::skirmish_win_condition(0, false, 0x15, 0x16) == 0x12);
+    // GameConstants writes the enum names (FoC: SKIRMISH_ALL_ENEMY_BASE_COMPONENTS_DESTROYED / SKIRMISH_SPACE_ENEMY_STARBASE_
+    // DESTROYED), with or without the SKIRMISH_ prefix, or a number.
+    CHECK(sim::parse_skirmish_victory_type("  SKIRMISH_ALL_ENEMY_BASE_COMPONENTS_DESTROYED\t") == 0x13);
+    CHECK(sim::parse_skirmish_victory_type("space_enemy_starbase_destroyed") == 0x16 && sim::parse_skirmish_victory_type("19") == 0x13);
+    CHECK(sim::parse_skirmish_victory_type("CONTROL_POINT_DOMINATION") == 0x15 && sim::parse_skirmish_victory_type("NOPE") == -1 &&
+          sim::parse_skirmish_victory_type("") == -1 && sim::parse_skirmish_victory_type("999") == -1);
+}
+
+// mcx4 t14 (docs/re/GALACTIC_DIALOGS.md §5.1.1, 0x3145c0 step 1): any one Build_Tab_* flag lists a type; none hides it.
+// ledger: verifies GameObjectType.Build_Tab_Special_Structures
+// ledger: verifies GameObjectType.Build_Tab_Heroes
+// ledger: verifies GameObjectType.Build_Tab_Outpost
+// ledger: verifies GameObjectType.Build_Tab_Space_Station
+// mcx4 t14 (docs/re/MCX4_T14_RE_ANSWERS.md "GameObjectType.MP_Encyclopedia_Text"): skirmish battles use the MP text
+// when the type has one.
+// ledger: verifies GameObjectType.MP_Encyclopedia_Text
+// mcx4 t13 (docs/re/MCX4_T13_RE_ANSWERS.md "Movie.SFXEvent_Frame family"): Movie SFXEvent_Frame / SpeechEvent_Frame cues
+// fire on the step whose frame range (prev, now] holds them, the first in list order only.
+// ledger: verifies Movie.SFXEvent_Frame
+// ledger: verifies Movie.SpeechEvent_Frame
+void movie_frame_cue_test() {
+    const std::vector<int64_t> frames = {60, 30, 60, 90};
+    CHECK(game::movie_frame_cue(frames, 59, 60) == 0);  // two cues on frame 60: the first in list order
+    CHECK(game::movie_frame_cue(frames, 29, 30) == 1 && game::movie_frame_cue(frames, 60, 61) == -1);
+    CHECK(game::movie_frame_cue(frames, 0, 1) == -1 && game::movie_frame_cue(frames, 89, 95) == 3);
+}
+
+// mcx4 t14 (docs/re/MCX4_T14_RE_ANSWERS.md "GameObjectType.Show_Hero_Head family"): Show_Hero_Head puts a non-hero
+// type (Generic_Field_Commander, Underworld_Saboteur) in the battle hero roster.
+// ledger: verifies GameObjectType.Show_Hero_Head
+// mcx4 t14 (docs/re/MCX4_T14_RE_ANSWERS.md "Faction.Victory_Text family"): the game over screen's text and image from the
+// local faction: Victory_Text / Land_Win_Image / Space_Win_Image on a win, Defeat_Text / Land_Lose_Image /
+// Space_Lose_Image on a loss.
+// ledger: verifies Faction.Victory_Text
+// ledger: verifies Faction.Defeat_Text
+// ledger: verifies Faction.Land_Win_Image
+// ledger: verifies Faction.Space_Win_Image
+// ledger: verifies Faction.Land_Lose_Image
+// ledger: verifies Faction.Space_Lose_Image
+void game_over_art_test() {
+    const auto art = [](bool won, bool land) {
+        return game::game_over_art(won, land, "TEXT_REBEL_VICTORY", "TEXT_REBEL_DEFEAT", "i_rl_win.tga", "i_rs_win.tga",
+                                   "i_rl_lose.tga", "i_rs_lose.tga");
+    };
+    CHECK(art(true, true).text_key == "TEXT_REBEL_VICTORY" && art(true, true).image == "i_rl_win.tga");
+    CHECK(art(true, false).image == "i_rs_win.tga");
+    CHECK(art(false, true).text_key == "TEXT_REBEL_DEFEAT" && art(false, true).image == "i_rl_lose.tga");
+    CHECK(art(false, false).image == "i_rs_lose.tga");
+    CHECK(game::game_over_art(true, true, "", "", "", "s.tga", "", "").image == "s.tga");  // a missing land image: space
+}
+
+// mcx4 t14 (docs/re/MCX4_T14_RE_ANSWERS.md): a planet's Encyclopedia_Weather_Name and Encyclopedia_Weather_Info text ids.
+// ledger: verifies GameObjectType.Encyclopedia_Weather_Name
+// ledger: verifies GameObjectType.Encyclopedia_Weather_Info
+void planet_weather_lines_test() {
+    const game::WeatherLines w = game::planet_weather_lines(" TEXT_WEATHER_NAME_RAIN ", "TEXT_TACTICAL_WEATHER_OBJECTIVE_RAIN\n");
+    CHECK(w.name == "TEXT_WEATHER_NAME_RAIN" && w.info == "TEXT_TACTICAL_WEATHER_OBJECTIVE_RAIN");
+    CHECK(game::planet_weather_lines("", "  ").name.empty() && game::planet_weather_lines("", "  ").info.empty());
+}
+
+// mcx4 t14 (docs/re/MCX4_T14_RE_ANSWERS.md "Faction.Infantry_Icon_Name family"): the battle pending side icon without a
+// hero is the faction's Infantry_Icon_Name (land) or Fighter_Icon_Name (space).
+// ledger: verifies Faction.Infantry_Icon_Name
+// ledger: verifies Faction.Fighter_Icon_Name
+void commander_icon_test() {
+    CHECK(game::commander_icon_tag(true) == "Infantry_Icon_Name" && game::commander_icon_tag(false) == "Fighter_Icon_Name");
+    game::BattleForceSummary s;
+    s.icon = "i_unit.tga";
+    game::apply_commander_icon(s, "i_rebel_infantry.tga");
+    CHECK(s.icon == "i_rebel_infantry.tga");
+    s.icon = "i_hero.tga";
+    s.hero = true;
+    game::apply_commander_icon(s, "i_rebel_infantry.tga");
+    CHECK(s.icon == "i_hero.tga");  // a hero portrait wins
+    s.hero = false;
+    game::apply_commander_icon(s, "");
+    CHECK(s.icon == "i_hero.tga");  // no faction icon: unchanged
+}
+
+// mcx4 t14 (docs/re/MCX4_T14_RE_ANSWERS.md "GameConstants.Corruption_Choice_Name family"): Corruption_Choice_Icon_Name,
+// Corruption_Choice_Name, Corruption_Choice_Benefit and Corruption_Mission_Requirement_Icon_Name are lists indexed by
+// corruption type.
+// ledger: verifies GameConstants.Corruption_Choice_Icon_Name
+// ledger: verifies GameConstants.Corruption_Choice_Name
+// ledger: verifies GameConstants.Corruption_Choice_Benefit
+// ledger: verifies GameConstants.Corruption_Mission_Requirement_Icon_Name
+void corruption_choice_art_test() {
+    const game::CorruptionChoiceArt a = game::CorruptionChoiceArt::from(
+        "\r\n\t\ti_button_corruption_assassination_a.tga\r\n\t\ti_button_corruption_piracy_a.tga\r\n",
+        " TEXT_CORRUPTION_ASSASSINATION, TEXT_CORRUPTION_PIRACY ", "TEXT_CORRUPTION_ASSASSINATION_BENEFIT", "");
+    using A = game::CorruptionChoiceArt;
+    CHECK(A::at(a.icon, 1) == "i_button_corruption_piracy_a.tga" && A::at(a.name, 0) == "TEXT_CORRUPTION_ASSASSINATION");
+    CHECK(A::at(a.benefit, 0) == "TEXT_CORRUPTION_ASSASSINATION_BENEFIT" && A::at(a.benefit, 1).empty());
+    CHECK(A::at(a.requirement_icon, 0).empty() && A::at(a.icon, -1).empty() && A::at(a.icon, 2).empty());
+}
+
+// mcx4 t14 (docs/re/MCX4_T14_RE_ANSWERS.md): End_Control_Transition_Radar_Event on an owner change seen by a listener
+// friendly to either side.
+// ledger: verifies GameObjectType.End_Control_Transition_Radar_Event
+// mcx4 t14 (docs/re/MCX4_PRES_RE_ANSWERS_2.md Q1): "label 010.933" and "label 01:05".
+void countdown_numbers_test() {
+    CHECK(game::retreat_countdown_number(328.0f / 30.0f) == " 010.933");
+    CHECK(game::retreat_countdown_number(0.0f) == " 000.000" && game::retreat_countdown_number(-1.0f) == " 000.000");
+    CHECK(game::build_countdown_clock(64.5f) == " 01:05");   // r = 64, shown 65 s
+    CHECK(game::build_countdown_clock(0.0f) == " 00:01" && game::build_countdown_clock(119.9f) == " 02:00");
+}
+
+void control_transition_ping_test() {
+    static_assert(game::control_transition_ping(-1, 0, false, true) && game::control_transition_ping(0, 1, true, false));
+    static_assert(!game::control_transition_ping(1, 2, false, false) && !game::control_transition_ping(0, 0, true, true));
+}
+
+void shows_hero_head_test() {
+    static_assert(game::shows_hero_head(true, false) && game::shows_hero_head(false, true) && game::shows_hero_head(true, true));
+    static_assert(!game::shows_hero_head(false, false));
+}
+
+void win_lose_banner_text_test() {  // mcx4 t14: docs/re/MCX4_T14_RE_ANSWERS.md "GameConstants.Win_Lose_Message_Font"
+    CHECK(game::win_lose_banner_text(true, false) == "TEXT_WIN_TACTICAL" && game::win_lose_banner_text(false, false) == "TEXT_LOSE_TACTICAL");
+    CHECK(game::win_lose_banner_text(true, true) == "TEXT_WIN_CORRUPTION_MISSION");
+    CHECK(game::win_lose_banner_text(false, true) == "TEXT_LOSE_CORRUPTION_MISSION");
+}
+
+void encyclopedia_text_tag_test() {
+    CHECK(game::encyclopedia_text_tag(true, true) == "MP_Encyclopedia_Text");
+    CHECK(game::encyclopedia_text_tag(true, false) == "Encyclopedia_Text");
+    CHECK(game::encyclopedia_text_tag(false, true) == "Encyclopedia_Text");
+}
+
+void galactic_build_listed_test() {
+    for (const char* tag : {"Build_Tab_Land_Units", "Build_Tab_Space_Units", "Build_Tab_Special_Structures", "Build_Tab_Heroes",
+                            "Build_Tab_Outpost", "Build_Tab_Space_Station"})
+        CHECK(game::galactic_build_listed([tag](std::string_view t) { return t == tag; }));
+    CHECK(!game::galactic_build_listed([](std::string_view) { return false; }));
+}
+
+void custom_tech_offset_test() {
+    galactic::GalacticRules rules;
+    rules.factions.resize(3);
+    rules.factions[1].displayed_tech_level_adjustment = 1;
+    rules.factions[2].displayed_tech_level_adjustment = -2;
+    CHECK(game::custom_tech_offset(rules, 0) == 0 && game::custom_tech_offset(rules, 1) == -1 &&
+          game::custom_tech_offset(rules, 2) == -1 && game::custom_tech_offset(rules, galactic::kNoIndex) == 0);
+}
+
 void linked_overlay_test() {
     using O = game::LinkedBattleOverlay;
     constexpr float kDt = 1.0f / 30.0f;
@@ -815,11 +1040,9 @@ void linked_overlay_test() {
         CHECK(!o.input_blocked());
         o.update(42, true, kDt);   // a midtro locks again: P11 battles block again
         CHECK(o.input_blocked());
-        o.script_letterbox(false);  // Letter_Box_Out: 0.5 s slide
+        o.script_letterbox(false);  // Letter_Box_Out: the script's bars slide out (story box); this overlay's go at once
         o.update(43, false, 0.25f);
-        CHECK(o.letterbox_level() > 0.4f && o.letterbox_level() < 0.6f && !o.input_blocked());
-        o.update(44, false, 0.5f);
-        CHECK(o.letterbox_level() == 0.0f);
+        CHECK(o.letterbox_level() == 0.0f && !o.input_blocked());
         o.reset();
         CHECK(o.letterbox_level() == 0.0f && !o.input_blocked() && !o.letterbox_held());
     }
@@ -838,9 +1061,9 @@ void linked_overlay_test() {
         o.begin(false, false, 0);
         o.update(1, true, kDt);
         CHECK(o.letterbox_level() == 0.0f && !o.input_blocked() && !o.letterbox_held() && !o.input_held());
-        o.script_letterbox(true);  // the scripts' letterbox is drawn in any battle
+        o.script_letterbox(true);  // the scripts' letterbox is the story box's, in any battle: nothing drawn here
         o.update(2, true, 0.5f);
-        CHECK(o.letterbox_level() == 1.0f && !o.input_blocked());
+        CHECK(o.letterbox_level() == 0.0f && !o.input_blocked());
     }
     std::printf("linked overlay: P10 letterbox / P11 block / hand-over checked\n");
 }
@@ -888,6 +1111,14 @@ void story_script_test() {
 
 // q6 t14 (GALACTIC_DIALOGS §2.8): the dialog script cache (exact names, rejected files not cached) and the summary fill
 // (rows = the tab's records, label = the chapter's first TEXT, colour / dim, selection, EXTRA_TEXT lines as stored).
+// mcx4 t14 (docs/re/MCX4_T14_RE_ANSWERS.md "Campaign.Show_Completed_Tab"): False hides the Completed tab.
+// ledger: verifies Campaign.Show_Completed_Tab
+void completed_tab_shown_test() {
+    CHECK(!game::completed_tab_shown("False", true) && !game::completed_tab_shown(" no ", true));  // Show_Completed_Tab False
+    CHECK(game::completed_tab_shown("True", true) && game::completed_tab_shown("yes", true));
+    CHECK(game::completed_tab_shown("", true) && game::completed_tab_shown("False", false));  // [port] defaults
+}
+
 void holocron_summary_test() {
     struct Files final : FileProvider {
         std::map<std::string, std::string> f;
@@ -1031,7 +1262,8 @@ void rate_lock_test(const game::GameData& data, const game::SessionSpec& spec) {
     CHECK(combined_diff == 0 && parity_diff == kTo - kFrom && outside_same);
 }
 
-// OI host: the attract demo's Demo_Attract_Controller (GameSession::attract_demo_script) on a map that places one. Factions
+// OI host: the attract demo's DEMO_CONTROLLER (its Lua_Script through the object-script host, modc t18) on a map that
+// places one. Factions
 // in order Empire 0, Rebel 1, Neutral 2, Underworld 3 (= map owners = players); the controller and three zones of each type
 // owned by Neutral, two Empire frigates, two Rebel corvettes, one Underworld frigate. Once the battle runs: the three
 // players' grids are Reveal_All, every unit got its Attack_Move (none excluded, three zones each: no early stop) and moved
@@ -1076,20 +1308,30 @@ void attract_demo_script_test(const game::GameData& data, const game::SessionSpe
         CHECK(s.start(&diag));
         for (const std::string& d : diag) std::printf("  attract script diag: %s\n", d.c_str());
         if (!s.started()) return;
+        const sim::ObjectScriptHost* scripts = s.host().object_scripts();
+        CHECK(scripts != nullptr);  // on in the attract demo (modc t18)
+        if (!scripts) return;
+        const auto revealed = [&s] {
+            const sim::TacticalBattle* b = s.battle();
+            const tactical::fog::FogOfWar* fog = b ? b->fog() : nullptr;
+            for (const int32_t p : {0, 1, 3})
+                if (!fog || !fog->grid(p) || !fog->grid(p)->reveal_all_active()) return false;
+            return true;
+        };
         uint64_t t = 0;
-        while (t < 600 && !s.attract_controller_ran()) {
+        while (t < 600 && !revealed()) {
             s.tick();
             ++t;
         }
-        CHECK(s.attract_controller_ran() && s.attract_moves() == 5);
+        CHECK(revealed());  // the controller's FogOfWar.Reveal_All for the three players
+        CHECK(scripts->stats().attached == 1 && scripts->stats().pumps >= 1 && scripts->error_total() == 0);
+        // modc t32: the map-placed controller attached (Base_Definitions ran) with the battle's object bridge bound.
+        CHECK(scripts->stats().attached_no_bridge == 0);
+        for (const std::string& m : scripts->messages()) std::printf("  attract script: %s\n", m.c_str());
         const sim::TacticalBattle* b = s.battle();
         CHECK(b != nullptr);
         if (!b) return;
         CHECK(!s.view_draws_fog());  // the cinematic camera hides the FOW render even once the controller revealed the map
-        const tactical::fog::FogOfWar* fog = b->fog();
-        CHECK(fog != nullptr);
-        for (const int32_t p : {0, 1, 3})
-            CHECK(fog && fog->grid(p) && fog->grid(p)->reveal_all_active());
         // Each unit heads for its side's zone column / row: 200 ticks later every one has moved towards it.
         std::vector<std::pair<objects::ObjectId, Vec3>> start;
         const objects::ObjectStore& st = s.host().modes().top_tactical()->primary();
@@ -1105,8 +1347,8 @@ void attract_demo_script_test(const game::GameData& data, const game::SessionSpe
             const float before = o == 0 ? p0.x : o == 1 ? -p0.x : -p0.y, after = o == 0 ? p1.x : o == 1 ? -p1.x : -p1.y;
             if (after < before - 50.0f) ++closer;
         }
-        std::printf("attract script (%d workers): controller ran at tick %" PRIu64 ", %u moves, %u of %zu units closer to their zones\n",
-                    workers, t, s.attract_moves(), closer, start.size());
+        std::printf("attract script (%d workers): controller ran at tick %" PRIu64 ", %u of %zu units closer to their zones\n",
+                    workers, t, closer, start.size());
         CHECK(closer > 0);
         out = s.host().crc_log();
     };
@@ -1140,7 +1382,9 @@ void attract_session_test(const game::GameData& data, const game::SessionSpec& b
             s.tick();
             ++t;
         }
-        CHECK(s.skirmish_over() && !s.attract_controller_ran() && s.attract_moves() == 0);  // no DEMO_CONTROLLER on this map
+        CHECK(s.skirmish_over());
+        // No DEMO_CONTROLLER (the only scripted type of the test data) on this map: nothing attaches (modc t18).
+        CHECK(s.host().object_scripts() && s.host().object_scripts()->stats().attached == 0);
         // Traced rule (MAIN_MENU_BACKGROUND.md §4a): the demo view never draws fog (cinematic camera clears the FOW render
         // option), yet the demo's sim keeps its fog grids for the AI and targeting (presentation only).
         CHECK(!s.view_draws_fog());
@@ -1207,6 +1451,36 @@ void attract_rec_test() {
 // at 4 degrees per second, so every hull was seen nose-on or tail-on (view within 30 degrees of its facing) for a third of
 // the time, in stretches of 15 s; the side-view camera keeps the view near broadside.
 void attract_camera_pure_test() {
+    {  // mcx4 (docs/re/MCX4_T11_T12_RE_ANSWERS.md §C2): GameConstants Saliency_Size, Saliency_Power, Saliency_X,
+       // Saliency_Y, Saliency_Health, Saliency_Targets and Saliency_Speed weight the min-max normalised features; the
+       // highest score is the interesting object.
+        // ledger: verifies GameConstants.Saliency_Size
+        // ledger: verifies GameConstants.Saliency_Power
+        // ledger: verifies GameConstants.Saliency_X
+        // ledger: verifies GameConstants.Saliency_Y
+        // ledger: verifies GameConstants.Saliency_Health
+        // ledger: verifies GameConstants.Saliency_Targets
+        // ledger: verifies GameConstants.Saliency_Speed
+        const game::SaliencyWeights w;  // FoC: 1, 1, 0.5, 0.5, 1, 1.5, 1
+        CHECK(w.targets == 1.5f && w.x == 0.5f && w.y == 0.5f && w.size == 1.0f);
+        std::vector<game::SaliencyFeatures> f(3);
+        CHECK(game::saliency_pick({}, w) == 0);
+        CHECK(game::saliency_pick(f, w) == 0);  // all equal: the first
+        f[1].targets = 3.0f;                     // 1.5
+        f[2].size = 100.0f;                      // 1.0
+        CHECK(game::saliency_pick(f, w) == 1);
+        f[2].speed = 5.0f;                       // 1.0 + 1.0 beats 1.5
+        CHECK(game::saliency_pick(f, w) == 2);
+        game::SaliencyWeights w2 = w;
+        w2.targets = 3.0f;
+        CHECK(game::saliency_pick(f, w2) == 1);
+        f[0].x = 10.0f;                          // x / y weigh 0.5 each
+        f[0].y = 10.0f;
+        f[1].targets = 0.0f;
+        f[2].size = 0.0f;
+        f[2].speed = 0.0f;
+        CHECK(game::saliency_pick(f, w) == 0);
+    }
     const float kNoseOn = 0.866f;  // cos 30 degrees
     const float kRad = 0.017453292519943295f;
     // Yaw convention: 0 looks north (+Y), clockwise from above; view = (sin yaw, cos yaw).
@@ -1268,6 +1542,138 @@ void attract_camera_pure_test() {
         const float y0 = game::demo_side_yaw_deg(0.0f, 1.0f, 0.0f);
         const float y1 = game::demo_shot_yaw_deg(y0, 1.0f, 0.0f, 0.0f, 0.1f, tune);
         CHECK(std::fabs(game::demo_wrap_deg(y1 - y0)) <= tune.max_turn_deg_per_s * 0.1f + 1e-3f);
+    }
+}
+
+// modc t18 on real data (ALAMO_FOC_DATA, else skipped): Demo_Attract_Geonosis, the one demo map that places a
+// DEMO_CONTROLLER (MAIN_MENU_BACKGROUND.md §4), runs the shipped Demo_Attract_Controller.lua through the object-script
+// host: the controller gets its script, State_Init reveals the map for the Empire, Rebel and Underworld players and the
+// script reports no error; a 0-worker run matches a 2-worker one.
+void attract_demo_real_test() {
+    const char* foc = std::getenv("ALAMO_FOC_DATA");
+    if (!foc || !*foc) {
+        std::printf("attract controller (real data): ALAMO_FOC_DATA not set: skipped\n");
+        return;
+    }
+    game::GameData data;
+    std::string err;
+    if (!game::load_game_data(foc, {}, data, &err)) {
+        std::printf("attract controller (real data): load failed: %s\n", err.c_str());
+        CHECK(false);
+        return;
+    }
+    game::SessionSpec spec;
+    spec.kind = game::SessionKind::Skirmish;
+    spec.attract = true;
+    spec.seed = 1;
+    spec.skirmish_map = "Demo_Attract_Geonosis";
+    spec.battle_max_frames = 3000;
+    const objects::TypeIndex controller = data.types.raw().find("DEMO_CONTROLLER");
+    CHECK(controller != objects::kNone);
+    std::vector<int32_t> players;  // the script's Find_Player names: player index = faction index in the demo
+    for (const char* f : {"Empire", "Rebel", "Underworld"}) players.push_back(static_cast<int32_t>(data.rules.find_faction(f)));
+    auto run = [&](int32_t workers, CrcLog& out) {
+        jobs::JobSystem js(jobs::JobSystemConfig{workers});
+        game::GameSession s(data, js, spec);
+        std::vector<std::string> diag;
+        CHECK(s.start(&diag));
+        for (const std::string& d : diag) std::printf("  attract controller diag: %s\n", d.c_str());
+        if (!s.started()) return;
+        const sim::ObjectScriptHost* scripts = s.host().object_scripts();
+        CHECK(scripts != nullptr);
+        if (!scripts) return;
+        const auto revealed = [&] {
+            const sim::TacticalBattle* b = s.battle();
+            const tactical::fog::FogOfWar* fog = b ? b->fog() : nullptr;
+            for (const int32_t p : players)
+                if (!fog || p < 0 || !fog->grid(p) || !fog->grid(p)->reveal_all_active()) return false;
+            return true;
+        };
+        uint64_t t = 0;
+        while (t < 900 && !revealed() && !s.skirmish_over()) {
+            s.tick();
+            ++t;
+        }
+        bool scripted = false;
+        if (const sim::TacticalMode* tm = s.host().modes().top_tactical())
+            for (const objects::ObjectHandle h : tm->primary().objects_newest_first())
+                if (tm->primary().type(h) == controller && scripts->has_script(tm->primary(), h)) scripted = true;
+        uint64_t controller_errors = 0;
+        for (const auto& [text, n] : scripts->error_counts()) {
+            std::printf("  attract controller (real data, %d workers): script error x%" PRIu64 ": %s\n", workers, n, text.c_str());
+            if (text.find("Demo_Attract_Controller") != std::string::npos || text.find("DEMO_ATTRACT_CONTROLLER") != std::string::npos)
+                controller_errors += n;
+        }
+        std::printf("attract controller (real data, %d workers): revealed at tick %" PRIu64 ", controller scripted %d, %" PRIu64
+                    " live scripts, %" PRIu64 " pumps\n",
+                    workers, t, scripted ? 1 : 0, static_cast<uint64_t>(scripts->live()), scripts->stats().pumps);
+        CHECK(revealed() && scripted && controller_errors == 0);
+        for (int i = 0; i < 300 && s.in_battle(); ++i) s.tick();
+        out = s.host().crc_log();
+    };
+    CrcLog a, b;
+    run(2, a);
+    run(0, b);
+    const CrcDivergence d = first_divergence(a, b);
+    std::printf("attract controller (real data) replay (0 vs 2 workers): %s\n", d.message.c_str());
+    CHECK(!d.diverged && a.records.size() == b.records.size());
+}
+
+// ref5 t04 (docs/re/MCX8_BINDINGS_OBJECTS.md §"Ship names") on real data (ALAMO_FOC_DATA, else skipped): the shipped
+// ShipNameTextFiles lists load (12 files, EaW GameData\Data through the fallback), the skirmish battle's capital ships get
+// quoted names, and the attract demo names nothing.
+void ship_names_real_test() {
+    const char* foc = std::getenv("ALAMO_FOC_DATA");
+    if (!foc || !*foc) {
+        std::printf("ship names (real data): ALAMO_FOC_DATA not set: skipped\n");
+        return;
+    }
+    game::GameData data;
+    std::string err;
+    if (!game::load_game_data(foc, {}, data, &err)) {
+        std::printf("ship names (real data): load failed: %s\n", err.c_str());
+        CHECK(false);
+        return;
+    }
+    game::SessionSpec spec;
+    spec.kind = game::SessionKind::Skirmish;
+    spec.seed = 1;
+    spec.skirmish.human_faction = "Rebel";
+    spec.skirmish.ai_faction = "Empire";
+    spec.skirmish_map = "Demo_Attract_Kamino";
+    spec.battle_max_frames = 600;
+    for (const bool attract : {false, true}) {
+        spec.attract = attract;
+        jobs::JobSystem js(jobs::JobSystemConfig{2});
+        game::GameSession s(data, js, spec);
+        CHECK(s.start());
+        if (!s.started()) continue;
+        if (attract) {
+            CHECK(s.host().ship_names() == nullptr);
+            continue;
+        }
+        const sim::ShipNames* names = s.host().ship_names();
+        CHECK(names && names->list_count() == 12);
+        uint64_t t = 0;
+        while (t < 600 && !s.battle()) {
+            s.tick();
+            ++t;
+        }
+        for (int i = 0; i < 3; ++i) s.tick();
+        const sim::TacticalMode* tm = s.host().modes().top_tactical();
+        CHECK(tm != nullptr);
+        if (!names || !tm) continue;
+        size_t named = 0;
+        std::string example;
+        for (const objects::ObjectHandle h : tm->primary().all_objects()) {
+            const std::string_view n = names->name(tm->primary().id(h));
+            if (n.empty()) continue;
+            CHECK(n.size() > 2 && n.front() == '"' && n.back() == '"');
+            if (named++ == 0) example = std::string(n) + " (" + std::string(tm->primary().object_types().raw().types().name[tm->primary().type(h)]) + ")";
+        }
+        std::printf("ship names (real data): %zu lists, %zu named objects in the battle, e.g. %s\n", names->list_count(), named,
+                    example.c_str());
+        CHECK(named > 0);
     }
 }
 
@@ -1418,6 +1824,346 @@ void controls_test() {
 #ifdef ALAMO_GAME_HAVE_CONTROLS
 // Playtest 2: the Empire Heart of the Maw galaxy starts with Piett, Tarkin, Veers, Boba Fett and the Emperor in the hero
 // roster (base screenshots). Real data (ALAMO_FOC_DATA); skipped when unset.
+void hero_roster_real_test();
+
+// skm1 t01 / t02 (the group's exit test, alamo_game side): a space and a land skirmish as the front end starts them
+// (StartSkirmish -> buy units -> GameSession: no skirmish_hop) start straight on their map with BattleConfig::skirmish_map
+// and the staging dialog's options: every player at the option credits when the battle starts (SKIRMISH_SETUP §2 step 3),
+// Income_Stream pays the slots (§5), each slot's victory record is the option's win condition (§2 step 4; 0x12 / 0x14 here,
+// not the 0x16 / 0x13 defaults), the space team markers become each slot's star base (§2.2), and a land map pre-builds no
+// pad with the pre-built-base option off (§2.6). Real data (ALAMO_FOC_DATA); skipped when unset.
+void skirmish_map_real_test() {
+    const char* foc = std::getenv("ALAMO_FOC_DATA");
+    if (!foc || !*foc) {
+        std::printf("skirmish map battle (real data): ALAMO_FOC_DATA not set: skipped\n");
+        return;
+    }
+    game::GameData data;
+    std::string err;
+    if (!game::load_game_data(foc, {}, data, &err)) {
+        std::printf("skirmish map battle (real data): load failed: %s\n", err.c_str());
+        CHECK(false);
+        return;
+    }
+    static const objects::BehaviorTypeId kStarBase = objects::behavior_type_id("DUMMY_STAR_BASE");
+    for (const bool land : {false, true}) {
+        game::SessionSpec spec;
+        spec.kind = game::SessionKind::Skirmish;
+        spec.skirmish_map = land ? "_MP_LAND_UTAPAU" : "_MP_SPACE_GEONOSIS";
+        spec.skirmish.human_faction = "Empire";
+        spec.skirmish.ai_faction = "Rebel";
+        spec.seed = 3;
+        spec.skirmish_options = sim::skirmish_option_defaults(data.db.constants());
+        // mcx4 t14 (docs/re/SKIRMISH_SETUP.md §0, 0x4acf00): the kinds' default conditions are GameConstants
+        // MP_Default_Land_Tactical_Win_Condition / _Space_ (FoC 0x13 base components, 0x16 star base).
+        CHECK(spec.skirmish_options.land_default_win == 0x13 && spec.skirmish_options.space_default_win == 0x16);
+        spec.skirmish_options.credits = 4000;
+        spec.skirmish_options.win_condition = land ? 0x14 : 0x12;
+        if (land) spec.skirmish_options.prebuilt_base = false;
+        jobs::JobSystem js(jobs::JobSystemConfig{0});
+        game::GameSession s(data, js, spec);
+        std::vector<std::string> diag;
+        CHECK(s.start(&diag, nullptr, nullptr));
+        for (const std::string& d : diag) std::printf("  diag: %s\n", d.c_str());
+        if (!s.started()) continue;
+        uint64_t t = 0;
+        while (t < 300 && !(s.in_battle() && s.battle() && s.battle()->frame() >= 2)) {
+            s.tick();
+            ++t;
+        }
+        const sim::TacticalBattle* b = s.battle();
+        const galactic::GalacticSim* g = s.galaxy();
+        CHECK(b != nullptr && g != nullptr);
+        if (!b || !g) continue;
+        const float c0 = g->credits(0), c1 = g->credits(1);
+        int32_t bases[2] = {0, 0};
+        const objects::ObjectStore& st = s.host().modes().top_tactical()->primary();
+        for (const objects::ObjectHandle h : st.all_objects())
+            if (st.active(h) && kStarBase != objects::kNoBehavior && st.has_behavior(h, kStarBase) && st.owner(h) >= 0 && st.owner(h) < 2)
+                ++bases[st.owner(h)];
+        std::printf("skirmish map battle %s: started at tick %" PRIu64 ", skirmish_map %d, credits %.1f / %.1f, win records 0x%x / 0x%x, "
+                    "star bases %d / %d, pre-built pads %u of %u\n",
+                    spec.skirmish_map.c_str(), t, b->skirmish_map() ? 1 : 0, static_cast<double>(c0), static_cast<double>(c1),
+                    b->victory_record_type(0), b->victory_record_type(1), bases[0], bases[1], b->stats().skirmish_prebuilt, b->stats().skirmish_pads);
+        CHECK(b->skirmish_map());
+        CHECK(c0 >= 4000.0f && c0 < 4050.0f && c1 >= 4000.0f && c1 < 4050.0f);  // the option credits (plus a frame or two of income)
+        CHECK(b->victory_record_type(0) == spec.skirmish_options.win_condition && b->victory_record_type(1) == spec.skirmish_options.win_condition);
+        if (!land) CHECK(bases[0] == 1 && bases[1] == 1);  // the Team_00 / Team_01 markers became the slots' star bases
+        if (land) CHECK(b->stats().skirmish_pads > 0 && b->stats().skirmish_prebuilt == 0);
+        // Income_Stream: the human (idle, spends nothing) earns over 10 s.
+        for (int i = 0; i < 300 && s.in_battle(); ++i) s.tick();
+        std::printf("  after 300 ticks: credits %.1f / %.1f\n", static_cast<double>(g->credits(0)), static_cast<double>(g->credits(1)));
+        if (!land) CHECK(g->credits(0) > c0);  // the land slot's income structures are not pre-built here
+    }
+}
+
+CrcLog records_from(const CrcLog& log, uint64_t tick);  // below (N1 / t09)
+
+// skm2 t02 / t01 (the group's exit test): a space skirmish as the front end starts it with four playing slots on two teams
+// (IDC_PLAYER_TEAM_n: slots 0 and 3 team 0, slots 1 and 2 team 1; slot 3 is Rebel like slot 1, so the team decides, not the
+// faction): every slot is a player of its faction with its own start forces, AI difficulty and victory record
+// (SKIRMISH_SETUP §1, §2 step 4), allies are not enemies (TACTICAL_COMBAT §2.10, 0x297470), the battle does not end while
+// one slot of the other team is left and ends with a team-0 winner once the whole team 1 is gone (§4). Then the Gameplay
+// options difficulty (SKIRMISH_SETUP 1.1) as a recorded command: every AI player Hard (galaxy row, tactical AI, health
+// rescaled), and the replay of the recording reproduces the CRC log. Real data (ALAMO_FOC_DATA); skipped when unset.
+namespace {
+game::SessionSpec four_slot_spec(const game::GameData& data) {
+    game::SessionSpec spec;
+    spec.kind = game::SessionKind::Skirmish;
+    spec.skirmish_map = "_MP_SPACE_GEONOSIS";
+    spec.skirmish.human_faction = "Empire";
+    spec.skirmish.ai_faction = "Rebel";
+    spec.skirmish.extra_slots = {{"Underworld", {}, {}}, {"Rebel", {}, {}}};
+    spec.skirmish.teams = {0, 1, 1, 0};
+    spec.skirmish.difficulties = {1, 0, 2, 1};
+    spec.seed = 5;
+    spec.skirmish_options = sim::skirmish_option_defaults(data.db.constants());
+    spec.skirmish_options.win_condition = 0x12;  // SKIRMISH_ALL_ENEMY_UNITS_DESTROYED
+    return spec;
+}
+
+// Kills every combat unit of `players` in the running battle (Lua Take_Damage's path); the number killed.
+uint32_t kill_players(game::GameSession& s, std::initializer_list<int32_t> players) {
+    sim::TacticalBattle* b = s.battles() ? s.battles()->battle() : nullptr;
+    sim::TacticalMode* m = s.host().modes().top_tactical();
+    if (!b || !m) return 0;
+    std::vector<objects::ObjectId> ids;
+    const objects::ObjectStore& st = m->primary();
+    for (const objects::ObjectHandle h : st.all_objects())
+        if (st.active(h) && std::find(players.begin(), players.end(), st.owner(h)) != players.end() && b->combat().has_unit(st.id(h)))
+            ids.push_back(st.id(h));
+    uint32_t n = 0;
+    for (const objects::ObjectId id : ids) n += b->script_damage(*m, id, 1.0e9f, false) ? 1u : 0u;
+    return n;
+}
+}  // namespace
+
+void skirmish_four_slot_real_test() {
+    const char* foc = std::getenv("ALAMO_FOC_DATA");
+    if (!foc || !*foc) {
+        std::printf("four-slot skirmish (real data): ALAMO_FOC_DATA not set: skipped\n");
+        return;
+    }
+    game::GameData data;
+    std::string err;
+    if (!game::load_game_data(foc, {}, data, &err)) {
+        std::printf("four-slot skirmish (real data): load failed: %s\n", err.c_str());
+        CHECK(false);
+        return;
+    }
+    const game::SessionSpec spec = four_slot_spec(data);
+    // 1. The slots, their forces, records, difficulties and relations; the team end.
+    {
+        jobs::JobSystem js(jobs::JobSystemConfig{0});
+        game::GameSession s(data, js, spec);
+        std::vector<std::string> diag;
+        CHECK(s.start(&diag, nullptr, nullptr));
+        for (const std::string& d : diag) std::printf("  diag: %s\n", d.c_str());
+        if (!s.started()) return;
+        uint64_t t = 0;
+        while (t < 300 && !(s.in_battle() && s.battle() && s.battle()->frame() >= 2)) {
+            s.tick();
+            ++t;
+        }
+        const sim::TacticalBattle* b = s.battle();
+        const galactic::GalacticSim* g = s.galaxy();
+        CHECK(b != nullptr && g != nullptr);
+        if (!b || !g) return;
+        const char* factions[4] = {"Empire", "Rebel", "Underworld", "Rebel"};
+        uint32_t owned[4] = {};
+        const objects::ObjectStore& st = s.host().modes().top_tactical()->primary();
+        for (const objects::ObjectHandle h : st.all_objects())
+            if (st.active(h) && st.owner(h) >= 0 && st.owner(h) < 4 && b->combat().has_unit(st.id(h))) ++owned[st.owner(h)];
+        for (int32_t k = 0; k < 4; ++k) {
+            const galactic::PlayerState& ps = g->players()[static_cast<size_t>(k)];
+            const uint32_t row = data.rules.find_difficulty(game::difficulty_name(spec.skirmish.difficulties[static_cast<size_t>(k)]));
+            std::printf("four-slot skirmish: slot %d faction %s human %d ai %d difficulty row %u (want %u) units %u record 0x%x team %d\n", k,
+                        data.rules.factions[ps.faction].name.c_str(), ps.human ? 1 : 0, ps.ai ? 1 : 0, ps.difficulty, row, owned[k],
+                        b->victory_record_type(k), b->skirmish_team(k));
+            CHECK(ascii_iequals(data.rules.factions[ps.faction].name, factions[k]));
+            CHECK(ps.human == (k == 0) && ps.ai == (k != 0));
+            if (k > 0) CHECK(ps.difficulty == row);
+            CHECK(owned[k] > 0);                       // its own start forces
+            CHECK(b->victory_record_type(k) == 0x12);  // its own victory record
+            CHECK(b->skirmish_team(k) == spec.skirmish.teams[static_cast<size_t>(k)]);
+        }
+        // A team game (the map has start positions, +0xb5): allies by team; else by faction (slots 1 and 3 are both Rebel).
+        const tactical::combat::CombatSystem& c = b->combat();
+        std::printf("  team game %d\n", b->skirmish_team_game() ? 1 : 0);
+        if (b->skirmish_team_game()) {
+            CHECK(c.is_enemy(0, 1) && c.is_enemy(0, 2) && !c.is_enemy(0, 3) && !c.is_enemy(1, 2) && c.is_enemy(1, 3) && c.is_enemy(2, 3));
+            CHECK(!c.is_enemy(3, 0) && !c.is_enemy(2, 1));
+        } else {
+            CHECK(c.is_enemy(0, 1) && c.is_enemy(0, 2) && c.is_enemy(0, 3) && c.is_enemy(1, 2) && !c.is_enemy(1, 3) && c.is_enemy(2, 3));
+        }
+#ifdef ALAMO_SIM_HAVE_TACTICAL_AI
+        if (const sim::BattleAi* ai = s.battles()->tactical_ai()) {
+            for (int32_t k = 1; k < 4; ++k) CHECK(ai->world().is_ai_player(k));
+            // skm2 t03: the perception's IsDifficulty input per slot (Easy / Hard / Normal), none for the human; team mates
+            // are allies (relation 0) there too.
+            const auto& pw = ai->world().world();
+            if (pw.players.size() >= 4) {
+                CHECK(pw.players[0].ai_difficulty.empty() && pw.players[1].ai_difficulty == "Easy" && pw.players[2].ai_difficulty == "Hard" &&
+                      pw.players[3].ai_difficulty == "Normal");
+                if (b->skirmish_team_game()) CHECK(pw.rel(1, 2) == 0 && pw.rel(0, 3) == 0 && pw.rel(0, 1) == 1);
+                else CHECK(pw.rel(1, 3) == 0 && pw.rel(1, 2) == 1);
+            }
+            std::printf("  tactical AI build-time multipliers: %.3f / %.3f / %.3f\n", static_cast<double>(ai->world().build_time_multiplier(1)),
+                        static_cast<double>(ai->world().build_time_multiplier(2)), static_cast<double>(ai->world().build_time_multiplier(3)));
+        }
+#endif
+        // Team 1 loses slot 1: slot 2 is left, so nothing is declared.
+        const uint32_t k1 = kill_players(s, {1});
+        for (int i = 0; i < 260 && s.battle(); ++i) s.tick();
+        std::printf("  slot 1 killed (%u units): battle %s\n", k1, s.battle() && !s.battle()->finished() ? "running" : "over");
+        CHECK(k1 > 0 && s.battle() && !s.battle()->finished());
+        // Then slot 2 (and whatever team 1 still has): team 0 wins.
+        for (int i = 0; i < 1500 && s.battle(); ++i) {
+            if (i % 30 == 0) (void)kill_players(s, {1, 2});
+            s.tick();
+        }
+        const auto& end = s.battles()->last_battle_end();  // the battle is popped in the tick it ends
+        const int32_t winner = end.valid ? end.winner : -1;
+        std::printf("  team 1 killed: battle %s, winner %d\n", s.battle() ? "still running" : "over", winner);
+        CHECK(!s.battle());
+        CHECK(winner == 0 || winner == 3);
+    }
+    // 1b. Land, three slots (Utapau): every slot's start forces stand on the map, every slot has its record, the land unit cap
+    // is the three-player one, and the team-1 pads go to the team's first slot (BKG3 Q3.1).
+    {
+        game::SessionSpec land = spec;
+        land.skirmish_map = "_MP_LAND_UTAPAU";
+        land.skirmish.extra_slots = {{"Underworld", {}, {}}};
+        land.skirmish.teams = {0, 1, 1};
+        land.skirmish.difficulties = {1, 1, 2};
+        land.skirmish_options.win_condition = 0x13;
+        jobs::JobSystem js(jobs::JobSystemConfig{0});
+        game::GameSession s(data, js, land);
+        std::vector<std::string> diag;
+        CHECK(s.start(&diag, nullptr, nullptr));
+        for (const std::string& d : diag) std::printf("  diag: %s\n", d.c_str());
+        uint64_t t = 0;
+        while (s.started() && t < 300 && !(s.in_battle() && s.battle() && s.battle()->frame() >= 2)) {
+            s.tick();
+            ++t;
+        }
+        const sim::TacticalBattle* b = s.battle();
+        CHECK(b != nullptr);
+        if (b) {
+            uint32_t owned[3] = {}, pads[3] = {};
+            static const objects::BehaviorTypeId kPad = objects::behavior_type_id("TACTICAL_BUILD_OBJECTS");
+            const objects::ObjectStore& st = s.host().modes().top_tactical()->primary();
+            for (const objects::ObjectHandle h : st.all_objects()) {
+                if (!st.active(h) || st.owner(h) < 0 || st.owner(h) >= 3) continue;
+                if (b->combat().has_unit(st.id(h))) ++owned[st.owner(h)];
+                if (kPad != objects::kNoBehavior && st.has_behavior(h, kPad)) ++pads[st.owner(h)];
+            }
+            std::printf("  land three slots: team game %d, units %u / %u / %u, pads %u / %u / %u, records 0x%x / 0x%x / 0x%x, caps %.0f / %.0f\n",
+                        b->skirmish_team_game() ? 1 : 0, owned[0], owned[1], owned[2], pads[0], pads[1], pads[2], b->victory_record_type(0),
+                        b->victory_record_type(1), b->victory_record_type(2), static_cast<double>(b->skirmish_land_unit_cap(0)),
+                        static_cast<double>(b->skirmish_land_unit_cap(2)));
+            for (int32_t k = 0; k < 3; ++k) {
+                CHECK(owned[k] > 0);
+                CHECK(b->victory_record_type(k) == 0x13);
+            }
+            if (b->skirmish_team_game()) CHECK(pads[1] > 0 && pads[2] == 0);  // Team_01 markers: slot 1 only
+        }
+    }
+    // 2. The Gameplay options difficulty in the running battle, recorded and replayed; then saved in the battle and loaded.
+    commands::CommandRecording rec;
+    RunResult live;
+    const std::string save_dir = path_to_utf8(fs::temp_directory_path() / "alamo_game_four_slot_save_test");
+    {
+        std::error_code ec;
+        remove_all_long(fs::path(path_from_utf8(save_dir)), ec);
+    }
+    std::string save_file;
+    bool save_ok = false;
+    uint64_t save_tick = 0;
+    {
+        jobs::JobSystem js(jobs::JobSystemConfig{0});
+        game::GameSession s(data, js, spec);
+        std::vector<std::string> diag;
+        CHECK(s.start(&diag, nullptr, &rec));
+        if (!s.started()) return;
+        uint64_t t = 0;
+        while (t < 300 && !(s.in_battle() && s.battle() && s.battle()->frame() >= 10)) {
+            s.tick();
+            ++t;
+        }
+        const sim::TacticalBattle* b = s.battle();
+        CHECK(b != nullptr);
+        if (!b) return;
+        // The slot-1 (Easy) unit with the most health (its star base): its health is rescaled by Hard / Easy.
+        const objects::ObjectStore& st = s.host().modes().top_tactical()->primary();
+        objects::ObjectId big = objects::kNoObjectId;
+        float h0 = 0.0f;
+        for (const objects::ObjectHandle h : st.all_objects())
+            if (st.active(h) && st.owner(h) == 1 && b->combat().has_unit(st.id(h)) && b->combat().health(st.id(h)) > h0) {
+                big = st.id(h);
+                h0 = b->combat().health(big);
+            }
+        CHECK(s.set_ai_difficulty(2));
+        s.tick();
+        ++t;
+        const uint32_t hard = data.rules.find_difficulty("Hard_Default"), easy = data.rules.find_difficulty("Easy_Default");
+        const galactic::GalacticSim* g = s.galaxy();
+        for (int32_t k = 1; k < 4; ++k) CHECK(g->players()[static_cast<size_t>(k)].difficulty == hard);
+        CHECK(s.port_stats().ai_difficulty == 1 && s.ai_difficulty_of(1) == 2 && s.ai_difficulty_of(3) == 2);
+        if (big != objects::kNoObjectId && hard < data.rules.difficulties.size() && easy < data.rules.difficulties.size()) {
+            const float want = h0 * data.rules.difficulties[hard].health_multiplier / data.rules.difficulties[easy].health_multiplier;
+            const float h1 = s.battle()->combat().health(big);
+            std::printf("  difficulty Hard: slot-1 unit %u health %.1f -> %.1f (want %.1f)\n", big, static_cast<double>(h0), static_cast<double>(h1),
+                        static_cast<double>(want));
+            CHECK(std::fabs(h1 - want) <= 0.02f * want + 1.0f);
+        }
+        for (int i = 0; i < 30; ++i) {
+            s.tick();
+            ++t;
+        }
+        // A save in the battle after the change (the extra slots, teams, difficulties and sides 2.. round-trip).
+        CHECK(s.save_blocker().empty() && s.check_save().empty());
+        save_ok = game::save_game(s, save_dir, "Four slots", "", game::unix_now(), &save_file, &err);
+        CHECK(save_ok);
+        save_tick = s.host().frame();
+        for (int i = 0; i < 90; ++i) {
+            s.tick();
+            ++t;
+        }
+        live.crc = s.host().crc_log();
+        live.ticks = t;
+    }
+    for (const int32_t w : {0, 4}) {  // determinism: the four sides' battle with workers too
+        RunResult rp;
+        replay_run(data, spec, rec, live.ticks, w, rp);
+        const CrcDivergence d = first_divergence(live.crc, rp.crc);
+        std::printf("  difficulty replay (%d workers) vs live: %s\n", w, d.message.c_str());
+        CHECK(!d.diverged && rp.crc.records.size() == live.crc.records.size());
+    }
+    if (save_ok) {
+        SaveFile f;
+        game::SessionSpec back;
+        CHECK(SaveFile::read_file(save_file, f, &err) && game::GameSession::spec_from_save(f, back, &err));
+        CHECK(back.skirmish.extra_slots.size() == 2 && back.skirmish.extra_slots[0].faction == "Underworld" &&
+              back.skirmish.teams == spec.skirmish.teams && back.skirmish.difficulties == std::vector<int32_t>({2, 2, 2, 2}) &&
+              back.difficulty == 2);
+        jobs::JobSystem js(jobs::JobSystemConfig{0});
+        game::GameSession b(data, js, back);
+        CHECK(b.start_from_save(f, &err, nullptr, nullptr));
+        if (!err.empty()) std::printf("  load: %s\n", err.c_str());
+        CHECK(b.loaded() && b.host().frame() == save_tick);
+        for (int i = 0; i < 90; ++i) b.tick();
+        const CrcLog want = records_from(live.crc, save_tick);
+        const CrcDivergence dl = first_divergence(want, b.host().crc_log());
+        std::printf("  four-slot battle save at %" PRIu64 ", +90 ticks: loaded live vs original: %s\n", save_tick, dl.message.c_str());
+        CHECK(!dl.diverged && b.host().crc_log().records.size() == want.records.size() && !want.records.empty());
+        if (b.galaxy())
+            for (int32_t k = 1; k < 4; ++k) CHECK(b.galaxy()->players()[static_cast<size_t>(k)].difficulty == data.rules.find_difficulty("Hard_Default"));
+    }
+    std::error_code ec;
+    remove_all_long(fs::path(path_from_utf8(save_dir)), ec);
+}
+
 void hero_roster_real_test() {
     const char* foc = std::getenv("ALAMO_FOC_DATA");
     if (!foc || !*foc) {
@@ -1480,6 +2226,26 @@ void hero_roster_real_test() {
     for (const ui::HeroEntry& h : ranked) order += h.type_name + " ";
     std::printf("hero bar order (real data): %s\n", order.c_str());
     CHECK(order == "Emperor_Palpatine Boba_Fett General_Veers Grand_Moff_Tarkin Accuser_Star_Destroyer ");
+    // ui4 t02 (A2K_T01 §1): the build pads at Corellia price with build_cost_for - the Emperor's 25 % discount there - and
+    // carry can_enqueue's block reason.
+    {
+        const std::vector<ui::GalacticBuildOption> opts = game::galactic_build_options(*g, s.local_player(), corellia, icon);
+        size_t discounted = 0;
+        for (const ui::GalacticBuildOption& o : opts) {
+            const galactic::TypeInfo& ti = g->rules().types[o.type_index];
+            CHECK(o.cost == g->build_cost_for(s.local_player(), corellia, o.type_index));
+            CHECK(o.block == game::galactic_build_block(g->can_enqueue(s.local_player(), corellia, o.type_index)));
+            CHECK(o.enabled == (o.block == ui::HudBuildOption::Block::None));
+            if (ti.build_cost > 0 && o.cost < ti.build_cost) ++discounted;
+        }
+        std::printf("build pads at Corellia (real data): %zu options, %zu below Build_Cost_Credits\n", opts.size(), discounted);
+        CHECK(!opts.empty() && discounted > 0);
+    }
+    CHECK(game::galactic_build_block(commands::RejectReason::QueueFull) == ui::HudBuildOption::Block::QueueFull &&
+          game::galactic_build_block(galactic::kRejectPopulationCap) == ui::HudBuildOption::Block::PopCap &&
+          game::galactic_build_block(commands::RejectReason::CannotAfford) == ui::HudBuildOption::Block::Funds &&
+          game::galactic_build_block(commands::RejectReason::PrerequisitesUnmet) == ui::HudBuildOption::Block::Prerequisite &&
+          game::galactic_build_block(commands::RejectReason::None) == ui::HudBuildOption::Block::None);
     // The rule on the other factions' companies: a named transport wins, else the first member; plain types stay.
     const galactic::GalacticRules& rules = g->rules();
     const auto bar_of = [&rules](std::string_view company) {
@@ -1501,6 +2267,108 @@ void hero_roster_real_test() {
 // HUD_GAPS feeds (hud_feeds.hpp): day pips (§4), order buttons (§5), hard-point type names / placement (§1), galactic
 // hero roster (§3.2) on a running session galaxy.
 void hud_feeds_test(const game::GameData& data, const game::SessionSpec& spec) {
+    // ui4 t11 (P4_SIM_SYSTEMS §2.7.2): a shown advisor line's Droid Log rows - "Day N", the text, the separator.
+    {
+        const std::vector<std::u32string> r = game::droid_log_rows(U"Day ##0", 12, U"Enemy fleet approaching Kuat", U"____");
+        CHECK(r.size() == 3 && r[0] == U"Day 12" && r[1] == U"Enemy fleet approaching Kuat" && r[2] == U"____");
+        CHECK(game::droid_log_rows(U"", 3, U"x", U"-")[0] == U"3");
+    }
+    // ui4 t04 (GALACTIC_PLANET_MAP §4.1): marker classes, first match wins.
+    {
+        using MC = game::MapMarkerClass;
+        CHECK(game::classify_map_marker("Out Base Special Structure Position", true) == MC::Out);
+        CHECK(game::classify_map_marker("IN BASE SPECIAL STRUCTURE POSITION", false) == MC::In);
+        CHECK(game::classify_map_marker("Defending Forces Position", false) == MC::Defender);
+        CHECK(game::classify_map_marker("Reinforcement_Point_Plus10_cap", true) == MC::Specific);
+        CHECK(game::classify_map_marker("reinforcement_point_plus10_cap", false) == MC::Reinforcement);
+        CHECK(game::classify_map_marker("Garrison_Bunker_Capturable", false) == MC::Bunker);
+        CHECK(game::classify_map_marker("Skirmish_Build_Pad", false) == MC::BuildPad);
+        CHECK(game::classify_map_marker("Attacker Entry Position", false) == MC::None);
+    }
+    // §4.2 pad groups, §4.4 structures, §4.5 units, §5 orbit stacks.
+    {
+        using MC = game::MapMarkerClass;
+        std::vector<game::PlanetMapMarker> m;
+        auto add = [&](int32_t id, MC c, std::vector<uint32_t> spec = {}) { m.push_back({id, c, 0.1f * static_cast<float>(id), 0.5f, std::move(spec)}); };
+        add(1, MC::Out);
+        add(2, MC::Specific, {50});
+        add(3, MC::In);
+        add(4, MC::Defender);
+        add(5, MC::BuildPad);
+        add(6, MC::Bunker);
+        add(7, MC::Reinforcement);
+        add(8, MC::Specific, {60});
+        add(9, MC::Specific, {70});
+        add(10, MC::In);
+        add(11, MC::Defender);
+        for (int32_t k = 0; k < 12; ++k) add(100 + k, MC::Defender);  // past unit_pad09: dropped
+        std::vector<game::PlanetMapPad> pads = game::planet_map_pads(m);
+        auto pad = [&](game::MapPadGroup g, int32_t index) -> const game::PlanetMapPad* {
+            for (const game::PlanetMapPad& p : pads)
+                if (p.group == g && p.index == index) return &p;
+            return nullptr;
+        };
+        using G = game::MapPadGroup;
+        // build_pad00.. = In (3, 10), Specific (2, 8, 9), Out (1); 33 = reinforcement; 40 = bunker, 41 = build pad.
+        CHECK(pad(G::Build, 0) && pad(G::Build, 0)->marker == 3 && pad(G::Build, 0)->tag == 1);
+        CHECK(pad(G::Build, 1)->marker == 10 && pad(G::Build, 2)->marker == 2 && pad(G::Build, 2)->tag == 3);
+        CHECK(pad(G::Build, 4)->marker == 9 && pad(G::Build, 5)->marker == 1 && pad(G::Build, 5)->tag == 1);
+        CHECK(pad(G::Build, 6) == nullptr && pad(G::Build, 33)->marker == 7 && pad(G::Build, 33)->tag == 0);
+        CHECK(pad(G::Build, 40)->marker == 6 && pad(G::Build, 41)->marker == 5);
+        CHECK(pad(G::Unit, 0)->marker == 4 && pad(G::Unit, 1)->marker == 11 && pad(G::Unit, 9)->marker == 107 && pad(G::Unit, 10) == nullptr);
+        // Structures: type 70 places itself at every Specific marker listing 60; type 50 (dimmed, shield 400) on marker 2;
+        // additional 50 again finds no free pad; in-base structure 20 remembers marker 10; 21 takes the first free In pad;
+        // 22 is out-base; 23 out-base too: Out is full (one pad) so it falls over to the In group - also full: not shown.
+        std::vector<game::PlanetMapStructure> st(6);
+        st[0] = {900, 70, 0, -1, 60, {}};
+        st[1] = {901, 50, 1, -1, game::kNoMapType, {50}};
+        st[2] = {902, 20, 1, 10, game::kNoMapType, {}};
+        st[3] = {903, 21, 1, -1, game::kNoMapType, {}};
+        st[4] = {904, 22, 2, -1, game::kNoMapType, {}};
+        st[5] = {905, 23, 2, -1, game::kNoMapType, {}};
+        game::place_map_structures(pads, st, [](uint32_t t) { return t == 50 ? 400.0f : 0.0f; });
+        CHECK(pad(G::Build, 3)->holds_type && pad(G::Build, 3)->type == 70 && !pad(G::Build, 3)->dimmed);
+        CHECK(pad(G::Build, 2)->holds_type && pad(G::Build, 2)->type == 50 && pad(G::Build, 2)->dimmed && pad(G::Build, 2)->shield_radius == 400.0f);
+        CHECK(pad(G::Build, 1)->object == 902 && pad(G::Build, 0)->object == 903 && pad(G::Build, 5)->object == 904);
+        CHECK(pad(G::Build, 4)->type == game::kNoMapType);
+        for (const game::PlanetMapPad& p : pads) CHECK(p.object != 905);
+        const uint32_t units[] = {31, 32}, utypes[] = {7, 8};
+        game::place_map_units(pads, units, utypes);
+        CHECK(pad(G::Unit, 0)->object == 31 && pad(G::Unit, 1)->object == 32 && pad(G::Unit, 1)->type == 8 && pad(G::Unit, 2)->object == 0);
+        // ui4 t13 (§4.4 step 3, §4.5): the marker sends. Structures: 902 already remembers marker 10 (no send); 903 / 904
+        // are sent their pads' markers 3 / 1. Units: 41 remembers marker 11 (unit_pad01: kept, no send), 42 remembers a
+        // marker with no pad (sent -1, waits), 43 has none (unit_pad00, sent 4); the waiting 42 then takes unit_pad02 (sent
+        // 100).
+        {
+            std::vector<game::PlanetMapPad> p2 = game::planet_map_pads(m);
+            std::vector<game::MapMarkerSend> sends;
+            game::place_map_structures(p2, st, {}, &sends);
+            CHECK(sends.size() == 2 && sends[0].object == 903 && sends[0].marker == 3 && sends[1].object == 904 && sends[1].marker == 1);
+            sends.clear();
+            const uint32_t u2[] = {41, 42, 43}, t2[] = {7, 7, 8};
+            const int32_t mk[] = {11, 999, -1};
+            game::place_map_units(p2, u2, t2, mk, &sends);
+            auto unit_pad = [&](int32_t index) {
+                for (const game::PlanetMapPad& p : p2)
+                    if (p.group == G::Unit && p.index == index) return p.object;
+                return 0u;
+            };
+            CHECK(unit_pad(0) == 43 && unit_pad(1) == 41 && unit_pad(2) == 42);
+            CHECK(sends.size() == 2 && sends[0].object == 43 && sends[0].marker == 4 && sends[1].object == 42 && sends[1].marker == 100);
+            // Rule 5 moved the In-base structure 903 onto the Out pad (marker 1): it stays there, nothing is sent.
+            std::vector<game::PlanetMapPad> p3 = game::planet_map_pads(m);
+            std::vector<game::PlanetMapStructure> st3 = st;
+            st3[3].marker = 1;
+            sends.clear();
+            game::place_map_structures(p3, st3, {}, &sends);
+            CHECK(pad(G::Build, 5) && p3[5].marker == 1 && p3[5].object == 903);
+            for (const game::MapMarkerSend& e : sends) CHECK(e.object != 903);
+        }
+        // §5: stacks per type, type-index order [port], representative = the first unit of the type.
+        const game::MapOrbitUnit ou[] = {{1, 10, 9}, {2, 10, 4}, {3, 11, 9}};
+        const std::vector<game::MapOrbitStack> os = game::map_orbit_stacks(ou);
+        CHECK(os.size() == 2 && os[0].type == 4 && os[0].count == 1 && os[1].type == 9 && os[1].count == 2 && os[1].unit == 1 && os[1].fleet == 10);
+    }
     // §4: (frame - cycle start) / cycle frames, clamped; no cycle length hides the pips.
     CHECK(game::day_cycle_fraction(0, 0, 1350) == 0.0f && game::day_cycle_fraction(675, 0, 1350) == 0.5f);
     CHECK(game::day_cycle_fraction(1350 + 135, 1350, 1350) == 0.1f && game::day_cycle_fraction(5000, 0, 1350) == 1.0f);
@@ -1521,6 +2389,38 @@ void hud_feeds_test(const game::GameData& data, const game::SessionSpec& spec) {
     const game::OrderUnitState e[] = {enemy_both};
     const ui::HudOrderButtons b4 = game::order_buttons(e, 0, false);
     CHECK(!b4.can_attack && !b4.can_move);
+    // cu9g §9.2 / §9.3: the land bombing-run button. Space: not driven. Ready: enabled, no dial. Controls locked or not
+    // available: disabled; the dial shows the cooldown fraction, a 0 as a full dial (skirmish before its first run).
+    const ui::HudBombingRunButton sp = game::bombing_run_button(false, false, true, 0.5f);
+    CHECK(!sp.present);
+    const ui::HudBombingRunButton rd = game::bombing_run_button(true, false, true, 1.0f);
+    CHECK(rd.present && !rd.disabled && rd.dial < 0.0f);
+    const ui::HudBombingRunButton lk = game::bombing_run_button(true, true, true, 1.0f);
+    CHECK(lk.present && lk.disabled && lk.dial == 1.0f);
+    const ui::HudBombingRunButton cd = game::bombing_run_button(true, false, false, 0.25f);
+    CHECK(cd.present && cd.disabled && cd.dial == 0.25f);
+    const ui::HudBombingRunButton fresh = game::bombing_run_button(true, false, false, 0.0f);
+    CHECK(fresh.disabled && fresh.dial == 1.0f);
+    // ui1 t04: the space special-weapon button - hidden without a weapon; icon / tooltip = the weapon's index; not allowed
+    // -> tooltip 4 (requires comm array), disabled; recharging -> disabled with the readiness dial; ready -> enabled.
+    CHECK(!game::space_weapon_button(false, 0, true, false, 1.0f).present);
+    const ui::HudBombingRunButton no_weapon = game::space_weapon_button(true, -1, true, false, 0.0f);
+    CHECK(no_weapon.present && no_weapon.hidden && no_weapon.disabled);
+    const ui::HudBombingRunButton ion = game::space_weapon_button(true, 0, true, false, 1.0f);
+    CHECK(ion.present && !ion.hidden && !ion.disabled && ion.icon == 0 && ion.tooltip == 0 && ion.dial < 0.0f);
+    const ui::HudBombingRunButton hv = game::space_weapon_button(true, 1, true, false, 0.4f);
+    CHECK(hv.disabled && hv.icon == 1 && hv.tooltip == 1 && hv.dial == 0.4f);
+    const ui::HudBombingRunButton comm = game::space_weapon_button(true, 2, false, false, 1.0f);
+    CHECK(comm.disabled && comm.icon == 2 && comm.tooltip == 4);
+    CHECK(game::space_weapon_button(true, 0, true, true, 1.0f).disabled);  // controls locked
+    {
+        galactic::FactionRules fr;
+        fr.xml_fields = {{"Bombing_Run_Shadow_Blob_Material_Name", "Bombing_Run_Empire"}, {"Bombing_Run_Blob_Size", "100.0"}};
+        const game::BombingRunStyle st = game::bombing_run_style(fr);
+        CHECK(st.blob_material == "Bombing_Run_Empire" && st.blob_size == 100.0f);
+        const game::BombingRunStyle none = game::bombing_run_style(galactic::FactionRules{});
+        CHECK(none.blob_material.empty() && none.blob_size == 100.0f);
+    }
     // §1: HardPointType names (reticle table keys) and the yaw-rotated attachment point.
     CHECK(std::string(game::hardpoint_type_name(0)) == "HARD_POINT_ENGINE" && std::string(game::hardpoint_type_name(5)) == "HARD_POINT_WEAPON_LASER");
     CHECK(std::string(game::hardpoint_type_name(12)) == "HARD_POINT_DUMMY_ART" && std::string(game::hardpoint_type_name(13)).empty());
@@ -1545,7 +2445,85 @@ void hud_feeds_test(const game::GameData& data, const game::SessionSpec& spec) {
     CHECK(heroes.size() <= 11 && named == heroes.size());
     const std::vector<ui::HeroEntry> none = game::galactic_hero_entries(*s.galaxy(), s.local_player(), [](uint32_t) { return std::string(); }, {}, 11);
     CHECK(none.empty());
-    std::printf("hud feeds: cycle %.4f -> %.4f, %zu galactic hero entries\n", static_cast<double>(f0), static_cast<double>(f1), heroes.size());
+    // ui4 t08: the announcer tags of galactic events for the local player.
+    {
+        const galactic::GalacticSim& gg = *s.galaxy();
+        const int32_t me = s.local_player();
+        int32_t other = -1;
+        for (int32_t p = 0; p < static_cast<int32_t>(gg.players().size()); ++p)
+            if (p != me && !gg.allied(me, p)) other = p;
+        PlanetIndex mine = kInvalidPlanet;
+        bool guarded = false;  // ui4 t11: a local fleet orbits `mine` (the enemy-approach announcer needs one)
+        for (PlanetIndex i = 0; i < gg.planets().size(); ++i)
+            if (gg.planets()[i].owner == me) {
+                bool g2 = false;
+                for (const galactic::FleetState& f : gg.fleets()) g2 = g2 || (f.alive && f.owner == me && f.planet == i && !f.contents.empty());
+                if (mine == kInvalidPlanet || (g2 && !guarded)) {
+                    mine = i;
+                    guarded = g2;
+                }
+            }
+        using K = galactic::GalacticEventKind;
+        galactic::GalacticEvent ev;
+        ev.kind = K::PlanetOwnerChanged;
+        ev.planet = mine;
+        ev.player = me;
+        ev.other_player = other;
+        CHECK(std::string_view(game::galactic_announcement(gg, ev, me)) == "SFXEvent_Planet_Gained_Control");
+        ev.player = other;
+        ev.other_player = me;
+        if (other >= 0) CHECK(std::string_view(game::galactic_announcement(gg, ev, me)) == "SFXEvent_Planet_Lost_Control");
+        ev.other_player = -1;
+        CHECK(game::galactic_announcement(gg, ev, me) == nullptr);
+        ev.kind = K::CorruptionChanged;
+        ev.player = other;
+        ev.value = 2;
+        ev.other_player = -1;
+        if (mine != kInvalidPlanet) {
+            CHECK(std::string_view(game::galactic_announcement(gg, ev, me)) == "SFXEvent_Planet_Corrupted");
+            ev.value = -1;
+            ev.other_player = 2;
+            CHECK(std::string_view(game::galactic_announcement(gg, ev, me)) == "SFXEvent_Corruption_Removed");
+            ev.kind = K::FleetDeparted;
+            ev.fleet = 0xFFFFFFFFu;
+            ev.other_planet = mine;
+            if (other >= 0 && guarded) CHECK(std::string_view(game::galactic_announcement(gg, ev, me)) == "SFXEvent_Enemy_Fleet_Approaching_Planet");
+            if (other >= 0 && !guarded) CHECK(game::galactic_announcement(gg, ev, me) == nullptr);
+            ev.player = me;
+            CHECK(game::galactic_announcement(gg, ev, me) == nullptr);
+        }
+    }
+    // ui4 t06 (GALAXY_MAP_PRESENTATION §2.2): the drag preview route of an orbiting fleet of the local player - origin first,
+    // target last, every hop a graph edge; its own planet, an unknown fleet or an invalid target give nothing.
+    size_t routes_checked = 0;
+    {
+        const galactic::GalacticSim& gg = *s.galaxy();
+        const int32_t me = s.local_player();
+        for (const galactic::FleetState& fl : gg.fleets()) {
+            if (!fl.alive || fl.owner != me || fl.moving || fl.planet == kInvalidPlanet) continue;
+            const uint32_t fid = static_cast<uint32_t>(gg.store().id(fl.object));
+            CHECK(game::fleet_drag_route(gg, me, fid, fl.planet).empty());
+            CHECK(game::fleet_drag_route(gg, me, fid, kInvalidPlanet).empty());
+            const galactic::PlanetGraph& gr = gg.graph();
+            auto adjacent = [&gr](PlanetIndex a, PlanetIndex b) {
+                for (uint32_t e = gr.edge_begin(a); e < gr.edge_end(a); ++e)
+                    if (gr.neighbour(e) == b) return true;
+                return false;
+            };
+            for (PlanetIndex t = 0; t < gg.planets().size(); ++t) {
+                const std::vector<PlanetIndex> r = game::fleet_drag_route(gg, me, fid, t);
+                if (r.empty()) continue;
+                ++routes_checked;
+                CHECK(r.front() == fl.planet && r.back() == t);
+                for (size_t i = 0; i + 1 < r.size(); ++i) CHECK(adjacent(r[i], r[i + 1]));
+            }
+            CHECK(routes_checked > 0);  // the start planet has revealed neighbours
+            break;
+        }
+        CHECK(game::fleet_drag_route(gg, me, 0xFFFFFFF0u, 0).empty());
+    }
+    std::printf("hud feeds: cycle %.4f -> %.4f, %zu galactic hero entries, %zu drag routes\n", static_cast<double>(f0),
+                static_cast<double>(f1), heroes.size(), routes_checked);
 }
 #endif
 // --- end OI host ---
@@ -1594,6 +2572,16 @@ void save_files_test() {
     sk.game_seconds = 125;
     CHECK(game::save_label(sk) == "s  -  Skirmish _MP_SPACE_KUAT, 2:05");
     CHECK(!game::decode_description("just a line", back));
+    // [port: Gabriel] the saved games tree: faction emblem and playthrough round-trip; a save from before them has none.
+    CHECK(back.faction_icon.empty() && back.playthrough.empty() && back.playthrough_started == 0);
+    m.faction_icon = "i_icon_empire.tga";
+    m.playthrough = game::new_playthrough_id(1790000000);
+    m.playthrough_started = 1789990000;
+    CHECK(m.playthrough.rfind("6ab13b80-", 0) == 0 && m.playthrough.size() == 17);
+    CHECK(game::decode_description(game::encode_description(m), back));
+    CHECK(back.faction_icon == m.faction_icon && back.playthrough == m.playthrough && back.playthrough_started == 1789990000);
+    CHECK(game::save_row_label(m).rfind("Week 3  -  Week 3, ", 0) == 0);
+    CHECK(game::save_row_label(sk) == "s  -  2:05");
 
     // Listing: newest first, then by name (case-insensitive); unreadable files listed; other extensions ignored.
     const fs::path dir = fs::temp_directory_path() / "alamo_game_save_files_test";
@@ -1641,6 +2629,52 @@ void save_files_test() {
     CHECK(!game::delete_save(d, "missing", &err) && !err.empty());
     CHECK(game::list_saves(path_to_utf8(dir / "none")).empty());
     remove_all_long(dir, ec);
+
+    // ui5 t13: names and folders outside the ANSI code page (Greek kappa + CJK, UTF-8 escapes): a typed name keeps its
+    // valid UTF-8, a broken byte becomes '_', the length cap cuts at a character boundary; the folder and the save list,
+    // load (header), exist and delete without the old std::system_error from path::string().
+    const std::string kappa = "\xCE\x9A", cjk = "\xE6\xB8\xAC";  // U+039A, U+6E2C
+    CHECK(game::sanitize_save_name("S" + kappa + cjk) == "S" + kappa + cjk);
+    CHECK(game::sanitize_save_name("a\xFF" "b\xC3") == "a_b_");               // invalid lead / truncated sequence
+    CHECK(game::sanitize_save_name("x\xE0\x80\x80" "y") == "x___y");           // overlong form
+    {
+        const std::string longname = std::string(63, 'x') + kappa;  // 65 bytes: the cut drops the whole kappa
+        CHECK(game::sanitize_save_name(longname) == std::string(63, 'x'));
+    }
+    const fs::path udir = fs::temp_directory_path() / path_from_utf8("alamo_saves_" + kappa + cjk);
+    remove_all_long(udir, ec);
+    const std::string ud = path_to_utf8(udir);
+    const std::string uname = "Spiel " + kappa + cjk;
+    {
+        SaveFile f;
+        f.tick = 7;
+        game::SaveMeta mm;
+        mm.name = uname;
+        mm.kind = "campaign";
+        f.description = game::encode_description(mm);
+        ByteWriter w;
+        w.u32(1).u64(7);
+        f.add("frame", 1, w);
+        std::string uerr;
+        CHECK(game::write_save_file(f, game::save_path(ud, uname), &uerr));
+        if (!uerr.empty()) std::printf("  write %s: %s\n", uname.c_str(), uerr.c_str());
+    }
+    bool listed = false;
+    try {
+        const std::vector<game::SaveEntry> ul = game::list_saves(ud);
+        listed = ul.size() == 1 && ul[0].name == uname && ul[0].readable && ul[0].tick == 7;
+    } catch (const std::exception& ex) {
+        std::printf("  list_saves threw: %s\n", ex.what());
+    }
+    CHECK(listed);
+    SaveFile back_file;
+    CHECK(game::read_save_file(game::save_path(ud, uname), back_file, &err) && back_file.tick == 7);
+    CHECK(game::save_exists(ud, uname) && game::delete_save(ud, uname, &err) && !game::save_exists(ud, uname));
+    // A file copied in under a name sanitizing would change (over kMaxSaveName bytes) is still reached by its listed name.
+    const std::string longname = std::string(70, 'L');
+    write_file(udir / (longname + ".alsv"), "not a save");
+    CHECK(game::save_exists(ud, longname) && game::delete_save(ud, longname, &err) && !game::save_exists(ud, longname));
+    remove_all_long(udir, ec);
 }
 
 // A skirmish saved through the menus' path (save_game) on the galactic map, loaded into a new session: the load continues
@@ -1795,7 +2829,7 @@ void save_load_test(const game::GameData& data, game::SessionSpec spec) {
         CHECK(p.start(nullptr, nullptr, nullptr));
         sim::SaveParticipant part;
         part.name = "pending_test";
-        part.write = [](ByteWriter&) {};  // a system whose save has not landed (write_if_saveable writes nothing)
+        part.write = [](ByteWriter&) {};  // a participant that writes nothing (the LoadReport / check_save path)
         part.read = [](ByteReader&) { return false; };
         p.host().add_save_participant(std::move(part));
         p.tick();
@@ -1838,7 +2872,8 @@ static void story_ui_test() {
     v.zoomed = true;  // zoom planet unknown -> the selected planet
     f.observe(v);
     out = f.take();
-    CHECK(kinds(out) == std::vector<E>{E::ZoomIntoPlanet} && out[0].object == 100);
+    // STY1 t03: the zoom state change also raises GENERIC zoomed_in / zoomed_out
+    CHECK(kinds(out) == (std::vector<E>{E::ZoomIntoPlanet, E::Generic}) && out[0].object == 100 && out[1].name == "zoomed_in");
     f.observe(v);
     CHECK(f.take().empty());
     v.zoom_planet = 101;  // re-targeted while zoomed: out of the old one, into the new one
@@ -1848,7 +2883,7 @@ static void story_ui_test() {
     v.zoomed = false;
     f.observe(v);
     out = f.take();
-    CHECK(kinds(out) == std::vector<E>{E::ZoomOutPlanet} && out[0].object == 101);
+    CHECK(kinds(out) == (std::vector<E>{E::ZoomOutPlanet, E::Generic}) && out[0].object == 101 && out[1].name == "zoomed_out");
     v.corruption_planet = 100;
     f.observe(v);
     out = f.take();
@@ -1859,6 +2894,22 @@ static void story_ui_test() {
     v.corruption_planet = 0;
     f.observe(v);
     CHECK(f.take().empty());  // deselect / close raise nothing
+    // STY1 t03: special dialogs and HUD drags raise their STORY_GENERIC names once per opening / drag
+    v.special_kind = galactic::kSpecialBlackMarket;
+    v.drag = 1;
+    f.observe(v);
+    out = f.take();
+    CHECK(out.size() == 2 && out[0].name == "open_black_market_menu" && out[1].name == "start_fleet_drag");
+    f.observe(v);
+    CHECK(f.take().empty());
+    v.special_kind = 0;
+    v.drag = 2;
+    f.observe(v);
+    out = f.take();
+    CHECK(out.size() == 1 && out[0].name == "start_land_drag");
+    v.drag = 0;
+    f.observe(v);
+    CHECK(f.take().empty());
     f.click_gui("b_Create_00");
     f.click_gui("");
     f.speech_done("UW_ACT01_G01_01");
@@ -1868,7 +2919,7 @@ static void story_ui_test() {
     out = f.take();
     CHECK(kinds(out) == (std::vector<E>{E::ClickGui, E::SpeechDone, E::MovieDone, E::Generic, E::MissionLost}));
     CHECK(out.size() == 5 && out[0].name == "b_Create_00" && out[4].name == "Story_Plots_Empire_ActI_M02_LAND.xml");
-    CHECK(f.raised(E::SelectUnit) == 3 && f.raised(E::ZoomOutPlanet) == 2 && f.raised_total() == 14);
+    CHECK(f.raised(E::SelectUnit) == 3 && f.raised(E::ZoomOutPlanet) == 2 && f.raised_total() == 19);
     f.reset();
     v = {};
     v.selection = {12};
@@ -1887,6 +2938,10 @@ static void story_ui_test() {
     n.name.assign(400, 'x');
     CHECK(game::read_story_ui_event(game::story_ui_event(n), back) && back.name.size() == game::kStoryUiMaxName);
     CHECK(!game::read_story_ui_event(game::tactical_auto_resolve_event(), back));
+    // bkc1 t01: the story Esc command is a data-free PortExtension of its own subtype, not a story UI event.
+    CHECK(game::story_esc_event().type() == commands::EventType::PortExtension &&
+          game::story_esc_event().u("subtype") == game::kStoryEscSubtype && game::story_esc_event().bytes_view("data").empty());
+    CHECK(!game::read_story_ui_event(game::story_esc_event(), back));
     const uint8_t bad[5] = {static_cast<uint8_t>(E::Count), 0, 0, 0, 0};
     CHECK(!game::read_story_ui_event(commands::ev::port_extension(game::kStoryUiSubtype, std::span<const uint8_t>(bad, 5)), back));
     CHECK(!back.tactical);  // the old payload layout (bit 7 clear) decodes as galactic
@@ -1934,8 +2989,23 @@ static void story_ui_test() {
     game::story_reward_media("MULTIMEDIA", {"T", "-1", "", "", "", "", "", "", "-1"}, media);
     game::story_reward_media("MULTIMEDIA", {"T", "-1", "", "", "", "", "", "", ""}, media);
     game::story_reward_media("STOP_COMMANDBAR_MOVIE", {}, media);
-    CHECK(media.size() == 2 && media[0].kind == game::StoryMediaCue::Kind::AdvisorMovie && media[0].name == "Tyber_loop" &&
+    CHECK(media.size() == 2 && media[0].kind == game::StoryMediaCue::Kind::AdvisorMovie && media[0].name == "Tyber_loop" && !media[0].loop &&
           media[1].kind == game::StoryMediaCue::Kind::AdvisorStop);
+    // ui2 t07: P10 / P2 are the loop flag (atoi, empty = 0); SPEECH P1 and COMMANDBAR_MOVIE P1 are cues; the head's name is not tested.
+    media.clear();
+    game::story_reward_media("MULTIMEDIA", {"T", "-1", "", "", "", "", "", "", "Han_Loop", "1"}, media);
+    game::story_reward_media("MULTIMEDIA", {"T", "-1", "", "", "", "", "", "", "Han_Loop", "0"}, media);
+    game::story_reward_media("MULTIMEDIA", {"T", "-1", "", "", "", "", "", "", "Plain_Name", "3"}, media);
+    game::story_reward_media("SPEECH", {" EMPIRE_ACT04_MISSION_TEN_04 "}, media);
+    game::story_reward_media("SPEECH", {}, media);
+    game::story_reward_media("COMMANDBAR_MOVIE", {"Vader_Loop"}, media);
+    game::story_reward_media("COMMANDBAR_MOVIE", {"Moff_Loop", "1"}, media);
+    game::story_reward_media("COMMANDBAR_MOVIE", {"-1"}, media);
+    CHECK(media.size() == 6);
+    CHECK(media[0].kind == game::StoryMediaCue::Kind::AdvisorMovie && media[0].loop && !media[1].loop && media[2].name == "Plain_Name" && media[2].loop);
+    CHECK(media[3].kind == game::StoryMediaCue::Kind::Speech && media[3].name == "EMPIRE_ACT04_MISSION_TEN_04");
+    CHECK(media[4].kind == game::StoryMediaCue::Kind::AdvisorMovie && media[4].name == "Vader_Loop" && !media[4].loop);
+    CHECK(media[5].name == "Moff_Loop" && media[5].loop);
     std::printf("story UI feed: %" PRIu64 " notifications raised\n", f.raised_total());
 }
 
@@ -2030,14 +3100,112 @@ void radar_feed_test() {
 }
 #endif
 
+// mcx3 t05 (D3, docs/MOD_COMPAT_DESIGN.md 15): a save from an older stack. The save is made on data whose stack says
+// "Stack Sub" 1.0; the current data has one value changed (the type list unchanged) and says 1.1. The load is refused
+// with the mod and both versions named and marked as a data difference; allowed, it loads and the session is marked.
+static void different_data_save_test(const std::string& data_dir, game::SessionSpec spec) {
+    spec.animation = false;
+    const fs::path cur_dir = fs::temp_directory_path() / "alamo_game_session_tests_v2";
+    const fs::path saves = fs::temp_directory_path() / "alamo_game_different_data_test";
+    std::error_code ec;
+    remove_all_long(cur_dir, ec);
+    remove_all_long(saves, ec);
+    fs::copy(path_from_utf8(data_dir), cur_dir, fs::copy_options::recursive, ec);
+    CHECK(!ec);
+    const fs::path types = cur_dir / "Data" / "XML" / "GSTypes.xml";
+    std::string t = ::alamo::test::read_file(types);
+    const std::string before = "<Tactical_Health>900</Tactical_Health>", after = "<Tactical_Health>950</Tactical_Health>";
+    const size_t at = t.find(before);
+    CHECK(at != std::string::npos);
+    if (at == std::string::npos) return;
+    t.replace(at, before.size(), after);
+    write_file(types, t);
+
+    const auto stack = [](const char* version, uint64_t content_hash) {
+        vfs::ModDescriptor m;
+        m.kind = vfs::ModKind::LocalMods;
+        m.id = "StackSub";
+        m.name = "Stack Sub";
+        m.version = version;
+        m.content_hash = content_hash;
+        return std::vector<vfs::ModDescriptor>{m};
+    };
+    game::GameData old_data, cur_data;
+    std::string err;
+    CHECK(game::load_game_data_dir(data_dir, old_data, &err) && game::load_game_data_dir(path_to_utf8(cur_dir), cur_data, &err));
+    old_data.mods = stack("1.0", 0x10);
+    cur_data.mods = stack("1.1", 0x11);
+    jobs::JobSystem js(jobs::JobSystemConfig{2});
+    std::string path;
+    {
+        game::GameSession a(old_data, js, spec);
+        CHECK(a.start(nullptr, nullptr, nullptr));
+        if (!a.started()) return;
+        for (int i = 0; i < 20; ++i) a.tick();
+        CHECK(game::save_game(a, path_to_utf8(saves), "older stack", "", game::unix_now(), &path, &err));
+    }
+    // The descriptor carries the stack.
+    SaveFile f;
+    sim::SessionDescriptor sd;
+    CHECK(game::read_save_file(path, f, &err) && sim::read_session(f, sd, &err));
+    CHECK(sd.mods.size() == 1 && sd.mods[0].name == "Stack Sub" && sd.mods[0].version == "1.0" && sd.mods[0].key == "StackSub");
+    // Refused, readably, as a data difference (the in-memory map is set again, as the other save tests do).
+    game::SessionSpec back;
+    CHECK(game::GameSession::spec_from_save(f, back, &err));
+    back.skirmish_map_data = spec.skirmish_map_data;
+    {
+        game::GameSession r(cur_data, js, back);
+        CHECK(!r.start_from_save(f, &err));
+        std::printf("different data: refused: %s\n", r.load_report().descriptor_error.c_str());
+        CHECK(r.load_report().different_data && !r.loaded_with_different_data());
+        CHECK(r.load_report().descriptor_error == "Stack Sub updated since this save (version 1.0 -> 1.1)");
+    }
+    // Load anyway: the type list is unchanged, every chunk reads; the session is marked.
+    {
+        game::GameSession s(cur_data, js, back);
+        s.set_allow_different_data(true);
+        const bool ok = s.start_from_save(f, &err);
+        if (!ok) std::printf("  load anyway: %s\n", err.c_str());
+        CHECK(ok && s.loaded() && s.loaded_with_different_data());
+        if (ok) s.tick();
+    }
+    // Same data: loads as before, not marked.
+    {
+        game::GameSession s(old_data, js, back);
+        CHECK(s.start_from_save(f, &err) && !s.loaded_with_different_data() && !s.load_report().different_data);
+    }
+    // Another seed is not a data difference: no load anyway.
+    game::SessionSpec other = back;
+    other.seed = back.seed + 1;
+    game::GameSession o(cur_data, js, other);
+    o.set_allow_different_data(true);
+    CHECK(!o.start_from_save(f, &err) && !o.load_report().different_data);
+    remove_all_long(cur_dir, ec);
+    remove_all_long(saves, ec);
+}
+
 int main() {
 #ifdef ALAMO_GAME_HAVE_CONTROLS
     radar_feed_test();
 #endif
+    custom_tech_offset_test();  // mcx4 t19
+    skirmish_win_condition_test();  // mcx4 t14
+    galactic_build_listed_test();   // mcx4 t14
+    encyclopedia_text_tag_test();   // mcx4 t14
+    win_lose_banner_text_test();    // mcx4 t14
+    shows_hero_head_test();         // mcx4 t14
+    game_over_art_test();           // mcx4 t14
+    planet_weather_lines_test();    // mcx4 t14
+    commander_icon_test();          // mcx4 t14
+    corruption_choice_art_test();   // mcx4 t14
+    control_transition_ping_test(); // mcx4 t14
+    countdown_numbers_test();       // mcx4 t14
+    movie_frame_cue_test();         // mcx4 t13
     story_ui_test();
     linked_overlay_test();
     story_script_test();
     holocron_summary_test();  // q6 t14
+    completed_tab_shown_test();  // mcx4 t14
     story_scripts_real_test();
     game::GameData data;
     std::string err;
@@ -2093,13 +3261,18 @@ int main() {
         attract_camera_pure_test();
         attract_rec_test();
         attract_camera_session_test();
+        ship_names_real_test();  // ref5 t04
+        attract_demo_real_test();
         // N1 / t09: saved games and GameSession save / load.
         save_files_test();
         save_load_test(data, spec);
+        different_data_save_test(dir, spec);  // mcx3 t05
 #ifdef ALAMO_GAME_HAVE_CONTROLS
         controls_test();
         hud_feeds_test(data, spec);
         hero_roster_real_test();
+        skirmish_map_real_test();  // skm1 t01 / t02
+        skirmish_four_slot_real_test();  // skm2 t01 / t02
 #endif
     }
     std::error_code ec;

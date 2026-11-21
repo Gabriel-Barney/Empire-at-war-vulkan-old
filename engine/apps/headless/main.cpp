@@ -56,13 +56,27 @@
 //       [--human FACTION [--human-script FILE]]: that faction is a scripted human (fixed recorded command stream).
 //       [--ai-type FACTION=TYPE ...]: that faction's AI player type from the start instead of the campaign's AI_Player_Control
 //       (q6 t07 [port] test knob: as a SWITCH_CONTROL story reward at frame 0, e.g. Thrawn's Revenge's INITIALIZE_AI types).
-//       [--trace-out FILE]: per-tick Q2TRACE 1 state trace (port_trace.hpp) for tools/probe_mod/q2_traces/q2trace.py.
+//       [--trace-out FILE]: per-tick Q2TRACE 1 state trace (port_trace.hpp) for tools/probe_mod/q2_traces/q2trace.py; with
+//       --skirmish-ai (q4hf t02) the tactical battle's trace (tactical_trace.hpp: owner / type / hull per object, first shot).
+//       [--tactical-trace-out FILE] (storyb t03): in --galactic-ai runs, the same tactical trace of every battle while it is
+//       on top (story missions: tools/parity story_kessel).
 //       [--story]: also run the campaign's story plot sets, as the retail sandbox does (q2f t03).
-//       [--ai-latency F] [--no-ai-stagger] (also --skirmish-ai): OPT2 t02 / t01 parity knobs - the AI path recompute latency
-//       (default 15 frames, 0 = the original timing) and every AI player planning on the same frames (the original).
+//       [--story-esc-at F] (tst2 t02, with --story and --human): the human's Esc after the tick in which the battle on top
+//       reaches battle frame F; sent as the story Esc command when the cinematic camera takes it (ai_run.hpp).
+//       [--eval-equations "A,B,..." --eval-player FACTION] (tst2 t07): after the last tick, those perception equations on
+//       every planet the faction owns (Self = it, Target = the planet), one "galactic-ai: eval frame ..." line per planet.
+//       [--ai-latency F] [--no-ai-stagger | --ai-stagger] (also --skirmish-ai): OPT2 t02 / t01 parity knobs - the AI path
+//       recompute latency (default 15 frames, 0 = the original timing) and every AI player planning on the same frames (the
+//       original; the default of the galactic AI since a2m r4 and of the tactical / skirmish AI since bkx1 t01 (b0123);
+//       --ai-stagger restores the OPT2 per-player phases as a benchmark knob).
 //       [--no-pp-streams] [--pp-latency F] (--skirmish-ai): OPT2 t10 parity knobs - slot-10 plan picks and PotentialPlan
 //       solves on the synced stream in proposal order (the original), and the frames from a goal slice to the apply of
 //       its solves (default 1; 0 = in the slice, on the job system).
+//       [--no-plan-retest] (--skirmish-ai): skai t18 - turn off the running-plan contrast re-test 0x6c47c0
+//       (TacticalAiConfig::plan_retest, on by default since skai t18; --plan-retest is accepted and changes nothing;
+//       docs/re/SKAI_T15_PLAN_RETEST.md).
+//       [--ai-lane] [--ai-lane-k K] (any run with a tactical AI, --bench included): sp3 AI lane (docs/SIM_PARALLEL_DESIGN.md
+//       5.1), off by default; K = ticks from an AI update to the apply of its command batch (default 2).
 //   alamo_headless --skirmish-ai synthetic|foc|foc-land|foc-land-campaign|foc-station|skirmish [--map NAME] [--ticks N] [--crc-out F] [--golden F] [--check-workers]
 //       [--expect-battle-end]: fail unless the battle ends with a winner before its frame limit (S10 land outcome).
 //       [--expect-skirmish-base]: foc-land only (t50): fail unless both sides start with a pre-built base, the AI acts and shots are fired.
@@ -74,6 +88,10 @@
 //       its Space_ / Land_Skirmish_AI_Default_Forces (else the cheapest buildable units, [port]).
 //       A1 stage 2: AI-vs-AI space skirmish fought by the tactical AI in an S10 battle (skirmish_run.hpp); foc-land: a land skirmish (t50), foc-land-campaign: the campaign-rules land invasion.
 //       [--fail-on-lua-errors]: fail on any tactical AI Lua error (foc-station always does; a1j t07).
+//       [--report-fielded] (tst2 t04): per slot and unit type, the units fielded and the distance they walked ("  fielded"
+//       lines, read by tools/parity outcome sweeps' "fielded" checks).
+//       [--control-points]: foc-land / skirmish on a land map (ccpgt t02): the Capture Control Points game type, each slot's win
+//       condition 0x15 CONTROL_POINT_DOMINATION (SKIRMISH_SETUP §4.2) instead of 0x13.
 //       Prints and writes the fired-event log (frame, plot set:sequence, plot, event, type, params,
 //       reward, cause) with the game-side trigger stream, and per-tick CRCs incl. "story". Campaign
 //       default Full_Story_Campaign_Underworld.
@@ -83,9 +101,13 @@
 //       Runs a session to tick T, saves it to FILE, runs K more ticks.
 //   alamo_headless --load FILE [--ticks K] [--crc-out F] [--replay STREAM.acmd] [--record-orders OUT.acmd]
 //       Rebuilds the saved session from its descriptor, loads it and runs K ticks (replaying / recording orders).
-//   alamo_headless --save-session KIND --save-check --save-at T FILE --ticks K [--expect-pending a,b,...]
+//   alamo_headless --save-session KIND --save-check --save-at T FILE --ticks K
 //       N1 done-check: save at T, continue to T+K; load in this process, in a fresh process and with replays, all
-//       must give the original's per-tick CRCs; exit 77 = "PENDING: <chunks>" (systems whose write/read has not landed).
+//       must give the original's per-tick CRCs.
+// SP5: any mode takes --svc-mode serial|parallel|reverse (the battle services graph; same results, reverse = order check)
+// and --svc-check (debug write check of the services' declared sets; violations printed to stderr), and
+// --svc-streams hangar|none (SP5 t03: those services draw from counter-based streams; this MOVES per-seed outcomes), and
+// --svc-parallel-min N (the per-unit service loops fork from N units, default 256; same results, a check of the forks).
 // BM1 benchmark (bench_run.hpp; scenario format alamo/sim/bench_scenario.hpp):
 //   alamo_headless --bench SCENARIO.abench [--runs R] [--warmup W] [--workers N] [--ticks K] [--bench-json FILE|-]
 //                  [--bench-baseline OLD.json] [--crc-out F] [--golden F] [--bench-allow-changed]
@@ -102,6 +124,8 @@
 // staggered by slot) and
 // issues fleet A* requests every frame. The run prints a checksum over everything the AIs read;
 // it must be identical for any worker count.
+#include "alamo/crash/crash_handler.hpp"
+
 #include <algorithm>
 #include <chrono>
 #include <cinttypes>
@@ -123,31 +147,42 @@
 #include "alamo/commands/pipeline.hpp"
 #include "alamo/commands/recording.hpp"
 #include "alamo/core/bytes.hpp"
+#include "alamo/core/compat_issue.hpp"
 #include "alamo/core/file_provider.hpp"
+#include "alamo/core/host_fs.hpp"
 #include "alamo/core/hash.hpp"
 #include "alamo/core/log.hpp"
 #include "alamo/core/profile.hpp"
 #include "alamo/core/sim_crc.hpp"
 #include "alamo/core/sim_rng.hpp"
 #include "alamo/data/game_database.hpp"
+#include "alamo/game/open_game_data.hpp"  // ref4 t05
 #include "alamo/galactic/all_pairs.hpp"
 #include "alamo/galactic/cadence.hpp"
 #include "alamo/galactic/fleet_path.hpp"
+#include "alamo/galactic/galactic_rules.hpp"  // cu5 t01: load_factions (campaign seed options)
 #include "alamo/galactic/planet_graph.hpp"
 #include "alamo/jobs/jobs.hpp"
 #include "alamo/objects/game_object_types.hpp"
 #include "alamo/objects/object_types.hpp"
 #ifdef ALAMO_HEADLESS_HAVE_SIM
+#include "alamo/sim/battle_ai.hpp"       // sp3: --ai-lane (ai_lane_defaults)
 #include "alamo/sim/bench_scenario.hpp"  // BM1 --bench-regen
+#ifdef ALAMO_SIM_HAVE_BATTLES
+#include "alamo/sim/tactical_battle.hpp"  // SP5 --svc-mode / --svc-check
+#include "alamo/tactical/services/stream_rng.hpp"  // SP5 --svc-streams
 #endif
+#endif
+#include "alamo/vfs/mod_environment.hpp"
 #include "alamo/vfs/steam_workshop.hpp"
 #include "alamo/vfs/vfs.hpp"
+#include "crc_out.hpp"  // header-only (core): the --crc-checkpoint options parse without the sim too
 #ifdef ALAMO_HEADLESS_HAVE_SIM
 #include "ai_run.hpp"  // A2
 #include "skirmish_run.hpp"  // A1 stage 2
 #include "battle_run.hpp"
 #include "bench_run.hpp"  // BM1
-#include "crc_out.hpp"
+#include "alamo/jobs/topology.hpp"  // sp1: OS hints
 #include "map_run.hpp"
 #include "save_run.hpp"  // N1
 #endif
@@ -189,7 +224,8 @@ struct Options {
     // S4 story
     bool story = false;
     bool scoring = false;  // q6 t06: --scoring
-    bool object_scripts = false;  // q6: --object-scripts
+    bool object_scripts = true;  // q6: --skirmish-ai, off with --no-object-scripts (q6 t23)
+    bool control_points = false;  // ccpgt t02: --control-points
     std::string story_out, story_golden;
     // S10 battle transitions (battle_run.hpp): --battles auto|fight|fight-all
     std::string battles;
@@ -201,10 +237,14 @@ struct Options {
     std::string ai_log, ai_golden;
     std::string ai_human, ai_human_script;  // A2 galactic: --human FACTION [--human-script FILE]
     std::vector<std::string> ai_types;      // q6 t07: --ai-type FACTION=TYPE (repeatable)
-    std::string trace_out;                  // q2f t05: --trace-out FILE (Q2TRACE 1 state trace, galactic AI runs)
+    std::string trace_out;                  // q2f t05: --trace-out FILE (Q2TRACE 1 state trace, galactic AI runs; q4hf t02: --skirmish-ai)
+    std::string tactical_trace_out;         // storyb t03: --tactical-trace-out FILE (galactic AI runs: the battles on top)
+    int64_t story_esc_at = -1;              // tst2 t02: --story-esc-at F (galactic AI story runs, ai_run.hpp)
+    std::string eval_equations, eval_player;  // tst2 t07: --eval-equations LIST --eval-player FACTION (ai_run.hpp)
     int64_t ai_latency = -1;                // OPT2 t02: --ai-latency F (galactic / tactical AI path recomputes)
-    bool ai_stagger = true;                 // OPT2 t01: --no-ai-stagger
+    int8_t ai_stagger = -1;                 // OPT2 t01: --no-ai-stagger 0, --ai-stagger 1, -1 = the mode's default
     bool pp_streams = true;                 // OPT2 t10: --no-pp-streams
+    bool plan_retest = true;                // skai t15 / t18: --no-plan-retest
     int64_t pp_latency = -1;                // OPT2 t10: --pp-latency F
     // A1 stage 2 tactical AI (skirmish_run.hpp): --skirmish-ai synthetic|foc
     std::string skirmish_ai;
@@ -212,12 +252,12 @@ struct Options {
     bool expect_battle_end = false;  // S10 land outcome: --expect-battle-end
     bool expect_skirmish_base = false;  // t50: --expect-skirmish-base
     bool fail_on_lua_errors = false;  // a1j t07: --fail-on-lua-errors
+    bool report_fielded = false;  // tst2 t04: --report-fielded
     // N1 save / load (save_run.hpp)
     std::string save_session, save_file, load_file;
     std::string save_when = "any";  // N1 stage 2: --save-when any|battle|galactic|pending|scheduled
     uint64_t save_at = 0;
     bool save_at_set = false, save_check = false;
-    std::vector<std::string> expect_pending;
     bool seed_set = false;
     // BM1 benchmark (bench_run.hpp)
     std::string bench, bench_make, bench_regen, bench_json, bench_baseline, bench_desc;
@@ -381,7 +421,7 @@ RunResult run_campaign(const alamo::GalaxyMap& map, const Options& opt, int32_t 
     // supplies the session seed; the sim never reads a clock.
     alamo::GameRandom rng(static_cast<uint32_t>(rng_seed), 0);
 
-    alamo::jobs::TickScheduler sched(js, alamo::jobs::SimClock{});
+    alamo::jobs::TickScheduler sched(js);
     for (auto& ai : ais)
         if (ai.deferred) sched.track(*ai.deferred);
 
@@ -658,15 +698,15 @@ int usage() {
                  "       alamo_headless --economy | --story (--game DIR | --data DIR) [--campaign NAME] [--ticks N] [--workers W]\n"
                  "                      [--seed S] [--check-workers] [--story-out FILE] [--story-golden FILE] [--crc-out FILE]\n"
                  "                      [--scoring] (run the GameScoring script at the session start, as the game does)\n"
-                 "                      [--object-scripts] (game-object Lua scripts, docs/re/OBJECT_SCRIPTS.md; --skirmish-ai:\n"
-                 "                      also runs the GameScoring script)\n"
+                 "                      [--no-object-scripts] (--skirmish-ai: game-object Lua scripts and the GameScoring\n"
+                 "                      script run by default, as the game does; this turns both off. OBJECT_SCRIPTS.md)\n"
                  "       alamo_headless --economy --battles auto|fight|fight-all [--aggressor FRAMES] [--battle-retreat R]\n"
                  "                      [--battle-max-frames N] (+ the --economy options)\n"
                  "       alamo_headless --save-session synthetic|hotm|galactic|skirmish [--campaign NAME] --save-at T FILE [--ticks K]\n"
                  "         [--battles auto|fight|fight-all[+anim]] [--story] [--map M] [--save-when any|battle|galactic|pending|scheduled]\n"
                  "                      [--crc-out F] [--record-orders F] [--seed S] [--workers W]\n"
                  "       alamo_headless --load FILE [--ticks K] [--crc-out F] [--replay STREAM] [--record-orders F] [--workers W]\n"
-                 "       alamo_headless --save-session KIND --save-check --save-at T FILE --ticks K [--expect-pending a,b,...]\n"
+                 "       alamo_headless --save-session KIND --save-check --save-at T FILE --ticks K\n"
                  "       alamo_headless --bench SCENARIO.abench [--runs R] [--warmup W] [--workers N] [--ticks K] [--bench-json FILE|-]\n"
                  "                      [--bench-baseline OLD.json] [--crc-out F] [--golden F] [--bench-allow-changed]\n"
                  "       alamo_headless --bench-make SCENARIO.abench --save-session KIND [--campaign C] [--map M] [--battles B] [--story]\n"
@@ -829,16 +869,7 @@ int replay_mode(const Options& opt) {
         }
         std::printf("wrote %s (%zu records)\n", opt.crc_out.c_str(), log.records.size());
     }
-    if (!opt.golden.empty()) {
-        alamo::CrcLog golden;
-        if (!alamo::CrcLog::load(opt.golden, golden, &err)) {
-            std::fprintf(stderr, "golden: %s\n", err.c_str());
-            return 2;
-        }
-        const auto d = alamo::first_divergence(golden, log);
-        std::printf("golden %s: %s\n", std::filesystem::path(opt.golden).filename().string().c_str(), d.message.c_str());
-        if (d.diverged) ok = false;
-    }
+    if (!opt.golden.empty() && alamo_headless::compare_golden(opt.golden, log, ok, true) != 0) return 2;
     std::printf(ok ? "replay: OK\n" : "replay: FAILED\n");
     return ok ? 0 : 1;
 }
@@ -901,7 +932,9 @@ static int headless_main(int argc, char** argv) {
         else if (a == "--economy") opt.economy = true;
         else if (a == "--story") opt.story = true;
         else if (a == "--scoring") opt.scoring = true;  // q6 t06
-        else if (a == "--object-scripts") opt.object_scripts = true;  // q6
+        else if (a == "--object-scripts") opt.object_scripts = true;  // q6 (the default since q6 t23)
+        else if (a == "--no-object-scripts") opt.object_scripts = false;  // q6 t23
+        else if (a == "--control-points") opt.control_points = true;  // ccpgt t02
         else if (a == "--story-out") opt.story_out = next();
         else if (a == "--story-golden") opt.story_golden = next();
         else if (a == "--battles") opt.battles = next();  // S10
@@ -911,15 +944,27 @@ static int headless_main(int argc, char** argv) {
         else if (a == "--expect-battle-end") opt.expect_battle_end = true;  // S10 land outcome
         else if (a == "--expect-skirmish-base") opt.expect_skirmish_base = true;  // t50
         else if (a == "--fail-on-lua-errors") opt.fail_on_lua_errors = true;  // a1j t07
+        else if (a == "--report-fielded") opt.report_fielded = true;  // tst2 t04
         else if (a == "--ai-log") opt.ai_log = next();
         else if (a == "--ai-golden") opt.ai_golden = next();
         else if (a == "--human") opt.ai_human = next();                // A2 galactic
         else if (a == "--human-script") opt.ai_human_script = next();  // A2 galactic
         else if (a == "--ai-type") opt.ai_types.push_back(next());        // q6 t07
         else if (a == "--trace-out") opt.trace_out = next();            // q2f t05
+        else if (a == "--tactical-trace-out") opt.tactical_trace_out = next();  // storyb t03
+        else if (a == "--story-esc-at") opt.story_esc_at = std::strtoll(next().c_str(), nullptr, 10);  // tst2 t02
+        else if (a == "--eval-equations") opt.eval_equations = next();  // tst2 t07
+        else if (a == "--eval-player") opt.eval_player = next();        // tst2 t07
         else if (a == "--ai-latency") opt.ai_latency = std::strtoll(next().c_str(), nullptr, 10);  // OPT2 t02
-        else if (a == "--no-ai-stagger") opt.ai_stagger = false;                                   // OPT2 t01
+        else if (a == "--no-ai-stagger") opt.ai_stagger = 0;                                       // OPT2 t01
+        else if (a == "--ai-stagger") opt.ai_stagger = 1;                                          // a2m r4
         else if (a == "--no-pp-streams") opt.pp_streams = false;                                   // OPT2 t10
+        else if (a == "--plan-retest") opt.plan_retest = true;                                     // skai t15
+        else if (a == "--no-plan-retest") opt.plan_retest = false;                                 // skai t18
+#ifdef ALAMO_SIM_HAVE_TACTICAL_AI
+        else if (a == "--ai-lane") alamo::sim::ai_lane_defaults().on = true;  // sp3
+        else if (a == "--ai-lane-k") alamo::sim::ai_lane_defaults().k_ai = static_cast<uint32_t>(std::strtoul(next().c_str(), nullptr, 10));
+#endif
         else if (a == "--pp-latency") opt.pp_latency = std::strtoll(next().c_str(), nullptr, 10);   // OPT2 t10
         else if (a == "--aggressor") opt.aggressor = static_cast<uint32_t>(std::strtoul(next().c_str(), nullptr, 10));
         else if (a == "--battle-retreat") opt.battle_retreat = static_cast<float>(std::strtod(next().c_str(), nullptr));
@@ -932,15 +977,7 @@ static int headless_main(int argc, char** argv) {
             opt.save_file = next();
         } else if (a == "--load") opt.load_file = next();
         else if (a == "--save-check") opt.save_check = true;
-        else if (a == "--expect-pending") {
-            const std::string list = next();
-            size_t i0 = 0;
-            while (i0 <= list.size()) {
-                const size_t e = std::min(list.find(',', i0), list.size());
-                if (e > i0) opt.expect_pending.push_back(list.substr(i0, e - i0));
-                i0 = e + 1;
-            }
-        } else if (a == "--bench") opt.bench = next();  // BM1
+        else if (a == "--bench") opt.bench = next();  // BM1
         else if (a == "--bench-make") opt.bench_make = next();
         else if (a == "--bench-regen") opt.bench_regen = next();
         else if (a == "--bench-json") opt.bench_json = next();
@@ -966,7 +1003,8 @@ static int headless_main(int argc, char** argv) {
     if (!opt.bench_regen.empty()) {  // BM1: remake a scenario with the arguments its manifest recorded
         alamo::sim::bench::Scenario sc;
         std::string err;
-        if (!alamo::sim::bench::Scenario::load(opt.bench_regen, sc, &err)) {
+        // wr1 t06: a recipe (definition only: name, make line, settings) is enough; a full manifest parses the same way.
+        if (!alamo::sim::bench::Scenario::load_recipe(opt.bench_regen, sc, &err)) {
             std::fprintf(stderr, "bench-regen: %s\n", err.c_str());
             return 1;
         }
@@ -1056,7 +1094,6 @@ static int headless_main(int argc, char** argv) {
         s.crc_out = opt.crc_out;
         s.replay = opt.replay;
         s.record_orders = opt.record_orders;
-        s.expect_pending = opt.expect_pending;
         s.game_dir = opt.game_dir;
         s.game_args = opt.game_args;
         s.workers = opt.workers;
@@ -1095,6 +1132,7 @@ static int headless_main(int argc, char** argv) {
         m.ai_latency = opt.ai_latency;  // OPT2 t01 / t02 parity knobs
         m.ai_stagger = opt.ai_stagger;
         m.pp_streams = opt.pp_streams;  // OPT2 t10 parity knobs
+        m.plan_retest = opt.plan_retest;  // skai t15
         m.pp_latency = opt.pp_latency;
         m.scoring = opt.scoring;  // q6 t06
         m.object_scripts = opt.object_scripts;  // q6
@@ -1105,7 +1143,9 @@ static int headless_main(int argc, char** argv) {
             m.human = opt.ai_human;  // skai: --skirmish-ai skirmish --human FACTION
             m.ai_factions = opt.skirmish_factions;  // q6 t02
             m.fail_on_lua_errors = opt.fail_on_lua_errors;
-            return skirmish_ai_run(m, opt.skirmish_ai, opt.ai_log);
+            m.report_fielded = opt.report_fielded;  // tst2 t04
+            m.control_points = opt.control_points;  // ccpgt t02
+            return skirmish_ai_run(m, opt.skirmish_ai, opt.ai_log, opt.trace_out);  // q4hf t02: --trace-out
         }
         if (opt.story && !(opt.economy && opt.galactic_ai)) {
             if (!opt.ticks_set && opt.frames_set) m.ticks = opt.frames;
@@ -1121,7 +1161,11 @@ static int headless_main(int argc, char** argv) {
             a.human_script = opt.ai_human_script;  // A2 galactic
             a.ai_types = opt.ai_types;             // q6 t07
             a.trace_out = opt.trace_out;           // q2f t05
+            a.tactical_trace_out = opt.tactical_trace_out;  // storyb t03
             a.story = opt.story;                   // q2f t03
+            a.story_esc_at = opt.story_esc_at;     // tst2 t02
+            a.eval_equations = opt.eval_equations;  // tst2 t07
+            a.eval_player = opt.eval_player;
             a.verbose = !opt.quiet;
             return ai_campaign_run(m, a);
         }
@@ -1195,17 +1239,14 @@ static int headless_main(int argc, char** argv) {
     // Game data through the VFS (real install) or a loose folder (extracted text).
     std::unique_ptr<alamo::FileProvider> provider;
     if (!opt.game_dir.empty()) {
-        alamo::vfs::VfsConfig cfg;
-        cfg.foc_root = opt.game_dir;
-        alamo::vfs::parse_command_line(opt.game_args, cfg);
-        std::string err;
-        auto v = alamo::vfs::Vfs::create(cfg, &err);
-        if (!v) {
-            std::fprintf(stderr, "VFS: %s\n", err.c_str());
+        alamo::IssueSink issues;  // ums2: the VFS findings (nothing reads them here yet)
+        alamo::game::OpenedGameData data = alamo::game::open_game_data(opt.game_dir, opt.game_args, issues);  // ref4 t05
+        if (!data.ok()) {  // the VFS error or the D1 base-EaW refusal
+            std::fprintf(stderr, "%s\n", data.error.c_str());
             return 1;
         }
-        if (!opt.quiet) std::printf("%s\n", v->describe().c_str());
-        provider = std::move(v);
+        if (!opt.quiet) std::printf("%s\n", data.env->vfs().describe().c_str());
+        provider = std::move(data.env);
     } else if (!opt.data_dir.empty()) {
         provider = std::make_unique<alamo::DirectoryProvider>(opt.data_dir);
     } else {
@@ -1242,6 +1283,9 @@ static int headless_main(int argc, char** argv) {
     alamo::objects::GameObjectTypes types;
     const bool have_types = odb.load(*provider) && types.build(odb, provider.get());
     const alamo::ai::ForceTypeLookup lookup = alamo::ai::make_force_type_lookup(types);
+    // modc t03: Is_Neutral / Benefits_From_Corruption from FactionFiles.xml (FoC: Neutral / Underworld, as before).
+    const alamo::ai::CampaignSeedOptions seed_options =
+        alamo::ai::seed_options_from_factions(alamo::galactic::load_factions(*provider));
     int rc = 0;
     for (const auto& name : names) {
         std::vector<std::string> mdiag;
@@ -1258,7 +1302,7 @@ static int headless_main(int argc, char** argv) {
             print_result(run_campaign(map, opt, opt.workers), opt.workers);  // synthetic perception snapshot
             continue;
         }
-        const alamo::ai::CampaignSeed seed = alamo::ai::seed_campaign_snapshot(*camp, map, lookup);
+        const alamo::ai::CampaignSeed seed = alamo::ai::seed_campaign_snapshot(*camp, map, lookup, seed_options);
         Options o = opt;
         if (!opt.ais_set) o.ais = static_cast<uint32_t>(seed.snapshot.player_count());  // every AI player
         print_result(run_campaign(map, o, opt.workers, nullptr, nullptr, 0, &seed.snapshot), opt.workers);
@@ -1272,7 +1316,15 @@ static int headless_main(int argc, char** argv) {
 // and prints p50 / p99 / max tick time, per-zone shares and the 20 worst ticks after it. Wall-clock data only: the run's
 // results and CRCs are unchanged. Runs that tick several hosts in turn (--selfcheck, --check-workers) report them together.
 int main(int argc, char** argv) {
+    {  // [port] crash minidumps (%LOCALAPPDATA%\alamo\crashes; ALAMO_CRASHDUMP=0 turns them off). Before the Q5 terminate handler,
+       // which then still prints the exception and aborts into the dump.
+        alamo::crash::Options crash_opt;
+        crash_opt.app_name = "alamo_headless";
+        alamo::crash::install(crash_opt);
+        alamo::crash::crash_if_requested();
+    }
     alamo::vfs::install_steam_workshop_lookup();  // modc t10: STEAMMOD= from the Steam library folders
+    (void)alamo::jobs::disable_power_throttling();  // SIMP sp1: wall clock only (the sim thread's priority: bench_run)
     // Q5: an uncaught exception (e.g. mod data past a fixed limit) names itself instead of a silent 0xC0000409 exit.
     std::set_terminate([] {
         try {
@@ -1293,10 +1345,60 @@ int main(int argc, char** argv) {
         if (a == "--profile") profile_on = true;
         else if (a == "--profile-out" && i + 1 < argc) profile_out = argv[++i];
         else if (a == "--profile-budget" && i + 1 < argc) budget_ms = std::strtod(argv[++i], nullptr);
+#ifdef ALAMO_SIM_HAVE_BATTLES
+        // SP5: how a battle tick runs its services graph (results are the same in every mode; the modes are checks).
+        else if (a == "--svc-mode" && i + 1 < argc) {
+            const std::string m = argv[++i];
+            auto d = alamo::sim::TacticalBattle::service_run_defaults();
+            if (m == "serial") d.mode = alamo::tactical::services::RunMode::Serial;
+            else if (m == "parallel") d.mode = alamo::tactical::services::RunMode::Parallel;
+            else if (m == "reverse") d.mode = alamo::tactical::services::RunMode::Reverse;
+            else {
+                std::fprintf(stderr, "alamo_headless: --svc-mode serial | parallel | reverse\n");
+                return 2;
+            }
+            alamo::sim::TacticalBattle::set_service_run_defaults(d);
+        } else if (a == "--svc-streams" && i + 1 < argc) {  // SP5 t03: services on counter-based streams (moves draws)
+            auto d = alamo::sim::TacticalBattle::service_run_defaults();
+            d.streams = 0;
+            const std::string list = argv[++i];
+            size_t at = 0;
+            while (at <= list.size()) {
+                size_t end = list.find(',', at);
+                if (end == std::string::npos) end = list.size();
+                const std::string n = list.substr(at, end - at);
+                if (n == "hangar") d.streams |= 1u << static_cast<uint32_t>(alamo::tactical::services::StreamId::Hangar);
+                else if (!n.empty() && n != "none") {
+                    std::fprintf(stderr, "alamo_headless: --svc-streams: unknown service '%s' (hangar | none)\n", n.c_str());
+                    return 2;
+                }
+                at = end + 1;
+            }
+            alamo::sim::TacticalBattle::set_service_run_defaults(d);
+        } else if (a == "--svc-parallel-min" && i + 1 < argc) {  // SP5: per-unit service loops fork from this many units
+            auto d = alamo::sim::TacticalBattle::service_run_defaults();
+            d.parallel_min = static_cast<uint32_t>(std::strtoul(argv[++i], nullptr, 10));
+            alamo::sim::TacticalBattle::set_service_run_defaults(d);
+        } else if (a == "--svc-check") {
+            auto d = alamo::sim::TacticalBattle::service_run_defaults();
+            d.check = true;
+            alamo::sim::TacticalBattle::set_service_run_defaults(d);
+        }
+#endif
         else args.push_back(argv[i]);
     }
     if (profile_on || !profile_out.empty()) alamo::profile::start(65536);
-    const int rc = headless_main(static_cast<int>(args.size()), args.data());
+    int rc = headless_main(static_cast<int>(args.size()), args.data());
+#if defined(ALAMO_HEADLESS_HAVE_SIM) && defined(ALAMO_SIM_HAVE_TACTICAL_AI)
+    {  // ref5 t06: AI lane code must not read the live battle (BattleAi::lane_live_read counts every such host answer)
+        const char* first = nullptr;
+        if (const uint64_t n = alamo::sim::ai_lane_live_reads(&first); n > 0) {
+            std::fprintf(stderr, "alamo_headless: the AI lane read the live battle %llu times (first: %s)\n",
+                         static_cast<unsigned long long>(n), first ? first : "?");
+            if (rc == 0) rc = 3;
+        }
+    }
+#endif
     if (alamo::profile::enabled()) {
         alamo::profile::stop();
         const std::string text = alamo::profile::format_report(alamo::profile::build_report(alamo::profile::snapshot(), budget_ms));

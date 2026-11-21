@@ -105,7 +105,7 @@ battle-scale reveal multiplier (§3.1) and the edge predictions use the observed
 | `cleanup_fow.cmd` → `fow_cleanup.py` | idempotent cleanup (`--dry-run`, `--no-pause`) |
 | `build_fow_mod.py` | builds `Mods\FowRegrowProbe` (shipped free-store script + hook, map extent from the .ted); `--geometry-only` prints the map's FOW geometry |
 | `fow_hook.lua` | the Lua appended to the shipped `BusyTacticalFreeStore.lua` |
-| `fow_reader.py` | the recorder (log format in its docstring; imports `..\a1_tactical\a1mem.py`) |
+| `fow_reader.py` | the recorder (log format in its docstring; imports `..\common\a1mem.py`) |
 | `fow_parse.py` | `parse <reader.log> [--out] [--json]` → report |
 | `fow_model.py` | the spec model (geometry, midpoint circle with / without the quirk, decay, reference grid); `predict` |
 | `selftest_model.py`, `selftest_parse.py`, `selftest_hook.py` | offline tests (below) |

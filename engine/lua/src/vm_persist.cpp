@@ -77,8 +77,11 @@ enum : uint8_t { kLightVm = 0, kLightAttachment = 1 };
 enum : uint8_t { kUdRaw = 0, kUdEngine = 1 };
 
 // Plausibility caps for sizes that are not backed by saved bytes (husks): no real script heap comes near them.
+// limit: guard save decode: husk heap size not backed by bytes
 constexpr uint64_t kMaxHeapBytes = 1ull << 31;
+// limit: guard save decode: ltable.c MAXBITS (vendored Lua 5.0.2)
 constexpr int kMaxTableBits = 24;  // ltable.c MAXBITS (int >= 32 bits)
+// limit: guard save decode: Lua stack size not backed by bytes
 constexpr int32_t kMaxStack = 1 << 24;
 
 // ltable.c / lfunc.c size formulas (sizeCclosure / sizeLclosure live in lfunc.c).
@@ -1637,8 +1640,8 @@ bool read_heap(ByteReader& r, lua_State* L_old, void* vm_self, lua_CFunction pan
 
 std::vector<std::string> cfunction_aliases() { return cfunction_names().aliases; }
 
-HeapStats heap_stats(lua_State* L) {
-    HeapStats s;
+LuaVm::HeapInfo heap_stats(lua_State* L) {
+    LuaVm::HeapInfo s;
     s.serial = G(L)->alamo_serial;
     s.bytes = G(L)->nblocks;
     s.threshold = G(L)->GCthreshold;

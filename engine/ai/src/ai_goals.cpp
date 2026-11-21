@@ -4,6 +4,8 @@
 #include <cmath>
 #include <utility>
 
+#include "alamo/core/ascii.hpp"
+#include "alamo/core/profile.hpp"
 #include "alamo/core/sim_crc.hpp"
 #include "alamo/core/sim_rng.hpp"
 
@@ -37,6 +39,7 @@ void GoalSystem::init(const AiDefinitions& defs, std::vector<GoalSource> sources
     rng_ = rng;
     sources_ = std::move(sources);
     hooks_ = hooks;
+    for (GoalSource& s : sources_) s.equation = hooks_ ? hooks_->resolve_function(s.function) : kAiNone;  // sp4a (S7)
     learning_ = learning;
     templates_ = templates;
     cfg_ = cfg;
@@ -57,7 +60,7 @@ int32_t GoalSystem::exclusion_count(uint32_t goal_type) const {
 }
 
 bool GoalSystem::proposable(uint32_t goal_type) const {
-    if (blocked_) return false;
+    if (proposals_blocked()) return false;
     if (templates_ && templates_->goal_value(goal_type) <= 0) return false;
     return exclusion_count(goal_type) == 0;
 }
@@ -78,9 +81,20 @@ void GoalSystem::service(int64_t now) {
         --countdown_;
         return;
     }
-    if (quota_ == 0) {  // [port] first pass: the cap term
+    if (quota_ == 0) {  // first pass
         const int32_t players = std::max(1, hooks_->quota_players());
-        quota_ = static_cast<uint32_t>(std::max(1, static_cast<int32_t>(20.0f / static_cast<float>(players) + 0.5f)));
+        const auto cap = static_cast<int32_t>(20.0f / static_cast<float>(players) + 0.5f);
+        if (cfg_.retail_cadence) {
+            // Init 0x6ca1f0 (A2M_R2_RE_A §2.1) [H]: +0x188 = S x max(1, T) (the slice's sources, the unfiltered target
+            // list); quota = max(1, min(ceil(+0x188 / (FPS x 5)), cap)); +0x188 is kept, so pass 1 counts on top of it.
+            const uint64_t seed = static_cast<uint64_t>(sources_.size()) * std::max<uint64_t>(1, hooks_->target_count());
+            evals_pass_ += static_cast<uint32_t>(std::min<uint64_t>(seed, 0xFFFFFFFFu - evals_pass_));
+            const auto need = static_cast<int32_t>(std::min<double>(
+                std::ceil(static_cast<double>(evals_pass_) / static_cast<double>(kAiFps * 5)), 1e9));  // frame-cast-ok: a count per 5 s, not seconds to frames
+            quota_ = static_cast<uint32_t>(std::max(1, std::min(need, cap)));
+        } else {  // [port]: the cap term
+            quota_ = static_cast<uint32_t>(std::max(1, cap));
+        }
     }
     if (!proposal_slice(now)) return;
     if (pending_ready_ >= 0) {  // OPT2 t10: Commit once the last slice's solves are applied
@@ -96,14 +110,14 @@ void GoalSystem::end_pass(int64_t now) {
     const int32_t players = std::max(1, hooks_->quota_players());
     const auto cap = static_cast<int32_t>(20.0f / static_cast<float>(players) + 0.5f);
     const auto need = static_cast<int32_t>(
-        std::ceil(static_cast<double>(evals_last_) / static_cast<double>(kAiFps * 5)));
+        std::ceil(static_cast<double>(evals_last_) / static_cast<double>(kAiFps * 5)));  // frame-cast-ok: a count per 5 s, not seconds to frames
     quota_ = static_cast<uint32_t>(std::max(1, std::min(need, cap)));
     countdown_ = cfg_.sleep_frames;
     ++passes_;
 }
 
 bool GoalSystem::skip(uint32_t goal_type, int32_t target) {
-    if (find_active(goal_type, target)) return true;
+    if (cfg_.like_sets ? active_like(goal_type, target) : find_active(goal_type, target) != nullptr) return true;
     return hooks_->blocked(goal_type, target);
 }
 
@@ -127,8 +141,9 @@ bool GoalSystem::proposal_slice(int64_t now) {
             hooks_->evaluated(s.function);
             if (!batched->ok) return;
             v = batched->value;
-        } else if (!hooks_->evaluate(s.function, target, v)) {
-            return;
+        } else {
+            ALAMO_PROFILE_SCOPE("ai.goals.eval");  // sp4a: the in-place evaluations (ai.goals split)
+            if (!hooks_->evaluate_resolved(s.equation, s.function, target, v)) return;
         }
         const int32_t c1 = learning_->recent_goal_failures(s.goal_type, target, now);
         const int32_t c2 = learning_->recent_activation_failures(s.goal_type, target, now);
@@ -149,9 +164,12 @@ bool GoalSystem::proposal_slice(int64_t now) {
             pending_.push_back(std::move(g));
             return;
         }
-        if (!hooks_->accept(g)) {
-            hooks_->drop_potential_plan(g);
-            return;
+        {
+            ALAMO_PROFILE_SCOPE("ai.goals.accept");  // sp4a: slot 10 (ai.goals split)
+            if (!hooks_->accept(g)) {
+                hooks_->drop_potential_plan(g);
+                return;
+            }
         }
         accept_tail(std::move(g));
     };
@@ -210,11 +228,15 @@ bool GoalSystem::proposal_slice(int64_t now) {
             }
             ++cursor_source_;
             cursor_target_ = 0;
+            if (cfg_.retail_cadence && used >= quota_) {  // 0x6cb120: the slice ends when its counter reaches the quota
+                flush();
+                return false;
+            }
             continue;
         }
         const uint32_t n = hooks_->target_count();
         while (cursor_target_ < n) {
-            const auto t = static_cast<int32_t>(cursor_target_);
+            const int32_t t = hooks_->target_at(cursor_target_);
             if (!hooks_->applies(t, def.application) || skip(s.goal_type, t)) {
                 ++cursor_target_;
                 continue;
@@ -226,6 +248,10 @@ bool GoalSystem::proposal_slice(int64_t now) {
             ++used;
             visit(cursor_source_, t);
             ++cursor_target_;
+            if (cfg_.retail_cadence && used >= quota_) {  // 0x6cb120 (see above)
+                flush();
+                return false;
+            }
         }
         ++cursor_source_;
         cursor_target_ = 0;
@@ -240,7 +266,8 @@ bool GoalSystem::proposal_slice(int64_t now) {
 void GoalSystem::accept_tail(Goal g) {
     if (hooks_->uses_budget()) {
         const float at = allowed_time(g);
-        if (!((at <= 0.0f || at >= g.eta) && hooks_->can_fund(g))) {
+        // a2m r3 (A2M_R3_RE_A §1.1) [H]: the accept fund test is the gross P / I test 0x6139f0, not 0x6129c0.
+        if (!((at <= 0.0f || at >= g.eta) && hooks_->can_fund_accept(g))) {
             hooks_->drop_potential_plan(g);
             return;
         }
@@ -303,13 +330,19 @@ Goal* GoalSystem::find_active(uint32_t goal_type, int32_t target) {
     return nullptr;
 }
 
+bool GoalSystem::active_like(uint32_t goal_type, int32_t target) const {
+    for (const auto& cat : active_)
+        for (const Goal& g : cat)
+            if (g.target == target && defs_->goals[g.type].like(goal_type)) return true;
+    return false;
+}
+
 void GoalSystem::block_proposals(uint32_t goal_serial) {
     for (auto& p : proposed_) {
         for (Goal& g : p) hooks_->drop_potential_plan(g);
         p.clear();
     }
     block_list_.push_back(goal_serial);
-    blocked_ = true;
     if (!pending_.empty()) {  // OPT2 t10: proposals made before the block are dropped with the proposed set
         for (Goal& g : pending_) hooks_->drop_potential_plan(g);
         pending_.clear();
@@ -319,7 +352,6 @@ void GoalSystem::block_proposals(uint32_t goal_serial) {
 
 void GoalSystem::unblock_proposals(uint32_t goal_serial) {
     block_list_.erase(std::remove(block_list_.begin(), block_list_.end(), goal_serial), block_list_.end());
-    blocked_ = !block_list_.empty();
 }
 
 Goal* GoalSystem::find_active_by_running(int32_t running) {
@@ -430,9 +462,10 @@ void GoalSystem::commit(int64_t now) {
             const bool ok = g.target < 0 ? def.global() : hooks_->applies(g.target, def.application);
             if (!ok) continue;
             double v = 0.0;
-            if (g.source < sources_.size() && hooks_->evaluate(sources_[g.source].function, g.target, v))
+            if (g.source < sources_.size() &&
+                hooks_->evaluate_resolved(sources_[g.source].equation, sources_[g.source].function, g.target, v))
                 g.desire = g.priority = clamp_desire(v);
-            else
+            else if (!cfg_.keep_desire_on_failed_eval)
                 g.desire = g.priority = 0.0f;
         }
     // 2. Sort incumbents.
@@ -504,6 +537,8 @@ void GoalSystem::resolve(int32_t category, int64_t now) {
                 hooks_->refresh_plan(g);  // 0x6c2d60: re-assert its reservations (A1_READINGS §28.6 step 3)
                 keep.push_back(std::move(g));
             }
+        } else if (hooks_->retest_old_candidates() && g.running >= 0 && hooks_->plan_invalid(g)) {
+            release(g, true);  // 0x6c8970 old-candidate path: the re-test runs, a failure joins neither kept nor pool
         } else {
             old.push_back(std::move(g));
         }
@@ -515,11 +550,24 @@ void GoalSystem::resolve(int32_t category, int64_t now) {
     for (Goal& g : props) pool.push_back(std::move(g));
     sort_by_eff(pool);
     uint32_t last_old_type = kAiNone;
+    int32_t last_old_target = -1;
     for (const Goal& g : pool)
-        if (g.state != GoalState::Proposed) last_old_type = g.type;  // the lowest old candidate (pool sorted desc)
+        if (g.state != GoalState::Proposed) {  // the lowest old candidate (pool sorted desc)
+            last_old_type = g.type;
+            last_old_target = g.target;
+        }
     std::vector<uint8_t> taken(pool.size(), 0);
     auto is_kept_or_active = [&](const Goal& g) {
-        if (g.state != GoalState::Proposed) return true;
+        // An old candidate whose plan already ended (plan_ended: running -1) is not taken again: retail's plan end releases
+        // the goal (BKG3_RE_ANSWERS Q5.1), so it only waits here for its release at Finalize.
+        if (g.state != GoalState::Proposed && (!cfg_.reaccept_old_candidates || g.running < 0)) return true;
+        if (cfg_.like_sets) {
+            // bkg3 (BKG3_RE_ANSWERS Q4) [H]: 0x721a50 on this Resolve's kept set, then on the active set (this category's
+            // goals were moved out of it above, so that reads the other categories).
+            for (const Goal& k : keep)
+                if (k.target == g.target && defs_->goals[k.type].like(g.type)) return true;
+            return active_like(g.type, g.target);
+        }
         for (const Goal& k : keep)
             if (k.type == g.type && k.target == g.target) return true;
         return false;
@@ -537,7 +585,7 @@ void GoalSystem::resolve(int32_t category, int64_t now) {
         if (hooks_->uses_budget() && !(hooks_->category_credits(category) > 0.0f)) break;
         Goal& g = pool[i];
         const GoalTypeDef& def = defs_->goals[g.type];
-        if (blocked_ || !proposable(g.type)) break;
+        if (proposals_blocked() || !proposable(g.type)) break;
         if (is_kept_or_active(g)) break;
         if (!hooks_->plan_activatable(g) || !fundable(g)) {
             learning_->record_activation(g.type, g.target, false, def.activation_tracking_duration, now);
@@ -547,9 +595,13 @@ void GoalSystem::resolve(int32_t category, int64_t now) {
             learning_->record_activation(g.type, g.target, false, def.activation_tracking_duration, now);
             break;
         }
-        if (last_old_type != kAiNone && is_like(g.type, last_old_type)) break;
+        if (!cfg_.like_sets && last_old_type != kAiNone && is_like(g.type, last_old_type)) break;
         if (keep.size() >= limit) break;
+        // bkg3 (BKG3_RE_ANSWERS Q4, 0x692d30) [H]: the lastOld test runs after the accept: the goal stays, the greedy phase ends
+        // when it and lastOld share the target and lastOld's type is in its like-set.
+        const bool like_last = cfg_.like_sets && last_old_type != kAiNone && g.target == last_old_target && def.like(last_old_type);
         accept_goal(i);
+        if (like_last) break;
     }
     // 6. Weighted random phase.
     while (keep.size() < limit) {
@@ -558,7 +610,7 @@ void GoalSystem::resolve(int32_t category, int64_t now) {
         for (size_t i = 0; i < pool.size(); ++i) {
             if (taken[i]) continue;
             const Goal& g = pool[i];
-            if (blocked_ || !proposable(g.type) || is_kept_or_active(g)) continue;
+            if (proposals_blocked() || !proposable(g.type) || is_kept_or_active(g)) continue;
             if (!fundable(g)) continue;
             const float e = effective_desire(g);
             if (!(e > 0.0f)) continue;
@@ -635,6 +687,23 @@ void GoalSystem::hash(StateHasher& h) const {
         h.u32(static_cast<uint32_t>(pending_.size()));
         for (const Goal& g : pending_) goal(g);
     }
+}
+
+// bkx1 t01 (BKX1_CADENCE_RE §2 [H]): see ai_goals.hpp.
+int32_t goal_quota_players(std::span<const QuotaPlayer> players, size_t faction_count,
+                           const std::function<std::string_view(size_t)>& faction_name) {
+    int32_t n = 0, humans = 0;
+    for (const QuotaPlayer& ps : players) {
+        ++n;
+        humans += ps.human ? 1 : 0;
+    }
+    for (size_t f = 0; f < faction_count; ++f) {
+        bool seen = false;
+        for (size_t k = 0; k < f && !seen; ++k) seen = ascii_iequals(faction_name(k), faction_name(f));
+        for (const QuotaPlayer& ps : players) seen = seen || ps.faction == f;
+        n += seen ? 0 : 1;
+    }
+    return n - humans;
 }
 
 }  // namespace alamo::ai

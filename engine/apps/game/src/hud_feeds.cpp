@@ -2,8 +2,10 @@
 #ifdef ALAMO_GAME_HAVE_CONTROLS
 #include <algorithm>
 #include <cmath>
+#include <cstdio>
 
 #include "alamo/galactic/economy.hpp"
+#include "alamo/objects/type_fields.hpp"
 
 namespace alamo::game {
 
@@ -27,6 +29,36 @@ ui::HudOrderButtons order_buttons(std::span<const OrderUnitState> selection, int
         b.can_move = b.can_move || u.can_move;
     }
     return b;
+}
+
+ui::HudBombingRunButton bombing_run_button(bool land, bool controls_locked, bool available, float fraction) {
+    ui::HudBombingRunButton b;
+    if (!land) return b;
+    b.present = true;
+    const bool ready = !controls_locked && available;
+    b.disabled = !ready;
+    if (!ready) b.dial = fraction > 0.0f ? std::min(fraction, 1.0f) : 1.0f;
+    return b;
+}
+
+ui::HudBombingRunButton space_weapon_button(bool space, int32_t icon, bool allowed, bool controls_locked, float readiness) {
+    ui::HudBombingRunButton b;
+    if (!space) return b;
+    b.present = true;
+    b.icon = icon;
+    b.hidden = icon < 0;
+    b.tooltip = allowed ? icon : 4;
+    const bool ready = icon >= 0 && allowed && !controls_locked && readiness >= 1.0f;
+    b.disabled = !ready;
+    if (!ready && icon >= 0) b.dial = allowed ? std::clamp(readiness, 0.0f, 1.0f) : 0.0f;
+    return b;
+}
+
+BombingRunStyle bombing_run_style(const galactic::FactionRules& faction) {
+    BombingRunStyle s;
+    s.blob_material = std::string(faction.xml_text("Bombing_Run_Shadow_Blob_Material_Name"));
+    if (const std::string_view v = faction.xml_text("Bombing_Run_Blob_Size"); !v.empty()) s.blob_size = static_cast<float>(objects::c_atof(v));
+    return s;
 }
 
 const char* hardpoint_type_name(uint8_t kind) {
@@ -198,9 +230,214 @@ BattleForceSummary battle_force_summary(const galactic::GalacticSim& g, std::spa
     return out;
 }
 
+std::string_view commander_icon_tag(bool land) {
+    if (land) return "Infantry_Icon_Name";  // ledger: consumes Faction.Infantry_Icon_Name
+    return "Fighter_Icon_Name";             // ledger: consumes Faction.Fighter_Icon_Name
+}
+
+void apply_commander_icon(BattleForceSummary& s, std::string_view faction_icon) {
+    if (!s.hero && !faction_icon.empty()) s.icon = std::string(faction_icon);
+}
+
 int32_t ar_result_magnitude(bool win, uint32_t n_own, uint32_t n_other) {
     const uint64_t a = win ? n_other : n_own, b = win ? n_own : n_other;
     return a > 3u * b ? 0 : a > b ? 1 : 2;
+}
+
+ui::HudBuildOption::Block galactic_build_block(commands::RejectReason why) {
+    using B = ui::HudBuildOption::Block;
+    if (why == commands::RejectReason::None) return B::None;
+    if (why == commands::RejectReason::QueueFull) return B::QueueFull;
+    if (why == galactic::kRejectPopulationCap) return B::PopCap;
+    if (why == commands::RejectReason::CannotAfford) return B::Funds;
+    return B::Prerequisite;
+}
+
+namespace {
+std::string_view first_word(std::string_view s) {
+    size_t b = 0;
+    while (b < s.size() && (s[b] == ' ' || s[b] == '\t' || s[b] == '\r' || s[b] == '\n')) ++b;
+    size_t e = b;
+    while (e < s.size() && s[e] != ' ' && s[e] != '\t' && s[e] != '\r' && s[e] != '\n') ++e;
+    return s.substr(b, e - b);
+}
+}  // namespace
+
+namespace {
+std::vector<std::string> list_words(std::string_view s) {
+    std::vector<std::string> out;
+    size_t i = 0;
+    const auto sep = [](char c) { return c == ' ' || c == '\t' || c == '\r' || c == '\n' || c == ','; };
+    while (i < s.size()) {
+        while (i < s.size() && sep(s[i])) ++i;
+        size_t j = i;
+        while (j < s.size() && !sep(s[j])) ++j;
+        if (j > i) out.emplace_back(s.substr(i, j - i));
+        i = j;
+    }
+    return out;
+}
+}  // namespace
+
+CorruptionChoiceArt CorruptionChoiceArt::from(std::string_view icon, std::string_view name, std::string_view benefit,
+                                              std::string_view requirement_icon) {
+    CorruptionChoiceArt a;
+    a.icon = list_words(icon);
+    a.name = list_words(name);
+    a.benefit = list_words(benefit);
+    a.requirement_icon = list_words(requirement_icon);
+    return a;
+}
+
+std::string_view CorruptionChoiceArt::at(const std::vector<std::string>& list, int32_t type) {
+    return type >= 0 && static_cast<size_t>(type) < list.size() ? std::string_view(list[static_cast<size_t>(type)]) : std::string_view();
+}
+
+WeatherLines planet_weather_lines(std::string_view name_field, std::string_view info_field) {
+    return {first_word(name_field), first_word(info_field)};
+}
+
+GameOverArt game_over_art(bool victory, bool pick_land, std::string_view victory_text, std::string_view defeat_text,
+                          std::string_view land_win, std::string_view space_win, std::string_view land_lose,
+                          std::string_view space_lose) {
+    GameOverArt a;
+    a.text_key = victory ? victory_text : defeat_text;
+    const std::string_view land = victory ? land_win : land_lose, space = victory ? space_win : space_lose;
+    a.image = pick_land ? (land.empty() ? space : land) : (space.empty() ? land : space);
+    return a;
+}
+
+int32_t movie_frame_cue(std::span<const int64_t> frames, int64_t prev, int64_t now) {
+    for (size_t i = 0; i < frames.size(); ++i)
+        if (frames[i] > prev && frames[i] <= now) return static_cast<int32_t>(i);
+    return -1;
+}
+
+std::string_view win_lose_banner_text(bool local_side_won, bool corruption_mission) {
+    if (local_side_won) return corruption_mission ? "TEXT_WIN_CORRUPTION_MISSION" : "TEXT_WIN_TACTICAL";
+    return corruption_mission ? "TEXT_LOSE_CORRUPTION_MISSION" : "TEXT_LOSE_TACTICAL";
+}
+
+std::string_view encyclopedia_text_tag(bool skirmish_battle, bool has_mp_text) {
+    // ledger: consumes GameObjectType.MP_Encyclopedia_Text
+    return skirmish_battle && has_mp_text ? "MP_Encyclopedia_Text" : "Encyclopedia_Text";
+}
+
+bool galactic_build_listed(const std::function<bool(std::string_view)>& flag) {
+    // ledger: consumes GameObjectType.Build_Tab_Special_Structures
+    // ledger: consumes GameObjectType.Build_Tab_Heroes
+    for (const char* tag : {"Build_Tab_Land_Units", "Build_Tab_Space_Units", "Build_Tab_Special_Structures", "Build_Tab_Heroes",
+                            "Build_Tab_Outpost", "Build_Tab_Space_Station"})
+        if (flag(tag)) return true;  // ledger: consumes GameObjectType.Build_Tab_Outpost
+    return false;                    // ledger: consumes GameObjectType.Build_Tab_Space_Station
+}
+
+std::vector<ui::GalacticBuildOption> galactic_build_options(const galactic::GalacticSim& g, int32_t player, PlanetIndex planet,
+                                                            const std::function<std::string(uint32_t type)>& icon) {
+    std::vector<ui::GalacticBuildOption> out;
+    if (planet >= g.planets().size() || player < 0 || static_cast<size_t>(player) >= g.players().size()) return out;
+    if (g.planets()[planet].owner != player) return out;  // §5.1.1: the bar lists only at the local player's own planet
+    for (const uint32_t t : g.buildable(planet, player)) {
+        if (t >= g.rules().types.size() || t > 0xFFFFu) continue;
+        const galactic::TypeInfo& ti = g.rules().types[t];
+        ui::GalacticBuildOption o;
+        o.type_index = static_cast<uint16_t>(t);
+        o.icon = icon ? icon(t) : std::string();
+        o.cost = g.build_cost_for(player, planet, t);
+        o.block = galactic_build_block(g.can_enqueue(player, planet, t));
+        o.enabled = o.block == ui::HudBuildOption::Block::None;
+        for (uint32_t q = 0; q < 2; ++q)
+            for (const galactic::BuildEntry& b : g.queue_of(planet, q))
+                if (b.player == player && b.type == t) ++o.queued;
+        o.structure = galactic::is_ground_structure_type(ti) || galactic::is_orbital_structure_type(ti) || galactic::is_star_base_type(ti);
+        o.production_disabled = g.production_disabled(player, t);
+        // GALACTIC_DIALOGS §5.1.1 (0x3145c0): the land tab lists Build_Cost_Credits > 0 types that need a ground base level or
+        // are a DUMMY_GROUND_STRUCTURE (the can-build gate's ground-buildable test); every other type is a space-tab option.
+        o.space = !(ti.build_cost > 0 && (ti.required_ground_base != 0 || galactic::is_ground_structure_type(ti)));
+        out.push_back(std::move(o));
+    }
+    return out;
+}
+
+std::vector<std::u32string> droid_log_rows(std::u32string_view day_text, int32_t cycle, std::u32string_view text, std::u32string_view separator) {
+    std::u32string day(day_text);
+    std::u32string num;
+    for (const char c : std::to_string(cycle)) num.push_back(static_cast<char32_t>(c));
+    if (const size_t at = day.find(U"##0"); at != std::u32string::npos) day.replace(at, 3, num);
+    else day += (day.empty() ? U"" : U" ") + num;
+    return {std::move(day), std::u32string(text), std::u32string(separator)};
+}
+
+const char* galactic_announcement(const galactic::GalacticSim& g, const galactic::GalacticEvent& e, int32_t me) {
+    using K = galactic::GalacticEventKind;
+    if (me < 0) return nullptr;
+    switch (e.kind) {
+        case K::PlanetOwnerChanged:
+            if (e.player == me && e.other_player != me) return "SFXEvent_Planet_Gained_Control";
+            if (e.other_player == me && e.player >= 0 && e.player != me) return "SFXEvent_Planet_Lost_Control";
+            return nullptr;
+        case K::CorruptionChanged: {
+            if (e.planet >= g.planets().size()) return nullptr;
+            if (e.player != me && g.planets()[e.planet].owner != me) return nullptr;
+            if (e.value >= 0 && e.value != e.other_player) return "SFXEvent_Planet_Corrupted";
+            if (e.value < 0 && e.other_player >= 0) return "SFXEvent_Corruption_Removed";
+            return nullptr;
+        }
+        case K::FleetDeparted: {
+            const PlanetIndex to = e.other_planet;
+            if (to >= g.planets().size() || g.planets()[to].owner != me || e.player < 0 || g.allied(me, e.player)) return nullptr;
+            // ui4 t11 (P4_SIM_SYSTEMS §2.7.3): only when the local player has something in the destination's orbit [port:
+            // its fleets; whether retail's orbit list also counts the starbase is M].
+            bool present = false;
+            for (const galactic::FleetState& f : g.fleets()) present = present || (f.alive && f.owner == me && f.planet == to && !f.contents.empty());
+            if (!present) return nullptr;
+            if (e.fleet < g.fleets().size()) {
+                const galactic::FleetState& fl = g.fleets()[e.fleet];
+                bool all_hidden = !fl.contents.empty();
+                for (const objects::ObjectHandle m : fl.contents)
+                    if (g.store().alive(m)) all_hidden = all_hidden && g.hidden(m);
+                if (all_hidden) return nullptr;
+            }
+            return "SFXEvent_Enemy_Fleet_Approaching_Planet";
+        }
+        default: return nullptr;
+    }
+}
+
+std::vector<PlanetIndex> fleet_drag_route(const galactic::GalacticSim& g, int32_t me, uint32_t fleet_id, PlanetIndex target) {
+    std::vector<PlanetIndex> path;
+    if (me < 0 || target >= g.planets().size()) return path;
+    const objects::ObjectHandle h = g.store().find(static_cast<objects::ObjectId>(fleet_id));
+    const uint32_t fi = h ? g.fleet_of(h) : galactic::kNoFleet;
+    if (fi == galactic::kNoFleet || fi >= g.fleets().size()) return path;
+    const galactic::FleetState& fl = g.fleets()[fi];
+    if (fl.moving || fl.planet == kInvalidPlanet || fl.planet == target) return path;
+    // 0x3da30's request: Path_Request_Init (every flag set), then flags 0..2 = the fleet is hidden, flag 4 = set.
+    const bool hidden = g.hidden(h);
+    galactic::PathRequest req;
+    req.source = fl.planet;
+    req.destination = target;
+    req.allow_unknown_or_neutral = req.allow_enemy_owned = req.skip_danger_check = hidden;
+    req.always_accept_destination = true;
+    galactic::PathScratch scratch;
+    if (!galactic::find_fleet_path(g.graph(), g.player_view(me), req, scratch, path)) path.clear();
+    return path;
+}
+
+std::string retreat_countdown_number(float seconds) {
+    const float s = seconds > 0.0f ? seconds : 0.0f;
+    const int32_t whole = static_cast<int32_t>(s);
+    const int32_t ms = static_cast<int32_t>((s - static_cast<float>(whole)) * 1000.0f);
+    char buf[32];
+    std::snprintf(buf, sizeof buf, " %03d.%03d", static_cast<int>(whole), static_cast<int>(ms));
+    return buf;
+}
+
+std::string build_countdown_clock(float remaining) {
+    const int32_t r = static_cast<int32_t>(remaining > 0.0f ? remaining : 0.0f) + 1;
+    char buf[32];
+    std::snprintf(buf, sizeof buf, " %02d:%02d", static_cast<int>(r / 60), static_cast<int>(r % 60));
+    return buf;
 }
 
 }  // namespace alamo::game

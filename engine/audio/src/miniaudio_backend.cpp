@@ -68,6 +68,7 @@ struct Voice {
     std::vector<uint8_t> bytes;
     ma_decoder dec{};
     bool dec_ok = false;
+    bool paused = false;  // aud2 t04: held by pause() (ma_sound_stop keeps the cursor)
 
     Voice() = default;
     Voice(const Voice&) = delete;
@@ -93,6 +94,25 @@ struct MiniaudioBackend::Impl {
     ~Impl() {
         voices.clear();
         if (engine_ok) ma_engine_uninit(&engine);
+    }
+
+    // SFX buses: the decoded PCM of `sample` from the cache, decoding it on the first use. nullptr = missing / undecodable.
+    std::shared_ptr<const PcmBuffer> cached_pcm(const SampleRef& sample) {
+        const std::string key = normalize_name(sample.file);
+        auto it = cache.find(key);
+        if (it != cache.end()) return it->second;
+        std::vector<uint8_t> bytes;
+        if (!samples->read(sample, bytes)) {
+            error = "missing sample " + sample.file;
+            return nullptr;
+        }
+        auto pcm = std::make_shared<PcmBuffer>();
+        std::string err;
+        if (!decode_audio(bytes, *pcm, &err)) {
+            error = sample.file + ": " + err;
+            return nullptr;
+        }
+        return cache.emplace(key, std::move(pcm)).first->second;
     }
 
     void apply(Voice& v, const VoiceParams& p) {
@@ -124,29 +144,20 @@ std::unique_ptr<MiniaudioBackend> MiniaudioBackend::create(const SampleSource& s
     return std::unique_ptr<MiniaudioBackend>(new MiniaudioBackend(std::move(impl)));
 }
 
+bool MiniaudioBackend::load(const SampleRef& sample) {
+    Impl& im = *impl_;
+    if (sample.bus == Bus::Sfx2D || sample.bus == Bus::Sfx3D) return im.cached_pcm(sample) != nullptr;
+    return im.samples->exists(sample);
+}
+
 bool MiniaudioBackend::start(uint32_t voice, const SampleRef& sample, const VoiceParams& p) {
     Impl& im = *impl_;
     im.voices.erase(voice);  // restart = fresh sound
     auto v = std::make_unique<Voice>();
     ma_data_source* ds = nullptr;
     if (sample.bus == Bus::Sfx2D || sample.bus == Bus::Sfx3D) {
-        const std::string key = normalize_name(sample.file);
-        auto it = im.cache.find(key);
-        if (it == im.cache.end()) {
-            std::vector<uint8_t> bytes;
-            if (!im.samples->read(sample, bytes)) {
-                im.error = "missing sample " + sample.file;
-                return false;
-            }
-            auto pcm = std::make_shared<PcmBuffer>();
-            std::string err;
-            if (!decode_audio(bytes, *pcm, &err)) {
-                im.error = sample.file + ": " + err;
-                return false;
-            }
-            it = im.cache.emplace(key, std::move(pcm)).first;
-        }
-        v->pcm = it->second;
+        v->pcm = im.cached_pcm(sample);
+        if (!v->pcm) return false;
         if (ma_audio_buffer_ref_init(ma_format_f32, v->pcm->channels, v->pcm->samples.data(), v->pcm->frames(),
                                      &v->ref) != MA_SUCCESS) {
             im.error = "ma_audio_buffer_ref_init failed";
@@ -220,7 +231,17 @@ bool MiniaudioBackend::playing(uint32_t voice) const {
     auto it = impl_->voices.find(voice);
     if (it == impl_->voices.end()) return false;
     Voice& v = *it->second;
+    if (v.paused) return !ma_sound_at_end(&v.sound);
     return ma_sound_is_playing(&v.sound) && !ma_sound_at_end(&v.sound);
+}
+
+void MiniaudioBackend::pause(uint32_t voice, bool paused) {
+    auto it = impl_->voices.find(voice);
+    if (it == impl_->voices.end() || it->second->paused == paused) return;
+    Voice& v = *it->second;
+    v.paused = paused;
+    if (paused) ma_sound_stop(&v.sound);  // the cursor stays: ma_sound_start resumes from it
+    else ma_sound_start(&v.sound);
 }
 
 void MiniaudioBackend::advance(double) {}
@@ -240,6 +261,5 @@ double MiniaudioBackend::output_latency_seconds() const {  // OI host
 
 uint32_t MiniaudioBackend::sample_rate() const { return ma_engine_get_sample_rate(&impl_->engine); }
 size_t MiniaudioBackend::cached_samples() const { return impl_->cache.size(); }
-const std::string& MiniaudioBackend::last_error() const { return impl_->error; }
 
 }  // namespace alamo::audio

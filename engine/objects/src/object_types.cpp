@@ -5,12 +5,13 @@
 #include "alamo/core/hash.hpp"
 #include "alamo/core/log.hpp"
 #include "alamo/data/values.hpp"
+#include "alamo/data/xml_list.hpp"
+#include "alamo/data/xml_values.hpp"
 
 namespace alamo::objects {
 
 namespace {
 
-constexpr std::string_view kXmlDir = "Data\\XML\\";
 constexpr std::string_view kVariantTag = "Variant_Of_Existing_Type";
 
 bool is_digit(char c) { return c >= '0' && c <= '9'; }
@@ -150,12 +151,10 @@ bool ObjectTypeDatabase::load(const FileProvider& provider, std::vector<std::str
     }
 
     std::unordered_map<std::string, uint32_t> file_by_path;  // normalize_path -> files_ index (lookup only)
-    for (data::XmlNode entry : list.root().children("File")) {
-        const std::string_view listed = data::trim(entry.text());
-        if (listed.empty()) continue;
+    for (const data::ListedXmlEntry& entry : data::listed_xml_entries(list)) {  // cu5 t02: list order, duplicates kept
+        const std::string_view listed = entry.name;
         ++stats_.list_entries;
-        std::string path(kXmlDir);
-        path += listed;
+        const std::string& path = entry.path;
         const std::string key = normalize_path(path);
         uint32_t fi;
         if (const auto it = file_by_path.find(key); it != file_by_path.end()) {
@@ -295,19 +294,24 @@ std::optional<std::string_view> ObjectTypeDatabase::get_text(TypeIndex t, std::s
     return fields_.text[f];
 }
 
+// mcx1 t02 (MCX1_RE_ANSWERS Q2, OBJECT_TYPES.md §4.5): retail's converters. A bool is "1" or a first letter Y / T, anything
+// else false; ints are C atoi (prefix, clamped), floats C atof (prefix, no number = 0). An empty or TBD value is no value.
 std::optional<bool> ObjectTypeDatabase::get_bool(TypeIndex t, std::string_view tag) const {
     const auto v = get_text(t, tag);
-    return v ? data::parse_bool(*v) : std::nullopt;
+    if (!v || data::xml_values::skipped(*v)) return std::nullopt;
+    return data::xml_values::to_bool(*v);
 }
 
 std::optional<int32_t> ObjectTypeDatabase::get_int(TypeIndex t, std::string_view tag) const {
     const auto v = get_text(t, tag);
-    return v ? data::parse_int(*v) : std::nullopt;
+    if (!v || data::xml_values::skipped(*v)) return std::nullopt;
+    return data::xml_values::to_int(*v);
 }
 
 std::optional<float> ObjectTypeDatabase::get_float(TypeIndex t, std::string_view tag) const {
     const auto v = get_text(t, tag);
-    return v ? data::parse_float(*v) : std::nullopt;
+    if (!v || data::xml_values::skipped(*v)) return std::nullopt;
+    return data::xml_values::to_float(*v);
 }
 
 std::vector<std::string_view> ObjectTypeDatabase::get_list(TypeIndex t, std::string_view tag) const {

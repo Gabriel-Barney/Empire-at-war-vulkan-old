@@ -6,10 +6,14 @@
 // consuming an object id [port: the original creates them inside the object update].
 #include <algorithm>
 #include <cmath>
+#include <span>
+#include <string_view>
 #include <vector>
 
 #include "alamo/core/dmath.hpp"
 #include "alamo/core/sim_crc.hpp"
+#include "alamo/data/values.hpp"
+#include "alamo/objects/behaviors.hpp"
 #include "alamo/objects/game_object_types.hpp"
 #include "alamo/sim/tactical_battle.hpp"
 #include "alamo/tactical/movement/special_locomotors.hpp"
@@ -24,6 +28,7 @@ namespace alamo::sim {
 namespace tc = alamo::tactical::combat;
 namespace ta = alamo::tactical::abilities;
 namespace mv = alamo::tactical::movement;
+namespace tg = alamo::tactical::garrison;
 
 namespace {
 Vec3 oi_sv(tactical::Vec3 v) { return Vec3{v.x, v.y, v.z}; }
@@ -75,7 +80,7 @@ void TacticalBattle::oi_add_ability_types() {
         if (thief) {  // Vehicle_Thief: the capture variants (Vehicle_Thief_Inside_Clone) of the battle types
             const std::vector<uint32_t> now = types_used_;
             for (const uint32_t t : now) {
-                const std::string_view name = types_trim(types.get_string(static_cast<objects::TypeIndex>(t), "Vehicle_Thief_Inside_Clone"));
+                const std::string_view name = types_trim(types.get(static_cast<objects::TypeIndex>(t), objects::tags::Vehicle_Thief_Inside_Clone));
                 if (name.empty()) continue;
                 const objects::TypeIndex v = types.resolve_name(name);
                 if (v != objects::kNone) use(static_cast<int32_t>(v));
@@ -97,8 +102,8 @@ bool TacticalBattle::oi_company_members(int32_t type, std::vector<int32_t>& memb
     const objects::GameObjectTypes& types = catalog_->types();
     if (type < 0 || static_cast<size_t>(type) >= types.size()) return false;
     const auto t = static_cast<objects::TypeIndex>(type);
-    std::span<const std::string_view> list = types.get_list(t, "Company_Units");
-    if (list.empty()) list = types.get_list(t, "Squadron_Units");
+    std::span<const std::string_view> list = types.get(t, objects::tags::Company_Units);
+    if (list.empty()) list = types.get(t, objects::tags::Squadron_Units);
     if (list.empty()) return false;
     for (const std::string_view n : list) {
         const objects::TypeIndex m = types.resolve_name(types_trim(n));
@@ -115,12 +120,11 @@ void TacticalBattle::oi_install(TacticalMode& mode, SimRng& rng) {
                                   if (credits_add_) credits_add_(p, d);
                               });
     ta::AbilityHost h;
-#ifdef ALAMO_SIM_HAVE_FOG
     h.point_fogged = [this](int32_t p, tactical::Vec3 v, bool force) { return fog_point_fogged(p, v.x, v.y, force); };
     h.object_hidden = [this](int32_t p, tc::ObjectId id, bool force) { return fog_object_hidden(p, id, force); };
     h.fow_reveal_add = [this](int32_t p, int32_t c, uint64_t s, float m) { fog_add_reveal_multiplier(p, c, s, m); };
     h.fow_reveal_remove = [this](int32_t p, uint64_t s) { fog_remove_reveal_modifier(p, s); };
-#endif
+    h.garrison_types = [this](int32_t p, const std::vector<int32_t>& types, bool add) { sk_garrison_upgrade(p, types, add); };  // tru3 t05
     // FIGHTER_FLYING Â§6.5: the snowspeeder tow cable circles its target (a team container: every live member).
     h.cable_attack = [this](tc::ObjectId user, tc::ObjectId target, float r_min, float r_max) {
         if (!movement_) return;
@@ -160,16 +164,18 @@ void TacticalBattle::oi_install(TacticalMode& mode, SimRng& rng) {
         if (r > 0) pos = tactical::Vec3{p.x, p.y, p.z};
         return r;
     };
-    // OI t02 (ABILITIES_HARDPOINTS Â§4.12 [port]): the map's water plane lies above the terrain under the point.
-    h.over_water = [this](tactical::Vec3 p) {
-        if (space_ || !map_.terrain.present || map_.terrain.header.water_type == terrain::WaterType::None) return false;
-        return map_.terrain.sample_height(p.x, p.y) < map_.terrain.header.water_height;
-    };
 #ifdef ALAMO_SIM_HAVE_ANIM
     // OI t03 (Â§4.13): clip frame count / fps from the sim model (an XML animation name resolved to its type id).
     h.anim_clip = [this, m = &mode](tc::ObjectId id, int32_t type, std::string_view name, uint32_t variant, uint32_t& frames,
                                     float& fps) {
         return anim_clip_info(*m, id, type >= 0 ? type : anim::find_anim_type(name), frames, fps, variant);
+    };
+    // r3h t03 (§4.15): the variant count of a clip on the same model (the 0xFFFF draws of the ability plays).
+    h.anim_variants = [this, m = &mode](tc::ObjectId id, int32_t type) -> uint32_t {
+        uint32_t frames = 0, n = 0;
+        float fps = 0.0f;
+        while (n < 256 && anim_clip_info(*m, id, type, frames, fps, n)) ++n;
+        return n;
     };
     // OI follow-up t01 (Â§4.14): the ModelAnimType id of a name, and the type's Attack_Animation_Is_Overlay.
     h.anim_type = [](std::string_view name) { return anim::find_anim_type(name); };
@@ -182,7 +188,9 @@ void TacticalBattle::oi_install(TacticalMode& mode, SimRng& rng) {
 #endif
     // OI follow-up t03 (A1_READINGS Â§28.9): the script's shares of the movement lock (Lock_Current_Orders, a Divert).
     // a1i t04: + the unload exit path of a landing object's unloaded units (Â§35.2, the locomotor's forced-move term).
-    h.movement_locked = [this](tc::ObjectId id) { return script_movement_locked(id) || landing_locked(id); };
+    // s78n t06 review: + the hero clash's share (0x39ad40 reads the one counter the clash Begin 0x6abde0 raises), so
+    // AbilitySystem::locked (can(HUNT), the behaviour switch-ons, the Lure follower filter) sees a duelling hero locked.
+    h.movement_locked = [this](tc::ObjectId id) { return script_movement_locked(id) || landing_locked(id) || hero_clash_locked(id); };
     // S8 t06 (LOB_SOLVER §3.5): Remote_Bomb range tests against a garrisoned target's host. S8 t10 (§5.1): the host's gun
     // bones of its current ALT entry (Num_Garrison_Guns FP_0<i>_ALT<a>, CombatSystem::garrison_fire_bones; s78f t03: world
     // position and x-axis yaw of the current pose).
@@ -196,9 +204,36 @@ void TacticalBattle::oi_install(TacticalMode& mode, SimRng& rng) {
         const mv::MovementSystem::DeployResult r = movement_->deploy(id, on, frame);
         return r != mv::MovementSystem::DeployResult::NoWalk && r != mv::MovementSystem::DeployResult::Ignored;
     };
+    // mdu1 t01 (SKAI_T19_MDU_DEPLOY_BLOCK Q1): DEPLOY's leave and adopt in the activation call, before Deploy.
+    h.stop_hold_now = [this, m = &mode](tc::ObjectId id, uint32_t) { return oi_stop_hold(*m, id); };
     // S8 t10 (LOB_SOLVER Â§3.5 "Facing at apply"): the thrown abilities snap the movement yaw (the combat facing follows).
     h.snap_yaw = [this](tc::ObjectId id, float yaw_deg) {
         if (movement_) movement_->snap_yaw(id, yaw_deg);
+    };
+    // mcx4 t23 (MCX4_T10_RE_ANSWERS §12a): Redirect_Blaster's Turn_To_Face_Unblockable_Shots facing order, given only while
+    // the victim's primary clip is idle-like (0x27b5e0). [port] The movement system has no rate-limited facing order, so
+    // the yaw is snapped; the victim's current clip (Move: the damage lands) is reported by primary_clip.
+    h.face_direction = [this](tc::ObjectId id, tactical::Vec3 dir) {
+        if (!movement_ || !movement_->has_unit(id)) return;
+#ifdef ALAMO_SIM_HAVE_ANIM
+        if (anim::AnimWorld* w = anim_world_now(); w && w->contains(id)) {
+            const int32_t cur = w->current_type(id);
+            if (cur != anim::kNoAnimType && !anim::is_idle_like(cur)) return;
+        }
+#endif
+        movement_->snap_yaw(id, dmath::atan2(dir.y, dir.x) * (180.0f / dmath::kPiF));
+    };
+    // mcx4 (MCX4_T10_RE_ANSWERS §15, 0x3a8f90): a buzz-droid cloud's chase step puts it at the new point (yaw kept).
+    h.place = [this](tc::ObjectId id, tactical::Vec3 p) {
+        if (!movement_ || !movement_->has_unit(id)) return;
+        (void)movement_->teleport(id, mv::V2{p.x, p.y}, p.z, movement_->view(id).yaw, frame_);
+    };
+    h.primary_clip = [this](tc::ObjectId id) -> int32_t {
+#ifdef ALAMO_SIM_HAVE_ANIM
+        if (anim::AnimWorld* w = anim_world_now(); w && w->contains(id)) return w->current_type(id);
+#endif
+        (void)this, (void)id;
+        return -1;
     };
     // s78l t05 (TACTICAL_COMBAT §5.4.1): Tactical_Bribe pays from the player's credits (the battle's credit hooks: the
     // galactic account in campaign battles; unset hooks = 0 credits, so a bribe with a cost fails) and reads the battle
@@ -213,11 +248,55 @@ void TacticalBattle::oi_install(TacticalMode& mode, SimRng& rng) {
         const auto p = req_.info.planet;
         return galaxy_ && p != kInvalidPlanet && static_cast<size_t>(p) < galaxy_->planets().size() && galaxy_->corrupted(p);
     };
+    // s78m t08 (TACTICAL_COMBAT §5.4.2): Tactical_Bribe's container test (R + 10) takes a land squad container (TEAM with
+    // a LAND_TEAM_CONTAINER locomotor) at its store position - s78n t03: the position its own mover gives it (§5.4.4 item 2),
+    // the one team targeting, fog and the AI threat entry read too.
+    h.land_squad_container = [this, st = &mode.primary()](tc::ObjectId id, tactical::Vec3& pos) {
+        if (space_) return false;
+        for (const Container& c : containers_) {
+            if (c.id != id) continue;
+            if (!c.team || c.removed || !st->alive(c.h) || !mv_self_registers(static_cast<uint32_t>(st->type(c.h)))) return false;
+            const Vec3 p = st->position(c.h);
+            pos = tactical::Vec3{p.x, p.y, p.z};
+            return true;
+        }
+        return false;
+    };
+    // s78n t09 (TACTICAL_COMBAT §5.4.4 item 1, 0x404450): Bribe's E_T - the joint box of the container's member slots.
+    h.land_squad_slots = [this, st = &mode.primary()](tc::ObjectId id, std::vector<ta::SquadSlot>& slots, float& jiggle,
+                                                       tactical::Vec3& facing) {
+        Vec3 f{1.0f, 0.0f, 0.0f};
+        if (!squad_joint_slots(*st, id, slots, jiggle, f)) return false;
+        facing = tactical::Vec3{f.x, f.y, f.z};
+        return true;
+    };
+    // s78m t05 (TACTICAL_COMBAT §5.4.3 item 4): the Combat_Bonus accept's ally test 0x39a230 (relation 0; neutral is not).
+    h.allied_players = [this](int32_t a, int32_t b) { return bt_allied(a, b); };
+    // s78n t05 (HERO_CLASH §7, TACTICAL_COMBAT §5.4.3 item 1): Bribe's step 6 refuses a build pad holding a live UC /
+    // finished object.
+    h.occupied_build_pad = [this](tc::ObjectId id) { return pad_occupied(id); };
+    // s78n t04 (TACTICAL_COMBAT §5.4.4 item 3a): Combat_Bonus Specific_Faction against the galactic faction registry
+    // (FactionFiles order, case-insensitive) and the players' factions.
+    h.faction_index = [this](std::string_view name) -> int32_t {
+        const uint32_t f = galaxy_->rules().find_faction(ascii_trim(name));
+        return f == galactic::kNoIndex ? -1 : static_cast<int32_t>(f);
+    };
+    h.player_faction = [this](int32_t p) -> int32_t {
+        const auto& ps = galaxy_->players();
+        if (p < 0 || static_cast<size_t>(p) >= ps.size()) return -1;
+        const uint32_t f = ps[static_cast<size_t>(p)].faction;
+        return f == galactic::kNoIndex ? -1 : static_cast<int32_t>(f);
+    };
+    // s78n t04 (§5.4.4 item 3c, 0x6fa920 step 1): an Enhance_Defense source owned by the neutral player stands for the
+    // battle's defender. [port] "the neutral player" = an owner whose faction Is_Neutral (retail: the first such player).
+    h.defense_player = [this](int32_t owner) { return bt_owner_neutral(owner) ? req_.info.defender : owner; };
+    // TRU1 t03 (TRU1_GRAVITY_FIELD §1.3): the gravity control field skips Is_Neutral players.
+    h.neutral_player = [this](int32_t p) { return bt_owner_neutral(p); };
     hg_ability_host(h);  // hangars: DEPLOY_SQUAD gate / handler (HangarSystem::deploy_ready / deploy_squad)
     abilities_->set_host(std::move(h));
 }
 
-objects::ObjectId TacticalBattle::oi_spawn_unit(TacticalMode& mode, int32_t type, Vec3 pos, Vec3 facing, int32_t owner) {
+objects::ObjectId TacticalBattle::oi_spawn_unit(TacticalMode& mode, int32_t type, Vec3 pos, Vec3 facing, int32_t owner, bool l1_props) {
     const objects::GameObjectTypes& types = catalog_->types();
     if (type < 0 || static_cast<size_t>(type) >= types.size() || !bt_rng_) return objects::kNoObjectId;
     objects::SpawnParams sp;
@@ -228,22 +307,53 @@ objects::ObjectId TacticalBattle::oi_spawn_unit(TacticalMode& mode, int32_t type
     const objects::ObjectHandle h = mode.spawn(sp, 1.0f);
     if (!h) return objects::kNoObjectId;
     const objects::ObjectId id = mode.primary().id(h);
-    const auto ut = static_cast<uint32_t>(type);
-    if (std::find(types_used_.begin(), types_used_.end(), ut) == types_used_.end()) return id;  // a prop (not in the tables)
-    bt_adopt_built(mode, h, owner, 1.0f, bt_rng_);  // combat / ability unit (hardpoint + SAP-init draws)
+    SpawnAdopt how;
+    how.owner = owner;
+    how.pos = pos;
+    how.facing = facing;
+    how.l1_props = l1_props;
+    adopt_spawned(mode, h, how);
+    return id;
+}
+
+bool TacticalBattle::adopt_spawned(TacticalMode& mode, objects::ObjectHandle h, const SpawnAdopt& how) {
+    objects::ObjectStore& st = mode.primary();
+    if (!st.alive(h)) return false;
+    const auto ut = static_cast<uint32_t>(st.type(h));
+    const bool in_tables = std::find(types_used_.begin(), types_used_.end(), ut) != types_used_.end();
+    if (!how.unit || !in_tables || !bt_rng_) {  // attached / contained, or a prop (not in the tables)
+        if (!how.unit || how.l1_props) l1_register(mode, h, static_cast<int32_t>(ut));
+        return false;
+    }
+    const objects::ObjectId id = st.id(h);
+    const objects::GameObjectTypes& types = catalog_->types();
+    bt_adopt_built(mode, h, how.owner, 1.0f, bt_rng_);  // combat / ability unit (hardpoint + SAP-init draws), L1 systems
     Unit* u = unit_by_id(id);
-    if (u && movement_ && mode.movable(h) && types.has_behavior(sp.type, objects::BehaviorSet::Union, objects::beh::Locomotor)) {
+    if (u && movement_ && mode.movable(h) && types.has_behavior(st.type(h), objects::BehaviorSet::Union, objects::beh::Locomotor)) {
         mv::UnitDesc md = mv::unit_desc_from_type(types, ut);
         md.locomotor = mv::locomotor_kind_from_type(types, ut, space_ ? mv::MoveMode::Space : mv::MoveMode::Land);
         md.id = id;
-        md.pos = {pos.x, pos.y};
-        md.z = pos.z;
-        md.yaw_deg = dmath::atan2(facing.y, facing.x) * (180.0f / dmath::kPiF);
-        md.owner = owner;
+        md.pos = {how.pos.x, how.pos.y};
+        md.z = how.pos.z;
+        md.yaw_deg = dmath::atan2(how.facing.y, how.facing.x) * (180.0f / dmath::kPiF);
+        md.owner = how.owner;
+        mv_type_extents(md, ut);  // s78n t20
         movement_->add_unit(md);
         u->movable = true;
+        // cu8l t02 (CU8K_T02_T06_RE §3 rows 0x6a1f90 / 0x6a1d20, rules 1 / 8): a SimpleSpace ship created on its own (Lua
+        // Spawn_Unit's single path 0x2bfdd0, ability spawns, respawns, survivors) registers itself at creation (0x625090):
+        // no draw now, one space composition at the next step 10. [port] Land team containers are never made here.
+        if (space_ && mv_self_registers(ut)) {
+            const objects::ObjectId one[] = {id};
+            (void)movement_->hold_from_birth(one);
+        }
+    } else if (u && movement_ && !space_) {
+        // s78n t23 step 0 (MOVEMENT §5.4.5 item 2, t21 review item 2): a land object without a locomotor whose type is
+        // IsDeathCloneObstacle with a UnitCollisionClass (FoC: Proximity_Mine, Infantry class) is a death-clone obstacle in
+        // the land layer from its creation until it dies (the death / retreat removal drops it)
+        register_clone_obstacle(mode, h, static_cast<int32_t>(ut));
     }
-    return id;
+    return u != nullptr;
 }
 
 void TacticalBattle::script_add_types(std::span<const uint32_t> add) {
@@ -258,17 +368,19 @@ void TacticalBattle::script_add_types(std::span<const uint32_t> add) {
 }
 
 objects::ObjectHandle TacticalBattle::script_spawn(TacticalMode& mode, const objects::SpawnParams& p) {
-    objects::ObjectHandle h{};
     if (p.container || p.attach_parent) {
-        h = mode.spawn(p);
-    } else {
-        const uint32_t t = static_cast<uint32_t>(p.type);
-        script_add_types(std::span<const uint32_t>(&t, 1));  // q6 t12: a real battle unit, not a prop
-        const objects::ObjectId id = oi_spawn_unit(mode, static_cast<int32_t>(p.type), p.position, p.facing, p.owner);
-        if (id != objects::kNoObjectId) h = mode.primary().find(id);
+        const objects::ObjectHandle h = mode.spawn(p);
+        SpawnAdopt how;
+        how.owner = p.owner;
+        how.unit = false;  // contained / attached: the L1 systems only
+        if (h) adopt_spawned(mode, h, how);
+        return h;
     }
-    if (h) adopt_object(mode, h);
-    return h;
+    const uint32_t t = static_cast<uint32_t>(p.type);
+    script_add_types(std::span<const uint32_t>(&t, 1));  // q6 t12: a real battle unit, not a prop
+    // l1_props: a type the tables could not take (no tables) still joins the L1 systems
+    const objects::ObjectId id = oi_spawn_unit(mode, static_cast<int32_t>(p.type), p.position, p.facing, p.owner, true);
+    return id != objects::kNoObjectId ? mode.primary().find(id) : objects::ObjectHandle{};
 }
 
 objects::ObjectHandle TacticalBattle::script_spawn_company(TacticalMode& mode, const objects::SpawnParams& p) {
@@ -281,7 +393,7 @@ objects::ObjectHandle TacticalBattle::script_spawn_company(TacticalMode& mode, c
     P.galactic_id = objects::kNoObjectId;
     P.owner = p.owner;
     P.type = ct;
-    P.side = p.owner == req_.info.defender ? 0 : 1;
+    P.side = owner_side(p.owner);
     P.built = true;
     P.pop = 0.0f;
     const auto& gt = galaxy_->rules().types;
@@ -306,7 +418,11 @@ objects::ObjectHandle TacticalBattle::script_spawn_company(TacticalMode& mode, c
     const auto pi = static_cast<uint32_t>(parts_.size());
     parts_.push_back(std::move(P));
     const size_t first_unit = units_.size(), first_container = containers_.size();
+    // cu8j t02 [M]: the script spawn path is not one of the adopt callers of MOVEMENT §4.7.2 / §4.7.3 (0x29f810 adopts
+    // nothing): deploy() skips the team helper's and the campaign spawn's adopts for it.
+    deploy_script_ = true;
     deploy(mode, pi, *bt_rng_);
+    deploy_script_ = false;
     // Â§10.4 step 7: a TEAM container stands at its chunk's centroid, on land snapped passable [port: for the first
     // member's movement class]; the members keep their spots.
     if (!space_ && movement_ && units_.size() > first_unit) {
@@ -324,15 +440,61 @@ objects::ObjectHandle TacticalBattle::script_spawn_company(TacticalMode& mode, c
     return out;  // deploy() registered the members with the L1 systems (l1_register)
 }
 
+bool TacticalBattle::script_despawn(TacticalMode& mode, objects::ObjectHandle h) {
+    if (!mode.primary().alive(h)) return false;
+    despawning_ = true;  // retail's Despawn is no loss or kill (MCX8_BINDINGS_OBJECTS §GameObjectWrapper.Despawn)
+    bt_kill_silently(mode, h);
+    despawning_ = false;
+    return true;
+}
+
+bool TacticalBattle::script_object_damage(TacticalMode& mode, objects::ObjectHandle h, float amount, bool cannot_die) {
+    objects::ObjectStore& st = mode.primary();
+    if (!st.alive(h) || unit_by_id(st.id(h))) return false;
+    const float cur = st.health(h);
+    float next = cur - amount;
+    const objects::GameObjectTypes& types = catalog_->types();
+    const objects::TypeIndex t = st.type(h);
+    const float max = t < types.columns().tactical_health.size() ? types.columns().tactical_health[t] : 0.0f;
+    if (max > 0.0f && next > max) next = max;
+    if (next > 0.0f) {
+        st.set_health(h, next);
+    } else if (cannot_die) {
+        st.set_health(h, cur < 1.0f ? cur : 1.0f);
+    } else {
+        st.set_health(h, 0.0f);
+        mode.destroy(h);
+    }
+    return true;
+}
+
+objects::ObjectHandle TacticalBattle::script_spawn_effect(TacticalMode& mode, const objects::SpawnParams& p) {
+    const objects::ObjectHandle h = mode.spawn(p);
+    SpawnAdopt how;
+    how.owner = p.owner;
+    how.unit = false;
+    if (h) adopt_spawned(mode, h, how);
+    return h;
+}
+
 bool TacticalBattle::script_damage(TacticalMode& mode, objects::ObjectId id, float amount, bool cannot_die) {
+    return script_hardpoint_damage(mode, id, amount, cannot_die, {});
+}
+
+bool TacticalBattle::script_hardpoint_damage(TacticalMode& mode, objects::ObjectId id, float amount, bool cannot_die,
+                                             std::string_view name) {
     Unit* u = unit_by_id(id);
     if (finished_ || !combat_ || !bt_rng_ || !u || !u->alive || u->retreated || !combat_->has_unit(id) || !combat_->alive(id))
         return false;
+    // r1b t01 (R1_T01_HARDPOINT_RUN): a named hit goes to that hardpoint record; none of that name: nothing applied.
+    const int32_t hp = name.empty() ? -1 : combat_->hardpoint_by_name(id, name);
+    if (!name.empty() && hp < 0) return false;
     const bool had_cannot_die = (combat_->flags(id) & tc::kUnitCannotDie) != 0;
     if (cannot_die && !had_cannot_die) combat_->set_flag(id, tc::kUnitCannotDie, true);
     tc::DamageRequest r;
     r.victim = id;
     r.amount = amount;
+    r.hardpoint = hp;
     r.kind = tc::kKindDebug;  // Lua Take_Damage: kind 0 (OBJECT_SCRIPTS Â§6.1 step 4)
     const size_t deaths_before = combat_->deaths().size();
     combat_->take_damage(r, frame_);
@@ -367,7 +529,7 @@ void TacticalBattle::script_member_spots(const TacticalMode& mode, std::span<con
     out.clear();
     const objects::GameObjectTypes& types = catalog_->types();
     auto has_model = [&](uint32_t t) {
-        return !types_trim(types.get_string(t, space_ ? "Space_Model_Name" : "Land_Model_Name")).empty();
+        return !types_trim(types.get(t, space_ ? objects::tags::Space_Model_Name : objects::tags::Land_Model_Name)).empty();
     };
     constexpr uint64_t kLayer20 = 0x20;  // Space_Layer 0x20: never a blocker (space_member_spots)
     // Blockers: as space_member_spots (the object tree, all owners: live, not dying, not Is_Decoration, a model for the
@@ -377,11 +539,11 @@ void TacticalBattle::script_member_spots(const TacticalMode& mode, std::span<con
     for (const objects::ObjectHandle h : st.all_objects()) {
         if (!st.alive(h) || st.dying(h)) continue;
         const objects::TypeIndex t = st.type(h);
-        if (t >= types.size() || types.get_bool(t, "Is_Decoration") || !has_model(t)) continue;
+        if (t >= types.size() || types.get(t, objects::tags::Is_Decoration) || !has_model(t)) continue;
         if (st.has_behavior(h, objects::beh::TransportLanding) || st.has_behavior(h, objects::beh::LandObstacle) ||
             st.has_behavior(h, objects::beh::Projectile))
             continue;
-        if (space_ && types.get_mask(t, "Space_Layer") == kLayer20) continue;
+        if (space_ && types.get(t, objects::tags::Space_Layer) == kLayer20) continue;
         const tactical::Aabb b = mode.bounds_of(h);
         blockers.push_back({b.min.x, b.min.y, b.max.x, b.max.y});
     }
@@ -417,7 +579,7 @@ void TacticalBattle::script_member_spots(const TacticalMode& mode, std::span<con
 bool TacticalBattle::script_has_model(const TacticalMode& mode, objects::ObjectHandle h) const {
     const objects::ObjectStore& store = mode.primary();
     if (!store.exists(h)) return false;
-    return !types_trim(catalog_->types().get_string(store.type(h), space_ ? "Space_Model_Name" : "Land_Model_Name")).empty();
+    return !types_trim(catalog_->types().get(store.type(h), space_ ? objects::tags::Space_Model_Name : objects::tags::Land_Model_Name)).empty();
 }
 
 Vec3 TacticalBattle::script_spawn_facing(Vec3 p) const { return facing_to_origin(p, space_); }
@@ -443,14 +605,57 @@ void TacticalBattle::oi_events(TacticalMode& mode) {
                 }
                 break;
             }
+            case ta::AbilityEventKind::Lured: {
+                // cu8f t06 (CU8F_T04_T06_RE §3.1): the lured unit's coordinator move toward the lure owner - an attack-move
+                // with the owner (or its team) as the goal object, so the ordered attack the ability issued stays.
+                Unit* u = unit_by_id(e.id);
+                if (u && u->alive && !u->retreated && u->movable && bt_rng_) {
+                    const objects::ObjectId ids[] = {e.id};
+                    exec_move(mode, ids, e.point.x, e.point.y, *bt_rng_, mv::kNoFacing, true, 0, false, e.target);
+                }
+                break;
+            }
             case ta::AbilityEventKind::StopOrder: {
                 Unit* u = unit_by_id(e.id);
                 if (u && u->alive && u->movable && movement_) {
                     const std::vector<objects::ObjectId> ids{e.id};
-                    movement_->stop(ids);
+                    // cu8j t02 (MOVEMENT §4.7.2 / §4.7.5): the stop-and-hold 0x3a9880 leaves every coordinator and adopts
+                    // (one ctor draw through the 0x39bcb0 predicate); DEPLOY 0x3a1ce0 stops, then adopts. cu8l t02: the
+                    // coordinator-system stop 0x4261f0 (kStopLeave) leaves every coordinator without the adopt.
+                    if (e.value == ta::kStopHold) {
+                        (void)oi_stop_hold(mode, e.id);
+                        break;
+                    }
+                    // b0416: the unit leaves its coordinator, so the formation's attack block no longer moves it (as the
+                    // Stop order, order_stop).
+                    team_attack_drop(ids);
+                    if (e.value == ta::kStopLeave) {
+                        (void)movement_->stop_and_leave(e.id);
+                    } else {
+                        movement_->stop(ids);
+                        if (e.value == ta::kStopAdopt && bt_rng_) (void)mv_adopt(mode, u->h, *bt_rng_);
+                    }
+                } else if (!u && e.value == ta::kStopHold && bt_rng_) {
+                    // cu8l t02 (CU8K_T02_T06_RE §3 row 0x48cecb): a TEAM container (the Hack / Repair release of a squad
+                    // member, a bribed team) adopts through the predicate: outside the movement system it draws once.
+                    // [port] Its members' movement is not changed.
+                    for (const Container& ct : containers_)
+                        if (ct.id == e.id && !ct.removed) {
+                            (void)mv_adopt(mode, ct.h, *bt_rng_, true);
+                            break;
+                        }
                 }
                 break;
             }
+            case ta::AbilityEventKind::Immobilised:  // cu8l t02 (CU8K_T02_T06_RE §3, rule 6): the first movement lock
+                if (bt_rng_ && !script_movement_locked(e.id) && !landing_locked(e.id)) (void)mv_first_lock(mode, e.id, *bt_rng_);
+                break;
+            case ta::AbilityEventKind::TrooperReleased:  // r3g t02: 0x392160 - off the walker's bone, LANDING starts
+                if (Unit* u = unit_by_id(e.id)) {
+                    u->attached_to = objects::kNoObjectId;
+                    u->attach_bone = -1;
+                }
+                break;
             case ta::AbilityEventKind::MarkerTossed: {
                 // S8 t10 (LOB_SOLVER Â§3.5 "MARKER removal"): the toss kills its ground-point MARKER (Dummy_Barrage_Target)
                 // with an ordinary Destroy_Object, spawned bomb or not. [port] removed here, after the ability pass.
@@ -485,7 +690,16 @@ void TacticalBattle::oi_events(TacticalMode& mode) {
             case ta::SpawnPurpose::Mine:
             case ta::SpawnPurpose::Summon: {
                 const objects::ObjectId id = oi_spawn_unit(mode, q.object_type, oi_sv(q.position), oi_sv(q.facing), q.owner);
-                if (q.purpose == ta::SpawnPurpose::Mine && id != objects::kNoObjectId) abilities_->bind_spawn(q.serial, id);
+                // mcx4 (MCX4_T10_RE_ANSWERS §15): a Buzz_Droids cloud is bound too (the ability system runs its pack)
+                if (id != objects::kNoObjectId) (void)abilities_->bind_spawn(q.serial, id);
+                // mcx4 t13: the summon / contamination / buzz-droid line hangs off the new object (presentation feed)
+                if (q.purpose == ta::SpawnPurpose::Summon && id != objects::kNoObjectId)
+                    summon_spawns_.push_back({id, q.source, q.owner, q.ability_type});
+                break;
+            }
+            case ta::SpawnPurpose::Bomber: {  // mcx4 t06 (Spawn_Ability, MCX4_RE_ANSWERS_TACTICAL §14)
+                const objects::ObjectId id = oi_spawn_unit(mode, q.object_type, oi_sv(q.position), oi_sv(q.facing), q.owner);
+                if (id != objects::kNoObjectId) abilities_->bind_spawn(q.serial, id);
                 break;
             }
             case ta::SpawnPurpose::Troopers: {
@@ -506,22 +720,91 @@ void TacticalBattle::oi_events(TacticalMode& mode) {
             case ta::SpawnPurpose::CaptureVariant: {
                 // Vehicle_Thief (TACTICAL_GAPS Â§2.3.10): the victim type's capture variant (+0xda8, the resolved
                 // Vehicle_Thief_Inside_Clone of +0xda0) at the victim with the victim's owner (one id); the thief
-                // boards it; EJECT_VEHICLE_THIEF (46) on for the variant (REMAINING_GAPS Â§5.1). No variant: nothing.
+                // boards it; EJECT_VEHICLE_THIEF (46) on for the variant (REMAINING_GAPS Â§5.1). No variant: the
+                // original is boarded (s78n t12).
                 int32_t vt = q.object_type;
                 const Unit* victim = unit_by_id(q.target);
                 if (vt < 0 && victim) {
                     const std::string_view name =
-                        types_trim(catalog_->types().get_string(static_cast<objects::TypeIndex>(victim->type), "Vehicle_Thief_Inside_Clone"));
+                        types_trim(catalog_->types().get(static_cast<objects::TypeIndex>(victim->type), objects::tags::Vehicle_Thief_Inside_Clone));
                     if (!name.empty()) {
                         const objects::TypeIndex t = catalog_->types().resolve_name(name);
                         if (t != objects::kNone) vt = static_cast<int32_t>(t);
                     }
                 }
-                if (vt < 0) break;
-                const objects::ObjectId id = oi_spawn_unit(mode, vt, oi_sv(q.position), oi_sv(q.facing), q.owner);
-                if (id == objects::kNoObjectId) break;
+                // s78n t12 (HERO_CLASH §8.4.3, apply 0x7112f0): with a clone type - spawn it (vehicle position /
+                // orientation / owner); a failed spawn changes nothing (the vehicle lives); else the vehicle is removed
+                // (0x391310(vehicle, 0), credited to the thief) and the clone is boarded. Without a clone type the
+                // ORIGINAL vehicle is boarded: no spawn, no removal. [port] the removal happens here, in the host pass
+                // of the same tick (retail: inside the apply), and is processed at once like a script kill
+                // (script_damage). s78n t12 review: it is the world removal WITHOUT Die (CombatSystem::remove_from_world) - no
+                // hardpoint dies, so no HardpointEvent is left over for the story feed after this tick's hardpoint pass
+                // has run, and there is no death clone, death projectile, DeathBehavior draw, Death_Explosions particle
+                // or death clip; the DeathEvent (story Destroyed, the victory count, the loss record) stays.
+                // [port] a victim that died between the apply and this pass: with a clone the clone is still spawned;
+                // without one nothing is boarded and CAPTURE_VEHICLE stays on. [port] a thief that died in that window
+                // (s78n t12 review): a clone is still spawned and the victim removed, but the clone stays an ordinary
+                // vehicle of the victim's owner - no ability 46, no owner change, no stolen / incognito flags, nobody
+                // boards; without a clone type nothing happens.
+                const bool victim_alive = combat_->has_unit(q.target) && combat_->alive(q.target);
+                const bool thief_alive = combat_->has_unit(q.source) && combat_->alive(q.source);
+                const bool original = vt < 0;
+                objects::ObjectId id = objects::kNoObjectId;
+                if (original) {
+                    if (!victim || !victim->alive || victim->retreated || !victim_alive || !thief_alive) break;
+                    id = q.target;
+                } else {
+                    id = oi_spawn_unit(mode, vt, oi_sv(q.position), oi_sv(q.facing), q.owner);  // may grow units_
+                    if (id == objects::kNoObjectId) break;
+                    if (victim_alive && bt_rng_) {
+                        const size_t deaths_before = combat_->deaths().size();
+                        combat_->remove_from_world(q.target, q.source, frame_);
+                        const std::vector<tc::DeathEvent> deaths(combat_->deaths().begin() + static_cast<std::ptrdiff_t>(deaths_before),
+                                                                 combat_->deaths().end());
+                        for (const tc::DeathEvent& d : deaths) process_death(mode, d, *bt_rng_, true);
+                    }
+                    if (!thief_alive) break;
+                }
+                // s78n t05 (HERO_CLASH §8.1, boarding 0x63fae0): 3. EJECT_VEHICLE_THIEF on; 4. Change_Owner(vehicle, the
+                // thief's owner) through the port's owner change (store, trees, abilities / combat, movement, fog,
+                // garrison); 5. +0x3a2 |= 0x08 (stolen vehicle, permanent); 7. +0x3a1 |= 0x10 (incognito); 8. the thief
+                // boards. [port] the thief's record of the vehicle's previous owner is not kept (the eject kills the
+                // vehicle, REMAINING_GAPS §5.1, so nothing reads it); the store notify (step 6) is not modelled.
+                // s78n t12: step 3 only when the boarded object has unit ability 46.
+                if (abilities_->has_ability(id, ta::kEjectVehicleThief))
+                    abilities_->set_unit_ability_active(id, ta::kEjectVehicleThief, true, frame_);
+                const objects::ObjectHandle th = store.find(q.source), vh = store.find(id);
+                if (store.alive(th) && store.alive(vh)) {
+                    const int32_t thief_owner = store.owner(th);
+                    if (thief_owner >= 0 && store.owner(vh) != thief_owner) script_change_owner(mode, vh, thief_owner);
+                }
+                if (combat_->has_unit(id)) combat_->set_flag(id, tc::kUnitStolenVehicle | tc::kUnitIncognito, true);
+                if (Unit* u = unit_by_id(id)) u->flags_3a2 = static_cast<uint8_t>(u->flags_3a2 | 8u);  // the +0x3a2 record
+                // s78n t12 (§8.4.3): the container pack +0xf8 is created on demand (0x390740), so any vehicle takes the
+                // thief. s78n t12 review (REMAINING_GAPS §5.1): a boarded object that is no garrison holder (17 of the
+                // 18 shipped *_Captured clones have no garrison behaviour) becomes a HolderKind::VehicleThief holder -
+                // not a garrison: nobody else enters it, the thief does not leave by a leave / eject-garrison order,
+                // and when the vehicle dies (the eject ability kills it) or is removed the thief is released ALIVE at
+                // the vehicle's position. [port] a thief whose type has no GARRISON_UNIT is registered here as a
+                // board-only occupant (tg::kBoardOnlyValue: the boarding asks for no garrison behaviour).
+                if (store.alive(vh) && !garrison_.is_holder(id)) {
+                    tg::HolderDesc hd;
+                    hd.kind = tg::HolderKind::VehicleThief;
+                    hd.slots = 0;
+                    hd.extent_len = s4_extent_len(mode, vh);
+                    s4_store_ = &store;
+                    s4_init();
+                    garrison_.add_holder(id, store.owner(vh), hd);
+                    abilities_->set_garrison_count(id, 0);
+                }
+                if (store.alive(th) && !garrison_.is_unit(q.source)) {
+                    tg::OccupantDesc od;
+                    od.value = tg::kBoardOnlyValue;
+                    s4_store_ = &store;
+                    s4_init();
+                    garrison_.add_unit(q.source, store.owner(th), od);
+                }
                 s4_board(mode, q.source, id);
-                abilities_->set_unit_ability_active(id, ta::kEjectVehicleThief, true, frame_);
                 break;
             }
             case ta::SpawnPurpose::BarrageTarget: {
@@ -568,6 +851,18 @@ void TacticalBattle::oi_events(TacticalMode& mode) {
                 }
                 break;
             }
+            case ta::SpawnPurpose::LureEffect: {
+                // cu8f t06 (CU8F_T04_T06_RE §3.1): the LURE record's Particle_Effect at the owner (a prop, one object id);
+                // the ability system raises RemoveSilently for it at the deactivation.
+                const ta::UnitAbilityRecord* r = abilities_->record(q.source, ta::kLure);
+                if (!r || r->particle_effect.empty()) break;
+                const objects::TypeIndex t = catalog_->types().raw().find(r->particle_effect);
+                if (t == objects::kNone || t >= catalog_->types().size()) break;
+                const objects::ObjectHandle h = spawn_prop(mode, static_cast<int32_t>(t), oi_sv(q.position), oi_sv(q.facing), q.owner);
+                // cu8g t05: not bound (the lure went off, or its owner is gone, before this pass): removed at once.
+                if (h && !abilities_->bind_spawn(q.serial, store.id(h))) remove_silently.push_back(store.id(h));
+                break;
+            }
             case ta::SpawnPurpose::StationUpgrade: hg_station_upgrade(mode, q); break;  // STATION_HANGARS_SOUND Â§1.2
             default: break;  // InstantEffect: [port] the variant / composition is not resolved
         }
@@ -581,6 +876,18 @@ void TacticalBattle::oi_events(TacticalMode& mode) {
     for (const tc::SurvivorEvent& s : combat_->survivor_events()) {
         if (s.respawn) {
             oi_respawns_.push_back(OiRespawn{s.due_frame, s.type, s.owner, oi_sv(s.position), oi_sv(s.facing)});
+        } else if (s.type >= 0 && static_cast<size_t>(s.type) < rules_->types.size() &&
+                   !rules_->type(static_cast<uint32_t>(s.type)).members.empty()) {
+            // skai t11 (SKAI_T06_LAND_RUNS 1 / 3 item 7 [H, trace]): a company survivor type (the DUMMY_GROUND_COMPANY
+            // Empire_Survivors_*) spawns its Company_Units - retail Utapau: one STORMTROOPER_TEAM with its squads at the
+            // destroyed factory's position, in the same frame - not the company object. [port] Placed like a script
+            // company spawn (script_spawn_company: the free spots around the point, members facing the map origin).
+            objects::SpawnParams sp;
+            sp.type = static_cast<objects::TypeIndex>(s.type);
+            sp.owner = s.owner;
+            sp.position = oi_sv(s.position);
+            sp.facing = oi_sv(s.facing);
+            (void)script_spawn_company(mode, sp);
         } else {
             oi_spawn_unit(mode, s.type, oi_sv(s.position), oi_sv(s.facing), s.owner);
         }
@@ -600,14 +907,168 @@ void TacticalBattle::oi_respawn_due(TacticalMode& mode) {
     oi_respawns_.resize(w);
 }
 
-void TacticalBattle::oi_deploy_sync() {
+// b0173 (B0173_DEPLOYED_BEHAVIOR_RE Q1 / Q2): the type's DeployedBehavior names, in list order. Deployed (0x39fec0, the
+// frame the Deploy clip ends, with signal 0x29): each one the object does not have yet is added. Undeploying (0x3a0580):
+// each one that is not in the type's generic <Behavior> list is removed. [port] retail removes in the frame the Undeploy
+// clip starts (after the turret wait); the port removes when state 0x1A is entered.
+void TacticalBattle::oi_deployed_behaviors(TacticalMode& mode, objects::ObjectId id, bool deployed) {
+    objects::ObjectStore& st = mode.primary();
+    const objects::ObjectHandle h = st.find(id);
+    if (!st.alive(h)) return;
+    const objects::GameObjectTypes& types = catalog_->types();
+    const objects::TypeIndex t = st.type(h);
+    if (t >= types.size()) return;
+    for (const std::string_view raw : types.get(t, objects::tags::DeployedBehavior)) {
+        const objects::BehaviorTypeId b = objects::behavior_type_id(data::trim(raw));
+        if (b == objects::kNoBehavior) continue;
+        if (deployed) {
+            (void)st.add_behavior(h, b);  // false when already present: skipped
+            continue;
+        }
+        bool generic = false;
+        for (const std::string_view g : types.get(t, objects::tags::Behavior)) generic = generic || objects::behavior_type_id(data::trim(g)) == b;
+        if (generic) continue;
+        const std::span<const objects::BehaviorTypeId> list = st.behaviors(h);
+        for (size_t k = list.size(); k-- > 0;)
+            if (list[k] == b) {
+                (void)st.remove_behavior(h, static_cast<uint32_t>(k));
+                break;
+            }
+    }
+}
+
+bool TacticalBattle::oi_stop_hold(TacticalMode& mode, objects::ObjectId id) {
+    const Unit* u = unit_by_id(id);
+    if (!u || !u->alive || !u->movable || !movement_) return false;
+    // b0416: the unit leaves its coordinator, so the formation's attack block no longer moves it (as the Stop order,
+    // order_stop). Without this a land attack block re-planned its approach on the 30-frame timer and undeployed a Mobile
+    // Defense Unit that DEPLOY had just stopped.
+    const std::vector<objects::ObjectId> ids{id};
+    team_attack_drop(ids);
+    if (bt_rng_) (void)mv_adopt(mode, u->h, *bt_rng_, true);
+    return true;
+}
+
+void TacticalBattle::oi_deploy_sync(TacticalMode& mode) {
     if (!movement_) return;
     for (const mv::MovementSystem::DeployEvent& e : movement_->take_deploy_events()) {
+        if (e.to == mv::LocoState::WalkDeployed) oi_deployed_behaviors(mode, e.id, true);
+        else if (e.to == mv::LocoState::WalkUndeploying) oi_deployed_behaviors(mode, e.id, false);
         if (abilities_) abilities_->set_deploy_state(e.id, static_cast<uint8_t>(e.to));
         // AI_TACTICAL Â§7.3.3 item 3: Walk vf6 0x61e930 raises 0x29 at the end of the Deploy / Undeploy clip, Deploy(true)
         // 0x61d300 at once on a blocked reverse. This is the deploy's "unit ability finished".
         if (e.finished) ability_finished_.push_back(e.id);
     }
+    // s78n t26 closing review (MOVEMENT §3.2.1 Helpers, item 4 row "deploying (0x18), d < 150", item 6): D = 0x39a390 is
+    // +0x2b3 set or state 0x19, so a deploying (0x18) unit whose walking-deployed flag an order set (d < M) is deployed for
+    // the shield absorb and the own-weapon gate from that moment. The 0x18 window has no deploy event, so the flag is
+    // mirrored here (kUnitDeploying with kUnitDeployingIn); 0x19 / 0x1A rewrite it through set_deploy_state.
+    if (!combat_) return;
+    for (const Unit& u : units_) {
+        if (!u.alive || !u.movable || movement_->deploy_state(u.id) != mv::LocoState::WalkDeploying || !combat_->has_unit(u.id)) continue;
+        combat_->set_flag(u.id, tc::kUnitDeploying, movement_->walking_deployed(u.id));
+    }
+}
+
+void TacticalBattle::oi_ability_anims(uint64_t gframe) {
+    // r3h t01 (ABILITIES_HARDPOINTS §4.15): the ability system's clips on the battle's animation world, play order. The
+    // variant is the one the ability system drew (no draw here); a default-idle entry plays the default idle type (index 0,
+    // Loop_Idle_Anim_00, speed 1) unless an idle-class clip already plays. A play made in an earlier tick (between ticks:
+    // Lua / commands after the tick) is played at its own frame. [port] Super_Laser's direct ModelClass play goes through
+    // the same path (its owners hold no lock and no Berserker).
+    if (!abilities_) return;
+    abilities_->take_anim_plays(oi_anim_plays_);
+#ifdef ALAMO_SIM_HAVE_ANIM
+    anim::AnimWorld* w = anim_world_now();
+    const GameMode* gm = anim_mode_now();
+    if (!anim_ || !w || !gm || oi_anim_plays_.empty()) return;
+    const objects::ObjectStore& st = gm->primary();
+    const anim::PresenceIdleFn presence = [this, &st](anim::ObjectId unit, std::span<const anim::IdleRecord> recs) {
+        return presence_pick(st, unit, recs.data(), recs.size());
+    };
+    // r3h review: never over a dying unit or a corpse row (its death clip, or a corpse without one), as play_default_idle.
+    const anim::AnimBehaviors* beh = anim_->find_behaviors(*gm);
+    for (const ta::AbilityAnimPlay& p : oi_anim_plays_) {
+        if (!w->contains(p.id) || (beh && beh->is_corpse(p.id))) continue;
+        if (combat_ && combat_->has_unit(p.id) && !combat_->alive(p.id)) continue;
+        const uint64_t back = p.frame <= frame_ ? static_cast<uint64_t>(frame_ - p.frame) : 0u;
+        const uint64_t at = gframe >= back ? gframe - back : 0u;
+        if (p.type == ta::kAbilityPlayDefaultIdle) {
+            if (anim_->play_default_idle(*gm, p.id, at, &presence)) ++stats_.anim_plays;
+            continue;
+        }
+        if (p.only_from_idle) {  // r3h t06: Idle_Blockblaster only over an idle-like clip or its own finished one
+            const anim::SlotView cur = w->slot(p.id);
+            const bool own_done = cur.type == p.type && cur.mode == anim::SlotMode::Finished;
+            if (cur.type != anim::kNoAnimType && !anim::is_idle_like(cur.type) && !own_done) continue;
+        }
+        anim::PlayRequest r;
+        r.type = p.type;
+        r.index = p.variant;
+        r.loop = p.loop != 0;
+        r.blend_seconds = p.blend;
+        r.speed = p.speed;
+        if (w->play(p.id, r, nullptr, at) == anim::PlayResult::Played) ++stats_.anim_plays;
+    }
+#else
+    (void)gframe;
+#endif
+    oi_anim_plays_.clear();
+}
+
+void TacticalBattle::play_battle_clip(objects::ObjectId id, int32_t type, bool loop, float speed, float blend) {
+#ifdef ALAMO_SIM_HAVE_ANIM
+    anim::AnimWorld* w = anim_world_now();
+    const GameMode* gm = anim_mode_now();
+    if (!anim_ || !w || !gm || !w->contains(id)) return;
+    if (const anim::AnimBehaviors* beh = anim_->find_behaviors(*gm); beh && beh->is_corpse(id)) return;  // r3h review
+    if (combat_ && combat_->has_unit(id) && !combat_->alive(id)) return;
+    anim::PlayRequest r;
+    r.type = type;
+    r.index = 0;
+    r.loop = loop;
+    r.speed = speed;
+    r.blend_seconds = blend;
+    if (w->play(id, r, nullptr, oi_global_frame_) == anim::PlayResult::Played) ++stats_.anim_plays;
+#else
+    (void)id, (void)type, (void)loop, (void)speed, (void)blend;
+#endif
+}
+
+void TacticalBattle::bt_base_shield_anims(uint64_t gframe, SimRng& rng) {
+    if (!combat_) return;
+#ifdef ALAMO_SIM_HAVE_ANIM
+    anim::AnimWorld* w = anim_world_now();
+    const GameMode* gm = anim_mode_now();
+    if (!anim_ || !w || !gm) return;
+    const objects::ObjectStore& st = gm->primary();
+    const objects::GameObjectTypes& types = catalog_->types();
+    const anim::AnimBehaviors* beh = anim_->find_behaviors(*gm);
+    for (const tc::CombatSystem::BaseShieldSetState& e : combat_->base_shield_set_states()) {
+        const objects::ObjectHandle h = st.find(e.id);
+        if (!st.exists(h) || !w->contains(e.id) || (beh && beh->is_corpse(e.id))) continue;  // r3h review: no corpse rows
+        if (combat_->has_unit(e.id) && !combat_->alive(e.id)) continue;
+        const int32_t on_anim = anim::find_anim_type(types.get(st.type(h), objects::tags::Shield_On_Anim));
+        const int32_t off_anim = anim::find_anim_type(types.get(st.type(h), objects::tags::Shield_Off_Anim));
+        if (on_anim == anim::kNoAnimType || off_anim == anim::kNoAnimType) continue;
+        anim::PlayRequest r;
+        r.type = e.on ? on_anim : off_anim;
+        r.index = anim::kRandomVariant;
+        r.loop = true;
+        r.blend_seconds = 0.0f;
+        r.speed = 1.0f;
+        const anim::SlotView cur = w->slot(e.id);
+        if (cur.type == (e.on ? off_anim : on_anim) && cur.clip) {
+            const float f = cur.frame;  // the opposite clip's progress, rounded half away from zero (0x22f9c0)
+            r.start_frame = static_cast<float>(static_cast<int32_t>(f + 0.5f));
+        }
+        const anim::AnimModel* m = w->model(e.id);
+        if (m && m->variant_count(r.type) < 2) r.index = 0;  // one variant: no draw (0x1ffb40 returns at once)
+        if (w->play(e.id, r, &rng, gframe) == anim::PlayResult::Played) ++stats_.anim_plays;
+    }
+#else
+    (void)gframe, (void)rng;
+#endif
 }
 
 void TacticalBattle::oi_hash(StateHasher& h) const {

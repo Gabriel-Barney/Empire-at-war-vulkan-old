@@ -13,7 +13,8 @@ import shutil
 import sys
 
 sys.dont_write_bytecode = True
-DEFAULT_GAME = r'F:\SteamLibrary\steamapps\common\Star Wars Empire at War'
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'common'))
+from launch_foc import DEFAULT_GAME  # noqa: E402,F401  (common/launch_foc.py)
 MARKER = 'TSWP_PROBE_MARKER.txt'
 MOD_NAME = 'TswPlanetProbe'
 

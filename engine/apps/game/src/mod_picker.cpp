@@ -1,0 +1,184 @@
+// modc t08: the mod picker's data side (mod_picker.hpp).
+#include "alamo/game/mod_picker.hpp"
+
+#include <algorithm>
+#include <cstdio>
+#include <filesystem>
+#include <utility>
+
+#include "alamo/core/ascii.hpp"
+#include "alamo/game/mod_check.hpp"
+#include "alamo/game/mod_resolve.hpp"
+#include "alamo/vfs/install_locations.hpp"
+#include "alamo/vfs/mod_registry.hpp"
+#include "alamo/vfs/steam_workshop.hpp"
+#include "alamo/vfs/vfs.hpp"  // is_mod_arg
+
+namespace alamo::game {
+namespace fs = std::filesystem;
+
+namespace {
+
+std::string fmt(const char* f, unsigned long long a, unsigned long long b = 0, unsigned long long c = 0) {
+    char buf[160];
+    std::snprintf(buf, sizeof buf, f, a, b, c);
+    return buf;
+}
+
+}  // namespace
+
+std::vector<std::string> relaunch_args(std::span<const std::string> args, std::span<const std::string> mod_args) {
+    std::vector<std::string> out;
+    for (const std::string& a : args)
+        if (!vfs::is_mod_arg(a)) out.push_back(a);
+    out.insert(out.end(), mod_args.begin(), mod_args.end());
+    return out;
+}
+
+std::vector<std::string> mod_launch_args(const vfs::ModDescriptor& mod, const ModCheckReport* report) {
+    if (report && (report->base_eaw || (report->resolved && report->stack.base_eaw))) return {};  // D1: refused
+    if (report && report->resolved) return report->stack.launch_args();  // ums1 t04: the one resolver's list
+    if (report && report->submod.likely && !report->submod.stacked_args.empty()) {
+        std::vector<std::string> out;
+        for (const std::string& a : report->submod.stacked_args)
+            if (vfs::is_mod_arg(a)) out.push_back(a);
+        if (!out.empty()) return out;
+    }
+    return {mod.arg()};
+}
+
+ModCheckReport check_picked_mod(const std::string& game, const std::string& picked, const ModCheckOptions& options) {
+    if (picked.empty()) return check_mod_data(game, {}, options);
+    const vfs::ModCatalog catalog = stack_catalog(game, options.workshop_libraries);  // scanned once: the stack and the report
+    vfs::ModStack stack = resolve_mod_stack(catalog, {picked});
+    std::vector<std::string> args = stack.launch_args();
+    if (args.empty()) {  // refused (D1) or not installed: report the picked mod alone, as its own argument
+        for (const vfs::StackMod& m : stack.mods)
+            if (m.reason == vfs::StackReason::Picked) args.push_back(m.mod.arg());
+        if (args.empty()) args.push_back(picked);
+    }
+    ModCheckOptions o = options;
+    o.catalog = &catalog;
+    ModCheckReport r = check_mod_data(game, args, o);
+    r.resolved = true;
+    r.stack = std::move(stack);
+    return r;
+}
+
+std::vector<std::string> mod_report_summary(const ModCheckReport& r) {
+    std::vector<std::string> out;
+    const size_t errors = r.error_count(), warnings = r.warning_count();
+    if (r.base_eaw || (r.resolved && r.stack.base_eaw)) {  // D1
+        for (const std::string& e : r.resolved ? r.stack.errors : std::vector<std::string>{r.error})
+            if (e.find(vfs::kBaseEawRefusal) != std::string::npos) out.push_back("Refused (FoC mods only): " + e);
+        return out;
+    }
+    if (r.resolved) {  // mcx3 t06: the stack Launch starts
+        std::string chain;
+        for (const vfs::StackMod& m : r.stack.mods) chain += (chain.empty() ? "" : " > ") + m.mod.name;
+        if (r.stack.mods.size() > 1) out.push_back("Stack: " + chain);
+        for (const std::string& e : r.stack.errors) out.push_back("Stack error: " + e);
+        for (const std::string& w : r.stack.warnings) out.push_back("Stack warning: " + w);
+    }
+    if (!r.loaded) {
+        out.push_back("Does not load: " + (r.error.empty() ? std::string("a load step failed") : r.error));
+    } else {
+        out.push_back(fmt(errors ? "Loads with %llu error(s), %llu warning(s)" : "Loads: OK, %llu errors, %llu warning(s)",
+                          static_cast<unsigned long long>(errors), static_cast<unsigned long long>(warnings)));
+    }
+    const ModCheckReport::Counts& c = r.counts;
+    out.push_back(fmt("%llu campaigns, %llu planets, %llu factions", c.campaigns, c.planets, c.factions));
+    out.push_back(fmt("%llu object types, %llu skirmish maps (%llu custom)", c.object_types, c.official_maps + c.custom_maps, c.custom_maps));
+    if (!r.grade.grade.empty() && r.loaded)  // mcx0 report v4: the grade badge
+        out.push_back("Grade " + r.grade.grade +
+                      (r.grade.g3_static ? std::string(", G3 static part ok")
+                                         : fmt(", %llu item(s) keep G3 open", static_cast<unsigned long long>(r.grade.blocking.size()))));
+    if (!r.base_eaw_suspect.empty()) out.push_back("Possibly a base-EaW mod (a guess, not refused): " + r.base_eaw_suspect);
+    if (r.no_startable_campaign()) out.push_back("No campaign has planets");
+    else if (!r.campaigns_without_planets.empty())
+        out.push_back(fmt("%llu campaign(s) without planets", r.campaigns_without_planets.size()));
+    size_t mod_missing = 0;
+    for (const MissingFile& m : r.missing_files) mod_missing += m.in_mod ? 1u : 0u;
+    if (!r.missing_files.empty())
+        out.push_back(fmt("%llu missing file(s), %llu named by the mod", r.missing_files.size(), mod_missing));
+    out.push_back(fmt("Lua: %llu scripts, %llu do not compile, %llu main-chunk errors", r.lua_scripts, r.lua_errors.size(),
+                      r.lua_run_errors.size()));
+    if (!r.unbound_lua_calls.empty()) out.push_back(fmt("%llu engine call(s) the port does not bind", r.unbound_lua_calls.size()));
+    if (r.shaders.checked)  // report v3 (modc t21): the effect audit
+        out.push_back(fmt("Shaders: %llu effects (%llu from the mod), %llu issue(s)", r.shaders.effects, r.shaders.mod_effects,
+                          r.shaders.issues.size()));
+    const SubmodHint& h = r.submod;
+    if (h.likely && !h.parents.empty()) {
+        const ModParentCandidate& p = h.parents.front();
+        out.push_back("Submod of " + p.id + (p.workshop ? " (workshop)" : " (Mods folder)") +
+                      fmt(": it has %llu of %llu missing files", p.provides, h.missing) +
+                      (p.mentioned ? ", named in modinfo.json" : ""));
+        if (!r.resolved) out.push_back("Launch stacks it on " + p.arg);
+    } else if (h.missing > 0) {
+        out.push_back(fmt("Names %llu file(s) no installed mod has", h.missing));
+    }
+    for (const std::string& e : r.check_errors) out.push_back("Check failed: " + e);
+    return out;
+}
+
+std::string language_code(std::string_view retail_language) {
+    static constexpr std::pair<std::string_view, std::string_view> kCodes[] = {
+        {"ENGLISH", "en"}, {"GERMAN", "de"}, {"FRENCH", "fr"}, {"SPANISH", "es"},
+        {"ITALIAN", "it"}, {"POLISH", "pl"}, {"RUSSIAN", "ru"}};
+    const std::string up = ascii_upper(retail_language);
+    for (const auto& [name, code] : kCodes)
+        if (up == name) return std::string(code);
+    return {};
+}
+
+std::vector<std::string> mod_language_warnings(const ModCheckReport& r, std::string_view retail_language) {
+    std::vector<std::string> out;
+    const std::string code = language_code(retail_language);
+    if (code.empty()) return out;
+    std::vector<const vfs::ModDescriptor*> mods;
+    if (r.resolved)
+        for (const vfs::StackMod& m : r.stack.mods) mods.push_back(&m.mod);
+    else
+        for (const vfs::ModDescriptor& m : r.mods) mods.push_back(&m);
+    for (const vfs::ModDescriptor* m : mods) {
+        if (!m->has_modinfo) continue;
+        std::string listed;
+        bool text = false;
+        for (const vfs::ModLanguage& l : m->languages) {
+            listed += (listed.empty() ? "" : ", ") + l.code;
+            text = text || (l.code == code && (l.support & 1u) != 0);
+        }
+        if (!text)
+            out.push_back(m->name + " lists no " + ascii_upper(retail_language) + " text (modinfo.json languages: " +
+                          (listed.empty() ? std::string("none") : listed) + "); its own strings may show in another language or as keys");
+    }
+    return out;
+}
+
+std::string windows_command_line(std::span<const std::string> args) {
+    std::string out;
+    for (const std::string& a : args) {
+        if (!out.empty()) out.push_back(' ');
+        if (!a.empty() && a.find_first_of(" \t\n\v\"") == std::string::npos) {
+            out += a;
+            continue;
+        }
+        out.push_back('"');
+        size_t slashes = 0;
+        for (const char c : a) {
+            if (c == '\\') {
+                ++slashes;
+                continue;
+            }
+            if (c == '"') out.append(2 * slashes + 1, '\\');
+            else out.append(slashes, '\\');
+            slashes = 0;
+            out.push_back(c);
+        }
+        out.append(2 * slashes, '\\');
+        out.push_back('"');
+    }
+    return out;
+}
+
+}  // namespace alamo::game

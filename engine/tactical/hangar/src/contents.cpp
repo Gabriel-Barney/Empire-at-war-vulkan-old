@@ -1,4 +1,5 @@
 #include "alamo/tactical/hangar/contents.hpp"
+#include "alamo/core/frames.hpp"
 
 #include <algorithm>
 
@@ -96,7 +97,7 @@ std::vector<BuildOrder>& TacticalProduction::list(int32_t player) {
     return players_[p];
 }
 
-uint32_t TacticalProduction::enqueue(int32_t player, ObjectId builder, int32_t type, float seconds, uint32_t frame) {
+uint32_t TacticalProduction::enqueue(int32_t player, ObjectId builder, int32_t type, float seconds, uint32_t frame, uint8_t q) {
     if (player < 0 || builder == kNoObject) return 0;
     BuildOrder o;
     o.id = next_id_++;
@@ -104,9 +105,10 @@ uint32_t TacticalProduction::enqueue(int32_t player, ObjectId builder, int32_t t
     o.builder = builder;
     o.type = type;
     const float f = seconds * static_cast<float>(fps_);
-    o.total_frames = f >= 1.0f ? static_cast<uint32_t>(f) : 1u;
+    o.total_frames = f >= 1.0f ? static_cast<uint32_t>(frames_trunc(f)) : 1u;
     o.frames_left = o.total_frames;
     o.issued = frame;
+    o.queue = q;
     list(player).push_back(o);
     return o.id;
 }
@@ -146,17 +148,18 @@ std::vector<BuildOrder> TacticalProduction::builder_removed(ObjectId builder) {
 void TacticalProduction::update(uint32_t frame) {
     (void)frame;
     for (std::vector<BuildOrder>& l : players_) {
-        std::vector<ObjectId> seen;  // builders whose first order was already advanced this frame
+        bool seen[256] = {};  // queues whose head was already advanced this frame
         for (size_t i = 0; i < l.size();) {
             BuildOrder& o = l[i];
-            if (std::find(seen.begin(), seen.end(), o.builder) != seen.end()) {
+            if (seen[o.queue]) {
                 ++i;
                 continue;
             }
-            seen.push_back(o.builder);
+            seen[o.queue] = true;
             if (o.frames_left > 0) o.frames_left -= 1;
             if (o.frames_left == 0) {
                 done_.push_back(o);
+                add_built(o.player, o.type);
                 l.erase(l.begin() + static_cast<std::ptrdiff_t>(i));
             } else {
                 ++i;
@@ -176,6 +179,31 @@ uint32_t TacticalProduction::count_type(int32_t player, int32_t type) const {
     return n;
 }
 
+void TacticalProduction::add_built(int32_t player, int32_t type) {
+    if (player < 0) return;
+    const auto p = static_cast<size_t>(player);
+    if (p >= built_.size()) built_.resize(p + 1);
+    for (std::pair<int32_t, uint32_t>& e : built_[p])
+        if (e.first == type) {
+            ++e.second;
+            return;
+        }
+    built_[p].emplace_back(type, 1u);
+}
+
+uint32_t TacticalProduction::built_count(int32_t player, int32_t type) const {
+    if (player < 0 || static_cast<size_t>(player) >= built_.size()) return 0;
+    for (const std::pair<int32_t, uint32_t>& e : built_[static_cast<size_t>(player)])
+        if (e.first == type) return e.second;
+    return 0;
+}
+
+uint32_t TacticalProduction::count_queue(int32_t player, uint8_t q) const {
+    uint32_t n = 0;
+    for (const BuildOrder& o : queue(player)) n += o.queue == q ? 1u : 0u;
+    return n;
+}
+
 void TacticalProduction::hash(StateHasher& h) const {
     h.u32(next_id_);
     h.u32(static_cast<uint32_t>(players_.size()));
@@ -187,6 +215,15 @@ void TacticalProduction::hash(StateHasher& h) const {
             h.i32(o.type);
             h.u32(o.total_frames);
             h.u32(o.frames_left);
+            h.u8(o.queue);  // mcx4 t04
+        }
+    }
+    h.u32(static_cast<uint32_t>(built_.size()));  // mcx4 t04
+    for (const auto& l : built_) {
+        h.u32(static_cast<uint32_t>(l.size()));
+        for (const auto& [type, n] : l) {
+            h.i32(type);
+            h.u32(n);
         }
     }
 }

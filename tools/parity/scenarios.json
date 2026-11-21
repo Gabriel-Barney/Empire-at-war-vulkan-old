@@ -1,0 +1,99 @@
+{
+ "about": "Q4 parity harness scenarios and tolerances (tools/parity/README.md). A tolerance key is a metric family prefix, optionally with a [Faction] bracket, or an exact metric id; the most specific key wins. abs / rel widen the retail envelope [min, max] of the reference runs; min_overlap grades a type mix; info = reported, not graded. Every entry says why.",
+ "distribution": {"seeds": 10, "z": 2.0, "spread_factor": 3.0, "spread_min_runs": 5, "seed_min_share": 0.8, "why": "run --seeds (parity tier 2, docs/DECISIONS.md \"Parity tiers\", Gabriel 2026-11-09): the port over `seeds` seeds against every retail run. A scalar passes when |port mean - retail mean| <= tol + z * se, se = sqrt(sd_port^2 / n_port + sd_retail^2 / n_retail) (z 2: about 95% two-sided; a side with one value takes the other side's sd, a prediction interval), and, once both sides have spread_min_runs values, when each standard deviation is at most spread_factor times the other plus tol (3: an F-test at 95% with 9 and 4 degrees of freedom allows a ratio of about 2.9; below 5 runs a sample sd says too little to grade). tol is the metric's own abs / rel below, rel of the retail mean. Type mixes grade the overlap of the mean mixes. Multi-modal and window metrics (travel.hop_ticks, a retail cycle seen across missed samples) have no mean: each seed is graded like a single run and the metric passes when at least seed_min_share of the seeds do (0.8: one seed in ten flying a fleet mix retail never built is an AI choice, a wrong hyperspace speed moves every seed). A scenario may override any of these in its own \"distribution\""},
+ "scenarios": {
+  "hotm_galactic": {
+   "kind": "galactic",
+   "title": "Galactic Conquest, Heart of the Maw (Sandbox_Heart_Of_The_Maw_Empire), idle human Empire, Rebel and Underworld AI, seed 0, 13501 ticks (10 fiscal cycles)",
+   "references": [
+    {"run": "20261108-170824-galactic-vanilla-lua", "note": "reader 2: credits, production queues, Lua plan records (fixed kit, q2f t10)"},
+    {"run": "20261030-061228-galactic-vanilla-lua", "note": "reader 2: credits, production queues"},
+    {"run": "20261027-101057-galactic-vanilla", "note": "reader 1: no credits, no production queues (travel, fleets and outcomes only); 577 missed ticks"},
+    {"run": "20261108-204711-galactic-vanilla-lua", "note": "q4hf t03: reader 2, fixed kit; 40 cycles, hands-off until the two Tatooine battles on day 16 (tick 21094, answered with Auto-resolve: autoresolve_refs.json), graded up to max_tick only"},
+    {"run": "20261115-220422-galactic-vanilla-lua", "note": "q4d t03 (2026-11-15): run_capture.cmd, reader 2, fixed kit, hands-off, cycles_reached"},
+    {"run": "20261115-221357-galactic-vanilla-lua", "note": "q4d t03 (2026-11-15): run_capture.cmd, reader 2, fixed kit, hands-off, cycles_reached"},
+    {"run": "20261115-222352-galactic-vanilla-lua", "note": "q4d t03 (2026-11-15): run_capture.cmd, reader 2, fixed kit, hands-off, cycles_reached"},
+    {"run": "20261115-223325-galactic-vanilla-lua", "note": "q4d t03 (2026-11-15): run_capture.cmd, reader 2, fixed kit, hands-off, cycles_reached"},
+    {"run": "20261115-224259-galactic-vanilla-lua", "note": "q4d t03 (2026-11-15): run_capture.cmd, reader 2, fixed kit, hands-off, cycles_reached"}
+   ],
+   "max_tick": 13501,
+   "hop_max_tick": 21093,
+   "hop_max_tick_why": "gai3 t01 (2026-11-16, backlog b0171): travel.hop_ticks reads the reference runs up to this tick, every other metric up to max_tick. A leg's duration is the fleet's speed on that route (Hyperspace_Speed of its slowest member, route factor, corruption bonus), not a matter of when it flies, so a reference run that went on hands-off measures more retail speeds. Only 20261108-204711 goes past max_tick; 21093 is its last tick before the Tatooine battles answered by hand. It holds retail's Tyber Zann trip to Tatooine (The Peacebringer, Hyperspace_Speed 1.0, Black_Market_Purchase): Kuat -> Corellia 42, Corellia -> Tatooine 40, Kashyyyk -> Kuat 45 ticks, which the port flies when its Black_Market_Purchase starts before tick 13501 (seed 10: 40 / 40 / 43)",
+   "distribution": {"spread_min_runs": 1000000, "why": "q4d t04 (2026-11-16): spread not graded here. Every retail run of this scenario starts from seed 0 (the menu path), so the retail sd is run-to-run timing noise only (0 on most metrics across 9 runs), while the port side varies its seed 0..9: an sd ratio between them says nothing about tier 2. Means are still graded (port mean over seeds against the retail runs, the port sd in se). geonosis_skirmish keeps the spread test: retail seeds each skirmish itself"},
+   "excluded_references": {
+    "20261103-152619-galactic-vanilla-lua": "q2f t08 (2026-11-08): its Lua plan hooks killed retail's own plan threads (records table lost to PGBase Flush_G, docs/re/LUA_SCRIPT_OUTPUT.md section 4), so its AI production and fleet moves are not retail behaviour (Rebel fleet departures 19 vs 71). Replace it with a run of the fixed kit",
+    "20261115-212542-galactic-vanilla-lua": "q4d t04 (2026-11-16): the game window lost focus and FoC sat paused for about 5 min at mode frame 2514 (run_trace.log; wall 865 s vs 490 s for the other q4d runs), so it was not hands-off: objects_max 732 vs 1106 in every other run, Rebel fleet departures 10 vs 51..63, Underworld ends with 4 planets (retail 3 in the other 9). Leave-one-out graded it FAIL 16 against the other runs. Note: its outcome (Underworld takes a Rebel planet, 4 / 4) is the port seed 0 outcome too; a later hands-off capture would show whether retail takes that branch without a pause"
+   },
+   "kit": "tools/probe_mod/q2_traces/run_lua_probe.cmd (or run_galactic.cmd; -NonInteractive drives the menus), README in that folder",
+   "workers": 4
+  },
+  "geonosis_skirmish": {
+   "kind": "skirmish",
+   "title": "Space skirmish, (2) Battle Over Geonosis (_MP_SPACE_GEONOSIS), idle human Empire vs Rebel AI (Medium), 6000 credits, 5400 ticks",
+   "references": [
+    {"run": "20261030-062751-skirmish-vanilla-lua", "note": "seeded 0x41ccdfe4 (the port host uses its own seed); every tick sampled"},
+    {"run": "20261108-204213-skirmish-vanilla-lua", "note": "q4hf t03 second Lua-probe run (run-to-run spread); every tick sampled"},
+    {"run": "20261108-203639-skirmish-vanilla", "note": "q4hf t03 third sample, same scenario without the Lua probe; every tick sampled"},
+    {"run": "20261115-225742-skirmish-vanilla-lua", "note": "q4d t03 (2026-11-15/16): run_trace.ps1 -NoDrive -LuaProbe, menus set by hand to the q2_scenes.json setup, ticks_reached"},
+    {"run": "20261115-235429-skirmish-vanilla-lua", "note": "q4d t03 (2026-11-15/16): run_trace.ps1 -NoDrive -LuaProbe, menus set by hand to the q2_scenes.json setup, ticks_reached"},
+    {"run": "20261116-002920-skirmish-vanilla-lua", "note": "q4d t03 (2026-11-15/16): run_trace.ps1 -NoDrive -LuaProbe, menus set by hand to the q2_scenes.json setup, ticks_reached"},
+    {"run": "20261116-003415-skirmish-vanilla-lua", "note": "q4d t03 (2026-11-15/16): run_trace.ps1 -NoDrive -LuaProbe, menus set by hand to the q2_scenes.json setup, ticks_reached"},
+    {"run": "20261116-003910-skirmish-vanilla-lua", "note": "q4d t03 (2026-11-15/16): run_trace.ps1 -NoDrive -LuaProbe, menus set by hand to the q2_scenes.json setup, ticks_reached"},
+    {"run": "20261116-173353-skirmish-vanilla", "note": "skai t22 (2026-11-16): run_skai_t22_space.cmd, no Lua probe (unhooked), read-only Frida goal hooks, -NonInteractive, ticks_reached"},
+    {"run": "20261116-173917-skirmish-vanilla", "note": "skai t22 (2026-11-16): run_skai_t22_space.cmd, no Lua probe (unhooked), read-only Frida goal hooks, -NonInteractive, ticks_reached"},
+    {"run": "20261116-174437-skirmish-vanilla", "note": "skai t22 (2026-11-16): run_skai_t22_space.cmd, no Lua probe (unhooked), read-only Frida goal hooks, -NonInteractive, ticks_reached"}
+   ],
+   "kit": "tools/probe_mod/q2_traces/run_skirmish.cmd -LuaProbe (-NonInteractive drives the menus), README in that folder",
+   "map": "_MP_SPACE_GEONOSIS",
+   "human": "Empire",
+   "ticks": 5400,
+   "frames": [600, 1200, 1800, 2400, 3000, 3600, 4200, 4800, 5400],
+   "workers": 4
+  },
+  "story_kessel": {
+   "kind": "story",
+   "title": "Underworld campaign (Full_Story_Campaign_Underworld), Kessel UM01 land mission, fully hands-off, seed 0, battle frames 0-18000",
+   "references": [
+    {"run": "20261109-053933-story-vanilla", "note": "storyb t09 hands-off reference (STORY_T04_KESSEL_RUN.md §6): no key or click after Start Game, 18003 samples"},
+    {"run": "20261109-064135-story-vanilla", "note": "second hands-off run, same kit: MATCH with the first on all 18000 ticks (q2trace.py compare)"}
+   ],
+   "kit": "tools/probe_mod/q2_traces/run_story.cmd (README 'Story mission run'; no input in the battle)",
+   "campaign": "Full_Story_Campaign_Underworld",
+   "human": "Underworld",
+   "ai_types": ["Underworld=AI_Player_Underworld"],
+   "ticks": 18003,
+   "workers": 4
+  }
+ },
+ "tolerances": {
+  "story.census_frame1": {"abs": 0, "why": "storyb t03: the battle's objects per owner index at battle frame 1; the two retail hands-off runs agree and the map, the story setup and the linked battle's participants are data: exact"},
+  "story.first_spawn_frame": {"abs": 0, "why": "storyb t03: the mission Lua's first spawn (retail: the Begin state's bribe squad at frame 6); both retail runs agree: exact"},
+  "story.spawned": {"abs": 0, "why": "storyb t03: objects appearing after battle frame 1 (Lua spawns, the cinematic's objects); a hands-off run repeats frame for frame in retail (STORY_T04_KESSEL_RUN.md §6): exact"},
+  "story.health_change_samples": {"abs": 0, "why": "storyb t03: samples in which an object's health changes; retail hands-off: nothing fights, only the cinematic's objects: exact"},
+  "travel.hop_ticks": {"abs": 3, "rel": 0.03, "nearest": true, "why": "keyed by faction and route; a hop takes its fleet's speed (the units' Hyperspace_Speed, the Underworld corruption bonus), so one route has several durations in retail (Underworld Nal Hutta -> Shola: 89 and 107 ticks) and each port hop must lie within tolerance of some retail hop of that route. A leg is timed from the last sample at its start planet to the first sample at its end planet, a trip passing a planet centre is split there (same rule on both sides, q4hf t04); retail hops of one route and fleet differ by up to 6 ticks (Rebel Kamino -> Shola 221 / 227, Mon Calamari -> Shola 74 / 80), so 3%, at least 3 ticks; a wrong speed multiplier shows as 100+ ticks (tools/probe_mod/g1_hops/README.md)"},
+  "build.ticks": {"abs": 3, "rel": 0.05, "why": "the shortest completed build per type and planet: retail from its queue start to leaving the queue (production.q2q: items finish 2 ticks after start + frames), the port from the AI build order to the new object in its state trace. The retail runs themselves differ by 5% on one planet (mining facility at Mon Calamari 686 vs 722 ticks, Y-wings 344 vs 362: a build-time modifier present in one run only), so 5%, at least 3 ticks"},
+  "econ.cycle_tick": {"abs": 0, "why": "the fiscal period is data (45 s = 1350 frames) and the first payment rule is known (q2f t02): exact; a retail cycle seen across missed samples is a window and the port tick must fall inside it"},
+  "econ.income_cycle1": {"abs": 1, "rel": 0.01, "why": "the first payment comes before AI ownership or structure choices can differ much: planet incomes, starting structures and corruption are data; 1% covers f32 credit arithmetic"},
+  "econ.income_mean": {"rel": 0.1, "why": "later payments follow the planets and mining facilities owned, which follow AI choices; the retail runs already differ in these, 10% on top of their envelope"},
+  "econ.credits_at": {"rel": 0.25, "why": "an AI balance is income minus spending, and AI spending timing differs between runs (the HotM retail runs end with 22 and 899 Rebel credits); 25% on top of the retail envelope. The income metrics are the economy check, this one catches gross spending differences"},
+  "econ.credits_at[Empire]": {"abs": 1, "rel": 0.001, "why": "the Empire is the idle human in both scenarios: it never spends, so its balance is income alone and must match closely"},
+  "ai.build_count": {"abs": 2, "rel": 0.25, "why": "how many items an AI queues depends on its budget and the RNG draw order, which the port does not reproduce draw for draw; 25% (at least 2 items) on top of the retail envelope"},
+  "ai.build_mix": {"min_overlap": 0.5, "retail_floor": true, "why": "an AI must build the same kind of units and structures: its items (multiset of types) must overlap the closest retail run at least as much as the retail runs overlap each other, capped at 0.5 (HotM retail runs overlap only 0.30 for the Rebel and 0.43 for the Underworld; a single reference run uses 0.5)"},
+  "ai.fleet_departures": {"abs": 2, "rel": 0.25, "why": "fleet moves follow AI plans and the RNG; the retail runs of one scenario already differ widely (their envelope); 25% (at least 2) on top"},
+  "ai.fleet_targets": {"min_overlap": 0.5, "retail_floor": true, "why": "the AI must send fleets to the same planets: its departures by target planet must overlap the closest retail run at least as much as the retail runs overlap each other, capped at 0.5 (HotM retail: Rebel 0.23-0.80, Underworld 0.64-0.80)"},
+  "ai.first_build_tick": {"abs": 30, "why": "the first AI decisions come before any run-to-run difference builds up: within 1 s (30 ticks) of retail"},
+  "ai.first_departure_tick": {"abs": 30, "why": "as ai.first_build_tick: the first fleet order within 1 s of retail"},
+  "ai.first_build_frame": {"abs": 600, "why": "skirmish units are counted from snapshots every 600 frames (the port host's state cadence): one snapshot of slack"},
+  "outcome.planets_final": {"abs": 0, "why": "a planet is one discrete outcome; the retail runs already span the outcomes seen (Shola captured or not)"},
+  "outcome.captures": {"abs": 1, "why": "planet captures per faction: one capture more or less than the retail envelope"},
+  "outcome.owner_changes": {"abs": 1, "why": "total planet owner changes: one more or less than the retail envelope"},
+  "outcome.shola_captured": {"abs": 0.1, "why": "b0107 (Gabriel 2026-11-12): whether the Rebel takes Shola within the scenario (1 / 0; over seeds the mean is the capture rate). Single run: exact against the retail runs; seeds: the rate within 0.1 of retail's plus the z * se allowance (retail captured it in every reference run)"},
+  "outcome.shola_capture_tick": {"abs": 150, "rel": 0.05, "why": "b0107 (Gabriel 2026-11-12): the tick of the first Rebel capture of Shola (the a2m exit metric; seeds without a capture leave it out). The capture follows the Rebel attack plan's timing and its space and land battles; 5% (at least 150 ticks, five seconds of galactic time) on top of the retail envelope. Retail: 7498 in the three reader-2 runs; the reader-1 run 20261027-101057 shows 9898 because it missed 577 ticks (a2m t03: a 2026-11-12 retail rerun gave 7498 again), which widens the envelope upwards only"},
+  "outcome.units_final": {"abs": 2, "rel": 0.2, "why": "units alive at the end of a skirmish: production and losses both depend on AI timing; 20% (at least 2 units)"},
+  "outcome.units_lost": {"abs": 2, "rel": 0.25, "why": "units destroyed during the skirmish: 25% (at least 2 units)"},
+  "outcome.battle_ended": {"abs": 0, "why": "whether the battle ends before the tick limit is a discrete outcome"},
+  "combat.damage_taken": {"rel": 0.25, "why": "hull lost per faction over the battle: weapon damage is data, but targeting and fire timing follow AI orders; 25%"},
+  "combat.first_shot_frame": {"abs": 300, "why": "first projectile of the battle: within 10 s (300 frames)"},
+  "diag": {"info": true, "why": "synced-RNG draws are an implementation detail; reported to explain divergences, never graded (parity is behaviour)"}
+ }
+}

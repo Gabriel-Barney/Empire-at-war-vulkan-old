@@ -13,15 +13,19 @@
 
 #include "alamo/core/bytes.hpp"
 #include "alamo/core/file_provider.hpp"
+#include "alamo/core/host_fs.hpp"
 #include "alamo/core/sim_crc.hpp"
 #include "alamo/core/sim_rng.hpp"
 #include "alamo/lua/ai_bridge.hpp"  // reset_script_threads
 #include "alamo/lua/bindings.hpp"
 #include "alamo/lua/lua_vm.hpp"
+#include "alamo/lua/object_bridge.hpp"
 #include "alamo/lua/presentation.hpp"
+#include "alamo/lua/script_gaps.hpp"
 #include "alamo/objects/game_object_types.hpp"
 #include "alamo/objects/object_store.hpp"
 #include "alamo/objects/object_types.hpp"
+#include "alamo/test/support.hpp"
 #include "vm_internal.hpp"  // the per-family binding tables (duplicate check)
 
 #include <lua.h>
@@ -30,14 +34,7 @@ using namespace alamo;
 using namespace alamo::lua;
 namespace fs = std::filesystem;
 
-static int g_fail = 0;
-#define CHECK(c)                                                     \
-    do {                                                             \
-        if (!(c)) {                                                  \
-            std::printf("FAIL %s:%d: %s\n", __FILE__, __LINE__, #c); \
-            ++g_fail;                                                \
-        }                                                            \
-    } while (0)
+using ::alamo::test::g_fail;
 
 // q6 t11 (docs/re/LUA_API.md "Binding error model across all bindings"): a binding error does not unwind; it logs
 // "SCRIPT ERROR: ..." and sets the script's stop flag. run() reports those lines as its result (a Lua error as before)
@@ -192,13 +189,20 @@ static void test_object_effects() {
           ev[2].args[1].text == "Rescue_Effect");
     CHECK(ev[3].args.size() == 3 && ev[3].args[1].kind == PresentationArg::Kind::Type && ev[3].args[2].text == "Bone_A");
     // OI lua: the resolved requests a render host consumes (object id, type index / name, bone), drained with the events.
+    // storyb t17 (STORYB_T17_SPAWNS_AND_DEATH.md §2): a known type without PARTICLE becomes an object of that type at the
+    // receiver, its owner's, returned; an unknown (or a PARTICLE) type stays a render request.
     const auto& pe = log.particle_effects();
-    CHECK(pe.size() == 2 && pe[0].frame == 7 && pe[0].seq == ev[2].seq && pe[0].object == 2 && pe[0].type == -1 &&
+    CHECK(pe.size() == 1 && pe[0].frame == 7 && pe[0].seq == ev[2].seq && pe[0].object == 2 && pe[0].type == -1 &&
           pe[0].type_name == "Rescue_Effect" && pe[0].bone.empty());
-    CHECK(pe.size() == 2 && pe[1].seq == ev[3].seq && pe[1].type == ev[3].args[1].id && pe[1].type_name == "Trooper" &&
-          pe[1].bone == "Bone_A");
-    CHECK(run(vm, "trooper.Attach_Particle_Effect('TROOPER')") == "" && log.particle_effects().size() == 3 &&
-          log.particle_effects()[2].type == ev[3].args[1].id && log.particle_effects()[2].type_name == "Trooper");
+    const auto trooper_t = static_cast<objects::TypeIndex>(ev[3].args[1].id);
+    auto count_t = [&] {
+        size_t n = 0;
+        for (const objects::ObjectHandle o : w.store->all_objects()) n += w.store->alive(o) && w.store->type(o) == trooper_t ? 1u : 0u;
+        return n;
+    };
+    const size_t before = count_t();
+    CHECK(run(vm, "fx = trooper.Attach_Particle_Effect('TROOPER') assert(fx)") == "" &&
+          log.particle_effects().size() == 1 && count_t() == before + 1);
     CHECK(ev[4].op == PresentationOp::ObjectCinematicHyperspaceIn && ev[4].args[1].number == 20.0);
     CHECK(ev[6].op == PresentationOp::ResumeHyperspaceIn && ev[8].op == PresentationOp::ObjectPlayCinematicEngineFlyby);
     const PresentationState& s = log.state();
@@ -212,6 +216,154 @@ static void test_object_effects() {
     CHECK(contains(run(vm, "trooper.Cinematic_Hyperspace_In('x')"), "Cinematic_Hyperspace_In -- invalid type for parameter 1. Expected number."));
     CHECK(contains(run(vm, "trooper.In_End_Cinematic()"), "GameObjectWrapper::Lua_Is_In_End_Cinematic -- Missing required boolean parameter."));
     CHECK(contains(run(vm, "trooper.Show_Emitter('x')"), "Show_Emitter -- invalid number of parameters. Expected 2, got 1."));
+}
+
+// cu8g t03: Set_New_Environment(int) - LUA_API.md contract strings; recorded, then the tactical host's
+// TacticalScriptHooks::set_new_environment with the truncated int (the mode clamps).
+static void test_set_new_environment() {
+    World w;
+    LuaHost h = w.host();
+    LuaVm vm(h);
+    PresentationLog log;
+    attach_presentation(vm, &log);
+    CHECK(contains(run(vm, "Set_New_Environment()"), "LuaSetNewEnvironment -- Expected int parameter 1"));
+    CHECK(contains(run(vm, "Set_New_Environment('x')"), "LuaSetNewEnvironment -- invalid type for parameter 1. Expected int."));
+    CHECK(log.events().empty());
+    CHECK(run(vm, "Set_New_Environment(1)") == "");  // no host: recorded only
+    CHECK(log.events().size() == 1 && log.events()[0].op == PresentationOp::SetNewEnvironment &&
+          log.events()[0].args.size() == 1 && log.events()[0].args[0].number == 1.0);
+    ObjectBridge bridge;
+    TacticalScriptHooks hooks;
+    std::vector<int32_t> got;
+    hooks.set_new_environment = [&got](int32_t i) { got.push_back(i); };
+    bridge.tactical = &hooks;
+    attach_object_bridge(vm, &bridge);
+    CHECK(run(vm, "Set_New_Environment(2) Set_New_Environment(3.9) Set_New_Environment(-1)") == "");
+    CHECK(got == std::vector<int32_t>({2, 3, -1}) && log.events().size() == 4);
+    CHECK(contains(run(vm, "Set_New_Environment(true)"), "Expected int.") && got.size() == 3);  // refused: no hook call
+    // ui2 t08: Set_Cinematic_Environment reaches the sim hook with its bool
+    std::vector<bool> cin;
+    hooks.set_cinematic_environment = [&cin](bool on) { cin.push_back(on); };
+    CHECK(run(vm, "Set_Cinematic_Environment(true) Set_Cinematic_Environment(false)") == "");
+    CHECK(cin == std::vector<bool>({true, false}));
+    attach_object_bridge(vm, nullptr);
+}
+
+// mcx6 t05 (MCX6_T05_CINEMATIC_BINDINGS §3, 0x5433f0): Promote_To_Space_Cinematic_Layer moves the object to its own position
+// raised by 20000 - through the tactical teleport hook when one is installed, else the store position; recorded either way.
+static void test_promote_to_space_cinematic_layer() {
+    World w;
+    LuaHost h = w.host();
+    LuaVm vm(h);
+    PresentationLog log;
+    attach_presentation(vm, &log);
+    CHECK(run(vm, std::string(kFind) + "Promote_To_Space_Cinematic_Layer(marker)") == "");
+    const objects::ObjectHandle marker = w.store->find(1);
+    CHECK(w.store->position(marker).x == 10.0f && w.store->position(marker).y == 20.0f && w.store->position(marker).z == 20000.0f);
+    CHECK(log.events().size() == 1 && log.events()[0].op == PresentationOp::PromoteToSpaceCinematicLayer);
+    ObjectBridge bridge;
+    TacticalScriptHooks hooks;
+    std::vector<Vec3> moved;
+    hooks.teleport = [&moved](objects::ObjectHandle, Vec3 p, Vec3) { moved.push_back(p); };
+    bridge.tactical = &hooks;
+    attach_object_bridge(vm, &bridge);
+    CHECK(run(vm, "Promote_To_Space_Cinematic_Layer(trooper)") == "");
+    CHECK(moved.size() == 1 && moved[0].x == -5.0f && moved[0].y == 3.0f && moved[0].z == 20000.0f);
+    CHECK(contains(run(vm, "Promote_To_Space_Cinematic_Layer(5)"), "LuaPromoteToSpaceCinematicLayer -- Invalid parameter 1, expected a game object"));
+    CHECK(moved.size() == 1 && log.events().size() == 2);
+    attach_object_bridge(vm, nullptr);
+    // Outside a tactical mode: retail's mode gate (a script error before the argument checks), nothing recorded or moved.
+    objects::ObjectStore galactic(objects::ModeKind::Galactic, objects::StoreKind::Primary, w.types, &w.ids);
+    LuaHost gh = w.host();
+    gh.store = &galactic;
+    LuaVm gvm(gh);
+    PresentationLog glog;
+    attach_presentation(gvm, &glog);
+    CHECK(contains(run(gvm, "Promote_To_Space_Cinematic_Layer(5)"), "Command only valid in a tactical game."));
+    CHECK(glog.events().empty());
+}
+
+// mcx6 (MCX6_T05_CINEMATIC_BINDINGS §2, 0x541e20 -> 0x38ed10): Do_End_Cinematic_Cleanup in a tactical mode (a bridge with
+// TacticalScriptHooks) suspends every LOCOMOTOR object not owned by the neutral player (here unknown: -1, no player world)
+// and not marked In_End_Cinematic(true), and moves it to (1, 1, 0) through the teleport hook (else the store position).
+// Without a tactical bridge it is only recorded.
+static void test_end_cinematic_cleanup() {
+    const fs::path root = fs::temp_directory_path() / "alamo_lua_presentation_cleanup";
+    std::error_code ec;
+    fs::remove_all(root, ec);
+    fs::create_directories(root / "Data/XML");
+    std::ofstream(root / "Data/XML/GameObjectFiles.xml", std::ios::binary) << "<L><File>C.xml</File></L>";
+    std::ofstream(root / "Data/XML/C.xml", std::ios::binary)
+        << "<R><Prop Name=\"Rock\"></Prop><GroundInfantry Name=\"Walker\"><Tactical_Health>40</Tactical_Health>"
+           "<LandBehavior>WALK_LOCOMOTOR</LandBehavior></GroundInfantry></R>";
+    objects::ObjectTypeDatabase raw;
+    objects::GameObjectTypes types;
+    {
+        DirectoryProvider dp(root.string());
+        CHECK(raw.load(dp));
+        CHECK(types.build(raw));
+    }
+    objects::IdCounter ids;
+    objects::ObjectStore store(objects::ModeKind::Land, objects::StoreKind::Primary, types, &ids);
+    GameRandom rng{1234u, 99u};
+    const auto make = [&](const char* type, int32_t owner, float x) {
+        objects::SpawnParams sp;
+        sp.type = raw.find(type);
+        sp.owner = owner;
+        sp.position = {x, 50.0f, 0.0f};
+        return store.create(sp);
+    };
+    const objects::ObjectHandle mine = make("Walker", 0, 100.0f);      // cleaned up
+    const objects::ObjectHandle actor = make("Walker", 1, 200.0f);     // In_End_Cinematic(true): kept
+    const objects::ObjectHandle neutral = make("Walker", -1, 300.0f);  // the neutral player's: kept
+    const objects::ObjectHandle rock = make("Rock", 0, 400.0f);        // no locomotor: kept
+    const objects::ObjectHandle unmarked = make("Walker", 1, 500.0f);  // In_End_Cinematic(false): cleaned up
+    CHECK(store.has_behavior(mine, objects::beh::Locomotor) && !store.has_behavior(rock, objects::beh::Locomotor));
+    LuaHost h;
+    h.store = &store;
+    h.types = &types;
+    h.rng = &rng;
+    LuaVm vm(h);
+    PresentationLog log;
+    attach_presentation(vm, &log);
+    // In_End_Cinematic(b) writes PresentationState::in_end_cinematic (test_object_effects); set here directly.
+    log.mutable_state().in_end_cinematic[store.id(actor)] = true;
+    log.mutable_state().in_end_cinematic[store.id(unmarked)] = false;
+    CHECK(run(vm, "Do_End_Cinematic_Cleanup()") == "");  // no bridge: recorded only
+    CHECK(log.events().back().op == PresentationOp::DoEndCinematicCleanup && store.position(mine).x == 100.0f);
+    ObjectBridge bridge;
+    attach_object_bridge(vm, &bridge);
+    CHECK(run(vm, "Do_End_Cinematic_Cleanup()") == "" && store.position(mine).x == 100.0f && !bridge.find_state(store.id(mine)));
+    TacticalScriptHooks hooks;
+    std::vector<std::pair<objects::ObjectId, Vec3>> moved;
+    hooks.teleport = [&](objects::ObjectHandle o, Vec3 p, Vec3) { moved.emplace_back(store.id(o), p); };
+    bridge.tactical = &hooks;
+    CHECK(run(vm, "Do_End_Cinematic_Cleanup()") == "");
+    CHECK(moved.size() == 2 && moved[0].first == store.id(mine) && moved[1].first == store.id(unmarked));
+    CHECK(moved.size() == 2 && moved[0].second.x == 1.0f && moved[0].second.y == 1.0f && moved[0].second.z == 0.0f);
+    const auto suspended = [&bridge, &store](objects::ObjectHandle o) {
+        const ScriptObjectState* s = bridge.find_state(store.id(o));
+        return s && s->end_cinematic_suspended;
+    };
+    CHECK(suspended(mine) && suspended(unmarked) && !suspended(actor) && !suspended(neutral) && !suspended(rock));
+    // No teleport hook: the store position. The bridge state is saved (version 4) and hashed once set.
+    hooks.teleport = nullptr;
+    CHECK(run(vm, "Do_End_Cinematic_Cleanup()") == "");
+    CHECK(store.position(mine).x == 1.0f && store.position(mine).y == 1.0f && store.position(unmarked).x == 1.0f &&
+          store.position(actor).x == 200.0f && store.position(neutral).x == 300.0f && store.position(rock).x == 400.0f);
+    ByteWriter w;
+    bridge.write(w);
+    ObjectBridge back;
+    ByteReader r(w.bytes());
+    CHECK(back.read(r) && r.done());
+    const ScriptObjectState* bs = back.find_state(store.id(unmarked));
+    CHECK(bs && bs->end_cinematic_suspended && !(back.find_state(store.id(actor)) && back.find_state(store.id(actor))->end_cinematic_suspended));
+    StateHasher ha, hb;
+    bridge.hash(ha);
+    back.hash(hb);
+    CHECK(ha.digest() == hb.digest());
+    attach_object_bridge(vm, nullptr);
+    fs::remove_all(root, ec);
 }
 
 static void test_argument_contracts() {
@@ -473,7 +625,7 @@ static void test_save_load() {
     const PresentationState& sa = la.state();
     CHECK(sa.camera == CameraMode::Cinematic && sa.controls_locked && sa.movie == "Mid_Movie" && sa.movie_block != 0 &&
           !sa.hidden_sub_objects.empty() && !sa.emitters.empty() && !sa.in_end_cinematic.empty() && la.events().size() > 10 &&
-          la.particle_effects().size() == 1);
+          la.particle_effects().empty());  // storyb t17: the 'Trooper' effect is an object
     ByteWriter wl;
     la.write(wl);
     ByteWriter wv;
@@ -550,10 +702,41 @@ static void test_save_load() {
     attach_presentation(b, nullptr);
 }
 
+// ui2 t03: a position argument is resolved when the script calls: "@pos", x, y, z follow the call's own arguments.
+static void test_camera_positions() {
+    World w;
+    LuaHost h = w.host();
+    LuaVm vm(h);
+    PresentationLog log;
+    attach_presentation(vm, &log);
+    CHECK(run(vm, std::string(kFind) +
+                      "Set_Cinematic_Camera_Key(Create_Position(1, 2, 3), 4, 5, 6, 0, 0, 0, 0) Point_Camera_At(Create_Position(7, 8, 9)) "
+                      "Transition_Cinematic_Target_Key(trooper, 2, 0, 0, 7, 0, trooper, 0, 0) Scroll_Camera_To(trooper)") == "");
+    const auto& ev = log.events();
+    CHECK(ev.size() == 4);
+    CHECK(ev[0].args.size() == 12 && ev[0].args[8].text == "@pos" && ev[0].args[9].number == 1.0 && ev[0].args[10].number == 2.0 &&
+          ev[0].args[11].number == 3.0);
+    CHECK(ev[1].op == PresentationOp::PointCameraAt && ev[1].args.size() == 5 && ev[1].args[1].text == "@pos" && ev[1].args[2].number == 7.0 &&
+          ev[1].args[4].number == 9.0);
+    CHECK(ev[2].args.size() == 13 && ev[2].args[9].text == "@pos");  // the object's own position at call time
+    CHECK(ev[3].args.size() == 5 && ev[3].args[1].text == "@pos");
+    // ui2 t08: Play_Lightning_Effect carries the resolved end (param 2) and start (param 3) after its own arguments.
+    CHECK(run(vm, "Play_Lightning_Effect('Zap', Create_Position(1, 2, 3), Create_Position(4, 5, 6))") == "");
+    const PresentationEvent& zap = log.events().back();
+    CHECK(zap.op == PresentationOp::PlayLightningEffect && zap.args.size() == 11 && zap.args[0].text == "Zap");
+    CHECK(zap.args[3].text == "@pos" && zap.args[4].number == 1.0 && zap.args[6].number == 3.0);
+    CHECK(zap.args[7].text == "@pos" && zap.args[8].number == 4.0 && zap.args[10].number == 6.0);
+    attach_presentation(vm, nullptr);
+}
+
 int main() {
     test_registry();
     test_argument_contracts();
+    test_set_new_environment();
+    test_promote_to_space_cinematic_layer();
+    test_end_cinematic_cleanup();  // mcx6
     test_object_effects();
+    test_camera_positions();
     test_cinematic_sequence();
     test_private_log_and_digest();
     test_blocking();

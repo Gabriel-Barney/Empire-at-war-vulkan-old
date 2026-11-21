@@ -52,21 +52,34 @@
 namespace alamo::game {
 
 inline constexpr uint16_t kStoryUiSubtype = 0x5355;  // "SU"
+// limit: guard story UI wire: name bytes (truncated)
 inline constexpr size_t kStoryUiMaxName = 255;
 inline constexpr uint8_t kStoryUiTacticalBit = 0x80;
 commands::EventData story_ui_event(const sim::StoryUiNotification& n);
 // False when `ev` is not a well-formed story UI event (n.player is left at -1: the issuer fills it).
 bool read_story_ui_event(const commands::EventData& ev, sim::StoryUiNotification& n);
+// bkc1 t01 (BKC1_RE_ANSWERS Q1): the local player's Esc during a story cinematic camera as a port-only command (no
+// payload). Retail calls Story_Handle_Esc from the message pump between ticks; the port records the key and applies it at
+// the next command phase (GameSession::port_event -> sim::StorySession::handle_esc), so replays repeat it.
+inline constexpr uint16_t kStoryEscSubtype = sim::kStoryEscSubtype;  // "SE"
+commands::EventData story_esc_event();
 
 // A presentation cue of a fired story reward (story_reward_media).
 struct StoryMediaCue {
-    // Movie = full-screen START_MOVIE; AdvisorMovie = MULTIMEDIA's *_Loop talking head; AdvisorStop = STOP_COMMANDBAR_MOVIE.
-    enum class Kind : uint8_t { Movie, Speech, AdvisorMovie, AdvisorStop };
+    // Movie = full-screen START_MOVIE; AdvisorMovie = MULTIMEDIA's *_Loop talking head; AdvisorStop = STOP_COMMANDBAR_MOVIE;
+    // Sfx = the SFX reward's event (STORY_REWARDS_GALACTIC §1.22: played through the SFX manager, 2D).
+    enum class Kind : uint8_t { Movie, Speech, AdvisorMovie, AdvisorStop, Sfx };
     Kind kind = Kind::Movie;
     std::string name;
+    bool loop = false;  // AdvisorMovie: COMMANDBAR_MOVIE P2 / MULTIMEDIA P10 != 0 (STORY_PRESENTATION_REWARDS.md 1.3, 6.2); else it plays once
 };
-// Appends the cues of one fired reward (type upper-case as in StoryFired; params[0] = Reward_Param1).
+// Appends the cues of one fired reward (type upper-case as in StoryFired; params[0] = Reward_Param1): START_MOVIE (P1), SPEECH (P1),
+// MULTIMEDIA (P8 speech, P9 talking head with the P10 loop flag), COMMANDBAR_MOVIE (P1 head, P2 loop), STOP_COMMANDBAR_MOVIE,
+// SFX (P1).
 void story_reward_media(std::string_view reward_type, const std::vector<std::string>& params, std::vector<StoryMediaCue>& out);
+// ref5 t02: story_reward_media has a handler registered for `reward_type` (upper case); the media rewards in registration order.
+bool story_reward_media_handles(std::string_view reward_type);
+std::vector<std::string_view> story_reward_media_names();
 
 // One frame of the galactic UI as the story sees it (object ids of the galactic store, 0 = none).
 struct StoryUiView {
@@ -75,6 +88,8 @@ struct StoryUiView {
     bool zoomed = false;              // the galactic camera is zoomed onto a planet (GalacticCamera::zoomed)
     uint32_t zoom_planet = 0;         // the planet the camera zoomed onto (0 = unknown: `planet`)
     uint32_t corruption_planet = 0;   // the open corruption panel's planet (0 = closed)
+    uint32_t special_kind = 0;        // STY1 t03: the open special dialog's SpecialAbility kind (0 = none)
+    uint8_t drag = 0;                 // STY1 t03: galactic HUD drag in progress: 1 fleet / unit, 2 land force, 0 none
 };
 
 class StoryUiFeed {

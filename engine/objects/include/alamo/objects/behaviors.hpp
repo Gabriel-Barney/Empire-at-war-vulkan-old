@@ -27,11 +27,15 @@ inline constexpr BehaviorTypeId Locomotor = 0x01, Selectable = 0x02, Planet = 0x
                                 Team = 0x16, TacticalSuperWeapon = 0x2C, TransportLanding = 0x36, Hint = 0x4A,
                                 DummyUpgrade = 0x65, Powered = 0x0F, LandObstacle = 0x14, DeployTroopers = 0x1C,
                                 Barrage = 0x1D, Landing = 0x1E, IndigenousUnit = 0x20, Hunt = 0x21,
-                                GuardSpawnHouse = 0x22, Lure = 0x23, BaseShield = 0x39, SelfDestruct = 0x43;
+                                GuardSpawnHouse = 0x22, Lure = 0x23, BaseShield = 0x39, SelfDestruct = 0x43,
+                                HolsterWeapon = 0x4E, DisableForceAbilities = 0x52;  // cu8f (CU8F_T01_T02_T07_RE.md)
 }
 
 // XML behaviour name (ASCII case-insensitive) -> type id; kNoBehavior if unknown.
 BehaviorTypeId behavior_type_id(std::string_view xml_name);
+// map1 t04 (docs/re/Q6_T30_FIND_HINT_ORDER.md 3): a map record's extra behaviour (.ted chunk 0x4B8 mini 0) names its behaviour
+// by alamo::name_crc of the XML name (every shipped entry is HINT, 0x0253EEE7) -> type id; kNoBehavior if unknown.
+BehaviorTypeId behavior_type_id_from_crc(uint32_t crc);
 
 // Service class of a behaviour (OBJECT_RUNTIME.md §9.1): whether it is serviced at all and its
 // service interval in frames. Never serviced: TACTICAL_BUILD_OBJECTS, MARKER, HINT, TRANSPORT,

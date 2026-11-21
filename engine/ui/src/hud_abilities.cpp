@@ -1,8 +1,8 @@
 #include "alamo/ui/hud_abilities.hpp"
 
 #include <algorithm>
-#include <cctype>
 
+#include "alamo/core/ascii.hpp"
 #include "alamo/ui/targeting.hpp"
 
 #ifdef ALAMO_UI_HAVE_ABILITIES
@@ -55,7 +55,7 @@ std::string ability_icon(uint8_t t) {
     }
     std::string n = ability_type_info(t).name;
     if (n.empty()) return {};
-    for (char& ch : n) ch = static_cast<char>(std::tolower(static_cast<unsigned char>(ch)));
+    ascii_lower_in_place(n);
     return "i_sa_" + n + ".tga";
 #else
     return {};
@@ -70,6 +70,8 @@ void abilities_from_s9(const tactical::abilities::AbilitySystem& sys, const Sele
         const auto type = static_cast<uint8_t>(t);
         bool any = false;
         std::string alternate;  // t42: Alternate_Icon_Name of the first member's record (hud_abilities.hpp)
+        std::string alt_name, alt_desc;  // mcx4 t14: that record's Alternate_Name_Text / Alternate_Description_Text
+        bool have_record = false;
         HudAbility a;
         a.ability_type = type;
         a.recharge = 0.0f;
@@ -80,6 +82,11 @@ void abilities_from_s9(const tactical::abilities::AbilitySystem& sys, const Sele
             any = true;
             if (const tactical::abilities::UnitAbilityRecord* rec = alternate.empty() ? sys.record(id, type) : nullptr)
                 alternate = rec->alternate_icon_name;
+            if (const tactical::abilities::UnitAbilityRecord* rec = have_record ? nullptr : sys.record(id, type)) {
+                have_record = true;
+                alt_name = rec->alternate_name_text;
+                alt_desc = rec->alternate_description_text;
+            }
             const bool active = sys.is_active(id, type);
             a.active = a.active || active;
             a.autofire = a.autofire || sys.is_autofire(id, type);
@@ -95,6 +102,16 @@ void abilities_from_s9(const tactical::abilities::AbilitySystem& sys, const Sele
         a.targeted = k != TargetKind::None;
         a.target_kind = static_cast<uint8_t>(k);
         a.icon = alternate.empty() ? ability_icon(type) : std::move(alternate);
+        // ui3 t07: the MasterTextFile pair TEXT_TOOLTIP_ABILITY_<type>_NAME / _DESCRIPTION; mcx4 t14 (MCX4_PRES_RE_ANSWERS_2
+        // Q5, tooltip 0x2f3e20): the first member's record's Alternate_Name_Text / Alternate_Description_Text replace each
+        // key when set. Two keys: two lines.
+        if (const std::string_view n = tactical::abilities::ability_type_info(type).name; !n.empty() && n != "NONE") {
+            // ledger: consumes Unit_Ability.Alternate_Name_Text
+            const std::string name_key = alt_name.empty() ? "TEXT_TOOLTIP_ABILITY_" + std::string(n) + "_NAME" : alt_name;
+            // ledger: consumes Unit_Ability.Alternate_Description_Text
+            const std::string desc_key = alt_desc.empty() ? "TEXT_TOOLTIP_ABILITY_" + std::string(n) + "_DESCRIPTION" : alt_desc;
+            a.tooltip_key = name_key + " " + desc_key;
+        }
         out.push_back(std::move(a));
     }
 }

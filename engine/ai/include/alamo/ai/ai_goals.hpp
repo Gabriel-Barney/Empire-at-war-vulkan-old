@@ -6,8 +6,8 @@
 // `quota` evaluations; when the pass completes: budget weights (hook), Commit, then
 //   quota = clamp(min(ceil(evalsLastPass / (FPS*5)), (int)(20 / max(1, players - activeHumans) + 0.5)), >= 1)
 // and countdown = the difficulty's Goal_Cycle_Sleep frames.
-// [port] The quota of the very first pass is the cap term (no previous pass exists; the original's initial
-// value is not traced).
+// First pass: GoalSystemConfig::retail_cadence (galactic, a2m r2) seeds it from sources x targets; otherwise [port] the
+// quota of the very first pass is the cap term.
 //
 // PROPOSAL CURSOR (0x6cb120, §1.5): sources = the player type's (goal type, function) pairs in
 // GoalProposalFunctionSets order, filtered by the context's mode. For each proposable source (block list
@@ -54,8 +54,11 @@
 // and reserves at accept (refresh_plan); maintenance re-reserves every surviving goal.
 #pragma once
 #include <cstdint>
+#include <functional>
 #include <map>
+#include <span>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include "alamo/ai/ai_definitions.hpp"
@@ -75,6 +78,9 @@ namespace alamo::ai {
 struct GoalSource {
     uint32_t goal_type = kAiNone;
     std::string function;  // perception equation name
+    // sp4a (S7) [port]: the mode's id for `function`, resolved once by GoalSystem::init (GoalModeHooks::resolve_function);
+    // kAiNone = evaluated by name. Not hashed or saved (rebuilt with the sources).
+    uint32_t equation = kAiNone;
 };
 
 // InstantiatedGoal (+0x48..+0x90).
@@ -107,10 +113,24 @@ class GoalModeHooks {
 public:
     virtual ~GoalModeHooks() = default;
     virtual uint32_t target_count() = 0;
+    // The target id at position i (0 <= i < target_count()) of the mode's perception target list, the order the
+    // proposal walk visits targets in. Default: the identity.
+    virtual int32_t target_at(uint32_t i) { return static_cast<int32_t>(i); }
     virtual bool applies(int32_t target, uint32_t application_flags) = 0;  // target slot 4
     virtual bool blocked(uint32_t goal_type, int32_t target) = 0;          // slot 9 reachability lookup
     // Perception for (self, opponent, human, target); `function` names an equation.
     virtual bool evaluate(const std::string& function, int32_t target, double& out) = 0;
+    // sp4a (S7): equation names resolved at load. resolve_function() runs once per source in GoalSystem::init (kAiNone =
+    // none); evaluate_resolved() is evaluate() for a source whose id it gave (`function` is still passed, for diagnostics).
+    // Defaults: no ids, evaluation by name.
+    virtual uint32_t resolve_function(const std::string& function) {
+        (void)function;
+        return kAiNone;
+    }
+    virtual bool evaluate_resolved(uint32_t equation, const std::string& function, int32_t target, double& out) {
+        (void)equation;
+        return evaluate(function, target, out);
+    }
     // Slot 10 (galactic 0x6b8660): Find_Plan_For_Goal + PotentialPlan + time/budget gross test. Fills
     // g.plan / g.pp_* / g.cost / g.eta (galactic: g.nominal_time). False rejects the candidate.
     virtual bool accept(Goal& g) = 0;
@@ -118,6 +138,9 @@ public:
     // galactic mode refreshes g.nominal_time from the re-solved selection (AllowedTime reads the PP live, A2f t09).
     virtual bool plan_activatable(Goal& g) = 0;
     virtual bool plan_invalid(const Goal& g) = 0;      // 0x6c47c0 (-> 0x6c45e0: a unit taken by another PP)
+    // skai t15 (SKAI_T15_PLAN_RETEST §2.1): Resolve_Category also re-validates an old candidate's running plan (no
+    // MagicPlan exception) and drops it when invalid. Tactical only so far [port: galactic keeps the earlier rule].
+    virtual bool retest_old_candidates() { return false; }
     virtual bool replaceable(const Goal& g) = 0;       // 0x692740
     virtual void refresh_plan(Goal& g) = 0;            // 0x6c2d60: reserve / re-assert (+0x30 = PP)
     // 0x6c0be0's reservation part, Commit step 4, every active goal with a PotentialPlan, every Commit: its free-store
@@ -125,6 +148,8 @@ public:
     virtual void suspend_reservations(Goal& g) = 0;
     virtual bool uses_budget() = 0;                    // galactic context
     virtual bool can_fund(const Goal& g) = 0;          // 0x6129c0 (true when no budget)
+    // Accept-time gross test 0x6139f0 (slot 10 only; A2M_R3_RE_A §1.1): P / I instead of A / R. Default: can_fund.
+    virtual bool can_fund_accept(const Goal& g) { return can_fund(g); }
     virtual float category_credits(int32_t category) = 0;  // cat+0x44 (positive when no budget)
     virtual void budget_add(Goal& g) = 0;
     virtual void budget_release(Goal& g) = 0;
@@ -182,6 +207,28 @@ struct GoalSystemConfig {
     // Build_Time_Delay_Tolerance, and nominal_time is hashed. The galactic AI (A2f t09) and the tactical AI (A2g t06,
     // Land_ / Space_Build_Time_Multiplier) set it; off keeps the PP ETA x tolerance base.
     bool nominal_allowed_time = false;
+    // a2m r2 (A2M_R2_RE_A §2.1) [H], set by the galactic AI: the goal-system Init 0x6ca1f0 seeds evalsLastPass with
+    // sources x max(1, targets), the first quota comes from that seed, and the seed is not cleared, so pass 1's
+    // evaluations add to it; a slice ends as soon as its counter reaches the quota (a pass of E evaluations at quota q
+    // takes floor(E / q) + 1 frames). Off (the tactical AI, not re-checked): first quota = the cap term, a slice scans on
+    // to the next counted candidate.
+    bool retail_cadence = false;
+    // bkg3 (BKG3_RE_ANSWERS Q4, 0x721a50 / 0x6b83c0) [H], set by the galactic AI: 'the goal is already active' (slot 9, and
+    // Resolve's kept-or-active test) holds when a goal on the same target has a type whose like-set (GoalTypeDef::like_set)
+    // contains the candidate's type, not only for the exact (type, target); the greedy lastOld rule accepts the goal first
+    // and needs the same target. Retail uses the same lookup in land and space: the tactical AI sets it too (aitac t04).
+    // Off: the exact (type, target) test, lastOld stop before the accept.
+    bool like_sets = false;
+    // skai t17 (AI_GALACTIC §1.6 steps 3-6, BKG3_RE_ANSWERS Q4: 0x6c8970 / 0x721a50) [H]: an old candidate (a replaceable
+    // incumbent with eff < best) is neither in this Resolve's kept set nor active, so the greedy and weighted phases may
+    // accept it again (its plan keeps running; the accept test is the validity test only). Off: an old candidate is
+    // treated as kept or active and always released. [port] Only the tactical space AI sets it so far (lane skai-b: land
+    // and galactic goldens are other lanes'; follow-ups on the roadmap).
+    bool reaccept_old_candidates = false;
+    // skai t15 (SKAI_T15_TARGET_CHOICE Q3, 0x7222c0 [H]): Commit step 1 writes the re-evaluated desire only when the
+    // evaluation succeeds; a failed one keeps the incumbent's old desire. Off: a failed evaluation sets it to 0. [port] Only
+    // the tactical land AI sets it so far (the same function serves space and galactic: their lanes' goldens, follow-ups).
+    bool keep_desire_on_failed_eval = false;
 };
 
 class GoalSystem {
@@ -189,6 +236,9 @@ public:
     void init(const AiDefinitions& defs, std::vector<GoalSource> sources, GoalModeHooks* hooks, LearningSystem* learning,
               const TemplateSystem* templates, SimRng* rng, GoalSystemConfig cfg);
     void service(int64_t now);  // Goal subsystem Service (every frame)
+    // skm2 t01 (SKIRMISH_SETUP 1.1, Set_Difficulty): a new difficulty's Goal_Cycle_Sleep_Duration frames; a running sleep
+    // keeps its countdown, the next commit sleeps the new value. Configuration, like init's (not saved: the host rebuilds it).
+    void set_sleep_frames(int32_t frames) { cfg_.sleep_frames = frames; }
 
     // ---- state queries ----
     const std::vector<GoalSource>& sources() const { return sources_; }
@@ -198,6 +248,7 @@ public:
     int32_t countdown() const { return countdown_; }
     uint32_t evaluations_last_pass() const { return evals_last_; }
     uint32_t passes() const { return passes_; }
+    const GoalSystemConfig& config() const { return cfg_; }  // aitac t04
     bool accept_pending() const { return pending_ready_ >= 0; }  // OPT2 t10: batched-accept solves in flight
     int64_t accept_ready_frame() const { return pending_ready_; }
     uint32_t commits() const { return commits_; }
@@ -216,6 +267,8 @@ public:
     void purge(int32_t keep_running);
     Goal* find_active_by_running(int32_t running);
     Goal* find_active(uint32_t goal_type, int32_t target);
+    // bkg3: 0x721a50 on the active set: a goal on `target` (any category) whose type's like-set holds `goal_type`.
+    bool active_like(uint32_t goal_type, int32_t target) const;
     // Block list +0x2a0 (AI_GALACTIC_2 §5.1) [H]: TaskForce.Block_Goal_Proposal clears the proposed set and
     // appends the plan's goal (key = goal serial); Unblock removes every occurrence. While non-empty nothing
     // is proposed or activated.
@@ -256,7 +309,6 @@ private:
     std::vector<std::vector<Goal>> active_, proposed_;
     std::vector<int32_t> exclusion_;  // per goal type (+0x260)
     std::vector<uint32_t> block_list_;  // +0x2a0 (goal serials)
-    bool blocked_ = false;              // = !block_list_.empty()
     // OPT2 t03: one slice's candidates (visit order) and their batched values; scratch, rebuilt every slice
     struct Candidate {
         uint32_t source = 0;
@@ -279,5 +331,17 @@ private:
     uint32_t next_serial_ = 1;
     int64_t now_ = 0;
 };
+
+// a2m r2 / bkx1 t01 (A2M_R2_RE_A §2.1, BKX1_CADENCE_RE §2) [H]: the goal quota cap's N - H. N = the global PlayerList:
+// Create_Default_Players 0x293390 puts the session players first, then one player for every faction of the faction table
+// that has no player yet; players are never removed. H = the human players. The same count for the galactic AI and every
+// battle (skirmish or campaign). A faction defined twice under one name counts once [port]. (FoC: 8 factions, so HotM and
+// a 1v1 skirmish with one human give 7.)
+struct QuotaPlayer {
+    size_t faction = 0;
+    bool human = false;
+};
+int32_t goal_quota_players(std::span<const QuotaPlayer> players, size_t faction_count,
+                           const std::function<std::string_view(size_t)>& faction_name);
 
 }  // namespace alamo::ai

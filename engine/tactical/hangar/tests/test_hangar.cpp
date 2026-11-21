@@ -5,6 +5,7 @@
 // abilities module (Starbase_Upgrade_Ability service -> StationUpgrade + RemoveSilently -> complete_station_upgrade);
 // engine loop requests; a repeat determinism check; and FoC data (ALAMO_FOC_DATA: an Empire station upgraded
 // mid-battle, a Star Destroyer launching and replacing squadrons).
+#include <array>
 #include <cstddef>
 #include <cstdio>
 #include <cstdlib>
@@ -21,6 +22,7 @@
 #include "alamo/tactical/hangar/contents.hpp"
 #include "alamo/tactical/hangar/engine_loops.hpp"
 #include "alamo/tactical/hangar/hangar_system.hpp"
+#include "alamo/test/support.hpp"
 #ifdef ALAMO_HANGAR_TESTS_HAVE_DATA
 #include "alamo/objects/behaviors.hpp"
 #include "alamo/objects/game_object_types.hpp"
@@ -36,14 +38,7 @@ namespace ta = alamo::tactical::abilities;
 
 namespace {
 
-int g_fail = 0;
-#define CHECK(c)                                                     \
-    do {                                                             \
-        if (!(c)) {                                                  \
-            std::printf("FAIL %s:%d: %s\n", __FILE__, __LINE__, #c); \
-            ++g_fail;                                                \
-        }                                                            \
-    } while (0)
+using ::alamo::test::g_fail;
 
 bool near(float a, float b) { return a - b < 0.01f && b - a < 0.01f; }
 bool near3(Vec3 a, Vec3 b) { return near(a.x, b.x) && near(a.y, b.y) && near(a.z, b.z); }
@@ -455,7 +450,7 @@ void test_engine_loops() {
         const auto got = e.requests();
         bool ok = got.size() == want.size();
         for (size_t i = 0; ok && i < got.size(); ++i)
-            ok = got[i].id == want[i].id && got[i].loop == want[i].loop && got[i].start == want[i].start;
+            ok = got[i].id == want[i].id && got[i].loop == want[i].loop && got[i].start == want[i].start && got[i].op == want[i].op;
         CHECK(ok);
         e.clear_requests();
     };
@@ -482,16 +477,215 @@ void test_engine_loops() {
     expect({{5, L::Idle, false, 10}});
     e.engines_online(5, 11);
     expect({{5, L::Idle, true, 11}});
-    e.suppress(5, 12);
-    expect({{5, L::Idle, false, 12}});
+    // cu8g t01: suppress = one Suppress request with the fade (the audio side stops every loop), flags off, blocked.
+    e.suppress(5, 12, 0.0f);
+    CHECK(e.requests().size() == 1 && e.requests()[0].fade == 0.0f);
+    expect({{5, L::Idle, false, 12, EngineLoopOp::Suppress}});
+    CHECK(!e.idle_on(5) && e.suppressed(5));
     e.locomotor_service(5, 20.0f, false, 13);
     expect({});
-    e.unsuppress(5);
+    e.unsuppress(5, 14);  // restarts nothing
+    expect({{5, L::Idle, false, 14, EngineLoopOp::Unsuppress}});
     e.locomotor_service(5, 20.0f, false, 14);
     expect({{5, L::Moving, true, 14}});
     CHECK(e.moving_on(5) && !e.idle_on(5));
     e.remove(5);
     CHECK(!e.moving_on(5) && e.requests().empty());
+    // Land Walk service: the same switch, moving call first.
+    e.walk_service(6, true, 15);
+    expect({{6, L::Moving, true, 15}});
+    e.walk_service(6, false, 16);
+    expect({{6, L::Moving, false, 16}, {6, L::Idle, true, 16}});
+}
+
+// cu8g t01 (CU8F_T01_T02_T07_RE.md §2.3): HOLSTER_WEAPON.
+void test_holster_weapon() {
+    using Op = EngineLoopOp;
+    using L = EngineLoop;
+    CHECK(holster_frames(0.17f, 30) == 5 && holster_frames(15.0f, 30) == 450 && holster_frames(0.2f, 30) == 6 &&
+          holster_frames(0.5f, 30) == 15 && holster_frames(-1.0f, 30) == 0 && holster_frames(0.05f, 30) == 2);
+    HolsterDesc vader;
+    vader.transition_frames = holster_frames(0.17f, 30);
+    vader.min_drawn_frames = holster_frames(15.0f, 30);
+    vader.disable_engine_loops = true;
+    EngineLoops e(10.0f);
+    std::vector<EngineLoopRequest> log;
+    auto take = [&] {
+        log.assign(e.requests().begin(), e.requests().end());
+        e.clear_requests();
+    };
+    auto has = [&](Op op) {
+        for (const EngineLoopRequest& q : log)
+            if (q.op == op) return true;
+        return false;
+    };
+    // Initialise before mode enter: suppressed with fade 0, the mode-enter idle-on is skipped (no hum).
+    e.holster_attach(1, 1);
+    e.mode_enter(1, 1);
+    take();
+    CHECK(log.size() == 1 && log[0].op == Op::Suppress && log[0].fade == 0.0f && log[0].id == 1);
+    CHECK(e.has_holster(1) && !e.holster_drawn(1) && e.suppressed(1) && !e.idle_on(1));
+    // Not engaged: nothing at any frame; engaged off the 15-frame cadence: nothing either.
+    for (uint32_t f = 2; f <= 31; ++f) e.holster_service(1, vader, f == 16 || f == 29, false, f);
+    take();
+    CHECK(log.empty() && !e.holster_drawn(1) && e.holster_last_engaged(1) == 0);
+    // Engaged on frame 45 (45 % 15 == 0): draw transition [45, 50], DrawWeapon, still suppressed.
+    e.holster_service(1, vader, true, false, 45);
+    take();
+    CHECK(log.size() == 1 && log[0].op == Op::DrawWeapon && e.holster_drawn(1) && e.holster_transitioning(1) && e.suppressed(1));
+    CHECK(e.holster_last_engaged(1) == 45);
+    for (uint32_t f = 46; f <= 49; ++f) e.holster_service(1, vader, false, false, f);
+    take();
+    CHECK(log.empty() && e.suppressed(1) && e.holster_transitioning(1));
+    // Transition end (frame 50 >= end): unsuppress; nothing restarts the hum until the Walk service.
+    e.holster_service(1, vader, false, false, 50);
+    take();
+    CHECK(log.size() == 1 && log[0].op == Op::Unsuppress && !e.suppressed(1) && !e.holster_transitioning(1) && !e.idle_on(1));
+    e.walk_service(1, false, 51);
+    take();
+    CHECK(log.size() == 1 && log[0].op == Op::Loop && log[0].loop == L::Idle && log[0].start && e.idle_on(1));
+    // Minimum drawn time: not engaged after 45 -> stays drawn while frame < 45 + 450 = 495; holsters at 495.
+    for (uint32_t f = 52; f < 495; ++f) e.holster_service(1, vader, false, false, f);
+    take();
+    CHECK(log.empty() && e.holster_drawn(1));
+    e.holster_service(1, vader, false, false, 495);
+    take();
+    // Holster start: HolsterWeapon, then suppress with each loop's own fade (-1).
+    CHECK(log.size() == 2 && log[0].op == Op::HolsterWeapon && log[1].op == Op::Suppress && log[1].fade < 0.0f);
+    CHECK(!e.holster_drawn(1) && e.suppressed(1) && !e.idle_on(1) && e.holster_transitioning(1));
+    // The holster transition completes without an unsuppress.
+    for (uint32_t f = 496; f <= 505; ++f) e.holster_service(1, vader, false, false, f);
+    take();
+    CHECK(log.empty() && e.suppressed(1) && !e.holster_transitioning(1));
+    // An engaged frame inside the window keeps it drawn: engaged at 510, not at 525 .. 945, holsters at 960.
+    e.holster_service(1, vader, true, false, 510);
+    for (uint32_t f = 511; f <= 959; ++f) e.holster_service(1, vader, false, false, f);
+    take();
+    CHECK(e.holster_drawn(1) && has(Op::DrawWeapon) && has(Op::Unsuppress) && !has(Op::HolsterWeapon));
+    e.holster_service(1, vader, false, false, 960);
+    take();
+    CHECK(!e.holster_drawn(1) && has(Op::HolsterWeapon));
+    // Without Holster_Disable_Engine_Loops: holster start / draw end leave the suppression alone.
+    HolsterDesc quiet = vader;
+    quiet.disable_engine_loops = false;
+    e.holster_attach(2, 1000);
+    e.holster_service(2, quiet, true, false, 1005);
+    for (uint32_t f = 1006; f <= 1010; ++f) e.holster_service(2, quiet, false, false, f);
+    take();
+    CHECK(e.holster_drawn(2) && e.suppressed(2) && !has(Op::Unsuppress));
+    // A thrown saber in flight holds the interpolation: the draw end (and its unsuppress) waits for the catch.
+    e.holster_attach(3, 1100);
+    e.holster_service(3, vader, true, false, 1110);
+    for (uint32_t f = 1111; f <= 1130; ++f) e.holster_service(3, vader, true, true, f);
+    take();
+    CHECK(e.holster_transitioning(3) && e.suppressed(3));
+    e.holster_service(3, vader, true, false, 1131);
+    take();
+    CHECK(!e.holster_transitioning(3) && !e.suppressed(3) && has(Op::Unsuppress));
+    // Objects without the behaviour (no bone): the service and the Saber_Throw entry points do nothing.
+    e.walk_service(4, false, 1200);
+    take();
+    e.holster_service(4, vader, true, false, 1215);
+    e.saber_throw(4, 1216);
+    e.saber_catch(4, 1217);
+    CHECK(e.requests().empty() && !e.has_holster(4) && e.idle_on(4));
+}
+
+// cu8g t01 (§2.3 Saber_Throw): throw = snap holstered + suppress(0); catch = snap drawn + suppress(0) too.
+void test_saber_throw_flight();  // cu8i t01 / cu8j t03
+
+void test_saber_throw() {
+    using Op = EngineLoopOp;
+    HolsterDesc luke;
+    luke.transition_frames = 5;
+    luke.min_drawn_frames = 450;
+    luke.disable_engine_loops = true;
+    EngineLoops e(10.0f);
+    e.holster_attach(1, 1);
+    e.holster_service(1, luke, true, false, 15);
+    for (uint32_t f = 16; f <= 20; ++f) e.holster_service(1, luke, true, false, f);
+    e.walk_service(1, false, 21);
+    CHECK(e.holster_drawn(1) && !e.suppressed(1) && e.idle_on(1));
+    e.clear_requests();
+    e.saber_throw(1, 22);
+    CHECK(e.requests().size() == 1 && e.requests()[0].op == Op::Suppress && e.requests()[0].fade == 0.0f);
+    CHECK(!e.holster_drawn(1) && e.suppressed(1) && !e.idle_on(1));
+    e.clear_requests();
+    e.walk_service(1, false, 23);  // suppressed: no hum
+    CHECK(e.requests().empty());
+    // The catch suppresses although it sets drawn: the hum stays off; with drawn == want no draw transition starts.
+    e.saber_catch(1, 25);
+    CHECK(e.requests().size() == 1 && e.requests()[0].op == Op::Suppress && e.requests()[0].fade == 0.0f);
+    CHECK(e.holster_drawn(1) && e.suppressed(1));
+    e.clear_requests();
+    for (uint32_t f = 26; f <= 120; ++f) e.holster_service(1, luke, true, false, f);
+    e.walk_service(1, false, 121);
+    CHECK(e.requests().empty() && e.suppressed(1));
+    // Holster (after the minimum drawn time) then a new draw: the hum returns at that draw's end.
+    for (uint32_t f = 121; f <= 600; ++f) e.holster_service(1, luke, false, false, f);
+    CHECK(!e.holster_drawn(1));
+    e.clear_requests();
+    for (uint32_t f = 601; f <= 620; ++f) e.holster_service(1, luke, true, false, f);
+    CHECK(e.holster_drawn(1) && !e.suppressed(1));
+    e.walk_service(1, true, 621);
+    CHECK(e.moving_on(1));
+    test_saber_throw_flight();
+}
+
+// cu8j t03 (CU8F_T01_T02_T07_RE §2.6 / §2.7, `luke` run 2): Luke drawn, the ability applied at 1505, the saber thrown 7
+// frames later (1512: snap holstered + suppress); the Service starts a draw at 1515 that the flight holds past its end
+// (1520). Caught at step 32 (1544: snap drawn + suppress), the ability ends 11 frames later (1555); the host's loop
+// (hg_holster_service: saber_service before, holster_service with saber_in_flight, saber_service after) clears the
+// transition and unsuppresses the frame after the END, not the catch; the idle loop returns at the next walk service.
+// Run 1 (no catch: the saber dies on its way back): no catch snap, the same return the frame after the end.
+static void run_saber_flight(bool caught) {
+    using Op = EngineLoopOp;
+    HolsterDesc luke;
+    luke.transition_frames = 5;
+    luke.min_drawn_frames = 450;
+    luke.disable_engine_loops = true;
+    EngineLoops e(10.0f);
+    e.holster_attach(1, 1);
+    for (uint32_t f = 1500; f <= 1505; ++f) e.holster_service(1, luke, true, false, f);  // drawn 1500..1505
+    e.walk_service(1, false, 1506);
+    CHECK(e.holster_drawn(1) && !e.suppressed(1) && e.idle_on(1));
+    e.clear_requests();
+    e.saber_schedule(1, 1512, caught ? 1544u : 0u, 1555);
+    CHECK(!e.saber_in_flight(1) && e.saber_throw_frame(1) == 1512 && e.saber_end_frame(1) == 1555 && e.requests().empty());
+    auto host_frame = [&](uint32_t f) {  // hg_holster_service's order, then the walk service
+        e.saber_service(1, f, true);
+        e.holster_service(1, luke, true, e.saber_in_flight(1), f);
+        e.saber_service(1, f, false);
+        e.walk_service(1, false, f);
+    };
+    uint32_t unsuppressed_at = 0, idle_at = 0, draws = 0, throws = 0, catches = 0;
+    for (uint32_t f = 1507; f <= 1560; ++f) {
+        host_frame(f);
+        for (const EngineLoopRequest& q : e.requests()) {
+            if (q.op == Op::DrawWeapon) ++draws;
+            if (q.op == Op::Suppress && q.frame == 1512) ++throws;
+            if (q.op == Op::Suppress && q.frame == 1544) ++catches;
+            if (q.op == Op::Unsuppress && unsuppressed_at == 0) unsuppressed_at = q.frame;
+            if (q.op == Op::Loop && q.loop == EngineLoop::Idle && q.start && idle_at == 0) idle_at = q.frame;
+        }
+        e.clear_requests();
+        if (f == 1511) CHECK(!e.saber_in_flight(1) && e.holster_drawn(1));  // before the throw
+        if (f == 1512) CHECK(e.saber_in_flight(1) && !e.holster_drawn(1) && e.suppressed(1));
+        if (f == 1520 || f == 1554) CHECK(e.holster_transitioning(1) && e.suppressed(1));  // held while the saber flies
+        if (f == 1550) CHECK(e.saber_in_flight(1));                                           // in flight past the catch
+        if (f == 1555) CHECK(!e.saber_in_flight(1));
+    }
+    CHECK(draws == 1 && throws == 1 && catches == (caught ? 1u : 0u) && unsuppressed_at == 1556 && idle_at == 1556);
+    CHECK(!e.saber_in_flight(1) && e.holster_drawn(1) && !e.holster_transitioning(1) && !e.suppressed(1) && e.idle_on(1));
+    // Objects without the behaviour ignore the schedule.
+    e.saber_schedule(2, 1600, 0, 1630);
+    CHECK(!e.saber_in_flight(2) && e.saber_end_frame(2) == 0 && !e.has_holster(2));
+}
+
+void test_saber_throw_flight() {
+    run_saber_flight(true);
+    run_saber_flight(false);
+    // The stand-in (ta::saber_flight) is checked in the abilities tests; save round trip below (scripted saves).
 }
 
 // The same script twice gives the same hashed state and draws; a different script differs.
@@ -719,12 +913,16 @@ void test_contents_production() {
     cs2.hash(h2);
     CHECK(h1.digest() == h2.digest());
 
+    // mcx4 t04 (SKIRMISH_SETUP §3 service 0x498170 [H]): the head of each of a player's two queues counts down, whatever
+    // the builder; an order of the same queue at another builder waits.
     TacticalProduction tp(30);
-    const uint32_t a = tp.enqueue(0, 1, 7, 1.0f, 0);  // 30 frames
-    const uint32_t b = tp.enqueue(0, 1, 8, 0.5f, 0);  // 15 frames, after a (same builder)
-    const uint32_t c = tp.enqueue(1, 1, 9, 0.2f, 0);  // 6 frames, player 1's own list
-    const uint32_t d = tp.enqueue(0, 3, 9, 0.1f, 0);  // 3 frames, another builder of player 0: runs in parallel
-    CHECK(a && b && c && d && tp.count_type(0, 7) == 1 && tp.count_type(0, 9) == 1 && tp.queue(0).size() == 3);
+    const uint32_t a = tp.enqueue(0, 1, 7, 1.0f, 0);     // 30 frames, queue 0
+    const uint32_t b = tp.enqueue(0, 1, 8, 0.5f, 0);     // 15 frames, after a
+    const uint32_t c = tp.enqueue(1, 1, 9, 0.2f, 0);     // 6 frames, player 1's own queues
+    const uint32_t d = tp.enqueue(0, 3, 9, 0.1f, 0, 1);  // 3 frames, player 0's queue 1: runs in parallel with a
+    const uint32_t g = tp.enqueue(0, 4, 5, 0.1f, 0, 0);  // 3 frames, another builder but queue 0: after b
+    CHECK(a && b && c && d && g && tp.count_type(0, 7) == 1 && tp.count_type(0, 9) == 1 && tp.queue(0).size() == 4);
+    CHECK(tp.count_queue(0, 0) == 3 && tp.count_queue(0, 1) == 1 && tp.count_queue(1, 0) == 1);
     std::vector<std::pair<uint32_t, uint32_t>> done;  // (order, frame)
     for (uint32_t f = 1; f <= 60; ++f) {
         if (f == 10) CHECK(tp.retarget(0, 1, 2) == 2 && tp.retarget(1, 1, 2) == 0);  // progress kept
@@ -732,13 +930,16 @@ void test_contents_production() {
         for (const BuildOrder& o : tp.completed()) done.emplace_back(o.id, f);
         tp.clear_completed();
     }
-    CHECK(done.size() == 4);
-    if (done.size() == 4) {
+    CHECK(done.size() == 5);
+    if (done.size() == 5) {
         CHECK(done[0].first == d && done[0].second == 3);
         CHECK(done[1].first == c && done[1].second == 6);
         CHECK(done[2].first == a && done[2].second == 30);
         CHECK(done[3].first == b && done[3].second == 45);
+        CHECK(done[4].first == g && done[4].second == 48);
     }
+    // the completed-build counts (lifetime count 0x2821b0)
+    CHECK(tp.built_count(0, 7) == 1 && tp.built_count(0, 9) == 1 && tp.built_count(1, 9) == 1 && tp.built_count(1, 7) == 0);
     const uint32_t e = tp.enqueue(0, 2, 7, 1.0f, 60);
     CHECK(tp.cancel(e) && !tp.cancel(e));
     tp.enqueue(0, 2, 7, 1.0f, 60);
@@ -1291,7 +1492,7 @@ void test_hangar_save() {
     bad.push_back(0);
     CHECK(rejected(bad));
     bad = hg_bytes;
-    bad[0] = 2;
+    bad[0] = 3;  // r3g t03: versions 1 and 2 are read; 3 is unknown
     CHECK(rejected(bad));
     bad = hg_bytes;
     bad[4] = 3;  // descriptor count 3, the battle has 2
@@ -1342,9 +1543,18 @@ void test_contents_production_loops_save() {
     tp.enqueue(0, 1, 7, 1.0f, 0);
     tp.enqueue(0, 1, 8, 0.5f, 0);
     tp.enqueue(1, 1, 9, 0.2f, 0);
-    tp.enqueue(0, 3, 9, 0.1f, 0);
+    tp.enqueue(0, 3, 9, 0.1f, 0, 1);
     for (uint32_t f = 1; f <= 10; ++f) tp.update(f);
     CHECK(tp.completed().size() == 2);
+    {  // mcx4 t04: a version 1 production (no queue byte, no counts) still loads
+        ByteWriter w1;
+        w1.u32(1).u32(5).u32(1).u32(1);
+        w1.u32(4).i32(0).i32(1).i32(7).u32(30).u32(20).u32(0);  // one order, v1 layout
+        w1.u32(0);
+        TacticalProduction old(30);
+        ByteReader r1(w1.bytes());
+        CHECK(old.read(r1) && old.queue(0).size() == 1 && old.queue(0)[0].queue == 0 && old.built_count(0, 7) == 0);
+    }
     const std::vector<uint8_t> pb = bytes_of(tp);
     ByteReader rp(pb);
     CHECK(tp2.read(rp) && bytes_of(tp2) == pb && tp2.completed().size() == 2 && tp2.count_type(0, 7) == 1);
@@ -1384,18 +1594,40 @@ void test_contents_production_loops_save() {
     e.mode_enter(5, 1);
     e.locomotor_service(5, 20.0f, false, 2);
     e.mode_enter(3, 2);
-    e.suppress(3, 3);
-    CHECK(!e.requests().empty());
+    e.suppress(3, 3, 0.25f);
+    // cu8g t01: a holster hero mid draw transition (version 2: holster state, request op / fade)
+    HolsterDesc hd;
+    hd.transition_frames = 5;
+    hd.min_drawn_frames = 450;
+    hd.disable_engine_loops = true;
+    e.holster_attach(7, 3);
+    e.holster_service(7, hd, true, false, 15);
+    CHECK(!e.requests().empty() && e.holster_transitioning(7) && e.holster_drawn(7));
+    e.holster_attach(8, 3);  // cu8j t03 (version 4): a saber in flight (thrown at 4), caught at 30, ending at 34
+    e.saber_schedule(8, 4, 30, 34);
+    e.saber_service(8, 4, true);
     const std::vector<uint8_t> eb = bytes_of(e);
     ByteReader re(eb);
     CHECK(e2.read(re) && bytes_of(e2) == eb && e2.moving_on(5) && !e2.idle_on(3) && e2.requests().size() == e.requests().size());
+    CHECK(e2.has_holster(7) && e2.holster_drawn(7) && e2.holster_transitioning(7) && e2.holster_last_engaged(7) == 15 &&
+          e2.suppressed(7) && e2.saber_catch_frame(8) == 30 && e2.saber_end_frame(8) == 34 && e2.saber_in_flight(8) && !e2.saber_in_flight(7));
+    bool same_requests = true;
+    for (size_t i = 0; i < e.requests().size(); ++i) {
+        const EngineLoopRequest &a = e.requests()[i], &b = e2.requests()[i];
+        same_requests = same_requests && a.id == b.id && a.op == b.op && a.loop == b.loop && a.start == b.start &&
+                        a.frame == b.frame && a.fade == b.fade;
+    }
+    CHECK(same_requests);
     for (EngineLoops* l : {&e, &e2}) {
         l->clear_requests();
         l->locomotor_service(5, 0.0f, false, 4);
-        l->unsuppress(3);
+        l->unsuppress(3, 4);
         l->locomotor_service(3, 20.0f, false, 5);
+        for (uint32_t f = 16; f <= 20; ++f) l->holster_service(7, hd, true, false, f);  // the draw completes at 20
+        l->walk_service(7, false, 21);
     }
     CHECK(bytes_of(e) == bytes_of(e2) && e.moving_on(3) && e2.moving_on(3) && e2.idle_on(5));
+    CHECK(!e2.suppressed(7) && e2.idle_on(7) && !e2.holster_transitioning(7));
     EngineLoops e3(10.0f);
     e3.mode_enter(9, 0);
     const std::vector<uint8_t> e3_before = bytes_of(e3);
@@ -1404,17 +1636,145 @@ void test_contents_production_loops_save() {
         ByteReader t(std::span<const uint8_t>(eb.data(), len));
         if (e3.read(t)) ++accepted;
     }
-    // version, 2 objects (7 bytes each), request count, then the first request's id and loop byte
+    // version, 4 objects (33 bytes each), request count, then the first request's id and loop byte
     bad = eb;
-    bad[4 + 4 + 14 + 4 + 4] = 9;
+    bad[4 + 4 + 132 + 4 + 4] = 9;
     ByteReader reb(bad);
     CHECK(accepted == 0 && !e3.read(reb) && bytes_of(e3) == e3_before);
+    // cu8i t01: version 2 (no catch frame) still reads, with no saber in flight; cu8j t03: version 3 (the catch frame 40:
+    // in flight up to it, which is also the end) too; other versions do not.
+    for (const uint32_t version : {2u, 3u, 1u, 5u}) {
+        ByteWriter w2;
+        w2.u32(version).u32(1);
+        w2.i32(4).u8(0).u8(0).u8(1).u8(1).u8(1).u32(10).u32(15).u32(10);
+        if (version == 3) w2.u32(40);
+        w2.u32(0);
+        EngineLoops e4(10.0f);
+        ByteReader r4(w2.bytes());
+        const bool ok = e4.read(r4);
+        CHECK(ok == (version == 2 || version == 3));
+        if (ok) CHECK(e4.has_holster(4) && e4.holster_drawn(4) && e4.suppressed(4) && e4.saber_in_flight(4) == (version == 3));
+        if (ok && version == 3) CHECK(e4.saber_catch_frame(4) == 40 && e4.saber_end_frame(4) == 40);
+    }
+    {  // version 4: an end frame before the throw, or a throw / catch without an end, is refused
+        for (const std::array<uint32_t, 3> t : {std::array<uint32_t, 3>{50, 0, 40}, std::array<uint32_t, 3>{50, 60, 0}}) {
+            ByteWriter w2;
+            w2.u32(4).u32(1);
+            w2.i32(4).u8(0).u8(0).u8(1).u8(1).u8(1).u32(10).u32(15).u32(10).u32(t[0]).u32(t[1]).u32(t[2]);
+            w2.u32(0);
+            EngineLoops e4(10.0f);
+            ByteReader r4(w2.bytes());
+            CHECK(!e4.read(r4));
+        }
+    }
 }
 
 }  // namespace
 
+// r3g t03 (STATION_HANGARS_SOUND §2.5 "Land", §2.7; 0x594880 / 0x593760 / 0x593960): a land structure (no bays) at
+// (500, 0) facing +y, starting A x1 (unlimited reserve), 5 s delay, fly-out 50 (no bones). Services every 30 frames from 0.
+//   * clips Open 40 / Close 25 frames: Open at 0 (state 1); the service at 60 sees it finished -> the unit leaves (request
+//     land / leaving, at the structure, fly-out point 50 along the facing), Hold (looping), state 2; its exit move ends at
+//     75 (unit_left) -> Close (state 3, ends 100); the service at 120 -> state 0, next = 120 + 150. A x1 alive: nothing more.
+//     The unit dies at 300 (it already left: no Close) -> live 0, the respawn timer restarts: next = 150 + 300; Open at 450
+//     (the first service >= 450), the next unit at 510.
+//   * without clips: the unit leaves at the first service (no Open / Hold), its death while leaving closes at once:
+//     state 0 with next = int(now + 150).
+//   * Spawn_Garrison_On_Load (not skirmish): the first update spawns every entry x its count at once (A x2, B x1), none
+//     leaving, no clip; the structure then waits for losses.
+void test_land_structures() {
+    auto land_world = [](World& w, HangarDesc d, bool clips, bool skirmish, std::vector<int32_t>* played) {
+        w.make({d});
+        HangarConfig cfg;
+        cfg.land = true;
+        cfg.skirmish = skirmish;
+        w.hg = std::make_unique<HangarSystem>(*w.sys, std::vector<HangarDesc>{d}, cfg);
+        HangarHost h;
+        if (clips)
+            h.clip = [played](ObjectId, int32_t anim, bool loop, uint32_t& fin) {
+                if (played) played->push_back(anim);
+                fin = anim == 68 ? 40u : anim == 70 ? 25u : 0u;
+                return anim == 68 || anim == 70 || (anim == 69 && loop);
+            };
+        w.hg->set_host(std::move(h));
+        w.add(1, w.structure, 0, Vec3{500, 0, 0}, Vec3{0, 1, 0});
+        CHECK(w.hg->add_carrier(1, 0, 0, nullptr));  // due 0
+    };
+    HangarDesc d = one_entry_desc(1, -1, 5.0f);
+    d.default_flyout = 50.0f;
+    {
+        World w;
+        std::vector<int32_t> played;
+        land_world(w, d, true, true, &played);
+        w.step(0);
+        CHECK(w.hg->state(1) == 1 && w.log.empty() && played.size() == 1 && played[0] == 68);
+        w.run(1, 60);
+        CHECK(w.log.empty() && w.hg->state(1) == 1);  // the service at 30 still sees Open playing
+        w.step(60);
+        CHECK(w.log.size() == 1 && w.hg->state(1) == 2 && played.size() == 2 && played[1] == 69);
+        if (w.log.size() != 1) return;
+        const LaunchRequest& q = w.log[0];
+        CHECK(q.land && q.leaving && q.type == kTypeA && near3(q.origin, Vec3{500, 0, 0}) && near3(q.flyout, Vec3{500, 50, 0}));
+        const ObjectId u = w.log_id[0];
+        CHECK(w.hg->leaving_units().size() == 1 && w.hg->leaving_units()[0] == u);
+        w.run(61, 75);
+        CHECK(w.hg->state(1) == 2);  // waits for the exit move
+        w.hg->unit_left(u, 75);
+        CHECK(w.hg->state(1) == 3 && played.size() == 3 && played[2] == 70 && w.hg->leaving_units().empty());
+        w.run(75, 120);
+        CHECK(w.hg->state(1) == 3);  // the service at 90 sees Close playing (ends at 100)
+        w.step(120);
+        CHECK(w.hg->state(1) == 0 && w.hg->next_spawn_frame(1) == 270 && w.hg->live(1, 0) == 1);
+        w.run(121, 300);
+        CHECK(w.log.size() == 1);  // A x1 alive
+        w.lose(u, 300);
+        CHECK(w.hg->live(1, 0) == 0 && w.hg->next_spawn_frame(1) == 450 && w.hg->state(1) == 0);
+        w.run(300, 450);
+        CHECK(w.log.size() == 1 && w.hg->state(1) == 0);
+        w.step(450);
+        CHECK(w.hg->state(1) == 1 && played.back() == 68);
+        w.run(451, 511);
+        CHECK(w.log.size() == 2 && w.log_frame.back() == 510);
+        std::printf("land structure: open 0, out 60, left 75, closed 120 (next 270); lost 300 -> open 450, out %u\n",
+                    w.log_frame.empty() ? 0u : w.log_frame.back());
+    }
+    {
+        World w;
+        land_world(w, d, false, true, nullptr);
+        w.step(0);
+        CHECK(w.log.size() == 1 && w.hg->state(1) == 2);
+        if (w.log.size() != 1) return;
+        w.run(1, 40);
+        w.lose(w.log_id[0], 40);  // dies while leaving: Close without a clip -> state 0, next = int(40 + 150)
+        CHECK(w.hg->state(1) == 0 && w.hg->next_spawn_frame(1) == 190 && w.hg->live(1, 0) == 0);
+        w.run(40, 211);  // services at 60 .. 180 wait; 210 launches
+        std::printf("land structure, no clips: lost 40 -> next 190, out %u (%zu launches, state %u)\n",
+                    w.log_frame.empty() ? 0u : w.log_frame.back(), w.log.size(), static_cast<unsigned>(w.hg->state(1)));
+        CHECK(w.log.size() == 2 && w.log_frame.back() == 210);
+    }
+    {
+        World w;
+        HangarDesc g = two_entry_desc();
+        g.garrison_on_load = true;
+        std::vector<int32_t> played;
+        land_world(w, g, true, false, &played);
+        w.step(0);
+        CHECK(w.log.size() == 3 && played.empty() && w.hg->leaving_units().empty());
+        size_t a = 0, b = 0;
+        for (const LaunchRequest& q : w.log) {
+            CHECK(q.land && !q.leaving);
+            a += q.type == kTypeA ? 1u : 0u;
+            b += q.type == kTypeB ? 1u : 0u;
+        }
+        CHECK(a == 2 && b == 1 && w.hg->live(1, 0) == 2 && w.hg->live(1, 1) == 1 && w.hg->remaining(1, 0) == 1);
+        w.run(1, 300);
+        CHECK(w.log.size() == 3 && w.hg->state(1) == 0);  // full: no Open
+    }
+}
+
 int main() {
     test_parse();
+    test_land_structures();  // r3g t03
     test_launch_sequence();
     test_losses();
     test_gates_and_bays();
@@ -1422,6 +1782,8 @@ int main() {
     test_tech_community_pending();
     test_carrier_death();
     test_engine_loops();
+    test_holster_weapon();  // cu8g t01
+    test_saber_throw();     // cu8g t01
     test_determinism();
     test_station_upgrade_abilities();
     test_contents_production();

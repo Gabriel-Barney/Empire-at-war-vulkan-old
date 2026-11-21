@@ -61,10 +61,19 @@ struct HudTypeInfo {
     std::string icon_name;                // Icon_Name (selection panel portrait)
     // Radar (UI.md §1.7 per-type tags): Radar_Icon_Name (atlas texture, "" = the radar_blip dot), Radar_Icon_Size (x y in
     // the radar's logical space, -1..1 across the radar: canvas size = size x radar size / 2 [port]), Is_Visible_On_Radar /
-    // Is_Visible_On_Enemy_Radar (absent = Yes [port]). Radar_Icon_Scale_Land / _Space (vanilla 1 .. 200) and
-    // Radar_Rotate_Icon / Radar_Show_Facing are not applied (no reader documented; HudUnit has no facing) [port].
+    // Is_Visible_On_Enemy_Radar (absent = Yes [port]). mcx4 t14 (MCX4_PRES_RE_ANSWERS_3 Q12): Radar_Show_Facing (default
+    // Yes) turns an icon blip with the unit's yaw (radar_show_facing), Radar_Rotate_Icon turns its texture a quarter turn
+    // clockwise inside the quad (radar_rotate).
     std::string radar_icon;
     Vec2f radar_icon_size{0.0f, 0.0f};
+    // mcx4 t14 (MCX4_T14_RE_ANSWERS "GameObjectType.Radar_Icon_Scale_Land family", blip builders 0x35b4d0 / 0x35c000):
+    // the blip icon size multiplier in land / space mode (absent = 1). [port] applied to Radar_Icon_Name icons; the
+    // vanilla 80 / 200 values sit on team / fleet containers, which the port's radar does not draw.
+    float radar_scale_land = 1.0f, radar_scale_space = 1.0f;
+    // mcx4 t14 (same answer, registration GameModeClass vf87 0x362580): Radar_Register_As_Foreground_Object - the blip
+    // goes on the radar's foreground layer, drawn above the other blips.
+    bool radar_foreground = false;
+    bool radar_show_facing = true, radar_rotate = false;  // mcx4 t14: Radar_Show_Facing / Radar_Rotate_Icon
     bool visible_on_radar = true, visible_on_enemy_radar = true;
     // q6 t19 (OBJECT_SCRIPTS §10.3, radar filter 0x35b4d0): Visible_On_Radar_When_Fogged - a Lua-hidden unit keeps its blip.
     bool visible_on_radar_when_fogged = false;
@@ -105,6 +114,7 @@ struct HudUnit {
     Vec3 icon_anchor{};
     float icon_health = 1.0f;
     Rgba8 team_color{255, 255, 255, 255};  // snapshot team colour (radar blips)
+    float yaw_deg = 0.0f;  // mcx4 t14: the facing's angle from world +X, counter-clockwise, degrees (radar icon turn)
     // R5 sensor jamming (ABILITY_VISUALS 3, radar filter 0x35b4d0): Is_Jammed this tick. The radar drops the blip of a unit that is
     // hostile to the local player and jammed; the owner's and allies' radar still shows it.
     bool jammed = false;
@@ -114,6 +124,11 @@ struct HudUnit {
     // q6 t19 (OBJECT_SCRIPTS §10.3, same filter): Lua Hide(true) (render::SnapshotObject::script_hidden). The radar drops
     // its blip for every viewer unless the type has Visible_On_Radar_When_Fogged.
     bool script_hidden = false;
+    // map1 t01 (radar filter 0x35b4d0): hidden from the local player by the fog (render::kSnapFogHidden: HIDE_WHEN_FOGGED
+    // not visible, or a hostile Is_Stealthed object). The radar drops its blip unless Visible_On_Radar_When_Fogged.
+    bool fog_hidden = false;
+    // map1 t01 (same filter, obj +0x3A7): inside a garrison / transport (render::kSnapContained). No blip, whoever owns it.
+    bool contained = false;
 };
 
 // One live unit and the unit standing for its squadron / company (itself when alone): TacticalBattle::icon_links.
@@ -139,7 +154,8 @@ struct WorldHudContext {
     int32_t local_player = 0;
     std::function<bool(int32_t owner)> hostile;          // default: owner >= 0 && owner != local_player
     // Faction default selection material (Faction XML Land_ / Space_Mode_Selection_Blob_Material_Name; heroes
-    // Selection_<faction>_Hero) for an owner. Default [port]: "Selection_Empire_Land" / "Selection_Empire_Space".
+    // Selection_<faction>_Hero) for an owner. Null [port]: no material name (modc t20: no built-in faction name; the
+    // land blob then takes the material table's first entry, the space blob model does not read it).
     std::function<std::string(int32_t owner, bool land, bool hero)> selection_material;
     bool interface_hidden = false;  // byte 0x140b3069b: nothing world-anchored is drawn
     bool targeting_active = false;  // modal targeting controller: selection circles hidden

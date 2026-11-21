@@ -64,6 +64,28 @@ alamo_lua_patch(ltable.c
 alamo_lua_patch(ltable.c
   "      return hashpointer(t, gcvalue(key));\n"
   "      return hashmod(t, cast(lu_hash, gcvalue(key)->gch.alamo_serial));  /* alamo: serial, not address */\n")
+# Robustness (mcx2 t08, found by alamo_fuzz_smoke; not a semantic change for any chunk stock 5.0.2 loads safely): a
+# precompiled chunk (.lc in a mod) is read without bounds. lu_mem is 32-bit on Win64, so a string length or vector count
+# from the file whose byte size passes 4 GB wraps the allocation, and the read then writes past it (stock 5.0.2 and so
+# retail's Lua crash on such a file). Lengths above MAX_INT and counts whose vector does not fit lu_mem or an int read
+# are refused with a load error, like every other malformed chunk.
+alamo_lua_patch(lundump.c
+  " size_t size=LoadSize(S);\n if (size==0)\n"
+  " size_t size=LoadSize(S);\n if (size>(size_t)MAX_INT) luaG_runerror(S->L,\"bad string size in %s\",S->name);  /* alamo */\n if (size==0)\n")
+alamo_lua_patch(lundump.c
+  "static void LoadCode (LoadState* S, Proto* f)\n{\n int size=LoadInt(S);\n"
+  "/* alamo: a count whose vector fits lu_mem and one int-sized read */\nstatic int LoadCount (LoadState* S, size_t elem)\n{\n int n=LoadInt(S);\n if ((lu_mem)n > MAX_LUMEM/elem || (size_t)n > (size_t)MAX_INT/elem)\n  luaG_runerror(S->L,\"bad count in %s\",S->name);\n return n;\n}\n\nstatic void LoadCode (LoadState* S, Proto* f)\n{\n int size=LoadCount(S,sizeof(Instruction));\n")
+alamo_lua_patch(lundump.c " n=LoadInt(S);\n f->locvars=" " n=LoadCount(S,sizeof(LocVar));\n f->locvars=")
+alamo_lua_patch(lundump.c " int size=LoadInt(S);\n f->lineinfo=" " int size=LoadCount(S,sizeof(int));\n f->lineinfo=")
+alamo_lua_patch(lundump.c " n=LoadInt(S);\n f->k=" " n=LoadCount(S,sizeof(TObject));\n f->k=")
+# The header's test number is compared as (long)x: a NaN or out-of-range number from the file makes that cast undefined
+# (UBSan in alamo_fuzz_smoke, nightly gate 2026-11-20; wr0 t04). Such a number is refused first. Same outcome as retail:
+# on x86 the cast gives LONG_MIN there, which never equals (long)TEST_NUMBER, so stock 5.0.2 refuses the chunk too.
+# long is 32-bit (Windows x64 only).
+alamo_lua_patch(lundump.c
+  " x=LoadNumber(S);\n if ((long)x!=(long)tx)"
+  " x=LoadNumber(S);\n if (!(x>-2147483649.0 && x<2147483648.0) || (long)x!=(long)tx)  /* alamo: no undefined cast */")
+alamo_lua_patch(lundump.c " n=LoadInt(S);\n f->p=" " n=LoadCount(S,sizeof(Proto*));\n f->p=")
 # OI lua (L1 determinism, [port]): tostring() of a table / function / full userdata / thread prints the value's
 # creation serial (8 hex digits) instead of its address, so printed / concatenated / compared names are the same
 # on every run, worker count and compiler. alamo_lua_serial is the C API for the serial (0 for non-collectables).
@@ -186,6 +208,8 @@ endif()
 set_source_files_properties(${_lua_sources} PROPERTIES LANGUAGE CXX)
 
 add_library(alamo_lua_vm STATIC ${_lua_sources})
+set_property(TARGET alamo_lua_vm PROPERTY PRECOMPILE_HEADERS_REUSE_FROM)
+set_property(TARGET alamo_lua_vm PROPERTY DISABLE_PRECOMPILE_HEADERS ON)  # 'register=' define
 target_include_directories(alamo_lua_vm SYSTEM PUBLIC "${ALAMO_LUA_DIR}/include")
 target_compile_features(alamo_lua_vm PRIVATE cxx_std_20)
 # 'register' is gone in C++17; Lua 5.0 still spells it.
@@ -200,6 +224,7 @@ add_library(alamo_lua STATIC
   src/lua_vm.cpp
   src/gc_schedule.cpp
   src/bindings.cpp
+  src/bridge_hooks.cpp  # ref5 t04: the hook table (generated bridge_hooks.inc) and the wiring check
   src/bind_engine.cpp
   src/bind_registry.cpp
   src/bind_objects.cpp
@@ -285,7 +310,7 @@ target_include_directories(alamo_lua PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
 target_link_libraries(alamo_lua PUBLIC alamo_objects alamo_core alamo_engine_flags PRIVATE alamo_lua_vm)
 
 add_executable(alamo_lua_tests tests/test_lua.cpp)
-target_link_libraries(alamo_lua_tests PRIVATE alamo_lua alamo_lua_vm Threads::Threads)
+target_link_libraries(alamo_lua_tests PRIVATE alamo_lua alamo_lua_vm Threads::Threads alamo_test_support)
 # Binding coverage / script compile reports go to <project>/logs/lua_*.txt.
 target_compile_definitions(alamo_lua_tests PRIVATE "ALAMO_LUA_LOG_DIR=\"${PROJECT_SOURCE_DIR}/logs\"")
 if(TARGET alamo_vfs)
@@ -295,23 +320,20 @@ endif()
 add_test(NAME alamo_lua_tests COMMAND alamo_lua_tests)
 set_tests_properties(alamo_lua_tests PROPERTIES TIMEOUT 120)
 
-# One test exe per binding family (L1 stage 2), so families are developed in parallel without
-# touching each other's files. A family's test file is created by the agent that owns that family.
-foreach(_fam objects players story presentation tactical script_gaps fog script_remaining save gc script_save)
-  if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_lua_${_fam}.cpp)
-    add_executable(alamo_lua_${_fam}_tests tests/test_lua_${_fam}.cpp)
-    target_link_libraries(alamo_lua_${_fam}_tests PRIVATE alamo_lua alamo_lua_vm Threads::Threads)
-    target_include_directories(alamo_lua_${_fam}_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
-    if(TARGET alamo_vfs)
-      target_link_libraries(alamo_lua_${_fam}_tests PRIVATE alamo_vfs)
-      target_compile_definitions(alamo_lua_${_fam}_tests PRIVATE ALAMO_LUA_HAVE_VFS=1)
-    endif()
-    add_test(NAME alamo_lua_${_fam}_tests COMMAND alamo_lua_${_fam}_tests)
-    set_tests_properties(alamo_lua_${_fam}_tests PROPERTIES TIMEOUT 120)
+# One test exe per binding family (L1 stage 2): tests/test_lua_<family>.cpp.
+foreach(_fam objects players story presentation tactical script_gaps fog script_remaining save gc script_save binding_effects runaway)
+  add_executable(alamo_lua_${_fam}_tests tests/test_lua_${_fam}.cpp)
+  target_link_libraries(alamo_lua_${_fam}_tests PRIVATE alamo_lua alamo_lua_vm Threads::Threads alamo_test_support)
+  target_include_directories(alamo_lua_${_fam}_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+  if(TARGET alamo_vfs)
+    target_link_libraries(alamo_lua_${_fam}_tests PRIVATE alamo_vfs)
+    target_compile_definitions(alamo_lua_${_fam}_tests PRIVATE ALAMO_LUA_HAVE_VFS=1)
   endif()
+  add_test(NAME alamo_lua_${_fam}_tests COMMAND alamo_lua_${_fam}_tests)
+  set_tests_properties(alamo_lua_${_fam}_tests PROPERTIES TIMEOUT 120)
 endforeach()
 # OPT2 t04: the GC schedule test checks 0 / 1 / 4 / 16 workers on engine/jobs (configured before lua) when it is built.
-if(TARGET alamo_lua_gc_tests AND TARGET alamo_jobs)
+if(TARGET alamo_jobs)
   target_link_libraries(alamo_lua_gc_tests PRIVATE alamo_jobs)
   target_compile_definitions(alamo_lua_gc_tests PRIVATE ALAMO_LUA_HAVE_JOBS=1)
 endif()

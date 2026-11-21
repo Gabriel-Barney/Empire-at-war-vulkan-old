@@ -15,16 +15,21 @@
 #include <vector>
 
 #include "alamo/core/file_provider.hpp"
+#include "alamo/core/sim_crc.hpp"
+#include "alamo/core/sim_rng.hpp"
+#include "alamo/core/host_fs.hpp"
 #include "alamo/core/log.hpp"
 #include "alamo/lua/ai_bridge.hpp"  // reset_script_threads
 #include "alamo/lua/bindings.hpp"
 #include "alamo/lua/fog_bridge.hpp"
 #include "alamo/lua/lua_vm.hpp"
 #include "alamo/lua/object_bridge.hpp"
+#include "alamo/lua/presentation.hpp"
 #include "alamo/lua/script_gaps.hpp"
 #include "alamo/objects/game_object_types.hpp"
 #include "alamo/objects/object_store.hpp"
 #include "alamo/objects/object_types.hpp"
+#include "alamo/test/support.hpp"
 #if ALAMO_LUA_HAVE_COMMANDS
 #include "alamo/commands/pipeline.hpp"
 #endif
@@ -38,14 +43,7 @@ using namespace alamo;
 using namespace alamo::lua;
 namespace fs = std::filesystem;
 
-static int g_fail = 0;
-#define CHECK(c)                                                     \
-    do {                                                             \
-        if (!(c)) {                                                  \
-            std::printf("FAIL %s:%d: %s\n", __FILE__, __LINE__, #c); \
-            ++g_fail;                                                \
-        }                                                            \
-    } while (0)
+using ::alamo::test::g_fail;
 
 static std::string run(LuaVm& vm, const std::string& code) {
     std::string err;
@@ -97,10 +95,7 @@ static bool last_message_has(LuaVm& vm, const char* text) {
     return !vm.messages().empty() && vm.messages().back().find(text) != std::string::npos;
 }
 
-static void write_file(const fs::path& p, const std::string& s) {
-    fs::create_directories(p.parent_path());
-    std::ofstream(p, std::ios::binary) << s;
-}
+using ::alamo::test::write_file;
 
 // ------------------------------------------------------------------------------------------
 // Synthetic type database.
@@ -116,6 +111,9 @@ struct Db {
         std::error_code ec;
         remove_all_long(root, ec);
         write_file(root / "Data/XML/GameObjectFiles.xml", "<L><File>S.xml</File></L>");
+        // r1b t01: the hardpoint data list, so a type's HardPoints resolve (Take_Damage(n, name) checks the name there).
+        write_file(root / "Data/XML/HardPointDataFiles.xml", "<L><File>HP.xml</File></L>");
+        write_file(root / "Data/XML/HP.xml", "<R><HardPoint Name=\"HP_Gun\"/></R>");
         write_file(root / "Data/XML/S.xml",
                    "<R>\n"
                    "<GroundInfantry Name=\"Trooper\"><Tactical_Health>100</Tactical_Health>"
@@ -127,7 +125,7 @@ struct Db {
                    "</Unit_Abilities_Data></GroundInfantry>\n"
                    "<GroundVehicle Name=\"Tank\"><Tactical_Health>400</Tactical_Health><Shield_Points>50</Shield_Points>"
                    "<CategoryMask>Vehicle</CategoryMask><Property_Flags>HealsInfantry</Property_Flags>"
-                   "<Behavior>SELECTABLE, UNIT_AI</Behavior></GroundVehicle>\n"
+                   "<Behavior>SELECTABLE, UNIT_AI</Behavior><HardPoints>HP_Gun</HardPoints></GroundVehicle>\n"
                    "<GroundCompany Name=\"Trooper_Team\"><Company_Units>Trooper, Trooper</Company_Units>"
                    "<Behavior>TEAM, TEAM_LOCOMOTOR</Behavior></GroundCompany>\n"
                    "<GroundCompany Name=\"Squad\"><Company_Units>Squaddie, Squaddie</Company_Units>"
@@ -144,6 +142,9 @@ struct Db {
                    "<GalacticFleet Name=\"Fleet\"><Behavior>FLEET</Behavior></GalacticFleet>\n"
                    "<HardPoint Name=\"HP_Gun\"><Tactical_Health>30</Tactical_Health></HardPoint>\n"
                    "<StarBase Name=\"Station\"><Tactical_Health>5000</Tactical_Health></StarBase>\n"
+                   // mcx1 t09: Get_Space_Station goes by DUMMY_STAR_BASE (without CAPTURE_POINT), not the element tag.
+                   "<Orbital_Thing Name=\"Odd_Station\"><Behavior>DUMMY_STAR_BASE</Behavior></Orbital_Thing>\n"
+                   "<Orbital_Thing Name=\"Capture_Station\"><Behavior>DUMMY_STAR_BASE, CAPTURE_POINT</Behavior></Orbital_Thing>\n"
                    "<GroundStructure Name=\"Bunker\"><Behavior>GARRISON_STRUCTURE</Behavior>"
                    "<Garrison_Category>Infantry</Garrison_Category></GroundStructure>\n"
                    // refixf t03 finder tests (test_find_filters).
@@ -154,9 +155,31 @@ struct Db {
                    "<Team Name=\"Team_Box\"><Behavior>TEAM, UNIT_AI</Behavior></Team>\n"
                    "<GroundCompany Name=\"Squad_Co\"><CategoryMask>Air</CategoryMask>"
                    "</GroundCompany>\n"
+                   // b0422 (test_find_nearest_base): a pre-placed base structure and a pad-built one.
+                   "<SpecialStructure Name=\"Base_Factory\"><CategoryMask>Structure</CategoryMask><Property_Flags>InBase</Property_Flags>"
+                   "<Behavior>DUMMY_GROUND_STRUCTURE, UNIT_AI</Behavior></SpecialStructure>\n"
+                   "<GroundStructure Name=\"Pad_Turret\"><CategoryMask>Structure</CategoryMask><Property_Flags>InBase</Property_Flags>"
+                   "<Behavior>UNIT_AI</Behavior></GroundStructure>\n"
+                   // mcx8 t12 (test_mcx8_*): type wrappers, garrisons.
+                   "<GroundInfantry Name=\"Sq_Member\"><Create_Team>Yes</Create_Team><AI_Combat_Power>100</AI_Combat_Power></GroundInfantry>\n"
+                   "<GroundCompany Name=\"Power_Co\"><Company_Units>Sq_Member, Sq_Member, Sq_Member, Sq_Member</Company_Units>"
+                   "<Max_Squad_Size>2</Max_Squad_Size><AI_Combat_Power>400</AI_Combat_Power></GroundCompany>\n"
+                   "<GroundVehicle Name=\"Cost_Unit\"><Tactical_Build_Cost_Campaign>300</Tactical_Build_Cost_Campaign>"
+                   "<Tactical_Build_Cost_Multiplayer>900</Tactical_Build_Cost_Multiplayer></GroundVehicle>\n"
+                   "<GroundCompany Name=\"Hero_Co\"><Company_Units>Hero_Ship</Company_Units></GroundCompany>\n"
+                   "<SpaceUnit Name=\"SW_Ship\"><Is_Special_Weapon_In_Space>Yes</Is_Special_Weapon_In_Space></SpaceUnit>\n"
+                   "<Squadron Name=\"SW_Squadron\"><Squadron_Units>SW_Ship, Tank</Squadron_Units></Squadron>\n"
+                   "<GroundInfantry Name=\"G_Trooper\"><Behavior>GARRISON_UNIT</Behavior><Garrison_Value>1</Garrison_Value>"
+                   "<Garrison_Category>Infantry</Garrison_Category></GroundInfantry>\n"
+                   "<GroundVehicle Name=\"G_Tank\"><Behavior>GARRISON_UNIT</Behavior><Garrison_Value>1</Garrison_Value>"
+                   "<Garrison_Category>Vehicle</Garrison_Category></GroundVehicle>\n"
+                   "<GroundInfantry Name=\"G_Free\"><Behavior>GARRISON_UNIT</Behavior><Garrison_Value>1</Garrison_Value></GroundInfantry>\n"
+                   "<GroundStructure Name=\"G_Bunker\"><Behavior>GARRISON_STRUCTURE</Behavior><Num_Garrison_Slots>3</Num_Garrison_Slots>"
+                   "<Garrison_Category>Infantry</Garrison_Category></GroundStructure>\n"
+                   "<Upgrade Name=\"G_Upgrade\"><Behavior>DUMMY_UPGRADE</Behavior><Garrison_Value>5</Garrison_Value></Upgrade>\n"
                    "</R>");
         dp = std::make_unique<DirectoryProvider>(root.string());
-        ok = raw.load(*dp) && types.build(raw);
+        ok = raw.load(*dp) && types.build(raw, dp.get());
     }
     ~Db() {
         std::error_code ec;
@@ -192,6 +215,9 @@ struct Scene {
         marker1 = make(store, db.t("Marker_Generic"), -1, {100, 0, 0});
         marker2 = make(store, db.t("Marker_Generic"), -1, {200, 0, 0});
         gun = make(store, db.t("HP_Gun"), 2, {5, 1, 0}, tank);
+        // A hinted object has the HINT behaviour (Q6_T30_FIND_HINT_ORDER.md §3: a hint implies HINT); Find_Hint sees only those.
+        store.add_behavior(marker1, objects::beh::Hint);
+        store.add_behavior(marker2, objects::beh::Hint);
         bridge.set_hint(store.id(marker1), "spawnpoint");
         bridge.set_hint(store.id(marker2), "SpawnPoint");
         host.store = &store;
@@ -236,7 +262,24 @@ static void test_find(const Db& db) {
                   "h2 = Find_Hint(Find_Object_Type('marker_generic'), 'SPAWNPOINT').Get_Object_ID() "
                   "h3 = tostring(Find_Hint('Trooper', 'spawnpoint')) h4 = tostring(Find_Hint('Marker_Generic', 'nope'))") == "");
     CHECK(gnum(vm, "h1") == 5.0 && gnum(vm, "h2") == 5.0 && gstr(vm, "h3") == "nil" && gstr(vm, "h4") == "nil");
-    CHECK(contains(run_stop(vm, "Find_Hint('x')"), "LuaFindMarkerCommandClass -- Invalid number of parameters."));
+    CHECK(contains(run_stop(vm, "Find_Hint()"), "LuaFindMarkerCommandClass -- Invalid number of parameters."));
+    // q6 t29 (Q6_T30 §2 [H]): no hint, a nil / non-string hint or "" -> the newest object of the type in the hint list;
+    // arguments past 2 are ignored.
+    CHECK(run(vm, "z1 = Find_Hint('Marker_Generic').Get_Object_ID() z2 = Find_Hint('Marker_Generic', nil).Get_Object_ID() "
+                  "z3 = Find_Hint('Marker_Generic', '').Get_Object_ID() z4 = Find_Hint('Marker_Generic', 7).Get_Object_ID() "
+                  "z5 = Find_Hint('Marker_Generic', 'spawnpoint', 'extra').Get_Object_ID()") == "");
+    CHECK(gnum(vm, "z1") == 5.0 && gnum(vm, "z2") == 5.0 && gnum(vm, "z3") == 5.0 && gnum(vm, "z4") == 5.0 && gnum(vm, "z5") == 5.0);
+    // q6 t32 (Q6_T30 §2 [H]): only objects with HINT are in the hint list: a Trooper (no HINT) is not found without a
+    // hint, nor with a hint set on it; once it has HINT it is.
+    s.bridge.set_hint(s.store.id(s.trooper2), "nohintbeh");
+    CHECK(run(vm, "y1 = tostring(Find_Hint('Trooper')) y2 = tostring(Find_Hint('Trooper', 'nohintbeh')) "
+                  "y3 = table.getn(Find_All_Objects_With_Hint('nohintbeh'))") == "");
+    CHECK(gstr(vm, "y1") == "nil" && gstr(vm, "y2") == "nil" && gnum(vm, "y3") == 0.0);
+    s.store.add_behavior(s.trooper2, objects::beh::Hint);
+    CHECK(run(vm, "y4 = Find_Hint('Trooper').Get_Object_ID() y5 = Find_Hint('Trooper', 'NoHintBeh').Get_Object_ID() "
+                  "y6 = table.getn(Find_All_Objects_With_Hint('nohintbeh')) y7 = tostring(Find_Hint('Tank'))") == "");
+    CHECK(gnum(vm, "y4") == 2.0 && gnum(vm, "y5") == 2.0 && gnum(vm, "y6") == 1.0 && gstr(vm, "y7") == "nil");
+    s.bridge.set_hint(s.store.id(s.trooper2), "");
     CHECK(contains(run_stop(vm, "Find_Hint(5, 'x')"), "LuaFindMarkerCommandClass -- Expected type or name for parameter 1"));
     // Find_All_Objects_With_Hint: newest first.
     CHECK(run(vm, "l = Find_All_Objects_With_Hint('SpawnPoint') hn = table.getn(l) hs = l[1].Get_Object_ID() .. ',' .. l[2].Get_Object_ID() "
@@ -246,6 +289,21 @@ static void test_find(const Db& db) {
     CHECK(contains(run_stop(vm, "Find_All_Objects_With_Hint(1)"), "invalid type for parameter 1. Expected string."));
     CHECK(run(vm, "gh = Find_Hint('Marker_Generic', 'spawnpoint').Get_Hint() gn = tostring(t1.Get_Hint())") == "");
     CHECK(gstr(vm, "gh") == "SpawnPoint" && gstr(vm, "gn") == "nil");
+    // q6 t28: map hints (.ted 0x482) come from the host's map_hint hook; a script-set hint wins over it.
+    {
+        const objects::ObjectId tank_id = s.store.id(s.tank), m1 = s.store.id(s.marker1);
+        s.store.add_behavior(s.tank, objects::beh::Hint);  // a map hint implies HINT (from the type or the record's 0x4B7)
+        s.bridge.map_hint = [&s, tank_id, m1](objects::ObjectHandle h) {
+            const objects::ObjectId id = s.store.id(h);
+            return id == tank_id ? std::string_view("falcongear1") : id == m1 ? std::string_view("mapname") : std::string_view();
+        };
+        CHECK(run(vm, "mh1 = Find_Hint('Tank', 'FalconGear1').Get_Object_ID() mh2 = tostring(Find_Hint('Trooper', 'falcongear1')) "
+                      "mh3 = tank.Get_Hint() mh4 = tostring(Find_Hint('Marker_Generic', 'mapname')) "
+                      "mh5 = table.getn(Find_All_Objects_With_Hint('falcongear1')) mh6 = Find_Hint('Marker_Generic', 'spawnpoint').Get_Object_ID()") == "");
+        CHECK(gnum(vm, "mh1") == static_cast<double>(tank_id) && gstr(vm, "mh2") == "nil" && gstr(vm, "mh3") == "falcongear1");
+        CHECK(gstr(vm, "mh4") == "nil" && gnum(vm, "mh5") == 1.0 && gnum(vm, "mh6") == 5.0);
+        s.bridge.map_hint = nullptr;
+    }
     // Find_First_Object: newest first, case-insensitive type name.
     CHECK(run(vm, "f1 = Find_First_Object('trooper').Get_Object_ID() f2 = tostring(Find_First_Object('Nope'))") == "");
     CHECK(gnum(vm, "f1") == 2.0 && gstr(vm, "f2") == "nil");
@@ -273,6 +331,16 @@ static void test_find(const Db& db) {
           last_message_has(vm, "Find_Nearest - unknown game object type, properties mask or catefory NoSuchThing."));
     CHECK(run(vm, "Find_Nearest()") == "" && last_message_has(vm, "Expected between 1 and 4, got 0."));
     CHECK(run(vm, "Find_Nearest(5)") == "" && last_message_has(vm, "invalid type for parameter 1; expected game object"));
+    // modc t06: a nil filter (a mod's category helper returning nil) is not a filter, the player is then read at slot 2;
+    // a non-player there is a null player (no player filter), a non-bool flag keeps true. No error in any of these.
+    {
+        const size_t before = vm.messages().size();
+        CHECK(run(vm, "n14 = Find_Nearest(t1, nil, p1, false).Get_Object_ID() "  // slot 2 is nil: null player, all players
+                      "n15 = Find_Nearest(t1, nil, nil, true).Get_Object_ID() "
+                      "n16 = Find_Nearest(t1, 'Infantry', 7, 'x').Get_Object_ID()") == "");
+        CHECK(gnum(vm, "n14") == 3.0 && gnum(vm, "n15") == 3.0 && gnum(vm, "n16") == 2.0);
+        CHECK(vm.messages().size() == before);
+    }
     // Bridge relation hook: "allied or self" = not an enemy. Nothing is p1's enemy -> p2's tank is a friend of p1.
     s.bridge.is_enemy = [](int32_t, int32_t) { return false; };
     CHECK(run(vm, "n9 = Find_Nearest(t1, p1, true).Get_Object_ID() n13 = tostring(Find_Nearest(t1, p1, false))") == "" &&
@@ -340,6 +408,27 @@ static void test_stage3(const Db& db) {
     vm.post_event("Named");
     CHECK(run(vm, "named = 0 function Named() named = named + 1 end ev = GetEvent() pn = tostring(GetEvent.Params()) ev()") == "");
     CHECK(gnum(vm, "named") == 1.0 && gstr(vm, "pn") == "nil");
+    // skai t15 (SKAI_T15_UNIT_DAMAGED §2.2): a coalesced task-force event is dropped while one of the same name for the
+    // same task force waits; another task force's, or one after the drain, is queued.
+    CHECK(run(vm, "dmg = '' function Default_Unit_Damaged(tf, u, a, d) dmg = dmg .. (d and 'd' or 'n') end") == "");
+    const auto dmg_args = [](bool deliberate) {
+        std::vector<AiEventArg> v(3);
+        v[0].kind = v[1].kind = AiEventArg::Number;
+        v[0].number = 1.0;
+        v[1].number = 2.0;
+        v[2].kind = AiEventArg::Boolean;
+        v[2].boolean = deliberate;
+        return v;
+    };
+    const std::vector<AiEventArg> d1 = dmg_args(true), d0 = dmg_args(false);
+    CHECK(dispatch_task_force_event(vm, 7, AiTaskForceKind::Land, "MainForce", "Unit_Damaged", d1, true, nullptr, true));
+    CHECK(dispatch_task_force_event(vm, 7, AiTaskForceKind::Land, "MainForce", "Unit_Damaged", d0, true, nullptr, true));
+    CHECK(dispatch_task_force_event(vm, 8, AiTaskForceKind::Land, "MainForce", "Unit_Damaged", d0, true, nullptr, true));
+    CHECK(run(vm, "ev = GetEvent() while ev do ev(unpack(GetEvent.Params())) ev = GetEvent() end") == "");
+    CHECK(gstr(vm, "dmg") == "dn");  // tf 7's second event dropped; tf 8's kept
+    CHECK(dispatch_task_force_event(vm, 7, AiTaskForceKind::Land, "MainForce", "Unit_Damaged", d0, true, nullptr, true));
+    CHECK(run(vm, "ev = GetEvent() while ev do ev(unpack(GetEvent.Params())) ev = GetEvent() end") == "");
+    CHECK(gstr(vm, "dmg") == "dnn");  // after the drain tf 7 gets the next one
     // Argument errors are the script error (+0x121: logged, the script's exit flag; no unwind).
     CHECK(run(vm, "t1.Event_Object_In_Range(5, 1)") == "" &&
           last_message_has(vm, "Event_Object_In_Range -- Expected function object as parameter 1.") && vm.exit_requested());
@@ -353,7 +442,7 @@ static void test_stage3(const Db& db) {
                   "fin = blk.IsFinished() and 1 or 0 units = blk.Result() rn = table.getn(units) "
                   "rt = units[1].Get_Type().Get_Name() ro = units[1].Get_Owner().Get_ID() "
                   "b2 = Reinforce_Unit('Tank', false, p1) f2 = b2.IsFinished() and 1 or 0 n2 = table.getn(b2.Result())") == "");
-    CHECK(gnum(vm, "fin") == 1.0 && gnum(vm, "rn") == 1.0 && gstr(vm, "rt") == "Trooper_Team" && gnum(vm, "ro") == 1.0);
+    CHECK(gnum(vm, "fin") == 1.0 && gnum(vm, "rn") == 1.0 && gstr(vm, "rt") == "TROOPER_TEAM" && gnum(vm, "ro") == 1.0);
     CHECK(gnum(vm, "f2") == 1.0 && gnum(vm, "n2") == 0.0);
     // With a hook: pending until the host finishes the request.
     ReinforceRequest seen;
@@ -375,15 +464,25 @@ static void test_stage3(const Db& db) {
     CHECK(contains(run_stop(vm, "Reinforce_Unit('Tank', 5, p1)"), "Reinforce -- Invalid position parameter."));
     // Spawn_From_Reinforcement_Pool: direct spawn stand-in, or the host's pool.
     CHECK(run(vm, "sp = Spawn_From_Reinforcement_Pool(Find_Object_Type('Tank'), tank, p1) sn = table.getn(sp) "
-                  "st = sp[1].Get_Type().Get_Name()") == "" && gnum(vm, "sn") == 1.0 && gstr(vm, "st") == "Tank");
+                  "st = sp[1].Get_Type().Get_Name()") == "" && gnum(vm, "sn") == 1.0 && gstr(vm, "st") == "TANK");
     s.bridge.spawn_from_pool = [](objects::TypeIndex, int32_t, Vec3) { return std::vector<objects::ObjectHandle>{}; };
     CHECK(run(vm, "sn2 = table.getn(Spawn_From_Reinforcement_Pool('Tank', tank, p1))") == "" && gnum(vm, "sn2") == 0.0);
     s.bridge.spawn_from_pool = nullptr;
     CHECK(contains(run_stop(vm, "Spawn_From_Reinforcement_Pool('Tank', tank)"), "Expected 3, got 2"));
-    // Get_Space_Station: the player's newest StarBase.
-    const objects::ObjectHandle station = make(s.store, db.t("Station"), 2, {0, 50, 0});
-    CHECK(run(vm, "ss = p2.Get_Space_Station().Get_Object_ID() ss1 = tostring(p1.Get_Space_Station())") == "");
-    CHECK(gnum(vm, "ss") == static_cast<double>(s.store.id(station)) && gstr(vm, "ss1") == "nil");
+    // Get_Space_Station (mcx1 t09, docs/re/MCX1_RE_ANSWERS.md "Get_Space_Station"): nil outside space mode.
+    CHECK(run(vm, "ssl = tostring(p2.Get_Space_Station())") == "" && gstr(vm, "ssl") == "nil");
+    {
+        // In space: an allied object with DUMMY_STAR_BASE and not CAPTURE_POINT, whatever its element; a <StarBase> element
+        // without the behaviour is not a station.
+        Scene sp(db, objects::ModeKind::Space);
+        LuaVm& svm = *sp.vm;
+        make(sp.store, db.t("Station"), 2, {0, 50, 0});
+        make(sp.store, db.t("Capture_Station"), 2, {0, 60, 0});
+        CHECK(run(svm, "ss0 = tostring(p2.Get_Space_Station())") == "" && gstr(svm, "ss0") == "nil");
+        const objects::ObjectHandle station = make(sp.store, db.t("Odd_Station"), 2, {0, 70, 0});
+        CHECK(run(svm, "ss = p2.Get_Space_Station().Get_Object_ID() ss1 = tostring(p1.Get_Space_Station())") == "");
+        CHECK(gnum(svm, "ss") == static_cast<double>(sp.store.id(station)) && gstr(svm, "ss1") == "nil");
+    }
     // Bridge digest reflects the reinforcement records.
     StateHasher h1;
     s.bridge.hash(h1);
@@ -404,6 +503,26 @@ static std::string ids_of(LuaVm& vm, const std::string& args) {
     const std::string err = run(vm, code);
     return err.empty() ? gstr(vm, "ids") : "error: " + err;
 }
+// b0422 / skai t12 (B0418_UTAPAU_AI_RUNS s8, SKAI_T06_LAND_RUNS s7), skai t15 (SKAI_T15_TARGET_CHOICE Q5): Find_Nearest skips
+// the structures pre-built at the skirmish start (kFlagNoAiOwnerList: not in the perception grid owner list it walks), so
+// BurnUnitsLand's Find_Nearest(tf, "InBase", ...) finds a pad-built structure but never the start base, and the plain enemy
+// search passes over the base to the next unit. The same base type built later is found.
+static void test_find_nearest_base(const Db& db) {
+    Scene s(db);
+    LuaVm& vm = *s.vm;
+    s.store.set_flag(make(s.store, db.t("Base_Factory"), 2, {1, 0, 0}), objects::kFlagNoAiOwnerList);
+    CHECK(run(vm, "b1 = Find_Nearest(t1, p1, false).Get_Object_ID() "     // the tank @5, not the base @1
+                  "b2 = tostring(Find_Nearest(t1, 'InBase', p1, false)) "  // only the base is InBase: nothing
+                  "b3 = tostring(Find_Nearest(t1, 'Structure'))") == "");
+    CHECK(gnum(vm, "b1") == 3.0 && gstr(vm, "b2") == "nil" && gstr(vm, "b3") == "nil");
+    const objects::ObjectHandle turret = make(s.store, db.t("Pad_Turret"), 2, {8, 0, 0});
+    CHECK(run(vm, "b4 = Find_Nearest(t1, 'InBase', p1, false).Get_Object_ID()") == "");
+    CHECK(gnum(vm, "b4") == static_cast<double>(s.store.id(turret)));
+    const objects::ObjectHandle rebuilt = make(s.store, db.t("Base_Factory"), 2, {6, 0, 0});  // built in battle: listed
+    CHECK(run(vm, "b5 = Find_Nearest(t1, 'InBase', p1, false).Get_Object_ID()") == "");
+    CHECK(gnum(vm, "b5") == static_cast<double>(s.store.id(rebuilt)));
+}
+
 static void test_find_filters(const Db& db) {
     objects::IdCounter ids;
     objects::ObjectStore st(objects::ModeKind::Land, objects::StoreKind::Primary, db.types, &ids);
@@ -480,13 +599,14 @@ static void test_queries(const Db& db) {
     Scene s(db);
     LuaVm& vm = *s.vm;
     CHECK(run(vm, "nm = tank.Get_Name() c1 = t1.Is_Category('Infantry') and 1 or 0 c2 = t1.Is_Category('Vehicle') and 1 or 0 "
-                  "c3 = t1.Is_Category('Bogus') and 1 or 0 pr = tank.Has_Property('HealsInfantry') and 1 or 0 "
+                  "c3 = 0 pr = tank.Has_Property('HealsInfantry') and 1 or 0 "
                   "pr2 = tank.Has_Property('Fodder') and 1 or 0 sh = tank.Get_Shield() sh2 = t1.Get_Shield() "
                   "st = tank.Get_Game_Scoring_Type().Get_Name() sel = t1.Is_Selectable() and 1 or 0 "
                   "mv = t1.Can_Move() and 1 or 0 mv2 = tank.Can_Move() and 1 or 0 tr = t1.Is_Transport() and 1 or 0") == "");
-    CHECK(gstr(vm, "nm") == "Tank" && gnum(vm, "c1") == 1.0 && gnum(vm, "c2") == 0.0 && gnum(vm, "c3") == 0.0);
+    // mcx8 t12: Get_Name is the ship name ("" without one), never the type name.
+    CHECK(gstr(vm, "nm") == "" && gnum(vm, "c1") == 1.0 && gnum(vm, "c2") == 0.0 && gnum(vm, "c3") == 0.0);
     CHECK(gnum(vm, "pr") == 1.0 && gnum(vm, "pr2") == 0.0 && gnum(vm, "sh") == 1.0 && gnum(vm, "sh2") == 0.0);
-    CHECK(gstr(vm, "st") == "Tank" && gnum(vm, "sel") == 1.0 && gnum(vm, "mv") == 1.0 && gnum(vm, "mv2") == 0.0 && gnum(vm, "tr") == 0.0);
+    CHECK(gstr(vm, "st") == "TANK" && gnum(vm, "sel") == 1.0 && gnum(vm, "mv") == 1.0 && gnum(vm, "mv2") == 0.0 && gnum(vm, "tr") == 0.0);
     CHECK(contains(run_stop(vm, "t1.Is_Category()"), "GameObjectWrapper::Is_Category -- invalid number of parameters. Expected 1, got 0."));
     CHECK(contains(run_stop(vm, "t1.Is_Category(1)"), "GameObjectWrapper::Is_Category -- parameter 1 is not a valid string."));
     // Type wrapper data.
@@ -598,7 +718,7 @@ static void test_spawn_and_state(const Db& db) {
                   "own = team.Get_Owner().Get_ID() tx = team.Get_Position().Get_XYZ() "
                   "members = Find_All_Objects_Of_Type('Trooper') par = members[1].Get_Parent_Object().Get_Object_ID() "
                   "tid = team.Get_Object_ID()") == "");
-    CHECK(gnum(vm, "sn") == 1.0 && gstr(vm, "tn") == "Trooper_Team" && gnum(vm, "cnt") == 2.0 && gnum(vm, "has") == 1.0);
+    CHECK(gnum(vm, "sn") == 1.0 && gstr(vm, "tn") == "TROOPER_TEAM" && gnum(vm, "cnt") == 2.0 && gnum(vm, "has") == 1.0);
     // OI follow-up t04 (A1_READINGS §28.9 item 4): in land a team that is not a squad container locks / unlocks each
     // member (a second lock or unlock warns per member); a squad container locks itself, a squad member locks its
     // container, and Unlock on the container walks the members and leaves the container locked.
@@ -613,6 +733,26 @@ static void test_spawn_and_state(const Db& db) {
     CHECK(said("Lock_Current_Orders - Trooper is already locked.  Script cannot stack locks.") == 2);
     CHECK(run(vm, "team.Unlock_Current_Orders() team.Unlock_Current_Orders() c1 = members[1].Can_Move() and 1 or 0") == "");
     CHECK(gnum(vm, "c1") == 1.0 && said("Unlock_Current_Orders - object Trooper is not locked.") == 2);
+    {  // s78n t06 review (A1_READINGS §28.9 item 4): a land TEAM Unlock decrements each locked member's counter, so a member
+       // locked only by its hero clash moves again (its +0x3b4 stays: Unlock on the member itself is still the error)
+        RemainingScriptHooks hk;
+        bool held = true;
+        CHECK(run(vm, "hm = members[1].Get_Object_ID()") == "");
+        const objects::ObjectHandle hm = s.store.find(static_cast<objects::ObjectId>(gnum(vm, "hm")));
+        hk.in_hero_clash = [hm](objects::ObjectHandle h) { return h == hm; };
+        hk.hero_clash_locked = [hm, &held](objects::ObjectHandle h) { return h == hm && held; };
+        hk.release_hero_clash_lock = [hm, &held](objects::ObjectHandle h) {
+            if (h != hm || !held) return false;
+            held = false;
+            return true;
+        };
+        s.bridge.remaining = &hk;
+        CHECK(run(vm, "c1 = members[1].Can_Move() and 1 or 0") == "" && gnum(vm, "c1") == 0.0);
+        CHECK(run(vm, "team.Unlock_Current_Orders() c1 = members[1].Can_Move() and 1 or 0") == "");
+        CHECK(!held && gnum(vm, "c1") == 1.0 && said("Unlock_Current_Orders - object Trooper is not locked.") == 3);  // member 2 only
+        CHECK(contains(run_stop(vm, "members[1].Unlock_Current_Orders()"), "is locked by a hero clash.  Cannot unlock."));
+        s.bridge.remaining = nullptr;
+    }
     CHECK(run(vm, "sq = Spawn_Unit(Find_Object_Type('Squad'), mk, p1)[1] sm = Find_All_Objects_Of_Type('Squaddie') "
                   "sq.Lock_Current_Orders() q1 = sq.Can_Move() and 1 or 0 m1 = sm[1].Can_Move() and 1 or 0 "
                   "sm[2].Lock_Current_Orders() sq.Unlock_Current_Orders() q2 = sq.Can_Move() and 1 or 0") == "");
@@ -648,13 +788,12 @@ static void test_spawn_and_state(const Db& db) {
     }
     // Create_Generic_Object: name or type, one object.
     CHECK(run(vm, "g = Create_Generic_Object('Tank', Create_Position(1, 2, 3), p1) gx, gy, gz = g.Get_Position().Get_XYZ() "
-                  "go = g.Get_Owner().Get_ID() gnil = tostring(Create_Generic_Object('Nope', t1, p1)) "
+                  "go = g.Get_Owner().Get_ID() "
                   "g.Despawn() gv = g.Is_Valid() and 1 or 0") == "");
-    CHECK(gnum(vm, "gx") == 1.0 && gnum(vm, "gy") == 2.0 && gnum(vm, "gz") == 3.0 && gnum(vm, "go") == 1.0 &&
-          gstr(vm, "gnil") == "nil" && gnum(vm, "gv") == 0.0);
+    CHECK(gnum(vm, "gx") == 1.0 && gnum(vm, "gy") == 2.0 && gnum(vm, "gz") == 3.0 && gnum(vm, "go") == 1.0 && gnum(vm, "gv") == 0.0);
     CHECK(contains(run_stop(vm, "Create_Generic_Object('Tank', 5, p1)"), "Could not deduce a creation position from parameter 2."));
-    CHECK(contains(run_stop(vm, "Create_Generic_Object('Tank', t1, 5)"), "Invalid type for parameter 3. Expected player."));
-    CHECK(contains(run_stop(vm, "Create_Generic_Object('Tank', t1)"), "Invalid number of parameters. Expected 3, got 2."));
+    CHECK(contains(run_stop(vm, "Create_Generic_Object('Tank', t1, 5)"), "Invalid type for parameter 3.  Expected player."));
+    CHECK(contains(run_stop(vm, "Create_Generic_Object('Tank', t1)"), "Invalid number of parameters.  Expected 3, got 2."));
     // Hull / damage / invulnerability / cannot-be-killed / hardpoint.
     CHECK(run(vm, "h0 = tank.Get_Hull() tank.Take_Damage(100) h1 = tank.Get_Hull() tank.Make_Invulnerable(true) tank.Take_Damage(100) "
                   "h2 = tank.Get_Hull() tank.Make_Invulnerable(false) tank.Set_Cannot_Be_Killed(true) tank.Take_Damage(10000) "
@@ -662,7 +801,35 @@ static void test_spawn_and_state(const Db& db) {
                   "gun = Find_First_Object('HP_Gun') gh = gun.Get_Hull() tank.Take_Damage(-100000) hmax = tank.Get_Hull()") == "");
     // q6 t12: Take_Damage is damage kind 0, which passes invulnerability (OBJECT_SCRIPTS §6.1 step 4): h2 drops too.
     CHECK(gnum(vm, "h0") == 1.0 && gnum(vm, "h1") == 0.75 && gnum(vm, "h2") == 0.5 && gnum(vm, "h3") == 1.0 / 400.0);
-    CHECK(gnum(vm, "v3") == 1.0 && gnum(vm, "gh") == 0.5 && gnum(vm, "hmax") == 1.0);
+    // r1b t01: a HardPoints name goes to the host's hardpoint record; none here, so nothing (the attached object untouched).
+    CHECK(gnum(vm, "v3") == 1.0 && gnum(vm, "gh") == 1.0 && gnum(vm, "hmax") == 1.0);
+    {  // r1b t01 / mcx8 t12 (MCX8_BINDINGS_OBJECTS §Take_Damage [H]): the name is looked up in the global HardPoint type
+       // table, case-insensitively; a match is handed to the host with the record's own name, also for an object that does
+       // not carry that hardpoint (the host decides); an unknown name stops, no damage.
+        std::string got;
+        float amount = 0.0f;
+        int calls = 0, plain = 0;
+        objects::ObjectHandle hit{};
+        s.bridge.take_hardpoint_damage = [&](objects::ObjectHandle h, float a, bool, std::string_view n) {
+            ++calls;
+            hit = h;
+            amount = a;
+            got = std::string(n);
+            return true;
+        };
+        s.bridge.take_damage = [&](objects::ObjectHandle, float, bool) {
+            ++plain;
+            return true;
+        };
+        const float before = s.store.health(s.tank);
+        CHECK(run(vm, "tank.Take_Damage(7, 'hp_GUN')") == "");
+        CHECK(calls == 1 && hit == s.tank && amount == 7.0f && got == "HP_Gun" && plain == 0 && s.store.health(s.tank) == before);
+        CHECK(contains(run_stop(vm, "tank.Take_Damage(7, 'HP_Nope')"), "GameObjectWrapper::Take_Damage -- unknown hard point HP_Nope."));
+        CHECK(run_stop(vm, "t1.Take_Damage(7, 'HP_Gun')") == "" && calls == 2 && hit == s.trooper1 && got == "HP_Gun");
+        CHECK(plain == 0 && s.store.health(s.tank) == before);
+        s.bridge.take_hardpoint_damage = nullptr;
+        s.bridge.take_damage = nullptr;
+    }
     CHECK(run(vm, "tank.Set_Cannot_Be_Killed(false) tank.Take_Damage(1000) v4 = tank.Is_Valid() and 1 or 0") == "");
     CHECK(gnum(vm, "v4") == 0.0);
     {  // q6 t12: a host damage system takes Take_Damage(amount) (not the hardpoint form); refused -> the store path
@@ -686,7 +853,7 @@ static void test_spawn_and_state(const Db& db) {
         s.store.set_health(s.trooper2, before);
         s.bridge.take_damage = nullptr;
     }
-    CHECK(contains(run_stop(vm, "t1.Take_Damage('a')"), "Take_Damage -- invalid type for parameter 1. Expected number."));
+    CHECK(contains(run_stop(vm, "t1.Take_Damage('a')"), "Take_Damage -- invalid type for parameter 1.  Expected number."));
     CHECK(contains(run_stop(vm, "t1.Make_Invulnerable(1)"), "Make_Invulnerable -- invalid type for parameter 1. Expected boolean."));
     CHECK(contains(run_stop(vm, "t1.Make_Invulnerable()"), "Make_Invulnerable -- invalid number of parameters. Expected 1, got 0."));
     // Script flags land in the bridge state.
@@ -694,23 +861,36 @@ static void test_spawn_and_state(const Db& db) {
     CHECK(run(vm, "t1.Hide(true) t1.Set_Selectable(false) t1.Prevent_AI_Usage(true) t1.Prevent_All_Fire(true) "
                   "t1.Prevent_Opportunity_Fire(true) t1.Lock_Current_Orders() t1.Suspend_Locomotor(true) t1.Highlight(true, 25) t1.Highlight_Small(true) "
                   "t1.Set_In_Limbo(true) t1.Override_Max_Speed(0.5) t1.Set_Importance(3) t1.Set_Targeting_Priorities('Infantry_Attack_Move') "
-                  "t1.Disable_Capture(true) t1.Set_Garrison_Spawn(true) t1.Set_Check_Contested_Space(true) "
+                  "t1.Disable_Capture(true) t1.Set_Garrison_Spawn(true) t1.Set_Check_Contested_Space(false) "
                   "b = t1.Play_Animation('Cinematic', false, 2) pf = b.IsFinished() and 1 or 0 "
                   "sel = t1.Is_Selectable() and 1 or 0 mv = t1.Can_Move() and 1 or 0 Hide_Object(t2, 1)") == "");
+    {  // ui2 t02: Highlight / Highlight_Small also record an event the host draws (receiver, on, z offset)
+        PresentationLog plog;
+        attach_presentation(vm, &plog);
+        CHECK(run(vm, "t1.Highlight(true, 25) t1.Highlight_Small(true)") == "");
+        const auto& pev = plog.events();
+        CHECK(pev.size() == 2 && pev[0].op == PresentationOp::ObjectHighlight && pev[0].args.size() == 3 &&
+              pev[0].args[0].kind == PresentationArg::Kind::Object && pev[0].args[1].b && pev[0].args[2].number == 25.0);
+        CHECK(pev[1].op == PresentationOp::ObjectHighlightSmall && pev[1].args[1].b && pev[1].args[2].number == 0.0);
+        attach_presentation(vm, nullptr);
+    }
     const ScriptObjectState& st = s.bridge.state(1);
     CHECK(st.hidden && st.selectable == 0 && st.prevent_ai_usage && st.prevent_all_fire && st.prevent_opportunity_fire);
     CHECK(st.locomotor_suspended && st.highlighted && st.highlight_offset == 25.0f && st.highlighted_small && st.in_limbo);
     CHECK(st.max_speed_override == 0.5f && st.importance == 3 && st.targeting_priorities == "Infantry_Attack_Move" && st.orders_locked);
-    CHECK(st.capture_disabled && st.garrison_spawn && st.check_contested_space && st.animation == "Cinematic" &&
+    CHECK(st.capture_disabled && st.garrison_spawn && st.contested_check_off && st.animation == "Cinematic" &&
           !st.animation_loop && st.animation_index == 2);
     CHECK(s.bridge.state(2).hidden && gnum(vm, "pf") == 1.0 && gnum(vm, "sel") == 0.0 && gnum(vm, "mv") == 0.0);
+    // modc t43: the hyperspace-in arrival shows the model again, ending a Lua hide (the EAW-Remake's arriving ships).
+    CHECK(run(vm, "t2.Cinematic_Hyperspace_In(1)") == "" && !s.bridge.state(2).hidden && s.bridge.state(1).hidden);
+    CHECK(run(vm, "Hide_Object(t2, 1)") == "" && s.bridge.state(2).hidden);  // hidden again for the no-bridge check below
     CHECK(run(vm, "t1.Override_Max_Speed(false) t1.Unlock_Current_Orders()") == "" && s.bridge.state(1).max_speed_override < 0.0f &&
           !s.bridge.state(1).orders_locked);
     CHECK(contains(run_stop(vm, "t1.Hide()"), "GameObjectWrapper::Hide -- Missing required boolean parameter."));
     CHECK(contains(run_stop(vm, "t1.Hide(1)"), "GameObjectWrapper::Hide -- Expected bool parameter."));
     CHECK(contains(run_stop(vm, "t1.Prevent_AI_Usage()"), "GameObjectWrapper::Prevent_AI_Usage -- Expected bool parameter."));
     CHECK(contains(run_stop(vm, "t1.Highlight()"), "GameObjectWrapper::Highlight -- invalid number of parameters. Expected 1 or 2."));
-    CHECK(contains(run_stop(vm, "t1.Override_Max_Speed('x')"), "Override_Max_Speed -- Expected a number or boolean parameter."));
+    CHECK(contains(run_stop(vm, "t1.Override_Max_Speed()"), "Override_Max_Speed -- Expected a number or boolean parameter."));
     CHECK(contains(run_stop(vm, "Hide_Object(t1)"), "LuaHideObject -- Expected gameobject pointer parameter 1, float parameter 2"));
     // Teleport / facing.
     CHECK(run(vm, "t2.Teleport(Create_Position(7, 8, 9)) a, b2, c = t2.Get_Position().Get_XYZ() "
@@ -795,7 +975,7 @@ static void test_dead_handles(const Db& db) {
     CHECK(run(vm, "r = 1 r = victim.Attack_Target(t1) rn = r == nil and 1 or 0") == "" && gnum(vm, "rn") == 1.0 && !vm.exit_requested());
     // q6 t11: a dead caller is silent in most methods (nothing returned, no message, no stop); the WarnNothing ones log
     // "SCRIPT WARNING: GameObjectWrapper::<m> -- this object is dead!" and go on.
-    for (const char* m : {"Get_Position()", "Hide(true)", "Get_Hull()", "Is_Category('Infantry')", "Activate_Ability('SPRINT')"}) {
+    for (const char* m : {"Get_Position()", "Hide(true)", "Get_Hull()", "Is_Category('Infantry')", "Activate_Ability('SPRINT', true)"}) {
         const size_t m0 = vm.messages().size();
         CHECK(run(vm, std::string("nr = (function(...) return arg.n end)(victim.") + m + ")") == "" && gnum(vm, "nr") == 0.0 &&
               vm.messages().size() == m0 && !vm.exit_requested());
@@ -886,20 +1066,29 @@ static void test_orders(const Db& db) {
     CHECK(run(vm, "t1.Turn_To_Face(Create_Position(0, 10, 0))") == "");
     CHECK(rec.cmds.back().payload.type() == EventType::Facing && rec.cmds.back().payload.ids("units") == std::vector<uint32_t>{1});
     CHECK(std::fabs(rec.cmds.back().payload.f("angle") - 90.0f) < 0.1f);
-    CHECK(contains(run_stop(vm, "t1.Turn_To_Face()"), "Turn_To_Face -- invalid number of parameters. Expected 1, got 0."));
+    CHECK(contains(run_stop(vm, "t1.Turn_To_Face()"), "Turn_To_Face -- invalid number of parameters.  Expected 1, got 0."));
+    // mcx8 t12 (MCX8_BINDINGS_OBJECTS §Turn_To_Face [H]): no position from the argument.
+    CHECK(contains(run_stop(vm, "t1.Turn_To_Face(5)"), "GameObjectWrapper::Turn_To_Face -- could not deduce a position to face."));
     // Abilities: SetUnitAbilityMode / SetAbilityAutofire on the direct path.
-    CHECK(run(vm, "t1.Activate_Ability('SPRINT') act = t1.Is_Ability_Active('SPRINT') and 1 or 0 rdy = t1.Is_Ability_Ready('SPRINT') and 1 or 0") == "");
+    CHECK(run(vm, "t1.Activate_Ability('SPRINT', true) act = t1.Is_Ability_Active('SPRINT') and 1 or 0 rdy = t1.Is_Ability_Ready('SPRINT') and 1 or 0") == "");
     {
         const commands::EventData& e = rec.cmds.back().payload;
         CHECK(e.type() == EventType::SetUnitAbilityMode && e.u("ability") == 40 && e.u("on") == 1 && e.u("count") == 1 &&
               e.ids("units") == std::vector<uint32_t>{1} && e.u("object") == commands::kNoObject);
     }
     CHECK(gnum(vm, "act") == 1.0 && gnum(vm, "rdy") == 0.0);
-    CHECK(run(vm, "t1.Activate_Ability('STEALTH', tank) t1.Activate_Ability('SPRINT', false) act2 = t1.Is_Ability_Active('SPRINT') and 1 or 0") == "");
-    CHECK(rec.cmds[rec.cmds.size() - 2].payload.u("ability") == 48 && rec.cmds[rec.cmds.size() - 2].payload.u("object") == 3);
+    CHECK(run(vm, "t1.Activate_Ability('STEALTH', true) t1.Activate_Ability('SPRINT', false) act2 = t1.Is_Ability_Active('SPRINT') and 1 or 0") == "");
+    CHECK(rec.cmds[rec.cmds.size() - 2].payload.u("ability") == 48 && rec.cmds[rec.cmds.size() - 2].payload.u("object") == commands::kNoObject);
     CHECK(rec.cmds.back().payload.u("on") == 0 && gnum(vm, "act2") == 0.0);
     const size_t before = rec.cmds.size();
-    CHECK(run(vm, "nb = t1.Activate_Ability('JET_PACK') nf = nb.IsFinished() and 1 or 0") == "" && rec.cmds.size() == before);  // not owned: no-op
+    // cu8l t04 (CU8K_T04_COORDINATOR_TRACES "Which check ends the script"): on the stage-2 path too, a count other than 2,
+    // an unknown name and a wrong argument kind (STEALTH takes a bool) are script errors; nothing is issued.
+    CHECK(contains(run_stop(vm, "t1.Activate_Ability('SPRINT')"), "invalid number of parameters.  Expected 2, got 1."));
+    CHECK(contains(run_stop(vm, "t1.Activate_Ability('NOT_AN_ABILITY', true)"), "unknown ability NOT_AN_ABILITY."));
+    CHECK(contains(run_stop(vm, "t1.Activate_Ability('STEALTH', tank)"), "Ability STEALTH expects a bool."));
+    CHECK(rec.cmds.size() == before);
+    CHECK(run(vm, "nb = t1.Activate_Ability('JET_PACK', tank) nf = nb.IsFinished() and 1 or 0") == "" && rec.cmds.size() == before);  // not owned: no-op
+    CHECK(last_message_has(vm, "SCRIPT WARNING: GameObjectWrapper::Activate_Ability -- Object ") && !vm.exit_requested());
     CHECK(run(vm, "t1.Set_Single_Ability_Autofire('STEALTH', true) af = t1.Is_Ability_Autofire('STEALTH') and 1 or 0") == "");
     CHECK(rec.cmds.back().payload.type() == EventType::SetAbilityAutofire && rec.cmds.back().payload.u("ability") == 48 &&
           gnum(vm, "af") == 1.0);
@@ -939,6 +1128,8 @@ static void test_galactic(const Db& db) {
     LuaHost host;
     host.store = &st;
     host.types = &db.types;
+    GameRandom rng(1234u, 99u);  // mcx8 t12: Destroy_Contained_Objects draws its victims from the synced stream
+    host.rng = &rng;
     LuaVm vm(host);
     ObjectBridge bridge;
     commands::CommandPipeline pipe;
@@ -965,6 +1156,42 @@ static void test_galactic(const Db& db) {
     // Find_Nearest is tactical only.
     CHECK(run(vm, "gn = Find_Nearest(px) gn = tostring(gn)") == "" && gstr(vm, "gn") == "nil" &&
           last_message_has(vm, "Find_Nearest - this function may only be used in tactical modes."));
+    reset_script_threads(vm);
+    // mcx8 t12 (MCX8_BINDINGS_OBJECTS §Move_To in galactic [H]): Move_Galactic - exactly one planet argument, fleets only.
+    CHECK(contains(run_stop(vm, "fl.Move_To(py, 5)"), "GameObjectWrapper::Move_Galactic -- invalid number of parameters.  Expected 1, got 2."));
+    CHECK(contains(run_stop(vm, "fl.Move_To(Create_Position(1, 2, 3))"),
+                   "GameObjectWrapper::Move_Galactic -- invalid type for parameter 1.  Expected planet."));
+    CHECK(contains(run_stop(vm, "fl.Move_To(ship)"), "GameObjectWrapper::Move_Galactic -- invalid type for parameter 1.  Expected planet."));
+    CHECK(contains(run_stop(vm, "ship.Move_To(py)"), "GameObjectWrapper::Move_Galactic -- this function is only valid on fleets."));
+    CHECK(cmds.size() == 1);
+    // mcx8 t12 (§Spawn_Unit [H]): the galactic texts; the location must be a planet.
+    CHECK(contains(run_stop(vm, "Spawn_Unit(Find_Object_Type('Tank'), py)"), "Galactic_Spawn_Unit -- Invalid number of parameters."));
+    CHECK(contains(run_stop(vm, "Spawn_Unit(Find_Object_Type('Tank'), py, 1)"), "Galactic_Spawn_Unit -- Invalid parameter for player."));
+    CHECK(contains(run_stop(vm, "Spawn_Unit('Tank', py, py.Get_Owner())"), "Galactic_Spawn_Unit -- Invalid parameter for type."));
+    CHECK(contains(run_stop(vm, "Spawn_Unit(Find_Object_Type('Tank'), fl, py.Get_Owner())"), "Galactic_Spawn_Unit -- Invalid planet parameter."));
+    CHECK(contains(run_stop(vm, "Spawn_Unit(Find_Object_Type('Tank'), Create_Position(1, 2, 3), py.Get_Owner())"),
+                   "Galactic_Spawn_Unit -- Invalid planet parameter."));
+    // mcx8 t12 (§Destroy_Contained_Objects [H]): keep = (int)((1 - f) * n + 0.5) units, the victims drawn with the synced
+    // RNG from the remaining units; f < 0 nothing; a fraction that destroys all draws nothing.
+    {
+        objects::SpawnParams fp;
+        fp.type = db.t("Fleet");
+        fp.owner = 1;
+        fp.container = px;
+        const objects::ObjectHandle f2 = st.create(fp);
+        std::vector<objects::ObjectHandle> u;
+        fp.type = db.t("Tank");
+        fp.container = f2;
+        for (int i = 0; i < 3; ++i) u.push_back(st.create(fp));
+        vm.set_object_global("F2", f2);
+        SimRng ref = rng.synced();
+        const int32_t pick = ref.range_int(0, 2);  // 3 units, f = 0.5: keep 2, one victim
+        CHECK(run(vm, "F2.Destroy_Contained_Objects(-1)") == "" && st.alive(u[0]) && st.alive(u[1]) && st.alive(u[2]));
+        CHECK(run(vm, "F2.Destroy_Contained_Objects(0.5)") == "" && rng.synced() == ref);
+        for (int i = 0; i < 3; ++i) CHECK(st.alive(u[static_cast<size_t>(i)]) == (i != pick));
+        CHECK(run(vm, "F2.Destroy_Contained_Objects(1.0)") == "" && rng.synced() == ref);
+        for (const objects::ObjectHandle h : u) CHECK(!st.alive(h));
+    }
     // Mark_Parent_Mode_Object_For_Death on a tactical store whose parent mode is this one.
     objects::IdCounter tids;
     objects::ObjectStore tac(objects::ModeKind::Space, objects::StoreKind::Primary, db.types, &tids);
@@ -1011,26 +1238,12 @@ static void test_determinism(const Db& db) {
 
 // The shipped scripts' patterns: TestValid / Find_Hint / Spawn_Unit / Teleport_And_Face / BlockOnCommand in a
 // thread. With ALAMO_FOC_DATA the real PGBase.lua drives BlockOnCommand; otherwise a minimal stand-in.
-static std::string env(const char* name) {
-#ifdef _MSC_VER
-    char* v = nullptr;
-    size_t len = 0;
-    std::string out;
-    if (_dupenv_s(&v, &len, name) == 0 && v) {
-        out = v;
-        std::free(v);
-    }
-    return out;
-#else
-    const char* v = std::getenv(name);
-    return v ? std::string(v) : std::string();
-#endif
-}
+using ::alamo::test::env_or_empty;
 
 static void test_script_patterns(const Db& db) {
     Scene s(db);
     std::unique_ptr<FileProvider> files;
-    const std::string root = env("ALAMO_FOC_DATA");
+    const std::string root = env_or_empty("ALAMO_FOC_DATA");
 #ifdef ALAMO_LUA_HAVE_VFS
     if (!root.empty()) {
         vfs::VfsConfig cfg;
@@ -1099,14 +1312,16 @@ static void test_wave1(const Db& db) {
                   "cg1 = t2.Can_Garrison(Bunker) cg2 = tank.Can_Garrison(Bunker) cg3 = Inside.Can_Garrison(t2) "
                   "pc = Inside.Get_Parent_Object() == Bunker n = Bunker.Get_Contained_Object_Count() "
                   "bf = BlockForever().IsFinished()") == "");
-    // t2 (player 2) may garrison only an empty or own bunker: the bunker (player 1) holds units -> false.
+    // mcx8 t12: none of these units has GARRISON_UNIT -> false (test_mcx8_garrison has the full rule).
     CHECK(gtrue(vm, "g1") && !gtrue(vm, "g2") && gtrue(vm, "h1") && !gtrue(vm, "h2") && gnum(vm, "gl") == 2.0 && gtrue(vm, "gf"));
     CHECK(!gtrue(vm, "cg1") && !gtrue(vm, "cg2") && !gtrue(vm, "cg3") && gtrue(vm, "pc") && gnum(vm, "n") == 2.0 && !gtrue(vm, "bf"));
-    CHECK(run(vm, "t2.Change_Owner(Bunker.Get_Owner()) cg4 = t2.Can_Garrison(Bunker)") == "" && gtrue(vm, "cg4"));
     const uint32_t before = s.bridge.orders_issued;
     CHECK(run(vm, "Bunker.Eject_Garrison() t2.Eject_Garrison()") == "" && s.bridge.orders_issued == before + 2);
     CHECK(s.bridge.state(s.store.id(inside)).has_orders && s.bridge.state(s.store.id(tank_in)).has_orders);
-    CHECK(run(vm, "Bunker.Destroy_Contained_Objects(0.5)") == "" && !s.store.alive(inside) && s.store.alive(tank_in));
+    // mcx8 t12 (MCX8_BINDINGS_OBJECTS §Destroy_Contained_Objects [H]): fleets only.
+    CHECK(contains(run_stop(vm, "Bunker.Destroy_Contained_Objects(0.5)"),
+                   "GameObjectWrapper::Destroy_Contained_Objects -- this function may only be used on fleets."));
+    CHECK(s.store.alive(inside) && s.store.alive(tank_in));
 }
 
 // q6 t11 (docs/re/LUA_API.md "Binding error model across all bindings").
@@ -1176,8 +1391,23 @@ static void test_binding_error_model(const Db& db) {
               messages_with(vm, "SCRIPT WARNING: GameObjectWrapper::Despawn -- this object is dead!") == 1 &&
               last_message_has(vm, "SCRIPT WARNING: GameObjectWrapper::Get_Time_Till_Dead -- this object is dead!"));
         CHECK(run(vm, "dd = victim.Get_Distance(t1)") == "" && vm.exit_requested() &&
-              last_message_has(vm, "SCRIPT ERROR: GameObjectWrapper::Get_Distance -- this object is already dead"));
+              last_message_has(vm, "SCRIPT ERROR: GameObjectWrapper::Get_Distance -- this object is already dead."));
         reset_script_threads(vm);
+        // mcx8 t12 (MCX8_BINDINGS_OBJECTS): the dead-wrapper error ends with a full stop (retail text); a dead Get_Shield is 0
+        // with no message; a dead Get_Name is "".
+        CHECK(run(vm, "dh = victim.Get_Contained_Heroes()") == "" && vm.exit_requested() && vm.messages().back() ==
+              "SCRIPT ERROR: GameObjectWrapper::Get_Contained_Heroes -- this object is already dead.");
+        reset_script_threads(vm);
+        const size_t m1 = vm.messages().size();
+        CHECK(run(vm, "ds = victim.Get_Shield() dn = victim.Get_Name()") == "" && !vm.exit_requested() && vm.messages().size() == m1);
+        CHECK(gstr(vm, "ds") == "0" && gstr(vm, "dn") == "");
+        // Take_Damage / Is_Ability_Ready test the argument count before the dead wrapper.
+        CHECK(contains(run_stop(vm, "victim.Take_Damage()"),
+                       "GameObjectWrapper::Take_Damage -- invalid number of parameters.  Expected 1 or 2, got 0."));
+        CHECK(contains(run_stop(vm, "victim.Is_Ability_Ready()"),
+                       "GameObjectWrapper::Is_Ability_Ready -- invalid number of parameters.  Expected 1, got 0."));
+        CHECK(run(vm, "dr = (function(...) return arg.n end)(victim.Is_Ability_Ready('SPRINT'))") == "" && gnum(vm, "dr") == 0.0 &&
+              vm.messages().size() == m1 + 2 && !vm.exit_requested());
     }
     {
         // The mode gate comes before the dead-wrapper check: a dead object's Get_Hull in a galactic mode is an error.
@@ -1186,12 +1416,191 @@ static void test_binding_error_model(const Db& db) {
         CHECK(run(vm, "victim = t2") == "");
         CHECK(s.store.destroy(s.trooper2));
         CHECK(run(vm, "h = victim.Get_Hull() after = 1") == "" && gnum(vm, "after") == 1.0 && vm.exit_requested() &&
-              last_message_has(vm, "SCRIPT ERROR: GameObjectWrapper::Get_Hull -- this command is only supported in tactical modes"));
+              last_message_has(vm, "SCRIPT ERROR: GameObjectWrapper::Get_Hull -- this command is only supported in tactical modes."));
         reset_script_threads(vm);
         CHECK(run(vm, "Zoom_Camera(1, 2)") == "" && vm.exit_requested() &&
-              last_message_has(vm, "SCRIPT ERROR: Zoom_Camera -- this command is only supported in tactical modes"));
+              last_message_has(vm, "SCRIPT ERROR: Zoom_Camera -- this command is only supported in tactical modes."));
+        reset_script_threads(vm);
+        // mcx8 t12 (MCX8_BINDINGS_OBJECTS [H]): Get_Health is Get_Hull (its gate and text); Get_Shield and Hide_Object
+        // carry their own texts.
+        CHECK(run(vm, "h = t1.Get_Health()") == "" && vm.exit_requested() && vm.messages().back() ==
+              "SCRIPT ERROR: GameObjectWrapper::Get_Hull -- this command is only supported in tactical modes.");
+        reset_script_threads(vm);
+        CHECK(run(vm, "h = t1.Get_Shield()") == "" && vm.exit_requested() && vm.messages().back() ==
+              "SCRIPT ERROR: GameObjectWrapper::Get_Shield -- this command is only supported in tactical modes.");
+        reset_script_threads(vm);
+        CHECK(run(vm, "Hide_Object(t1, 1)") == "" && vm.exit_requested() && vm.messages().back() ==
+              "SCRIPT ERROR: LuaTransitionCinematicTargetKey -- Command only valid in a tactical game.");
         reset_script_threads(vm);
     }
+}
+
+// mcx8 t12 (docs/re/MCX8_BINDINGS_OBJECTS.md): the object bindings whose retail behaviour differed from the port's guess,
+// one block per binding (tactical scene).
+static void test_mcx8_bindings(const Db& db) {
+    Scene s(db);
+    LuaVm& vm = *s.vm;
+    CHECK(run(vm, "mk = Find_Hint('Marker_Generic', 'spawnpoint')") == "");
+    // Spawn_Unit: at least 3 arguments, the player before the type, the tactical position text.
+    CHECK(contains(run_stop(vm, "Spawn_Unit('Tank', mk, 1)"), "LuaSpawnUnitCommandClass -- Invalid parameter for player."));
+    CHECK(contains(run_stop(vm, "Spawn_Unit(Find_Object_Type('Tank'), 5, p1)"), "LuaSpawnUnitCommandClass -- Invalid position parameter."));
+    CHECK(run_stop(vm, "sx = table.getn(Spawn_Unit(Find_Object_Type('Tank'), mk, p1, 'extra'))") == "" && gnum(vm, "sx") == 1.0);
+    // Create_Generic_Object: the player before the type; an unknown type name is an error, never nil.
+    CHECK(contains(run_stop(vm, "Create_Generic_Object('Nope', 5, 5)"), "Create_Generic_Object -- Invalid type for parameter 3.  Expected player."));
+    CHECK(contains(run_stop(vm, "gn = Create_Generic_Object('Nope', t1, p1)"),
+                   "Create_Generic_Object -- Invalid type or unnown type name for parameter 1."));
+    CHECK(contains(run_stop(vm, "Create_Generic_Object(7, t1, p1)"), "Create_Generic_Object -- Invalid type or unnown type name for parameter 1."));
+    // Hide_Object: hides only for a number > 0; a non-number argument 2 is an error and hides anyway; extra arguments ignored.
+    CHECK(run(vm, "Hide_Object(t2, 1, 'extra')") == "" && !vm.exit_requested() && s.bridge.state(2).hidden);
+    CHECK(run(vm, "Hide_Object(t2, -1)") == "" && !s.bridge.state(2).hidden);
+    CHECK(contains(run_stop(vm, "Hide_Object(t2, 'x')"), "LuaHideObject -- Invalid parameter 2, expected a float") && s.bridge.state(2).hidden);
+    CHECK(run(vm, "Hide_Object(t2, 0)") == "" && !s.bridge.state(2).hidden);
+    // Get_Name: the ship name, first and last character dropped when longer than 2; else "".
+    s.bridge.ship_name = [&](objects::ObjectHandle h) -> std::string_view {
+        if (h == s.tank) return "\"Executor\"";
+        if (h == s.trooper2) return "ab";
+        return {};
+    };
+    CHECK(run(vm, "n1 = tank.Get_Name() n2 = t2.Get_Name() n3 = t1.Get_Name()") == "");
+    CHECK(gstr(vm, "n1") == "Executor" && gstr(vm, "n2") == "ab" && gstr(vm, "n3") == "");
+    s.bridge.ship_name = nullptr;
+    // Is_Category: an unrecognized category is an error; the representative type's CategoryMask is tested.
+    CHECK(contains(run_stop(vm, "c = t1.Is_Category('Bogus')"), "GameObjectWrapper::Is_Category -- unrecognized category Bogus."));
+    const objects::ObjectHandle box = make(s.store, db.t("Team_Box"), 1, {60, 0, 0});
+    vm.set_object_global("Box", box);
+    s.bridge.representative_type = [&](objects::ObjectHandle h) { return h == box ? db.t("Squad_Co") : objects::kNone; };
+    CHECK(run(vm, "ca = Box.Is_Category('Air') ci = Box.Is_Category('Infantry')") == "" && gtrue(vm, "ca") && !gtrue(vm, "ci"));
+    // Get_Game_Scoring_Type: a team container's company type, a transport's carried type, else the representative type.
+    s.bridge.team_company_type = [&](objects::ObjectHandle h) { return h == box ? db.t("Trooper_Team") : objects::kNone; };
+    const objects::ObjectHandle hauler = make(s.store, db.t("Hero_Ship"), 1, {70, 0, 0});  // TRANSPORT
+    CHECK(s.store.set_carried_type(hauler, db.t("Squad")));
+    vm.set_object_global("Hauler", hauler);
+    CHECK(run(vm, "g1 = Box.Get_Game_Scoring_Type().Get_Name() g2 = Hauler.Get_Game_Scoring_Type().Get_Name() "
+                  "g3 = tank.Get_Game_Scoring_Type().Get_Name()") == "");
+    CHECK(gstr(vm, "g1") == "TROOPER_TEAM" && gstr(vm, "g2") == "SQUAD" && gstr(vm, "g3") == "TANK");
+    s.bridge.team_company_type = nullptr;
+    CHECK(run(vm, "g4 = Box.Get_Game_Scoring_Type().Get_Name()") == "" && gstr(vm, "g4") == "SQUAD_CO");
+    s.bridge.representative_type = nullptr;
+    // Take_Damage: a TEAM container passes the full amount to each member and takes none itself.
+    CHECK(run(vm, "team = Spawn_Unit(Find_Object_Type('Trooper_Team'), mk, p1)[1] team.Take_Damage(30)") == "");
+    {
+        int members = 0;
+        for (const objects::ObjectHandle h : s.store.all_objects())
+            if (s.store.alive(h) && s.store.container(h) && s.store.type(s.store.container(h)) == db.t("Trooper_Team")) {
+                ++members;
+                CHECK(s.store.health(h) == 70.0f);
+            }
+        CHECK(members == 2);
+    }
+    // Override_Max_Speed: true does nothing, other types do nothing silently, false clears.
+    CHECK(run(vm, "t1.Override_Max_Speed(0.5) t1.Override_Max_Speed(true) t1.Override_Max_Speed('x') t1.Override_Max_Speed(nil)") == "" &&
+          !vm.exit_requested() && s.bridge.state(1).max_speed_override == 0.5f);
+    CHECK(run(vm, "t1.Override_Max_Speed(false)") == "" && s.bridge.state(1).max_speed_override < 0.0f);
+    // Is_Ability_Ready: an unknown name is an error; an object without the ability warns and answers false.
+    CHECK(contains(run_stop(vm, "r = t1.Is_Ability_Ready('Bogus')"), "GameObjectWrapper::Is_Ability_Ready -- unknown ability Bogus."));
+    CHECK(contains(run_stop(vm, "r = t1.Is_Ability_Ready(1)"), "GameObjectWrapper::Is_Ability_Ready -- invalid type for ability 1.  Expected string."));
+    CHECK(run(vm, "r = tostring(tank.Is_Ability_Ready('sprint'))") == "" && !vm.exit_requested() && gstr(vm, "r") == "false" &&
+          last_message_has(vm, "SCRIPT WARNING: GameObjectWrapper::Is_Ability_Ready -- Object TANK does not have ability sprint."));
+    // Type wrappers: Is_Hero through the first company / squadron member and Is_Special_Weapon_In_Space; the tactical squad
+    // share of Get_Combat_Rating; Get_Tactical_Build_Cost by game kind.
+    CHECK(run(vm, "h1 = Find_Object_Type('Hero_Co').Is_Hero() h2 = Find_Object_Type('SW_Ship').Is_Hero() "
+                  "h3 = Find_Object_Type('SW_Squadron').Is_Hero() h4 = Find_Object_Type('Trooper_Team').Is_Hero() "
+                  "cr = Find_Object_Type('Power_Co').Get_Combat_Rating() tc = Find_Object_Type('Cost_Unit').Get_Tactical_Build_Cost() "
+                  "th = Find_Object_Type('Hero_Ship').Get_Tactical_Build_Cost()") == "");
+    CHECK(gtrue(vm, "h1") && gtrue(vm, "h2") && gtrue(vm, "h3") && !gtrue(vm, "h4"));
+    const double power = static_cast<double>(db.types.columns().ai_combat_power[db.t("Power_Co")]);
+    CHECK(power > 0.0 && gnum(vm, "cr") == static_cast<double>(static_cast<float>(power) * 0.5f));
+    CHECK(gnum(vm, "tc") == 900.0 && gnum(vm, "th") == 900.0);  // skirmish (not a campaign): Multiplayer
+    {
+        LuaHost ch = s.host;
+        ch.campaign = true;
+        LuaVm cvm(ch);
+        CHECK(run(cvm, "tc = Find_Object_Type('Cost_Unit').Get_Tactical_Build_Cost() "
+                       "th = Find_Object_Type('Hero_Ship').Get_Tactical_Build_Cost()") == "");
+        CHECK(gnum(cvm, "tc") == 300.0 && gnum(cvm, "th") == 900.0);  // campaign; Multiplayer when Campaign < 1
+        objects::IdCounter gids;
+        objects::ObjectStore gst(objects::ModeKind::Galactic, objects::StoreKind::Primary, db.types, &gids);
+        LuaHost gh;
+        gh.store = &gst;
+        gh.types = &db.types;
+        LuaVm gvm(gh);
+        CHECK(run(gvm, "cr = Find_Object_Type('Power_Co').Get_Combat_Rating()") == "" && gnum(gvm, "cr") == power);  // no share
+    }
+    // Get_Contained_Heroes: one level, own type Is_Named_Hero only.
+    {
+        objects::SpawnParams sp;
+        sp.owner = 1;
+        sp.type = db.t("Hero_Ship");
+        sp.container = s.tank;
+        const objects::ObjectHandle direct = s.store.create(sp);
+        sp.type = db.t("Trooper");
+        const objects::ObjectHandle inner = s.store.create(sp);
+        sp.type = db.t("Hero_Ship");
+        sp.container = inner;
+        s.store.create(sp);  // nested: not listed
+        sp.type = db.t("Hero_Co");
+        sp.container = s.tank;
+        s.store.create(sp);  // a company of a hero, not itself Is_Named_Hero: not listed
+        vm.set_object_global("Direct", direct);
+        CHECK(run(vm, "hl = tank.Get_Contained_Heroes() hn = table.getn(hl) h1 = hl[1] == Direct ch = tank.Contains_Hero()") == "");
+        CHECK(gnum(vm, "hn") == 1.0 && gtrue(vm, "h1") && gtrue(vm, "ch"));
+    }
+}
+
+// mcx8 t12 (MCX8_BINDINGS_OBJECTS §Can_Garrison / §Eject_Garrison [H]).
+static void test_mcx8_garrison(const Db& db) {
+    Scene s(db);
+    LuaVm& vm = *s.vm;
+    const objects::ObjectHandle bunker = make(s.store, db.t("G_Bunker"), 1, {50, 0, 0});
+    const objects::ObjectHandle unit = make(s.store, db.t("G_Trooper"), 1, {40, 0, 0});
+    const objects::ObjectHandle gtank = make(s.store, db.t("G_Tank"), 1, {41, 0, 0});
+    const objects::ObjectHandle gfree = make(s.store, db.t("G_Free"), 1, {42, 0, 0});
+    const objects::ObjectHandle enemy = make(s.store, db.t("G_Trooper"), 2, {43, 0, 0});
+    const objects::ObjectHandle depot = make(s.store, db.t("Depot"), 1, {44, 0, 0});  // CanContainGarrison property only
+    vm.set_object_global("B", bunker);
+    vm.set_object_global("U", unit);
+    vm.set_object_global("GT", gtank);
+    vm.set_object_global("GF", gfree);
+    vm.set_object_global("E", enemy);
+    vm.set_object_global("D", depot);
+    // No GARRISON_UNIT: false before the argument checks (no error for a bad argument).
+    CHECK(run(vm, "n1 = tostring(t1.Can_Garrison(5))") == "" && !vm.exit_requested() && gstr(vm, "n1") == "false");
+    // A bad argument: the type error, then the dead-target error.
+    const size_t m0 = vm.messages().size();
+    CHECK(run(vm, "x = U.Can_Garrison(5)") == "" && vm.exit_requested() && vm.messages().size() == m0 + 2);
+    CHECK(vm.messages()[m0] ==
+          "SCRIPT ERROR: GameObjectWrapper::Can_Garrison -- invalid type for parameter 1.  Expected game object or AI target.");
+    CHECK(vm.messages()[m0 + 1] == "SCRIPT ERROR: GameObjectWrapper;:Can_Garrison - target is already dead.");
+    reset_script_threads(vm);
+    CHECK(contains(run_stop(vm, "x = U.Can_Garrison()"), "GameObjectWrapper::Can_Garrison -- invalid number of parameters.  Expected 1, got 0."));
+    // Holder, owner, masks.
+    CHECK(run(vm, "a1 = U.Can_Garrison(B) a2 = U.Can_Garrison(D) a3 = E.Can_Garrison(B) a4 = GT.Can_Garrison(B) "
+                  "a5 = GF.Can_Garrison(B)") == "");
+    CHECK(gtrue(vm, "a1") && !gtrue(vm, "a2") && !gtrue(vm, "a3") && !gtrue(vm, "a4") && gtrue(vm, "a5"));
+    // Capacity: 3 slots - occupants' Garrison_Value (DUMMY_UPGRADE skipped) - the unit's value must stay > 0.
+    objects::SpawnParams sp;
+    sp.owner = 1;
+    sp.container = bunker;
+    sp.type = db.t("G_Upgrade");
+    s.store.create(sp);
+    sp.type = db.t("G_Trooper");
+    const objects::ObjectHandle in1 = s.store.create(sp);
+    CHECK(run(vm, "c1 = U.Can_Garrison(B)") == "" && gtrue(vm, "c1"));  // 3 - 1 - 1 = 1
+    s.store.create(sp);
+    CHECK(run(vm, "c2 = U.Can_Garrison(B)") == "" && !gtrue(vm, "c2"));  // 3 - 2 - 1 = 0
+    // A garrisoned unit (or one in limbo) cannot garrison.
+    vm.set_object_global("In1", in1);
+    CHECK(run(vm, "c3 = In1.Can_Garrison(B) GF.Set_In_Limbo(true) c4 = GF.Can_Garrison(B)") == "" && !gtrue(vm, "c3") && !gtrue(vm, "c4"));
+    // A dead target.
+    CHECK(run(vm, "victim = U") == "");
+    CHECK(s.store.destroy(unit));
+    CHECK(contains(run_stop(vm, "x = GT.Can_Garrison(victim)"), "GameObjectWrapper;:Can_Garrison - target is already dead."));
+    // Eject_Garrison: only a host with a garrison behaviour (the property alone does nothing).
+    sp.container = depot;
+    s.store.create(sp);
+    const uint32_t before = s.bridge.orders_issued;
+    CHECK(run(vm, "D.Eject_Garrison()") == "" && s.bridge.orders_issued == before);
+    CHECK(run(vm, "B.Eject_Garrison()") == "" && s.bridge.orders_issued == before + 3);
 }
 
 int main() {
@@ -1202,6 +1611,7 @@ int main() {
     if (!db.ok) return 1;
     test_registry_rows();
     test_find(db);
+    test_find_nearest_base(db);
     test_find_filters(db);
     test_queries(db);
     test_stage3(db);
@@ -1211,6 +1621,8 @@ int main() {
     test_dead_handles(db);
     test_binding_error_model(db);
     test_wave1(db);
+    test_mcx8_bindings(db);
+    test_mcx8_garrison(db);
 #if ALAMO_LUA_HAVE_COMMANDS
     test_orders(db);
     test_galactic(db);

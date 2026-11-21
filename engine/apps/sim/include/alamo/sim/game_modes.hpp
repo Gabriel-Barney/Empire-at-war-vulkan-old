@@ -12,7 +12,7 @@
 //   galactic: common tick FIRST, then cinematic step, income at the income frame, per-planet RNG
 //             value [stub: no planets in this store yet], victory events.
 //   land/space: cinematic step [stub], per-AI-player tactical AI data [stub], movement scratch
-//             reset [stub], land: weather + hero clash [stub], tactical frame += 1, victory event
+//             reset [stub], land: weather + hero clash [in TacticalBattle], tactical frame += 1, victory event
 //             0x11 [stub], common tick LAST.
 //   common (§3.3): FOW for players with id = F (mod 16) [stub counter], GOM service of the primary
 //             then the secondary store (OBJECT_RUNTIME.md §5.3: refit spatial trees, serviced
@@ -40,7 +40,7 @@
 
 #include "alamo/core/bytes.hpp"
 #include "alamo/core/parallel.hpp"
-#include "alamo/core/sim_crc.hpp"
+#include "alamo/core/sim_crc_fwd.hpp"
 #include "alamo/core/sim_rng.hpp"
 #include "alamo/objects/object_store.hpp"
 #include "alamo/tactical/tree_set.hpp"
@@ -60,7 +60,11 @@ using objects::ObjectHandle;
 using objects::ObjectId;
 using objects::kNoObjectId;
 
-inline constexpr uint32_t kMaxPlayers = 32;  // = commands::kMaxPlayerSlots
+// mcx5 t01: the session's PlayerList bound. The original keeps a vector with no fixed cap (MODS.md §10.4); the port's
+// per-player state is sized from SimConfig::players, and this guard (far above any mod: Age of Legends has 50) only
+// exists because the sim's player ids are uint8_t (host hooks, tactical battles, battle AI). The commands carry 13 bits
+// (commands::kMaxPlayerSlots). start_galactic refuses a setup above it; SimHost::handle refuses an id >= it.
+inline constexpr uint32_t kMaxPlayers = 256;  // limit: guard (uint8_t sim player ids 0..255)
 
 // Spatial category bits (TreeSet masks).
 inline constexpr uint32_t kCatUnit = 0x1;       // has a locomotor
@@ -134,8 +138,8 @@ public:
     void post_tick() {
         if (!paused()) ++frame_;
     }
-    // Per-frame (render-rate) update (vtable +0xb8); d = 0.03 per tick done this iteration, else 0.
-    virtual void per_frame_update(double d) { last_frame_delta_ = d; }
+    // [port] The per-frame (render-rate) update (vtable +0xb8; d = 0.03 per tick done this iteration, else 0) has no
+    // override in the port, so neither the hook nor its d is modelled (cu9 t15).
 
     // Mode-level sim state for the CRC (frames, counters, orders); stores are hashed separately.
     virtual void hash(StateHasher& h) const;
@@ -163,7 +167,6 @@ protected:
     uint64_t fow_updates_ = 0;
     bool paused_ = false;
     bool suspended_ = false;
-    double last_frame_delta_ = 0.0;
 };
 
 class GalacticMode final : public GameMode {
@@ -172,8 +175,8 @@ public:
     ~GalacticMode() override;
     void tick(const ModeTickContext& ctx) override;
     void hash(StateHasher& h) const override;
-    // N1: + income cadence and the pause counter (restored without re-pushing GalacticSim pauses: the sim's own pause
-    // state is in its "galactic.state" chunk).
+    // N1: + the pause counter (restored without re-pushing GalacticSim pauses: the sim's own pause state is in its
+    // "galactic.state" chunk). cu9f t01: the pre-S3 income cadence is no longer hashed or saved (frame chunk version 2).
     void write_state(ByteWriter& w) const override;
     bool read_state(ByteReader& r) override;
 
@@ -189,15 +192,8 @@ public:
     void pop_pause();
     // a1j t05: 0x4b2360 is also true while the story block holds (GalacticSim::paused(), A1_READINGS §31.7).
     bool paused() const override;
-    // Income: every income_interval mode frames (GALACTIC_ECONOMY.md fiscal cycle; S3 owns the
-    // amounts). Counted here so the cadence is in the CRC.
-    void set_income_interval(uint32_t frames) { income_interval_ = frames ? frames : 1; }
-    uint64_t income_events() const { return income_events_; }
 
 private:
-    uint32_t income_interval_ = 1350;
-    uint64_t next_income_frame_ = 0;
-    uint64_t income_events_ = 0;
     uint32_t pause_count_ = 0;
     std::unique_ptr<galactic::GalacticSim> sim_;
 };
@@ -233,6 +229,9 @@ public:
     // team list's box is not modelled; no FoC TEAM type is projectile-collidable] and without a source (synthetic
     // runs without model files). Serial callers only (it fills the per-type model cache).
     tactical::Aabb bounds_of(ObjectHandle h) const;
+    // SP5: fills exactly the model-cache entry bounds_of(h) would fill (serial); afterwards bounds_of(h) only reads, so it
+    // may run in a parallel loop until the next spawn of a new type.
+    void prepare_bounds(ObjectHandle h) const;
     // The pre-t07 box: the per-type half extent (max Custom_Hard_X/YExtent, else 40 (space) / 10 (land) x Scale_Factor)
     // around the position. [port] Still the model box stand-in of the fog (FogObject) and the garrison holder.
     tactical::Aabb extent_box(ObjectHandle h) const;
@@ -273,6 +272,9 @@ public:
     bool read_state(ByteReader& r) override;
 
     uint64_t ai_services() const { return ai_services_; }
+    // storyb t17 (objects::kFlagUnlinkedInRetail): the primary store's dead objects pending the flush at the end of SimHost
+    // T5 (the battle and its animation step) get the mark; story-script deaths after it do not.
+    void mark_step_deaths();
 
 protected:
     void pre_service(objects::ObjectStore& store, const ModeTickContext& ctx) override;
@@ -318,7 +320,7 @@ public:
         : TacticalMode(ModeKind::Land, types, ids, players) {}
 
 protected:
-    void mode_specific(const ModeTickContext& ctx) override;  // weather + hero clash [stubs]
+    void mode_specific(const ModeTickContext& ctx) override;  // weather + hero clash (trace; both run in TacticalBattle)
 };
 
 class SpaceMode final : public TacticalMode {

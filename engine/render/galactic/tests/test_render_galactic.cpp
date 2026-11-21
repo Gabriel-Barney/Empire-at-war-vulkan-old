@@ -28,6 +28,7 @@
 #include <vector>
 
 #include "alamo/core/file_provider.hpp"
+#include "alamo/core/host_fs.hpp"
 #include "alamo/core/log.hpp"
 #include "alamo/core/sim_crc.hpp"
 #include "alamo/jobs/crc_recorder.hpp"
@@ -42,34 +43,15 @@
 #include "alamo/render/sim_view.hpp"
 #include "alamo/rhi/rhi.hpp"
 #include "alamo/vfs/vfs.hpp"
+#include "alamo/test/support.hpp"
+#include "alamo/render/test/gpu.hpp"
 
 using namespace alamo;
 namespace fs = std::filesystem;
 
-static int g_fail = 0;
-#define CHECK(c)                                                     \
-    do {                                                             \
-        if (!(c)) {                                                  \
-            std::printf("FAIL %s:%d: %s\n", __FILE__, __LINE__, #c); \
-            ++g_fail;                                                \
-        }                                                            \
-    } while (0)
+using ::alamo::test::g_fail;
 
-static std::string env_or_empty(const char* name) {
-#ifdef _MSC_VER
-    char* v = nullptr;
-    size_t len = 0;
-    std::string out;
-    if (_dupenv_s(&v, &len, name) == 0 && v) {
-        out = v;
-        std::free(v);
-    }
-    return out;
-#else
-    const char* v = std::getenv(name);
-    return v ? std::string(v) : std::string();
-#endif
-}
+using ::alamo::test::env_or_empty;
 
 static bool near(float a, float b, float eps = 1e-4f) { return std::fabs(a - b) <= eps; }
 
@@ -131,7 +113,10 @@ static void test_r2_records() {
     const render::RouteLineSettings& neutral = s.settings[render::kRouteNeutral];
     CHECK(near(neutral.zoomed_out.x, 0.5f) && near(neutral.width, 0.0f) && neutral.render_mode == "ALPHA");
     CHECK(near(s.color(render::RouteClass::Enemy).x, 225 / 255.0f) && near(s.width(render::RouteClass::Corrupt), 3.0f));  // built-in
-    const render::GalacticLightSettings ls = render::load_galactic_light_settings(mf);
+    std::vector<uint8_t> gc_bytes;  // cu5 t04: the loaders take the parsed <GameConstants> root
+    CHECK(mf.read("Data\\XML\\GameConstants.xml", gc_bytes));
+    const data::XmlDocument gc_doc = data::XmlDocument::parse(gc_bytes, "GameConstants.xml");
+    const render::GalacticLightSettings ls = render::load_galactic_light_settings(gc_doc.root());
     CHECK(near(ls.out_yaw_deg, 90.0f) && near(ls.out_elevation_deg, 30.0f) && near(ls.in_yaw_deg, 180.0f) && near(ls.zoom_light_level, 0.8f));
     const render::Lighting out = render::galactic_lighting(ls, 0.0f), in = render::galactic_lighting(ls, 1.0f);
     const assets::Float3 d = render::light_direction(90.0f * 3.14159265f / 180.0f, 30.0f * 3.14159265f / 180.0f);
@@ -173,7 +158,7 @@ static void test_r2_records() {
         CHECK(render::faction_text_color(tab, "Neutral", c) && near(c.x, 128 / 255.0f));
         CHECK(!render::faction_map_color(tab, "Hutts", c) && !render::faction_text_color(tab, "", c));
     }
-    const render::GalacticCorruptionSettings cs = render::load_galactic_corruption_settings(mf);
+    const render::GalacticCorruptionSettings cs = render::load_galactic_corruption_settings(gc_doc.root());
     CHECK(cs.planet_particle == "Light_Galactic_Corruption_Particles" && cs.line_particle == "Galactic_Corruption_Line_Particles" &&
           near(cs.brightness[0], 0.25f) && near(cs.brightness[1], 0.75f));
     const render::Lighting def = render::galactic_lighting();
@@ -560,10 +545,11 @@ static void test_synthetic(const render::GalacticWorld& w) {
     CHECK(st.planets == 12 && st.background == 1 && st.routes == 17 && st.route_sparks >= 1 && st.route_sparks < st.routes && st.rings >= 6 &&
           st.starbases >= 1 && st.no_model == 0);
     // GALAXY_MAP_PRESENTATION §2.1: only fleets in transit are drawn; orbiting ones are counted, not drawn.
-    CHECK(b.snap && st.fleets + st.orbit_fleets + st.fogged_fleets == b.snap->fleets.size());
+    CHECK(b.snap && st.fleets + st.hidden_fleets + st.orbit_fleets + st.fogged_fleets == b.snap->fleets.size());  // mcx4 t14: + hidden
     if (b.snap) {
         uint32_t transit = 0;
-        for (const auto& f : b.snap->fleets) transit += render::GalacticSceneBuilder::fleet_in_transit(f, b.snap->planets.size()) ? 1u : 0u;
+        for (const auto& f : b.snap->fleets)  // mcx4 t14: a transit fleet the local vote hides is not drawn
+            transit += render::GalacticSceneBuilder::fleet_in_transit(f, b.snap->planets.size()) && !(f.flags & render::kGalFleetHidden) ? 1u : 0u;
         CHECK(st.fleets == transit && st.selection == 0);
     }
     if (b.snap) test_fog(w, *b.snap);
@@ -810,6 +796,14 @@ static void test_fleets_and_selection(const render::GalacticWorld& w) {
         const float sc = types[types.fleet_type()].scale;
         CHECK(near(f2.transform.m[1][1], sc) && near(f2.transform.m[0][1], 0.0f));  // t32: the darts' tips (+Y) along the hop (+Y)
     }
+    {  // mcx4 t14 (MCX4_GAL2_RE_ANSWERS Q3): a transit fleet the local visibility vote hides is not drawn
+        render::GalacticFrame hid = frame;
+        hid.fleets[1].flags |= render::kGalFleetHidden;
+        std::vector<render::Instance> hfg, hbg;
+        render::GalacticViewStats hst;
+        b.build(hid, models, hfg, hbg, &hst);
+        CHECK(hst.fleets == 1 && hst.hidden_fleets == 1 && hst.stealth_fleets == 1);
+    }
     // Selection: planet 100, camera south of it, 45 degrees up.
     render::GalacticSelection sel;
     sel.planet = 100;
@@ -839,6 +833,18 @@ static void test_fleets_and_selection(const render::GalacticWorld& w) {
     // QA D6: rings, selection and fleet lines are gone from f = 0.25 on (planets and fleets stay), half at f = 0.125. t39:
     // the route stays to f = 1 (FIXPASS_GALACTIC §3.1) in Color_Zoomed_In; only its sparkle goes.
     {
+        {  // mcx4 t14 (docs/re/MCX4_T14_RE_ANSWERS.md): GUI_Cycle_Speed / GUI_Darken_Level colour cycle, mode 4
+            // ledger: verifies GameConstants.GUI_Cycle_Speed
+            // ledger: verifies GameConstants.GUI_Darken_Level
+            using B = render::GalacticSceneBuilder;
+            const materials::float4 one{1, 1, 1, 1};
+            const materials::float4 cyc_a = B::cycle_light_scale(one, Vec3{6, 0, 0}, 0.0f, 0.5f);  // factor 0.5
+            CHECK(near(cyc_a.x, 4.0f) && cyc_a.y == 1.0f && cyc_a.z == 1.0f && cyc_a.w == 1.0f);
+            const materials::float4 cyc_b = B::cycle_light_scale(one, Vec3{6, 0, 0}, -1.5707963f, 0.5f);  // factor 0
+            CHECK(near(cyc_b.x, 1.0f));
+            const materials::float4 cyc_c = B::cycle_light_scale(one, Vec3{1, -1, -1}, 1.5707963f, 0.5f);  // factor 1
+            CHECK(near(cyc_c.x, 2.0f) && near(cyc_c.y, 0.0f) && near(cyc_c.z, 0.0f));
+        }
         CHECK(render::GalacticSceneBuilder::overlay_fade(0.0f) == 1.0f && near(render::GalacticSceneBuilder::overlay_fade(0.125f), 0.5f) &&
               render::GalacticSceneBuilder::overlay_fade(0.25f) == 0.0f && render::GalacticSceneBuilder::overlay_fade(1.0f) == 0.0f);
         render::GalacticFrame fr = frame;
@@ -888,6 +894,25 @@ static void test_fleets_and_selection(const render::GalacticWorld& w) {
             o.set_route_zoom(0.0f);
             o.build(cf, models, ofg, obg, &os);
             CHECK(os.corruption_paths == 1);
+        }
+        // ui4 t06: fleet drag preview segments (GALAXY_MAP_PRESENTATION §2.2): one ribbon each, grey tint, width 2 x the
+        // corruption width scale; cleared by an empty list.
+        {
+            const Vec3 pa = fr.planets[0].position, pb = fr.planets[1].position;
+            o.set_drag_lines({{pa, pb, 128}, {pb, Vec3{pb.x + 10.0f, pb.y, 0.0f}, 50}});
+            o.build(fr, models, ofg, obg, &os);
+            CHECK(os.drag_lines == 2);
+            const assets::Mat3x4 rt = render::GalacticSceneBuilder::ribbon_transform(pa, pb, 2.0f * o.options().corruption_width_scale);
+            bool grey128 = false, grey50 = false;
+            for (const render::Instance& in : ofg) {
+                grey128 = grey128 || (near(in.light_scale.x, 128.0f / 255.0f) && near(in.transform.m[0][3], pa.x) &&
+                                      near(in.transform.m[1][1], rt.m[1][1]));
+                grey50 = grey50 || (near(in.light_scale.y, 50.0f / 255.0f) && near(in.light_scale.w, 1.0f));
+            }
+            CHECK(grey128 && grey50);
+            o.set_drag_lines({});
+            o.build(fr, models, ofg, obg, &os);
+            CHECK(os.drag_lines == 0);
         }
         // t34: a fogged planet whose model has an _ALT2 mesh draws that alternate; without one, the procedural globe.
         render::GalacticFrame ff = frame;
@@ -942,6 +967,9 @@ static void test_fleets_and_selection(const render::GalacticWorld& w) {
     render::GalacticSnapshot snap;
     render::build_galactic_snapshot(gs, 0, types, pal, snap);
     CHECK(snap.find_fleet(fid) && !(snap.find_fleet(fid)->flags & render::kGalFleetStealthed));
+    // mcx4 t14: the hidden flag follows GalacticSim::fleet_visible_to_local for every fleet
+    for (const render::GalacticFleetSnap& f : snap.fleets)
+        CHECK(((f.flags & render::kGalFleetHidden) != 0) == !gs.fleet_visible_to_local(f.index));
     std::vector<objects::ObjectHandle> ships;
     for (objects::ObjectHandle h : gs.fleets()[pick].contents)
         if (gs.store().alive(h) && !gs.is_company_transport(h)) ships.push_back(h);
@@ -956,35 +984,11 @@ static void test_fleets_and_selection(const render::GalacticWorld& w) {
 }
 
 // ------------------------------------------------------------------------------------------- GPU
-struct Gpu {
-    rhi::Context ctx;
-    rhi::Allocator alloc;
-    rhi::Uploader up;
-    rhi::FrameRing ring;
+struct Gpu : render::test::GpuCore {
     render::Renderer renderer;
 };
 
-struct Offscreen {
-    rhi::Image color;
-    rhi::Buffer readback;
-    uint32_t w = 0, h = 0;
-    bool create(Gpu& g, uint32_t width, uint32_t height) {
-        w = width;
-        h = height;
-        rhi::ImageDesc cd;
-        cd.format = rhi::Format::RGBA8;
-        cd.width = w;
-        cd.height = h;
-        cd.mips = 1;
-        cd.usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT;
-        return g.alloc.create_image(cd, color) &&
-               g.alloc.create_buffer(static_cast<VkDeviceSize>(w) * h * 4, VK_BUFFER_USAGE_TRANSFER_DST_BIT, rhi::MemoryUsage::Readback, readback);
-    }
-    void destroy(Gpu& g) {
-        g.alloc.destroy(color);
-        g.alloc.destroy(readback);
-    }
-};
+using Offscreen = render::test::OffscreenColorOnly;  // alamo/render/offscreen.hpp
 
 static void test_gpu(const render::GalacticWorld& w, const std::string& src_dir) {
     const bool strict = render::setup_validation_env(src_dir);
@@ -1180,7 +1184,7 @@ static void test_real_data() {
                 b.snap->planets.size(), drawable, bg, b.snap->routes.size(), b.snap->fleets.size(), b.last.planets, b.last.starbases,
                 b.last.routes, b.last.fleets);
     CHECK(drawable + 2 >= b.snap->planets.size() && core && bg >= 1);
-    CHECK(!b.snap->fleets.empty() && b.last.fleets + b.last.orbit_fleets + b.last.fogged_fleets == b.snap->fleets.size() &&
+    CHECK(!b.snap->fleets.empty() && b.last.fleets + b.last.hidden_fleets + b.last.orbit_fleets + b.last.fogged_fleets == b.snap->fleets.size() &&
           b.last.routes + 2 >= b.snap->routes.size() &&
           b.last.routes >= 8);
     bool fleet_model = false;
@@ -1246,7 +1250,7 @@ static void test_planet_portrait(const std::string& src_dir) {
         types.build(w->types);
         render::GalacticModels models(g.renderer, streamer.get(), cache.get(), w->files.get());
         render::PlanetPortraits portraits(g.renderer, g.alloc, g.ring, models, types);
-        portraits.set_lighting(render::galactic_lighting(render::load_galactic_light_settings(*w->files), 1.0f));
+        portraits.set_lighting(render::galactic_lighting(render::load_galactic_light_settings(w->gdb->constants().element), 1.0f));
         const std::string name = render::planet_portrait_name("Kuat");
         CHECK(render::is_planet_portrait_name(name) && render::planet_portrait_type(name) == "Kuat" &&
               !render::is_planet_portrait_name("planet_portrait:") && !render::is_planet_portrait_name("load_overlay.tga"));

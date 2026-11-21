@@ -164,7 +164,7 @@ void write_terrain(ChunkWriter& w, const Terrain& t) {
         m.push_back(mk_u32(0x00, t.width));
         m.push_back(mk_u32(0x01, t.height));
         m.push_back(mk_u32(0x04, t.width * t.height));
-        m.push_back(mk_u32(0x05, kMaterialSlots));
+        m.push_back(mk_u32(0x05, static_cast<uint32_t>(kMaterialSlots + t.extra_materials.size())));
         m.push_back(mk_f32(0x0F, h.cloud_scale));
         m.push_back(mk_f32x3(0x10, h.cloud_velocity));
         m.push_back(mk_string(0x0E, h.cloud_texture));
@@ -200,6 +200,7 @@ void write_terrain(ChunkWriter& w, const Terrain& t) {
     }
     w.begin(2);
     for (const TerrainMaterial& m : t.materials) write_material(w, m);
+    for (const TerrainMaterial& m : t.extra_materials) write_material(w, m);  // mcx5 t03
     w.end();
     if (!t.decals.empty()) {
         w.begin(6);
@@ -249,7 +250,28 @@ void write_object(ChunkWriter& w, const ObjectPlacement& o) {
         w.mini_leaf(0, m);
     }
     w.end();
+    if (!o.extra_behaviors.empty()) {  // map1 t04: 0x4B7 after 0x4BA, as the shipped maps order it
+        w.begin(0x4B7);
+        for (const ObjectPlacement::ExtraBehavior& e : o.extra_behaviors) {
+            std::vector<RawMini> m;
+            m.push_back(mk_u32(0x00, e.name_crc));
+            w.mini_leaf(0x4B8, merged(std::move(m), e.raw));
+        }
+        w.end();
+    }
     w.end();  // 0x459
+    if (o.has_marker_name) {  // map1 t04: 0x46E between 0x459 and 0x482, as the shipped maps order it
+        w.begin(0x46E);
+        const RawMini m[] = {mk_string(1, o.marker_name)};
+        w.mini_leaf(0, m);
+        w.end();
+    }
+    if (!o.hint.empty()) {  // 0x482 before 0x476, as the shipped maps order them
+        w.begin(0x482);
+        const RawMini m[] = {mk_string(1, o.hint)};
+        w.mini_leaf(0, m);
+        w.end();
+    }
     w.begin(0x476);
     w.mini_leaf(1, o.owner_raw);
     w.end();

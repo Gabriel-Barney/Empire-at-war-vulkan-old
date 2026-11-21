@@ -1,6 +1,9 @@
 #include "alamo/tactical/movement/land_path.hpp"
 
+#include "alamo/tactical/movement/corridor.hpp"
+
 #include <algorithm>
+#include <cmath>
 #include <limits>
 
 namespace alamo::tactical::movement {
@@ -196,6 +199,111 @@ float path_length(std::span<const V2> points) {
     float l = 0.0f;
     for (size_t i = 1; i < points.size(); ++i) l += distance(points[i - 1], points[i]);
     return l;
+}
+
+V2 lane_dir(std::span<const V2> fpath, size_t i) {
+    const size_t n = fpath.size();
+    if (n < 2 || i >= n) return {};
+    if (i == 0) {
+        const V2 d = normalize_retail(fpath[1] - fpath[0]);
+        const float l = length(d);
+        return l > 0.0f ? V2{d.x / l, d.y / l} : V2{};
+    }
+    const V2 din = normalize_retail(fpath[i] - fpath[i - 1]);
+    return i + 1 < n ? normalize_retail(din + normalize_retail(fpath[i + 1] - fpath[i])) : din;
+}
+
+float LaneShape::offset(float s) const {
+    if (shift.empty()) return left;
+    const float r = s > 0.0f ? s / kCorridorSampleStep : 0.0f;
+    const size_t k = std::min(static_cast<size_t>(r), shift.size() - 1);
+    const uint32_t e = k < entry.size() ? entry[k] : 0u;
+    return shift[k] + (e != 0 && e < entry_left.size() ? entry_left[e] : left);
+}
+
+float LaneShape::rotation_at(float s) const {
+    const float r = rot_rate * s + rot_start;  // 0x421cc0: never past F +0x24c
+    return rot_rate >= 0.0f ? (r <= rot_full ? r : rot_full) : (rot_full <= r ? r : rot_full);
+}
+
+float LaneShape::lateral_at(float s) const {
+    const float l0 = offset(s);
+    if (!rotated()) return l0;
+    const float r = rotation_at(s);  // 0x559350: (x, y) -> (c x - s y, s x + c y), x = depth, y = lateral
+    return dmath::sin(r) * depth + dmath::cos(r) * l0;
+}
+
+namespace {
+// One lane point: origin o, unit direction n, the pull-in of 0x413340.
+V2 lane_point(const PassabilityGrid& grid, bool no_grid, V2 o, V2 n, float left, uint32_t mask) {
+    const V2 side = perp_left(n);
+    const float step = left / 5.0f;
+    float l = left;
+    V2 p = o + side * l;
+    while (!no_grid && !grid.passable_world(p, mask)) {
+        l -= step;
+        if (!(std::fabs(l) > std::fabs(step))) return o;
+        p = o + side * l;
+    }
+    return p;
+}
+}  // namespace
+
+std::vector<V2> formation_lane(const PassabilityGrid& grid, std::span<const V2> fpath, const LaneShape& shape, uint32_t mask) {
+    // mov2 t01 (MOVEMENT §3.5.2 D, §4.3.3 items 1 / 7 [H]): one point per waypoint, each pulled in alone (0x413340); the
+    // lane feeds only the corner pass, so no line test per lane segment and no extra point per squeeze row
+    std::vector<V2> out;
+    out.reserve(fpath.size());
+    const bool no_grid = grid.width() == 0 || grid.height() == 0;
+    float s = 0.0f;
+    for (size_t i = 0; i < fpath.size(); ++i) {
+        if (i > 0) s += distance(fpath[i - 1], fpath[i]);
+        out.push_back(lane_point(grid, no_grid, fpath[i], lane_dir(fpath, i), shape.lateral_at(s), mask));
+    }
+    return out;
+}
+
+LaneShape MemberSlot::shape() const {
+    LaneShape sh;
+    sh.left = left;
+    sh.shift = shift;
+    sh.entry = entry;
+    sh.entry_left = entry_left;
+    sh.depth = depth;
+    sh.rot_full = rot_full;
+    sh.rot_start = rot_start;
+    sh.rot_rate = rot_rate;
+    return sh;
+}
+
+namespace {
+V2 last_dir(std::span<const V2> fpath) {
+    V2 d1{};
+    for (size_t k = fpath.size() - 1; k > 0 && length_sq(d1) == 0.0f; --k) {
+        const V2 d = fpath[k] - fpath[k - 1];
+        const float l = length(d);
+        if (l > 0.0f) d1 = V2{d.x / l, d.y / l};
+    }
+    return d1;
+}
+}  // namespace
+
+float lane_end_shift(std::span<const V2> fpath, const LaneShape& shape, float back) {
+    if (!shape.rotated()) return -back;
+    // mcx4 t11 (MOVEMENT §4.3.3 item 2, MCX4_T11_T12_RE_ANSWERS §B4): +0x68 = cos psi D - sin psi L, psi = the full rotation
+    // F +0x24c (D = shape.depth = -back, L the slot lateral at the end's arc position)
+    // L' = the slot lateral of row k = min(round((|W| + D') / 30), rows - 1), D' = -back (offset clamps to the last row)
+    const float k = std::round((path_length(fpath) - back) / kCorridorSampleStep);
+    const float l = shape.offset(std::max(0.0f, k) * kCorridorSampleStep);
+    return dmath::cos(shape.rot_full) * shape.depth - dmath::sin(shape.rot_full) * l;
+}
+
+V2 lane_end(std::span<const V2> fpath, const LaneShape& shape, float back) {
+    const size_t n = fpath.size();
+    if (n == 0) return {};
+    const V2 d1 = last_dir(fpath);
+    const float total = path_length(fpath);
+    return fpath[n - 1] + d1 * lane_end_shift(fpath, shape, back) + perp_left(d1) * shape.lateral_at(total - back);
 }
 
 // ---------------------------------------------------------------- region A*
@@ -533,6 +641,60 @@ bool snap_to_component(const PassabilityGrid& grid, const RegionMap& regions, V2
     return found;
 }
 
+// ---------------------------------------------------------------- s78n t20 batch 2: zones (MOVEMENT §4.3.1 item 7)
+int32_t zone_at(const RegionMap& regions, int32_t slot, int32_t cx, int32_t cy) {
+    if (slot < 0) return -1;
+    const int32_t r = regions.region_at(cx, cy);
+    if (r < 0) return -1;
+    const int32_t c = regions.component(slot, r);
+    return c < 0 ? 0 : c + 1;
+}
+
+bool zone_connected(const RegionMap& regions, uint32_t mask, V2 a, V2 b) {
+    const int32_t slot = regions.mask_slot(mask);
+    const int32_t za = zone_at(regions, slot, world_to_cell(a.x), world_to_cell(a.y));
+    return za > 0 && za == zone_at(regions, slot, world_to_cell(b.x), world_to_cell(b.y));
+}
+
+bool zone_validate(const RegionMap& regions, V2 p, V2 q, uint32_t mask, V2& out) {
+    const int32_t slot = regions.mask_slot(mask);
+    const int32_t w = static_cast<int32_t>(regions.width()), h = static_cast<int32_t>(regions.height());
+    const auto inside = [&](int32_t x, int32_t y) { return x >= 0 && y >= 0 && x < w && y < h; };
+    const int32_t px = world_to_cell(p.x), py = world_to_cell(p.y), qx = world_to_cell(q.x), qy = world_to_cell(q.y);
+    const int32_t zq = zone_at(regions, slot, qx, qy);
+    if ((zq == -1 && !inside(qx, qy)) || zq == zone_at(regions, slot, px, py)) {
+        out = p;
+        return true;
+    }
+    for (int32_t r = 1; r < 30; ++r) {
+        float best = 0.0f;
+        bool found = false;
+        V2 pick;
+        const auto consider = [&](int32_t x, int32_t y) {
+            if (!inside(x, y) || zone_at(regions, slot, x, y) != zq) return;
+            const V2 c = cell_center(x, y);
+            const float d = distance(q, c);
+            if (!found || d < best) {
+                best = d;
+                pick = c;
+                found = true;
+            }
+        };
+        // a pair's mirror cell is looked at only when its first cell is inside the grid and has a region (as decompiled)
+        const auto pair = [&](int32_t x, int32_t y, int32_t mx, int32_t my) {
+            consider(x, y);
+            if (inside(x, y) && regions.region_at(x, y) >= 0) consider(mx, my);
+        };
+        for (int32_t i = -r; i <= r; ++i) pair(px + i, py + r, px - i, py - r);
+        for (int32_t j = 1 - r; j <= r - 1; ++j) pair(px + r, py + j, px - r, py - j);
+        if (found) {
+            out = pick;
+            return true;
+        }
+    }
+    return false;
+}
+
 // ---------------------------------------------------------------- main entry
 bool find_land_path(const PassabilityGrid& grid, const RegionMap& regions, const LandPathRequest& req, LandPathScratch& sc,
                     LandPath& out) {
@@ -596,6 +758,130 @@ bool find_land_path(const PassabilityGrid& grid, const RegionMap& regions, const
     out.points.insert(out.points.end(), pts.begin(), pts.end());
     out.ok = true;
     return true;
+}
+
+// ---- s78n t26.3 (MOVEMENT §3.5.2 D items 2-7, s78n t26 RE 2): the corner-speed pass 0x5070b0 ----
+void corner_arc_probe(V2 pj, V2 a, float v, float omega, float theta_s, float seg, std::vector<V2>& out) {
+    out.clear();
+    out.push_back(pj);
+    const float th = std::fabs(theta_s);
+    const float rad = v / omega;
+    const V2 t = normalize_retail(a - pj);
+    const bool left = theta_s >= 0.0f;
+    const V2 n = left ? V2{-t.y, t.x} : V2{t.y, -t.x};
+    const float s = left ? 1.0f : -1.0f;
+    // s78o (b0088) [port]: the point count is capped at kCornerArcProbeMaxPoints (an arc of 2^14 segments of at least 2
+    // units is longer than any map) and a non-finite count takes the cap: a tiny positive Max_Rate_Of_Turn or a corner
+    // near pi in custom data no longer plans ~1e7 points per corner or casts past UINT32_MAX (undefined, MSVC != clang)
+    const float nf = th * v / omega / seg + 3.0f;
+    const uint32_t count = nf < static_cast<float>(kCornerArcProbeMaxPoints) ? static_cast<uint32_t>(nf) : kCornerArcProbeMaxPoints;
+    const float sin_th = dmath::sin(th), cos_th = dmath::cos(th);
+    for (uint32_t k = 1; k <= count; ++k) {
+        const float u = static_cast<float>(k) / static_cast<float>(count);
+        const V2 p = pj + t * ((sin_th - dmath::sin((1.0f - 2.0f * u) * th)) * rad) +
+                     n * ((dmath::cos((2.0f * u - 1.0f) * th) - cos_th) * rad);
+        const V2 last = out.back();
+        if (cross(a - last, p - last) * s < 0.0f) break;  // p_k has passed the aim line
+        out.push_back(p);
+    }
+    out.push_back(a);
+}
+
+std::vector<float> corner_fractions(const std::vector<V2>& poly, const CornerPassIn& in, CornerPassStats* stats) {
+    std::vector<float> f;
+    const size_t count = poly.size();
+    const float omega = in.rate * dmath::kPiF / 180.0f;
+    // [port] a unit that cannot turn (R <= 0) or move (vmax <= 0) gets no pass: its fractions stay 1.0
+    if (count < 2 || !(in.vmax > 0.0f) || !(omega > 0.0f)) return f;
+    f.assign(count, 1.0f);
+    const auto angle = [](V2 din, V2 d) { return dmath::acos(std::clamp(dot(din, d), -1.0f, 1.0f)); };
+    std::vector<V2> probe;
+    size_t j = 0;
+    while (j + 1 < count) {
+        const V2 pj = poly[j];
+        const V2 din = j == 0 ? dir_from_deg(in.yaw0) : normalize_retail(pj - poly[j - 1]);
+        size_t i = j + 1;
+        float len = distance(pj, poly[i]);
+        V2 d = normalize_retail(poly[i] - pj);
+        float theta = angle(din, d);
+        const float cr = cross(din, d);
+        const float side = cr > 0.0f ? 1.0f : (cr < 0.0f ? -1.0f : 0.0f);
+        V2 aim = poly[i];
+        if (in.f_min > 0.0f) {  // item 3: the merge and the aim point, only with f_min > 0
+            float l_turn = 2.0f * in.vmax * dmath::sin(theta) / omega;
+            V2 b = pj;
+            while (len < l_turn && i + 1 < count) {
+                if (side * cross(din, normalize_retail(poly[i + 1] - pj)) < 0.0f) break;  // the next point on the other side
+                b = poly[i];
+                ++i;
+                len = distance(pj, poly[i]);
+                d = normalize_retail(poly[i] - pj);
+                theta = angle(din, d);
+                l_turn = 2.0f * in.vmax * dmath::sin(theta) / omega;
+            }
+            if (len > l_turn) {
+                aim = b + d * std::max(0.0f, distance(b, poly[i]) - (len - l_turn));
+                len = distance(pj, aim);
+                // [port] an aim point on P_j itself (l_turn 0: theta 0) keeps the leg's angle
+                if (len > 0.0f) theta = angle(din, normalize_retail(aim - pj));
+            }
+        }
+        // item 4: the corner speed
+        float v = in.vmax;
+        if (theta != 0.0f) {
+            const float r = std::max(20.0f, std::min(len * 0.5f, 100.0f));
+            v = std::min(in.vmax, std::min(omega * r / (1.0f - dmath::cos(theta)), len * omega / (2.0f * dmath::sin(theta))));
+        }
+        // item 5: the arc probe, the static line test and the corridor test; else v /= 1.5
+        const float theta_s = cr > 0.0f ? -theta : theta;
+        bool line_passed = true;  // mov3 t05: the last line test's result
+        while (v > 0.0f) {
+            corner_arc_probe(pj, aim, v, omega, theta_s, in.seg, probe);
+            bool line = true;
+            for (size_t k = 0; k + 1 < probe.size() && line; ++k)
+                if (in.line_ok && !in.line_ok(in.ctx, probe[k], probe[k + 1])) line = false;
+            line_passed = line;
+            if (line && ((v < 0.2f * in.vmax && j != 0) || !in.corridor_ok || in.corridor_ok(in.ctx, probe))) break;
+            v /= 1.5f;
+            if (stats) ++stats->stepdowns;
+            if (v < in.vmin || v < 0.1f * in.vmax) {
+                v = line ? in.vmin : 0.0f;
+                break;
+            }
+        }
+        // item 6: the fraction; below f_min 0 on the unmerged leg's start only
+        const float fr = v / in.vmax;
+        const auto count_zero = [&] {
+            ++stats->zero;
+            if (j == 0) ++stats->zero_first;
+            if (fr > 0.0f) ++stats->zero_fmin;
+            else if (line_passed) ++stats->zero_corridor;
+            else ++stats->zero_line;
+        };
+        if (fr < in.f_min) {
+            f[j] = 0.0f;
+            if (stats) count_zero();
+            j += 1;
+        } else {
+            for (size_t k = j; k < i; ++k) f[k] = fr;
+            if (stats) {
+                if (fr <= 0.0f) count_zero();
+                else if (fr < 1.0f) ++stats->slowed;
+            }
+            j = i;
+        }
+    }
+    f[count - 1] = 1.0f;
+    // item 7: the brake pass (2-D segments)
+    if (in.decel > 0.0f && count >= 3) {
+        float v = 0.0f;
+        for (size_t k = count - 1; k-- > 0;) {
+            v = std::sqrt(2.0f * in.decel * distance(poly[k], poly[k + 1]) + v * v);
+            f[k] = std::min(f[k], v / in.vmax);
+            v = in.vmax * f[k];
+        }
+    }
+    return f;
 }
 
 }  // namespace alamo::tactical::movement

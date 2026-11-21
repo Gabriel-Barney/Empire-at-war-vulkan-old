@@ -17,12 +17,20 @@ MovementConstants MovementConstants::from_game_constants(const data::GameConstan
     c.dynamic_avoidance_rectangle_bound = get_u32(gc, "DynamicAvoidanceRectangleBound", c.dynamic_avoidance_rectangle_bound);
     c.dynamic_obstacle_overlap_penalty = gc.get_float("DynamicObstacleOverlapPenalty", c.dynamic_obstacle_overlap_penalty);
     c.land_destination_proximity = gc.get_float("LandDestinationProximity", c.land_destination_proximity);
+    c.between_formation_spacing = gc.get_float("BetweenFormationSpacing", c.between_formation_spacing);  // s78n t20
+    // s78n t20 batch 2 (MOVEMENT §4.3.1 item 4, GC +0x14f0): E of the destination check's object test
+    c.destination_query_extension =
+        gc.get_float("Destination_Collision_Query_Extension", c.destination_query_extension);
     c.land_temporary_destination_proximity =
         gc.get_float("LandTemporaryDestinationProximity", c.land_temporary_destination_proximity);
     c.max_move_frame_delay = static_cast<int32_t>(get_u32(gc, "Max_Move_Frame_Delay", 6));
     c.close_enough_angle_for_move_start = gc.get_float("CloseEnoughAngleForMoveStart", c.close_enough_angle_for_move_start);
     c.frames_per_collision_check = get_u32(gc, "FramesPerCollisionCheck", c.frames_per_collision_check);
     c.moving_vs_moving_look_ahead_time = gc.get_float("MovingVsMovingLookAheadTime", c.moving_vs_moving_look_ahead_time);
+    c.land_prediction_time_interval = gc.get_float("LandPredictionTimeInterval", c.land_prediction_time_interval);  // mov1 t04
+    c.min_land_prediction_distance = gc.get_float("MinLandPredictionDistance", c.min_land_prediction_distance);
+    c.frames_per_position_approximation_rebuild =
+        get_u32(gc, "FramesPerPositionApproximationRebuild", c.frames_per_position_approximation_rebuild);
     c.minimum_stopped_vs_stopped_overlap =
         gc.get_float("MinimumStoppedVsStoppedOverlapCoefficient", c.minimum_stopped_vs_stopped_overlap);
     c.space_pathfind_max_expansions = get_u32(gc, "SpacePathfindMaxExpansions", c.space_pathfind_max_expansions);
@@ -69,11 +77,32 @@ MovementConstants MovementConstants::from_game_constants(const data::GameConstan
     c.vehicle_formation_recruitment_distance =
         gc.get_float("VehicleFormationRecruitmentDistance", c.vehicle_formation_recruitment_distance);
     c.double_click_move_max_speed_ratio = gc.get_float("DoubleClickMoveMaxSpeedRatio", c.double_click_move_max_speed_ratio);
-    c.land_speed_multiplier = gc.get_float("Object_Max_Speed_Multiplier_Land", c.land_speed_multiplier);
-    c.space_speed_multiplier = gc.get_float("Object_Max_Speed_Multiplier_Space", c.space_speed_multiplier);
+    c.fleeing_infantry_speed_bonus = gc.get_float("Fleeing_Infantry_Speed_Bonus", c.fleeing_infantry_speed_bonus);  // s78n t14
+    c.land_speed_multiplier = gc.shared.object_max_speed_multiplier_land.value_or(c.land_speed_multiplier);  // ref4 t06: GameConstants::shared
+    c.space_speed_multiplier = gc.shared.object_max_speed_multiplier_space.value_or(c.space_speed_multiplier);
+    c.infantry_turn_blend_time = gc.shared.infantry_turn_blend_time.value_or(c.infantry_turn_blend_time);  // mcx4 t11
     c.space_guard_range = gc.get_float("Space_Guard_Range", c.space_guard_range);  // S7 t37
     c.land_guard_range = gc.get_float("Land_Guard_Range", c.land_guard_range);
     c.max_waypoints_per_path = get_u32(gc, "MaxWaypointsPerPath", c.max_waypoints_per_path);  // s78f t02
+    c.base_land_targeting_arc_angle_coefficient =  // s78n t25.2
+        gc.get_float("Base_Land_Targeting_Arc_Angle_Coefficient", c.base_land_targeting_arc_angle_coefficient);
+    c.solo_attack_range = gc.get_float("Solo_Attack_Range", c.solo_attack_range);
+    c.short_range_attack_formation_coefficient =
+        gc.get_float("Short_Range_Attack_Formation_Coefficient", c.short_range_attack_formation_coefficient);
+    c.formation_minimum_side_error = gc.get_float("FormationMinimumSideError", c.formation_minimum_side_error);  // mcx4 t11
+    c.formation_maximum_side_error = gc.get_float("FormationMaximumSideError", c.formation_maximum_side_error);
+    c.approximation_forward_distance = gc.get_float("ApproximationForwardDistance", c.approximation_forward_distance);
+    c.should_infantry_teams_split_across_formations =
+        gc.get_bool("ShouldInfantryTeamsSplitAcrossFormations", c.should_infantry_teams_split_across_formations);
+    c.space_static_obstacle_avoidance_bonus_distance = static_cast<float>(gc.get_int(
+        "SpaceStaticObstacleAvoidanceBonusDistance", static_cast<int32_t>(c.space_static_obstacle_avoidance_bonus_distance)));
+    c.space_locomotor_facing_lookahead_acc =
+        gc.get_float("SpaceLocomotorFacingLookaheadAcc", c.space_locomotor_facing_lookahead_acc);
+    c.final_formation_facing_minimum_angle =
+        gc.get_float("FinalFormationFacingMinimumAngle", c.final_formation_facing_minimum_angle);
+    c.final_formation_facing_delta_coefficient =
+        gc.get_float("FinalFormationFacingDeltaCoefficient", c.final_formation_facing_delta_coefficient);
+    c.rotate_formation_facing_moves = gc.get_bool("Rotate_Formation_Facing_Moves", c.rotate_formation_facing_moves);
     return c;
 }
 

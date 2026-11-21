@@ -127,6 +127,9 @@ struct WorldStats {
     DecorationStats decorations;
 };
 
+struct XConstCache;  // src/render_internal.hpp (renderer-internal register images)
+class RendererCore;  // src/renderer_core.hpp
+
 class WorldRenderer {
 public:
     WorldRenderer();  // out of line: members hold types private to renderer.cpp / world.cpp
@@ -180,7 +183,16 @@ public:
     void update(float dt);
     // Environment skydome objects for the sky cube (instances at the origin with their skydome transform).
     void set_sky(std::span<const Instance> sky);
-    void environment_changed() { sky_dirty_ = true; }
+    // cu8g t03: the clouds of a new environment (Set_New_Environment, TERRAIN_WATER_POST §5.3 step 4): scale and
+    // velocity at once (the offset keeps accumulating); a different texture is uploaded through the init() texture
+    // source and swapped in by make_resident() once its upload is done (new bindless slot, terrain texture sets
+    // rewritten; the old texture keeps drawing until then and stays owned until shutdown). Before init(): scale and
+    // velocity only.
+    void set_clouds(const terrain::CloudParams& clouds);
+    float cloud_scale() const { return cloud_scale_; }
+    float cloud_velocity_x() const { return cloud_vel_[0]; }
+    float cloud_velocity_y() const { return cloud_vel_[1]; }
+    const std::string* cloud_texture_name() const;  // the drawn (or pending) cloud texture, null = none
     const WorldStats& stats() const { return stats_; }
     // Switch between the batched and the reference (unbatched) terrain / water draws (WorldOptions::batch_draws).
     void set_batch_draws(bool batched) { options_.batch_draws = batched; }
@@ -211,7 +223,7 @@ public:
     static constexpr float kObliqueFarScale = 8.0f;
 
 private:
-    friend class Renderer;
+    friend class RendererCore;
     struct PassGpu {
         uint8_t material = 0;
         uint32_t first_index = 0;  // into terrain_ib_
@@ -254,11 +266,11 @@ private:
     static constexpr uint32_t kMaxSlots = 3;
     // Next free region of this frame (int_bool: the set 0 layout with bindings 2/3); null on failure.
     ConstRegion const_region(const rhi::Frame& frame, bool int_bool);
-    static void copy_region(uint8_t* dst, const Renderer::XConstCache& cc, bool int_bool);
+    static void copy_region(uint8_t* dst, const XConstCache& cc, bool int_bool);
     int add_texture(const std::string& name, assets::TextureRole role);
     bool upload_buffer(rhi::Buffer& b, std::span<const uint8_t> bytes, VkBufferUsageFlags usage, const char* name);
 
-    Renderer* r_ = nullptr;
+    RendererCore* r_ = nullptr;
     TextureSource textures_src_;
     WorldOptions options_;
     std::vector<PatchGpu> patches_;
@@ -274,6 +286,8 @@ private:
     MaterialGpu materials_[terrain::kMaterialSlots];
     std::vector<GpuTexture> textures_;
     int cloud_texture_ = -1;
+    int pending_cloud_ = -1;  // cu8g t03: set_clouds' texture while its upload is in flight
+    void swap_pending_cloud();
     std::shared_ptr<const materials::MaterialEffect> terrain_fx_;
     const materials::ResolvedPass* terrain_pass_ = nullptr;
     // Water.
@@ -297,8 +311,8 @@ private:
     // Time.
     float water_time_ = 0, cloud_off_[2] = {0, 0}, cloud_scale_ = 500.0f, cloud_vel_[2] = {5, 5};
     uint64_t draw_generation_ = 0;
-    std::unique_ptr<Renderer::XConstCache[]> caches_;  // per terrain material: register images of the current draw call
-    std::unique_ptr<Renderer::XConstCache> water_cache_;
+    std::unique_ptr<XConstCache[]> caches_;  // per terrain material: register images of the current draw call
+    std::unique_ptr<XConstCache> water_cache_;
     WorldStats stats_;
 
     // ---- Decorations (decorations.cpp).
@@ -340,7 +354,7 @@ private:
     std::shared_ptr<const materials::MaterialEffect> prim_fx_[terrain::kRenderModeCount];
     const materials::ResolvedPass* prim_pass_[terrain::kRenderModeCount] = {};
     std::unique_ptr<materials::FfDrawTemplate> prim_tpl_[terrain::kRenderModeCount];
-    std::unique_ptr<Renderer::XConstCache> deco_cache_;
+    std::unique_ptr<XConstCache> deco_cache_;
     // Fog of war.
     rhi::Buffer fow_ib_;                              // full 31x31-quad list, then per holed patch its rendered quads
     std::vector<std::pair<uint32_t, uint32_t>> fow_patch_;  // per patch (first index, count)
@@ -354,7 +368,7 @@ private:
     const materials::ResolvedPass* fow_pass_ = nullptr;
     const materials::ResolvedPass* space_fow_pass_ = nullptr;
     std::unique_ptr<materials::FfDrawTemplate> space_fow_tpl_;
-    std::unique_ptr<Renderer::XConstCache> fow_cache_;
+    std::unique_ptr<XConstCache> fow_cache_;
     // 6 PrimVert vertices over the box at kSpaceFowHeight, one buffer per frame slot (rewritten only in its own
     // slot, when the box generation changed, so no frame in flight reads a buffer being written).
     rhi::Buffer space_plane_vb_[kMaxSlots];

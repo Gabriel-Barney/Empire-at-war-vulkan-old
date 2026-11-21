@@ -43,15 +43,18 @@
 // AnimWorld::play (blend 0.33 s, speed 1: ANIM_PARTICLES §A.4); Get_Bone_Position(bone) ->
 // AnimWorld::bone_world_position with object_to_world (default [port]: position, facing yaw, Scale_Factor).
 #pragma once
+#include <algorithm>
 #include <cstdint>
 #include <functional>
 #include <iterator>
 #include <map>
+#include <span>
 #include <string>
 #include <string_view>
 #include <vector>
 
 #include "alamo/core/bytes.hpp"
+#include "alamo/core/parallel.hpp"
 #include "alamo/lua/script_remaining.hpp"  // L1 final: RemainingScriptHooks, RemainingObjectState
 #include "alamo/objects/object_store.hpp"
 
@@ -88,13 +91,90 @@ enum class LuaOrder : uint8_t {
 };
 inline constexpr size_t kLuaOrderPayloadBytes = 24;
 
+// ---- sp3 (AI lane, docs/SIM_PARALLEL_DESIGN.md 5.1 / 11.6): the ability / combat state the bindings read off the
+// critical lane, and the writes they queue there ----
+// One ability type of a captured object (AbilitySystem answers at the capture frame): has_ability, is_ready,
+// can_activate(t, true, true), is_active, is_autofire, and the dry runs the lane's same-call answers predict from
+// (set_unit_ability_mode on / off gates 1-3, targeted_ability's per-user checks).
+struct LaneAbility {
+    uint8_t type = 0;
+    uint8_t has = 0, ready = 0, can = 0, active = 0, autofire = 0, mode_on = 0, mode_off = 0, targeted = 0;
+};
+// One object of the battle's ability or combat system as captured at the AI slot.
+struct LaneObject {
+    objects::ObjectId id = objects::kNoObjectId;
+    objects::ObjectId container = objects::kNoObjectId;  // AbilitySystem::container_of
+    uint8_t abilities = 0;  // the ability system knows it (the bindings' ability_system() answers)
+    uint8_t combat = 0;     // the combat system has the unit (Get_Hull / Get_Shield / Set_Targeting_Priorities)
+    uint8_t tractored = 0, ion_stunned = 0;
+    uint8_t engine_hardpoints = 0, engines_live = 0;  // any ENGINE hard point; any of them functioning
+    int32_t immobilize = 0;
+    float hull = 0.0f, shield = 0.0f;  // CombatSystem::script_hull / shield_fraction
+    uint32_t first = 0, count = 0;    // its LaneAbility entries (LaneAbilityView::types, ascending type)
+};
+struct LaneAbilityView {
+    uint32_t frame = 0;                 // the ability frame of the capture
+    std::vector<LaneObject> objects;    // ascending id
+    std::vector<LaneAbility> types;
+    const LaneObject* find(objects::ObjectId id) const {
+        const auto it = std::lower_bound(objects.begin(), objects.end(), id, [](const LaneObject& o, objects::ObjectId v) { return o.id < v; });
+        return it != objects.end() && it->id == id ? &*it : nullptr;
+    }
+    const LaneAbility* ability(const LaneObject& o, uint8_t type) const {
+        for (uint32_t i = o.first; i < o.first + o.count; ++i)
+            if (types[i].type == type) return &types[i];
+        return nullptr;
+    }
+};
+// A queued write: applied by the host at the start of the due tick, in its batch order, through the same calls the
+// binding makes on the critical lane (ObjectBridge::lane_write). PortExtension subtype kLaneWriteSubtype, payload
+// encode_lane_write.
+enum class LaneWriteOp : uint8_t {
+    SetAutofire = 1,      // AbilitySystem::set_autofire(ids, type, on)
+    AbilityMode = 2,      // set_unit_ability_mode(ids, type, on, frame, target)
+    Targeted = 3,         // targeted_ability(ids, type, target, -1, frame)
+    DummyAbility = 4,     // spawn_ability_target(p, owner), then on the dummy: mode on (jet = on) or targeted
+    ForceRecharge = 5,    // force_recharge(ids[0], type, seconds)
+    ResetCounter = 6,     // reset_counters(ids[0]): every ability id (Reset_Ability_Counter; type unused)
+    UnlockMovement = 7,   // lock_movement(ids[0], false, frame)
+    PriorityOverride = 8, // CombatSystem::set_priority_override(ids[0], value)
+    Stickiness = 9,       // CombatSystem::set_stickiness_override(id, seconds) for each combat unit of ids
+    OrderReplaced = 10,   // ObjectBridge::raise_order_replaced(id) for each of ids
+    HostFirst = 64,       // 64..255: the host's own hook writes (apply_lane_write leaves them to the host)
+};
+inline constexpr uint16_t kLaneWriteSubtype = 0x4157;  // "AW"
+struct LaneWrite {
+    LaneWriteOp op = LaneWriteOp::SetAutofire;
+    uint8_t type = 0;
+    uint8_t on = 0;  // AbilityMode / SetAutofire; DummyAbility: 1 = jet pack (mode on)
+    int32_t owner = -1;  // the first object's owner (the batch's player); DummyAbility: the dummy's owner
+    int32_t value = -1;  // PriorityOverride: the set index; AbilityMode / Targeted / DummyAbility: the predicted count
+    float seconds = -1.0f;
+    objects::ObjectId target = objects::kNoObjectId;
+    Vec3 p{};
+    std::vector<objects::ObjectId> ids;
+    Vec3 q{};  // a second point (host writes: a facing)
+};
+std::vector<uint8_t> encode_lane_write(const LaneWrite& w);
+bool decode_lane_write(std::span<const uint8_t> bytes, LaneWrite& out);  // false on malformed bytes
+class ObjectBridge;
+struct ScriptLockFact;  // sp3: below ObjectBridge
+// The host's two halves (with ALAMO_LUA_HAVE_ABILITIES; without, an empty view and nothing applied): the capture of every
+// object of `a` and of its combat system at `frame` (on the critical lane, at the AI slot), and the apply of a queued
+// write at the due tick's `frame` through the calls the binding makes live. `host` = the VMs' bridge (its
+// spawn_ability_target and raise_order_replaced). apply returns the count of a write with a predicted answer (compare
+// LaneWrite::value), else -1.
+void capture_lane_abilities(const tactical::abilities::AbilitySystem& a, uint32_t frame, LaneAbilityView& out,
+                            const ParallelFor& pf = serial_for);  // per object through pf (per-index outputs, id order)
+int32_t apply_lane_write(tactical::abilities::AbilitySystem& a, uint32_t frame, const LaneWrite& w, const ObjectBridge& host);
+
 struct AbilityState {
     bool active = false;
     bool autofire = false;
 };
 
 struct ScriptObjectState {
-    std::string hint;                 // map-editor hint (Find_Hint / Get_Hint); set by the map loader
+    std::string hint;                 // script-set hint (Create_Cinematic_Transport); map hints come from ObjectBridge::map_hint
     bool hidden = false;              // Hide / Hide_Object
     int8_t selectable = -1;           // Set_Selectable; -1 = default (type has SELECTABLE behaviour)
     bool prevent_ai_usage = false;
@@ -106,13 +186,22 @@ struct ScriptObjectState {
     bool highlighted = false, highlighted_small = false;
     bool in_limbo = false;
     bool garrison_spawn = false;
-    bool check_contested_space = false;
+    // Set_Check_Contested_Space(b) stores !b: every object starts with the bit SET (obj +0x3a2 & 0x40, initial byte 0x60;
+    // STY1 t01), so the default state reads "checking" and a saved default stays all-zero.
+    bool contested_check_off = false;
     bool capture_disabled = false;
+    // mcx6 (MCX6_T05_CINEMATIC_BINDINGS §2): Do_End_Cinematic_Cleanup suspended this object's behaviours (0x38ed10, every
+    // behaviour's suspend virtual); the battle host reads it every tick (no locomotor run, no weapon fire). Nothing clears
+    // it. Saved (bridge version 4), hashed only when set.
+    bool end_cinematic_suspended = false;
     bool orders_locked = false;
     bool has_orders = false;          // set by an issued order, cleared by Stop
     float max_speed_override = -1.0f; // Override_Max_Speed; < 0 = none
     float shield = -1.0f;             // shield fraction 0..1; < 0 = full (1 if the type has shields, else 0)
     float highlight_offset = 0.0f;
+    // storyb t17: the Object_Highlight effect a Highlight(true) made ([port] not saved; Highlight(false) after a load finds
+    // the effect attached to the object).
+    objects::ObjectId highlight_effect = objects::kNoObjectId;
     int32_t importance = 0;
     objects::ObjectId attack_target = objects::kNoObjectId;
     std::string targeting_priorities;
@@ -184,6 +273,7 @@ public:
     // (any order, may over-report: the binding re-tests the 3D distance and sorts by id). Hosts with a
     // spatial tree (engine/tactical TreeSet) plug a radius query in here. Without a hook every live
     // object of the store is tested.
+    // hook-optional: a speed-up only; without it the binding tests every live object and answers the same.
     std::function<void(Vec3 center, float radius, std::vector<objects::ObjectId>& out)> objects_in_range;
     // Reinforce_Unit: true = the host accepted request `r` and calls finish_reinforcement(r.id, units)
     // when the units have arrived; false = refused (the block finishes with no units). Without a hook
@@ -211,14 +301,26 @@ public:
     // object Spawn_Unit hands to Lua; null = not handled (the binding creates the company and its members itself, each
     // through spawn_unit). Unset (default): the binding's own layout.
     std::function<objects::ObjectHandle(const objects::SpawnParams& p)> spawn_company;
+    // ref2 t04: an effect object a binding creates for presentation (detail::spawn_attached_effect: Highlight's
+    // Object_Highlight) through the host (a tactical battle: the mode's trees and the L1 systems, never a battle unit).
+    // Used only with battle_lifecycle; unset there: refused.
+    std::function<objects::ObjectHandle(const objects::SpawnParams& p)> spawn_effect;
     // q6 t12: Take_Damage(amount) without a hardpoint name through the host's damage system (a tactical battle: the
     // combat Take_Damage with kind 0, TacticalBattle::script_damage); `cannot_die` = the object's Set_Cannot_Be_Killed.
     // True = applied by the host (the death, if any, processed there); false or unset: the store-only health change.
     std::function<bool(objects::ObjectHandle unit, float amount, bool cannot_die)> take_damage;
+    // r1b t01: Take_Damage(amount, name) with a name of the type's HardPoints (checked by the binding): the host damages that
+    // hardpoint record (a tactical battle: combat Take_Damage kind 0 with the hardpoint index, shield first). True = applied;
+    // false or unset: no damage (hardpoints are combat records, there is no object to damage).
+    std::function<bool(objects::ObjectHandle unit, float amount, bool cannot_die, std::string_view hardpoint)> take_hardpoint_damage;
     // q6 (OBJECT_SCRIPTS §10.2): Make_Invulnerable(on), called after ScriptObjectState::invulnerable is stored: the host's
     // INVULNERABLE behaviour (a tactical battle: the combat gate that drops every damage kind but 0 and 13; a TEAM
     // container passes it to its members). Unset: only the flag is stored.
     std::function<void(objects::ObjectHandle, bool on)> invulnerable_changed;
+    // STY1 t01 (docs/re/STY1_OBJECT_SETTERS_RE_ANSWERS.md §1): Prevent_Opportunity_Fire(on), after the flag is stored: the host
+    // writes the "incognito" bit (obj +0x3a1 & 0x10) on the object and its TEAM members. An edge, not a level (retail's
+    // Take_Damage clears the bit on the first hit). Unset: only the flag is stored.
+    std::function<void(objects::ObjectHandle, bool on)> opportunity_fire_changed;
     // q6 (OBJECT_SCRIPTS §10.1): Prevent_AI_Usage(on) on the owner's AI free store of the current mode (true: removed,
     // false: admitted by the normal rules); no object flag. Returns the outcome; unset: only the flag is stored.
     std::function<PreventAiResult(objects::ObjectHandle, bool on)> prevent_ai_usage;
@@ -235,6 +337,22 @@ public:
     // representative type for every galactic object of the port model (GalacticSim::representative_type) and for
     // tactical objects other than team containers without a Create_Team_Type (store type "Team") and transports.
     std::function<objects::TypeIndex(objects::ObjectHandle)> representative_type;
+    // q6 t28 (TERRAIN_WATER_POST 1.6): the object's map hint name (.ted chunk 0x482, loaded with the map object). Find_Hint,
+    // Get_Hint and Find_All_Objects_With_Hint read ScriptObjectState::hint when a script set one (Create_Cinematic_Transport),
+    // else this. Unset or "": no map hint.
+    std::function<std::string_view(objects::ObjectHandle)> map_hint;
+    // mcx8 t12 (docs/re/MCX8_BINDINGS_OBJECTS.md §Get_Name): the object's ship name as stored (SelectionDataPack +0x40: a
+    // random name from the GameConstants ShipNameTextFiles lists, or the parent-mode object's). Get_Name drops its first
+    // and last character when it is longer than 2. Unset or "": no ship name (Get_Name answers "").
+    std::function<std::string_view(objects::ObjectHandle)> ship_name;
+    // mcx8 t12 (§Get_Game_Scoring_Type): a TEAM container's company type (team data +0x58, e.g. Imperial_Stormtrooper_Squad
+    // for a Stormtrooper_Team container). Unset or kNone: the binding uses the representative type.
+    std::function<objects::TypeIndex(objects::ObjectHandle)> team_company_type;
+    // ref2 t04: set by a tactical battle's bridge factory (sim make_object_bridge, battle_object_bridge.hpp): the battle owns
+    // its objects' lifecycle, so spawn_unit / spawn_company / take_damage / change_owner / destroy_object are the only
+    // way a binding creates, damages, re-owns or removes one. A hook that declines (or is unset) is a refusal: no object,
+    // no damage, no owner change, no removal - never the bare ObjectStore write the bindings fall back to otherwise.
+    bool battle_lifecycle = false;
 
     // ---- L1/S4 wave 2a: tactical systems (see the header comment) ----
     // S9 ability system of the battle (object ids = store ids). Used only in builds where engine/lua links
@@ -246,15 +364,22 @@ public:
     // the host spawns at the point (an object id is consumed). Returns its id, or kNoObjectId to refuse. Unset:
     // the SetUnitAbilityMode event with the position goes to the pipeline instead [port].
     std::function<objects::ObjectId(Vec3 position, int32_t owner)> spawn_ability_target;
+    // sp3 (AI lane): set by a host whose VMs run off the critical lane (BattleAi with TacticalAiConfig::ai_lane). The
+    // ability / combat bindings then read the object's record in `lane_abilities` (captured at the AI slot; an object
+    // missing from it is unknown to both systems) instead of `abilities`, and hand their writes to `lane_write`, which
+    // queues them for the due tick; a write's same-call answer is predicted from the record's dry runs. Null: live.
+    const LaneAbilityView* lane_abilities = nullptr;
+    std::function<void(const LaneWrite&)> lane_write;
     // R3 animation world of the mode (rows by store id). Used only with ALAMO_LUA_HAVE_ANIM.
     anim::AnimWorld* anim = nullptr;
     // Global frame for AnimWorld::play. Unset: the VM frame.
     std::function<uint64_t()> anim_frame;
     // Object -> world transform for Get_Bone_Position (ANIM_PARTICLES §A: "position, facing, Scale_Factor; the
     // caller's"). Unset [port]: translation = store position, rotation = yaw of the store facing (XY, x forward,
-    // z up), uniform scale = the type's Scale_Factor (0 -> 1).
+    // z up), uniform scale = the type's Scale_Factor (0 -> 1). hook-optional: that default is the spec's transform.
     std::function<bool(objects::ObjectHandle, anim::Mat34& out)> object_to_world;
-    // Generic bone read (hosts without an AnimWorld, tests). Checked first. True = `out` written.
+    // Generic bone read (hosts without an AnimWorld, tests). Checked first. True = `out` written. hook-optional: a host
+    // with an AnimWorld (`anim`) answers through it.
     std::function<bool(objects::ObjectHandle, std::string_view bone, Vec3& out)> bone_position;
 
     // ---- L1/S4 wave 2b (script_gaps.hpp): special weapons, TSW, engines, cinematic transport / retreat ----
@@ -326,8 +451,21 @@ public:
             it = store.find(it->first) ? std::next(it) : remaining_states_.erase(it);
         for (auto it = ability_signals_.begin(); it != ability_signals_.end();)
             it = store.find(it->first) ? std::next(it) : ability_signals_.erase(it);
+        for (auto it = hidden_sub_objects_.begin(); it != hidden_sub_objects_.end();)
+            it = store.find(it->first) ? std::next(it) : hidden_sub_objects_.erase(it);
     }
     size_t state_count() const { return states_.size(); }
+    // mcx6 t04: Hide_Sub_Object (STORYB_T17_HIDDEN_UNITS.md §1.1: the named sub-mesh of an object is hidden): per object
+    // the hidden mesh names, upper case, sorted. Presentation only: drawn by the renderer (render, shadow and selection
+    // passes), saved with the bridge (version 3 and up), kept apart from the per-object script states so it is not in the
+    // state hash (it adds no ScriptObjectState entry). Empty span: nothing hidden.
+    void set_sub_object_hidden(objects::ObjectId id, const std::string& mesh_upper, bool hide);
+    std::span<const std::string> hidden_sub_objects(objects::ObjectId id) const {
+        const auto it = hidden_sub_objects_.find(id);
+        return it == hidden_sub_objects_.end() ? std::span<const std::string>() : std::span<const std::string>(it->second);
+    }
+    // sp3: every object with a script lock or a Divert (ascending id; struct ScriptLockFact below).
+    std::vector<ScriptLockFact> script_lock_facts() const;
 
     // ---- diagnostics ----
     uint32_t orders_issued = 0;  // events built by the bindings (also counted without a pipeline)
@@ -351,7 +489,26 @@ private:
     std::map<uint32_t, ReinforceState> reinforcements_;
     uint32_t next_reinforcement_ = 1;
     std::map<objects::ObjectId, uint32_t> ability_signals_;  // S7 t15 A1: watched units' signal 0x29 counts
+    std::map<objects::ObjectId, std::vector<std::string>> hidden_sub_objects_;  // mcx6 t04: never empty lists
 };
+
+// sp3 (AI lane): script_movement_locked's inputs for one object - Lock_Current_Orders, and a Divert with its goal. A host
+// whose VMs run off the critical lane publishes these (ObjectBridge::script_lock_facts, ascending id) with the AI's batch
+// and answers its movement lock from the copy.
+struct ScriptLockFact {
+    objects::ObjectId id = objects::kNoObjectId;
+    uint8_t locked = 0, diverted = 0;
+    Vec3 goal{};
+};
+inline bool script_movement_locked(std::span<const ScriptLockFact> facts, objects::ObjectId id,
+                                   const std::function<bool(objects::ObjectId, Vec3&)>& goal) {
+    const auto it = std::lower_bound(facts.begin(), facts.end(), id, [](const ScriptLockFact& f, objects::ObjectId v) { return f.id < v; });
+    if (it == facts.end() || it->id != id) return false;
+    if (it->locked) return true;
+    if (!it->diverted || !goal) return false;
+    Vec3 g{};
+    return goal(id, g) && g.x == it->goal.x && g.y == it->goal.y;
+}
 
 // OI follow-up t03 (A1_READINGS §28.9): this bridge's shares of the obj +0x3a8 movement lock (0x39ad40) - a script
 // Lock_Current_Orders, or the locomotor's forced-move term while the unit's current move is the one a Divert started

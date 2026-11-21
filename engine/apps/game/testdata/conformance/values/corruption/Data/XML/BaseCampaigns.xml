@@ -1,0 +1,4 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Campaigns>
+  <Campaign Name="Base_GC"><Locations>Base_Alpha, Base_Beta</Locations></Campaign>
+</Campaigns>

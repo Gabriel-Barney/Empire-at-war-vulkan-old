@@ -296,7 +296,7 @@ All gates, in order; any failure returns false:
 | 30 TRACTOR_BEAM | ≥ 1 live TRACTOR_BEAM (4) hardpoint, then as 31 |
 | 31, 34, 55 (ENERGY_WEAPON, LUCKY_SHOT, SUPER_LASER) | weapons not disabled (obj +0x3a0 bit 0x10 clear) |
 | 38 DEPLOY_TROOPERS | DEPLOY_TROOPERS behaviour present and idle |
-| 47 FIRE_LOBBING_SUPERWEAPON | player's super-weapon state allows (needs base power when the type requires it) |
+| 47 FIRE_LOBBING_SUPERWEAPON | the owner has a tactical player; with `Requires_Base_Power` (type +0x8b) also that player's base power (TRU1_GRAVITY_FIELD §2) |
 | 52 FORCE_SIGHT | no ability of the object is busy (0x37c520, §4.14; this row read "SABER_THROW" before 2026-11-01) |
 | 58 LEECH_SHIELDS, 70 BLAST | ≥ 1 live WEAPON_SPECIAL (10) hardpoint |
 | 64 PLACE_REMOTE_BOMB | player's remote-bomb count < `Max_Remote_Bombs_Per_Player` (20) |
@@ -435,7 +435,7 @@ which list goes with which error message]:
 | target **position** (command 57 style, spawns `Dummy_Barrage_Target`) | 50, 67, 71, 73, 74 |
 | command 43 with the position zeroed (no position) | 14, 23, 24, 25, 35, 36, 38, 44, 46, 49, 57, 61, 72 |
 | position via command 43 | 5, 26, 28, 42 |
-| special | 6/10/12 (HUNT, LURE, AVOID_DANGER: optional target), 17 JET_PACK (position), 19 (object) |
+| special | 6/10/12 (HUNT, LURE, AVOID_DANGER: a bool, value ignored, mode on; corrected cu8k t10, CU8K_T04_COORDINATOR_TRACES "Which check ends the script"), 17 JET_PACK (position), 19 (object) |
 
 Correction (S7 t26 RE, 2026-11-02) [H]: the command-57 position row is ids 50, 67, 71, 73, 74; ids 14, 23, … 72
 were listed there before but take command 43 with no position. Which families return an `AbilityBlockStatus`
@@ -549,7 +549,8 @@ Vanilla: 9 users (Star Destroyer, Executor, Piett, satellite…), `Activation_Ma
 `Target_Speed_Decrease_Percent` 0.75–0.98, `Stacking_Category` 0 or 2, applicable to transports/corvettes/
 frigates (+capital for some) and named heroes (Millennium Falcon…), `Excluded_Unit_Types` Buzz_Droids.
 - **Accepts target** (vfunc +0x28, 0x710540): enemy (0x39a450), passes the applicable filter, target
-  locomotor not busy, layer check when either side has obj +0x3b4 set, owner passes `Can_Activate(30)` (needs
+  locomotor not busy, the hero-clash pairing rule 0x39a540 when either side has obj +0x3b4 (in a hero clash) set
+  (TACTICAL_COMBAT §5.4.3), owner passes `Can_Activate(30)` (needs
   a live tractor hardpoint), target not in the nebula lockout, target has a model.
 - **Apply** (0x710130): allowed (§3.1) and in range → remove the effect from any previous target →
   register → `Set_Unit_Ability_Active(owner, 30, on)` → **target speed modifier** (0x710280) → beam visual.
@@ -734,7 +735,13 @@ hardpoint's `Allow_Opportunity_Fire_When_Idle` flag decides. The same cutoff is 
 Projectile fields (type): `Projectile_Ion_Stun_On_Detonation` +0xab, `_Duration` +0x4cc,
 `_Speed_Reduction_Percent` +0x4d0, `_Shot_Rate_Reduction_Percent` +0x4d4, `_Stack_Duration` +0xac,
 `_Radius` +0x4d8. Applied on a direct hit (from `Process_Hit` 0x4cb280) and, when the radius > 0, to victims in
-radius at detonation (0x4cbbb0). Per victim (0x62b920):
+radius at detonation (0x4cbbb0). **tru2 t04 reading (2026-11-20) [H]:** `_Radius` (+0x4d8) is only a path switch.
+The object hit (Process_Hit 0x4cb280) stuns the hit victim when it is exactly 0, and otherwise (≠ 0, negative included)
+runs 0x4cbbb0; the ground hit (0x4cb070) runs 0x4cbbb0 when it is > 0. 0x4cbbb0 gathers every object of each enemy
+player of the projectile's owner within `Projectile_Stun_Radius` (+0x1e90) of the projectile, and does nothing unless
+that radius is > 0 and `Projectile_Stun_Duration_Frames` (+0x1e8c) ≠ 0 (the land stun's fields; FoC's two area ion
+projectiles carry equal values: Krayt bombardment 300 / 300, Rebel bombardment 70 / 70). No other reader of +0x4d8 was
+found in the two detonation paths. Per victim (0x62b920):
 1. frames = int(FPS × duration); nothing if ≤ 0 or the victim's locomotor is busy.
 2. End frame (behaviour +0x30): without stacking, or when the current end is already past, end := now + frames;
    with `Stack_Duration`, end += frames and the modifier duration becomes (end − now + 1)/FPS.
@@ -788,9 +795,9 @@ In order:
 1. obj +0x3a0 |= 0x40 (dying), health := 0, 0x392160; record the killer's player byte (obj +0x330, also on the
    team container).
 2. Missile-shield / jammer emitter removal (§4.3).
-3. Signal **0x25** (object died). Transport/fleet/garrison notifications; the object linked through obj +0x150
-   (the container link of TACTICAL §3.6 step 1) dies recursively with the same arguments [M on which side of the
-   link].
+3. Signal **0x25** (object died). Transport/fleet/garrison notifications (a dying build-pad content notifies its pad,
+   0x42e6d0); when the dying object is a build pad, its content (pad pack obj +0x150: the finished object +0x10, else
+   the under-construction one +8) dies recursively with the same arguments (TACTICAL_COMBAT §5.4.3).
 4. Battle statistics entry (type, owner) appended to the game mode's list.
 5. Animation states reset; **hardpoints destroyed** (§1.3).
 6. Hero death → special-ability manager event (0x48eb10).
@@ -822,8 +829,9 @@ through **globals** 0x140b2c380–0x140b2c394. The port must pass that context e
 root-finder method is not identified; any deterministic method with the same bracket and stop rule is
 acceptable for our own clients.
 
-### 4.12 `Destroy_When_Stunned_Over_Water` (type +0xe6) — port guess, no RE pass, confirmed by probe 2026-11-04
-Not traced (Gabriel 2026-10-30, `docs/DECISIONS.md` "Roadmap trim": a documented guess instead of an RE pass). The
+### 4.12 `Destroy_When_Stunned_Over_Water` (type +0xe6) — port guess (probe 2026-11-04), RE reading 2026-11-15; port follows the RE reading since trn1 t04 (2026-11-17)
+Port guess first, then the probe, then the binary reading, which replaces the guess where they differ.
+Not traced when the rule was written (Gabriel 2026-10-30, `docs/DECISIONS.md` "Roadmap trim": a documented guess instead of an RE pass). The
 only vanilla user is `MAL_Rocket_Vehicle` (`UNITS_LAND_UNDERWORLD_MAL.XML`): a `Hover` movement-class vehicle with
 `STUNNABLE` in its land behaviours, so it is the one STUNNABLE unit that can stand on water cells (`Hover`
 passability includes `Water`). The port's reading of the name: a stunned hover vehicle loses its lift and sinks.
@@ -846,6 +854,51 @@ lifetime), with no stun-end delay. MALs stunned on low shore ground (terrain 2.9
 shallow kill); the port's rule has no depth threshold, and a kill at 3.8 already rules one out above that depth.
 Probe notes: `Spawn_Unit` moves a land unit off water cells (the MALs landed 80–90 units away on the shore);
 `Create_Generic_Object` places it exactly.
+**RE reading (2026-11-15, Ghidra through ReVa, retail FoC Steam x64; functions 0x4d01c0, 0x4cbbb0, 0x712190,
+0x647290, 0x135140, 0x136660, 0x199c20):** the water kill is part of the projectile detonation, not of the stun.
+- **Field [H].** Both readers take the object's type (obj +0x298) and test the byte at type +0xe6 ≠ 0. The parse
+  row (`xml_field_tables.md`, `GameObjectType` segment: code 0x0 bool, +0xe6) comes from the descriptor table read
+  by `tools/re/field_tables.py`; the parse function itself was not read in this pass (Ghidra has no reference to
+  the tag string 0x8825f0) [open, not needed for the rule].
+- **Readers [H for the two found; M for "only two"].** Two searches of the whole decompilation for a type +0xe6
+  byte test found only the land stun detonation 0x4d01c0 and the ion stun detonation 0x4cbbb0 (TACTICAL_GAPS
+  §2.3.7). Other +0xe6 hits are other structs. A reader that goes through an accessor would not have matched.
+- **When [H].** Once, inside the detonation's victim loop. Both functions need the projectile type's stun radius
+  (+0x1e90) > 0 and duration (+0x1e8c) ≠ 0, then walk every object within the radius (3D, from the projectile's
+  position) of each enemy player of the projectile's owner (0x294910, 0x2a8fb0). The terrain scene is fetched only
+  when the game mode is 1 (land); otherwise the test is skipped. Nothing tests it per frame or at the stun end.
+- **Which objects [H].** In 0x4d01c0 the test is made for every object of the query that has the type flag. It
+  is a separate statement after the stun call, so it does not need STUNNABLE (behaviour 0x38) and does not need
+  the object to pass the stun's victim filter (0x39f300). In 0x4cbbb0 it sits in the same per-object block as the
+  ion stun (behaviour 0x45 → 0x62b920); that block is skipped for an object whose slot byte +0x333 ≠ −1 and whose
+  locomotor (behaviour 1) answers true to vfunc +0x2b0 [open: what that vfunc reports].
+- **Stuns that do not reach it [H].** `Stun_Ability` (0x712190) calls the same stun apply 0x647290 for each
+  STUNNABLE victim and has no water test; 0x647290 itself has none (its only callers are 0x4d01c0 and 0x712190).
+  Confuse, Earthquake and other immobilisations were not looked at; none of them is among the readers found.
+- **Over water [H for the comparison, M for the helper meanings].** Needs the scene's water type (+0x204,
+  TERRAIN_WATER_POST: 0 none) ≠ 0 and **terrain height < water height − 0.5** (literal 0.5). Terrain height =
+  0x135140 at the object's X, Y: bilinear interpolation of the height grid (*read, mov3 t08, 2026-11-20 [H]*: y
+  first on the two columns, then x; corner indices clamped on their own, so clamp to edge; not triangle-linear;
+  MOVEMENT §3.6, MOV2_RE_QUESTIONS Q6). Water height = 0x136660 at the object's position: the scene's water plane height
+  (+0x200) by default; if the position lies inside a scene entry of kind 2 (entry +0x1a8 = 2, vertical ray test
+  0x155d90) it is instead terrain height + that entry's +0x100 [M: read, but what a kind-2 entry is was not
+  identified; inferred to be a local water patch]. The object's own Z is not used.
+- **How it dies [H for the call, inferred for the outcome].** `Take_Damage` 0x3a9e30(victim, kind 1, amount
+  999999.0, source null, no hardpoint name, 9th argument 1 (the raw flag of TACTICAL_COMBAT §3.6), 10th argument
+  the projectile object's +0x58 (the value used for the enemy-player query, read as the owner's player id)). It
+  is not a direct `Die` or removal: the unit dies through the normal damage path, so `Take_Damage`'s own gates
+  (`Immune_To_Damage`, garrisoned, invulnerability) can stop it and death clone / death projectile follow as for
+  any lethal hit (inferred from §4.9 and TACTICAL_COMBAT §3.6; not re-read here). The stun is applied first, in
+  the same call; the 2-frame gap of the probe is death processing, not a delay in this code (inferred).
+- **Match with the port rule: partly.** Same: land only, a water plane must exist, the terrain under the unit's
+  X, Y is compared with the water height, one test at the detonation, death by damage kind 1 with no source
+  object. Different: (1) retail needs the terrain more than **0.5** below the water height, the port has no
+  threshold (the probe's 3.8 kill and +2.9 / +5.0 survivals fit both); (2) retail does **not** kill on a
+  `Stun_Ability` wave, the port does; (3) retail **does** test on an ion stun detonation (0x4cbbb0), the port
+  excludes it; (4) retail tests every flagged enemy object in the radius, stunned or not, the port only a unit
+  that receives a STUNNABLE stun; (5) retail deals 999999 damage through `Take_Damage`, the port calls `Die`
+  directly. Vanilla data reach (1) and (2) with `MAL_Rocket_Vehicle`; whether any vanilla ion stun projectile is
+  fired in land battles, and whether (4) and (5) can show with vanilla units, was not checked.
 
 ### 4.13 Animation-driven ability timings on sim frames [port]
 Several special-ability classes time their effects from the owner's animation (TACTICAL_GAPS §2.3: "at animation
@@ -861,9 +914,9 @@ sim code (determinism rule 3); instead a clip position is a pure function of fix
   (anim_state.hpp `advance_one_shot`). Generic / Eat / Arc_Sweep hold the unit (the special stays applied) until
   then, after their last frame-numbered event; Grenade until the end of `Toss_Anim` after the throw; Hack / Repair
   change the owner / repair at the end of animation 0x5a: ceil(max(count − 2, 0) / rate) sim frames after the apply.
-- **Berserker window**: animation 0x68 is taken as looping [port]: position = (n × rate) mod (count − 1), n = the
-  frames since the apply (int(FPS × duration) − counter); a damage pass needs counter % 5 = 0 and 0.2 × count <
-  position < 0.8 × count.
+- **Berserker window** (r3h: §4.15): the SpinMove the apply / restart recorded loops: position = (n × rate) mod
+  (count − 1), n = the frames since that play; near its end (position ≥ count − 3) it restarts with a new variant draw;
+  a damage pass needs (near its end or counter % 5 = 0) and 0.2 × count < position < 0.8 × count.
 - **Clip data**: frame count and fps of variant 0 of the clip, from the type's sim model (`AbilityHost::anim_clip`,
   battle host `TacticalBattle::anim_clip_info`; XML names such as `Attack_Animation` / `Toss_Anim` values resolve to
   ModelAnimType ids with `anim::find_anim_type`). This is static model data loaded from the ALA files, the same for
@@ -882,6 +935,7 @@ sim code (determinism rule 3); instead a clip position is a pure function of fix
   within the reader's ±1 frame. The attach (re-own) frame was not visible in memory.
 - Infiltrator `STICKY_BOMB`: `PROJ_STICKY_BOMB` appears at `Bombtoss` (47) start + 12 / + 13 (port: position ≥ 12);
   the clip ends at + 29 and the thrower's next clip starts at + 30 (port: ceil(max(count − 2, 0) / rate)). Match.
+- (r3h 2026-11-17: explained and ported by the restart rule of §4.15; the two differences below are gone.)
 - Yoda `BERSERKER`: damage passes come every 5 frames (counter % 5 = 0 confirmed) and only in the middle of the clip
   (passes at clip positions 8–29, none at 3–5 or 30+, i.e. about 20 %–80 %). Two differences, kept as the [port]
   approximation: retail played **variant 1** of `RI_YODA_SPINMOVE` (38 frames; the port uses variant 0, 36 frames)
@@ -1026,6 +1080,103 @@ frame, rate, end, loop, what follows; saved from ability save v2, hashed only wh
 unless an explicit sub-index); Eat's `Target_Grabbed_Animation` is not parsed; a Super_Laser whose variant is missing
 keeps the §4.13 rate-1 fallback (the host cannot tell "no model" from "no variant"); writers outside the ability
 system (Lua / cinematic Play_Animation, death, the Berserker redirect) are not seen by the record.
+r3h (2026-11-17) replaced the first two and the last: see §4.15.
+
+### 4.15 Clip playback: Berserker, blaster, flame, demolition, shield and structure clips (r3h RE pass 2026-11-17) [H unless tagged]
+Read with REA from retail StarWarsG.exe (the Play_Animation callers, the special-ability vtables); behaviour in words.
+
+**Play_Animation's Berserker case (0x3a92f0).** While the object's Berserker counter (SAP +0x2cc) is non-zero and the
+request is not SpinMove (0x68):
+- "near its end" = the primary clip's frame ≥ frame count − 2 − its speed, or the clip has finished (0x39a180);
+- a request for Idle (0), Attack (5) or Attack Idle (6) is **ignored** while a SpinMove runs and is not near its end;
+  otherwise (no SpinMove, or near its end) it is **rewritten to SpinMove**, speed 1, start frame 1, keeping the
+  request's index (0xFFFF draws over the SpinMove variants), loop flag and blend;
+- **any other request** (Move, a flinch, a Force clip, Lua, death ...) first **ends the Berserker** (the special's
+  remove-all, vf15 0x48f1e0, with reason 3) and then plays as asked.
+This corrects ANIM_PARTICLES §A.4 item 1 ("anything but Attack / Attack Idle / Idle becomes SpinMove").
+
+**Berserker (BerserkerAbilityClass).** Apply 0x712dc0: counter := int(FPS × `Berserker_Duration_In_Secs`), recharge 51,
+then **SpinMove, 0xFFFF (one synced draw over its variants), looped, blend 0.5, speed 1**. Update 0x712fd0 (every frame):
+counter − 1, at < 1 the remove (reason 3). The update continues only when the primary clip is near its end (as above)
+or counter % 5 == 0. A damage pass needs 0.2 × count < frame < 0.8 × count **of the current primary clip** (whatever it
+is). After the pass, **near its end the SpinMove restarts**: 0xFFFF (a new draw), loop, blend 0.1, speed 1. Then the
+target upkeep (§2.3.2). Remove 0x713710: counter 0, signal 0x29, the speed override cleared; with a reason other than 3
+it plays a closing SpinMove one-shot (0xFFFF, blend 0.5); the expiry (reason 3) plays nothing.
+Shipped Yoda: `RI_YODA_SPINMOVE_00/01/02` = 36 / 38 / 36 frames at 30 fps, so a loop restarts every 33 (variants 0, 2)
+or 35 (variant 1) frames, which explains the probe's irregular 33-36-frame loops (§4.13). With the draws of the probe's
+run 1 (variant 1, 1, 1, 0 or 2, 1: loops 35 + 35 + 35 + 33 + 35 = 173 frames; probe 36 + 35 + 34 + 34 + 34 = 173) the
+rule gives the measured **23 passes** in 6 s; a single 38-frame clip gives 25, a single 36-frame clip 22.
+
+**Redirect_Blaster (RedirectBlasterAbilityClass, Take_Damage listener vf30 0x709c90).** Fields: +0x178
+`Redirect_Chance`, +0x17c `Block_Chance`, +0x180 `Reaction_Arc_In_Degrees`, +0x184
+`Max_Projectile_Redirection_Angle_In_Degrees` (range checks in vf29 0x70a0d0). The projectile's damage category must not
+be 1, 2, 3, 4, 6, 8 or 9. A shot from **outside** the reaction arc is not blocked; when the special's turn flag (+0x188)
+is set and the unit's clip is idle-like, the unit turns to 1.01 × the arc edge [M: flag name; `Turn_To_Face_Unblockable_Shots`
+per MCX4_T10_RE_ANSWERS §12]. Inside the arc: one
+synced float draw against the projectile's redirect factor × `Redirect_Chance` (redirect, 0x4cca10), else a second draw
+against its block factor × `Block_Chance` (block). After a redirect or block: **a unit whose clip is Move (2) returns
+"not handled"** [M: 0x4cca10 already redirected / blocked the shot; the damage then still lands]; otherwise it plays
+**Idle_Blockblaster (0x1e), 0xFFFF, one-shot, blend 0.1, speed 2** when its clip is idle-like (0x27b5e0) or is a
+finished Idle_Blockblaster (the redirect path also needs 0x397040 false [M]), and runs the activation presentation.
+Absorb_Blaster (vf30 0x6ee840) plays nothing. **Block_Blaster (28) and Redirect_Blaster (29) are played by no
+Play_Animation (103 callers) or ModelClass-play (28 callers) call with a constant type**: they are reachable only
+through a variable type (Lua / cinematic Play_Animation by name, type data) [M: unused by the engine].
+
+*cmb3 t08 (2026-11-20, read from `re_reference/`) [H]:*
+- **The Move-clip "not handled".** The listener runs under `SAP_On_Take_Damage` 0x37d160 → 0x37b580 (style 10): a false
+  return makes the dispatcher go on to the victim's next Take_Damage special ability in list order; only a true one ends
+  the walk and zeroes the damage (§4.6). So after a redirect or block of a victim in the Move clip, the new shot is
+  already out (0x4cca10) and the hit is still offered to the next listener (an `Absorb_Blaster` may take it); with none,
+  the damage lands.
+- **The turn** is the locomotor (behaviour 1) vf +0x218 with a unit direction (cos, sin, 0): the facing order the space
+  targeting service 0x633ae0 also gives for `Auto_Rotate_For_Space_Targeting`; it turns the unit at its locomotor's rate
+  and touches no order. All 52 FoC `Redirect_Blaster_Ability` entries (and the 15 EaW ones) set
+  `Turn_To_Face_Unblockable_Shots` to No, so the turn is inert in shipped data. Port: the facing is snapped
+  (`AbilityHost::face_direction`, [port] - the movement system has no rate-limited facing order; mod data only).
+- **The redirect path's extra test 0x397040** reads obj +0x2a0's byte +0x108 (false without that pack); only the
+  Idle_Blockblaster play depends on it.
+
+**Flame_Attack (PersonalFlameThrowerAbilityClass update 0x705e50).** State (SAP +0x130) 1: turn toward the target
+(locomotor vf +0x2f0) until the facing is within 0.1 rad; then state 2, timer := int(FPS × +0x18c [duration]) and
+**FLAME_ATTACK (0x2d), index 0, looped, blend 0.2, speed 1**. State 2: keep facing, flame (0x7061b0), timer − 1; at 0
+the end 0x7060e0 (release the hold 0x63f060(obj, 0, 1), state 0, signal 0x29) **plays nothing**: the loop runs on until
+another clip replaces it.
+
+**Demolition (DemolitionBehaviorClass, behaviour 0x33 DEMOLITION, service 0x640060).** State 1: turn toward the target
+until within 0.1 rad, then 0x6403f0: state 2, start time := now, **DEMOLITION (0x2e), 0xFFFF, one-shot, blend 0.1,
+speed 1**, and the hold calls 0x63f060(obj, 0, 0) / (obj, 1). State 2: 0x6401b0 [the plant, not read]. State 3:
+signals 0x29 / 0x28 and the cleanup.
+
+**SHIELD_ON / SHIELD_OFF.** Played only by the base shield's Set_State 0x56b540 (TRU1_A_RE_ANSWERS, item 6): when the
+type sets both `Shield_On_Anim` (+0xde4) and `Shield_Off_Anim` (+0xde8), turning on plays the on clip and turning off
+the off clip, **0xFFFF, looped, blend 0, speed 1**, start frame = round(frame) of the opposite clip when that one is the
+current clip, else 0. Shipped: one Hutt type (HUTT_FACTION_UNITS.XML).
+
+**Build pads and structures (L1_S4_REMAINING §3.6).** Start build 0x42dbd0: the pad plays **Pad_Build (0x74), 0xFFFF,
+one-shot, blend 0, speed 1**. The pad plays **Pad_Sell (0x75)** with the same arguments when its child goes away
+(0x42e6d0), on a sale's release (0x42ecd0) and at a battle start that does not pre-build (0x42df80). The
+under-construction object's init 0x5d70f0 plays **Build (0x4a), index 0, one-shot, blend 0, speed = (clip frames / fps)
+/ build seconds, start frame 0** (the restore 0x5d6e40: start frame = the elapsed build frames).
+
+**Capture points (CapturePointBehaviorClass service 0x501980).** When the progress of a point decays to 0 under its
+owner, the point plays **Idle (0)** looped, blend 0, speed 1, index = the owner faction's `Faction_Anim_Subindex`
+(type +0x2098, 0x371070; an unlisted faction gives 0xFFFF = a draw). When another controller starts a transition
+(progress exactly 0), it plays **Transition_Ownership (0x4b)** looped, blend 0, speed 1, index = the controller faction's
+`Faction_Anim_Subindex` (the owner's when the controller's faction has its +0x108 flag [M: Is_Neutral]). A point
+already at progress 0 under its owner returns before the step and plays nothing; a running transition plays nothing
+new; after a completed capture (owner := controller, progress 0) the Transition_Ownership loop stays on.
+
+**Port (r3h, 2026-11-17).** The record of §4.14 is kept and also handed to the host: each play is queued as an
+`AbilityAnimPlay` (type, drawn variant, loop, blend, speed, frame) and the battle plays it on its animation world after
+the combat tick (`TacticalBattle::oi_ability_anims`). 0xFFFF plays draw in the ability system when the clip has >= 2
+variants (`AbilityHost::anim_variants`; one variant: no draw, as 0x1ffb40). What follows a finished one-shot is queued
+in the frame it finishes (`anim_follow_ups`): the hold loop (0xFFFF, blend 0.1), Earthquake / Telekinesis's Idle loop
+(0xFFFF, blend 0.2) or the default idle; Force_Revel_End is followed by nothing (the IDLE behaviour). The record follows
+the world: when the battle's world shows another primary clip than the record (`observe_clip`), the record ends
+(Generic / Arc / Eat abort at their next update, Generic / Eat with the default idle; a Berserker ends).
+Capture points: the capture service lists the clips it asks for (`CapturePointSystem::anims`) and the battle plays
+them (`bt_capture_anims`); the Idle only on a decay from above 0 (at progress 0 under the owner retail returns before
+the step).
 
 ---
 
@@ -1038,7 +1189,7 @@ system (Lua / cinematic Play_Animation, death, the Berserker redirect) are not s
 | `Activate_Ability(name, arg)` 0x570580 | §2.9; executes the command directly (no queue) |
 | `Cancel_Ability(name)` 0x5745c0 | `SetUnitAbilityMode(t, off)` executed directly |
 | `Force_Ability_Recharge(name[, s])` 0x576b70 | without s: start recharge (§2.6); with s: counter = maximum = int(FPS × s) (phase unchanged) |
-| `Reset_Ability_Counter(name)` 0x57f430 | sets counter = maximum = 1 frame when 0x42f8e0 allows [M] |
+| `Reset_Ability_Counter()` 0x57f430 | no arguments read; for **every** ability id whose counter is **not** zero (0x42f8e0 false), counter = maximum = 1 frame (0x42fa70); idle counters untouched (MCX8_BINDINGS_OBJECTS §Reset_Ability_Counter) |
 | `Is_Ability_Autofire` / `Set_Single_Ability_Autofire` / `Set_All_Abilities_Autofire` | slot byte +9 (§2.10); the setters write it directly (0x3a78b0) |
 | `Is_Under_Effects_Of_Ability(name)` 0x57c600 | tests a behaviour's active state [L which behaviour] |
 | `Get_Hull()` 0x578c30 | §1.3 (tactical only, error elsewhere) |

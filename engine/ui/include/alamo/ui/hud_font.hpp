@@ -20,6 +20,7 @@
 #include <string>
 #include <string_view>
 #include <tuple>
+#include <utility>
 #include <vector>
 
 namespace alamo::ui {
@@ -60,9 +61,6 @@ public:
 std::unique_ptr<GlyphRasterizer> make_system_rasterizer();
 // Deterministic stand-in: every glyph a filled box of 0.5 x 0.7 em, advance 0.6 em, spaces empty.
 std::unique_ptr<GlyphRasterizer> make_box_rasterizer();
-// Windows: makes a TrueType file (e.g. the game's EmpireAtWar TTFs) visible to this process only
-// (AddFontResourceExW FR_PRIVATE; no system change). Other platforms: false.
-bool register_private_font_file(const std::string& path_utf8);
 
 // Game fonts. The data names "EmpireAtWar-Medium", "EmpireAtWar-Bold", "EmpireAtWar-light" (plus Arial faces, which
 // are system fonts). The Steam install has no font files and installs none: the four EmpireAtWar TrueType fonts
@@ -98,6 +96,20 @@ std::vector<GameFont> registered_game_fonts();
 // The registered font a face name means (case-insensitive full, PostScript or family name), or false.
 bool find_game_font(std::string_view face, GameFont* out = nullptr);
 
+// mcx4 t14 (MCX4_T14_RE_ANSWERS "GameConstants.Command_Bar_Default_Font_Name family", "Game_Object_Name_Font_Name",
+// "Tool_Tip_Font_Name family"): the GameConstants default fonts (defaults = FoC's values), set once by the host.
+enum class FontUse : uint8_t {
+    Text,     // a text component without its own font: Command_Bar_Default_Font_Name / _Size
+    Button,   // a text button without its own font: Text_Button_Default_Font_Name / _Size
+    World,    // in-world / HUD text (control-group numbers, fly-text, waypoint numbers): Game_Object_Name_Font_Name / _Size
+    Tooltip,  // the tooltip text: Tool_Tip_Font_Name / _Size
+};
+struct DefaultFonts {
+    std::string text_face = kFallbackFontFace, button_face = kFallbackFontFace, world_face = kFallbackFontFace;
+    std::string tooltip_face = "Arial";
+    float text_size = 7.0f, button_size = 7.0f, world_size = 7.0f, tooltip_size = 7.0f;
+};
+
 // Glyphs packed into square RGBA8 pages (white, alpha = coverage). Pages only grow; dirty pages are
 // re-uploaded by the renderer (generation counter). clear() on a resolution change (font sizes depend
 // on the screen height).
@@ -109,6 +121,12 @@ public:
     // kFallbackFontFace; -1 only when even that fails.
     int32_t font(std::string_view face, float point_size, uint32_t screen_height, float stretch = 1.0f);
     const FontMetrics& metrics(int32_t font) const { return fonts_[static_cast<size_t>(font)].metrics; }
+    // mcx4 t14: the default fonts and a component's font by the retail rule (0x349a20 / 0x351d50): its own name (size:
+    // its own, else the use's); a size without a name takes the use's face (Text / Button: Command_Bar_Default_Font_Name);
+    // neither: the use's default font. `name` empty / `size` <= 0 = unset.
+    void set_defaults(DefaultFonts d) { defaults_ = std::move(d); }
+    const DefaultFonts& defaults() const { return defaults_; }
+    int32_t component_font(std::string_view name, float size, FontUse use, uint32_t screen_height);
 
     struct Glyph {
         uint16_t page = 0;
@@ -140,6 +158,7 @@ private:
     bool pack(uint32_t w, uint32_t h, uint16_t& page, uint32_t& x, uint32_t& y);
 
     GlyphRasterizer* r_;
+    DefaultFonts defaults_;
     uint32_t page_size_;
     std::vector<Font> fonts_;
     std::map<std::tuple<std::string, int32_t, int32_t>, int32_t> by_key_;  // (FACE, px, stretch*1000) -> font

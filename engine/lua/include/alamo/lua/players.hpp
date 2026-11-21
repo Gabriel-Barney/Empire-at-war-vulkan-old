@@ -192,6 +192,11 @@ public:
 
     std::vector<LuaPlayerState>& states() { return state_; }
     const std::vector<LuaPlayerState>& states() const { return state_; }
+    // mcx8 t12 (docs/re/MCX8_BINDINGS_PLAYERS_STORY.md "Flush_Category", "GiveDesireBonus"): the AI host's name checks
+    // (its AiDefinitions: goal categories, goal types). Unset = names are not checked (sim-less worlds, tests). Not
+    // hashed or saved: the host sets them again.
+    std::function<bool(std::string_view)> goal_category_known;
+    std::function<bool(std::string_view)> goal_type_known;
     std::vector<int32_t> purge_goal_requests;
     std::vector<DesireBonusRequest> desire_bonuses;
     std::vector<TacticalCreditRelease> tactical_releases;

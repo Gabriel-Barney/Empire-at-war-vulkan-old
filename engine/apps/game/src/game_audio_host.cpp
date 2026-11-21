@@ -1,10 +1,19 @@
 #include "alamo/game/game_audio_host.hpp"
+#include "alamo/tactical/abilities/ability_types.hpp"
 
 #include <algorithm>
 #include <cmath>
+#include <map>
 #include <optional>
 
+#include "alamo/core/ascii.hpp"
+#include "alamo/data/values.hpp"
+#include "alamo/objects/behaviors.hpp"
+#include "alamo/objects/game_object_types.hpp"
+#include "alamo/objects/type_fields.hpp"  // c_atof
 #include "alamo/sim/tactical_battle.hpp"
+#include "alamo/tactical/abilities/ability_system.hpp"
+#include "alamo/tactical/hangar/contents.hpp"
 #ifdef ALAMO_GAME_HAVE_AUDIO
 #include "alamo/audio/audio_db.hpp"
 #include "alamo/audio/audio_system.hpp"
@@ -29,6 +38,223 @@ struct UnitSounds {};
 #endif
 
 namespace alamo::game {
+
+std::string_view GameAudioHost::control_point_line(int32_t prev, int32_t timer, int32_t leader, int32_t local_player, bool leader_is_enemy) {
+    if (timer < 0 || leader < 0 || local_player < 0) return {};
+    static constexpr struct {
+        int32_t frames;
+        const char* owned;
+        const char* ally;
+        const char* enemy;
+    } kMarks[] = {
+        {60 * 30, "SFXEvent_HUD_Reinforcement_Point_Owned_60_Seconds", "SFXEvent_HUD_Reinforcement_Point_Ally_Owned_60_Seconds",
+         "SFXEvent_HUD_Reinforcement_Point_Enemy_Owned_60_Seconds"},
+        {30 * 30, "SFXEvent_HUD_Reinforcement_Point_Owned_30_Seconds", "SFXEvent_HUD_Reinforcement_Point_Ally_Owned_30_Seconds",
+         "SFXEvent_HUD_Reinforcement_Point_Enemy_Owned_30_Seconds"},
+        {15 * 30, "SFXEvent_HUD_Reinforcement_Point_Owned_15_Seconds", "SFXEvent_HUD_Reinforcement_Point_Ally_Owned_15_Seconds",
+         "SFXEvent_HUD_Reinforcement_Point_Enemy_Owned_15_Seconds"},
+        {5 * 30, "SFXEvent_HUD_Reinforcement_Point_Owned_05_Seconds", "SFXEvent_HUD_Reinforcement_Point_Ally_Owned_05_Seconds",
+         "SFXEvent_HUD_Reinforcement_Point_Enemy_Owned_05_Seconds"},
+    };
+    const bool armed_now = prev < 0 || timer > prev;
+    for (const auto& m : kMarks) {
+        const bool hit = armed_now ? (timer == m.frames || timer + 1 == m.frames) : (prev > m.frames && m.frames >= timer);
+        if (!hit) continue;
+        if (leader == local_player) return m.owned;
+        return leader_is_enemy ? m.enemy : m.ally;
+    }
+    return {};
+}
+
+std::string_view GameAudioHost::garrison_line(int32_t unit_owner, int32_t local_player) {
+    return local_player >= 0 && unit_owner == local_player ? std::string_view("SFXEvent_Bunker_Garrisoned") : std::string_view();
+}
+
+std::string_view GameAudioHost::health_warning_tag(float before, float after, float low, float critical, bool local_victim,
+                                                   bool local_attacker) {
+    const bool crit = before > critical && after <= critical;
+    const bool lo = !crit && before > low && after <= low;
+    if (!crit && !lo) return {};
+    if (local_victim) return crit ? "SFXEvent_Health_Critical_Warning" : "SFXEvent_Health_Low_Warning";
+    if (local_attacker) return crit ? "SFXEvent_Enemy_Damaged_Health_Critical_Warning" : "SFXEvent_Enemy_Damaged_Health_Low_Warning";
+    return {};
+}
+
+std::string_view GameAudioHost::hardpoint_lost_tag(uint8_t kind, bool local_parent, bool parent_dying, bool last_of_kind,
+                                                   bool weapons_left) {
+    if (!local_parent || parent_dying) return {};
+    if (kind >= 5 && kind <= 10 && !weapons_left) return "SFXEvent_Hardpoint_All_Weapons_Destroyed";
+    return last_of_kind ? std::string_view("SFXEvent_Hardpoint_Destroyed") : std::string_view();
+}
+
+std::string_view GameAudioHost::battle_result_line(bool local_won, bool local_hostile, bool space, bool enemy_tsw, bool own_killer,
+                                                   bool corruption) {
+    if (local_won) {
+        if (!space) {
+            if (enemy_tsw) return "SFXEvent_HUD_Won_Land_Battle_Enemy_TSW_Present";
+            return corruption ? "SFXEvent_HUD_Won_Tactical_Corruption_Mission" : "SFXEvent_HUD_Won_Land_Battle";
+        }
+        if (enemy_tsw) return own_killer ? "SFXEvent_HUD_Won_Space_Battle_Enemy_TSW_Present" : "Space_Forced_Retreat_Due_To_Superweapon";
+        return corruption ? "SFXEvent_HUD_Won_Tactical_Corruption_Mission" : "SFXEvent_HUD_Won_Space_Battle";
+    }
+    if (!local_hostile) return {};
+    if (enemy_tsw) return space ? "SFXEvent_HUD_Lost_Space_Battle_Enemy_TSW_Present" : "SFXEvent_HUD_Lost_Land_Battle_Enemy_TSW_Present";
+    if (corruption) return "SFXEvent_HUD_Lost_Tactical_Corruption_Mission";
+    return space ? "SFXEvent_HUD_Lost_Space_Battle" : "SFXEvent_HUD_Lost_Land_Battle";
+}
+
+std::string_view GameAudioHost::retreat_cancel_tag(bool space, bool local_retreats, bool by_player) {
+    // ledger: consumes Faction.Space_Retreat_Cancel_SFXEvent
+    if (space) return "Space_Retreat_Cancel_SFXEvent";
+    // ledger: consumes Faction.Land_Retreat_Cancel_SFXEvent
+    if (local_retreats && by_player) return "Land_Retreat_Cancel_SFXEvent";
+    return {};
+}
+
+std::string_view GameAudioHost::retreat_begin_tag(bool local_retreats, bool local_hostile, bool space) {
+    // ledger: consumes Faction.Land_Retreat_Begin_SFXEvent
+    // ledger: consumes Faction.Space_Retreat_Begin_SFXEvent
+    if (local_retreats) return space ? "Space_Retreat_Begin_SFXEvent" : "Land_Retreat_Begin_SFXEvent";
+    // ledger: consumes Faction.Land_Retreat_Enemy_Begin_SFXEvent
+    // ledger: consumes Faction.Space_Retreat_Enemy_Begin_SFXEvent
+    if (local_hostile) return space ? "Space_Retreat_Enemy_Begin_SFXEvent" : "Land_Retreat_Enemy_Begin_SFXEvent";
+    return {};
+}
+
+std::string_view GameAudioHost::move_into_field_tag(uint32_t dest_fields) {
+    // ledger: consumes GameObjectType.SFXEvent_Move_Into_Asteroid_Field
+    if ((dest_fields & 1u) != 0) return "SFXEvent_Move_Into_Asteroid_Field";  // tactical::abilities::kFieldAsteroid
+    // ledger: consumes GameObjectType.SFXEvent_Move_Into_Nebula
+    if ((dest_fields & 4u) != 0) return "SFXEvent_Move_Into_Nebula";  // kFieldNebula
+    return {};
+}
+
+std::string_view GameAudioHost::special_weapon_tag(bool fired, bool own) {
+    // ledger: consumes Faction.SFXEvent_HUD_Special_Weapon_Ready
+    // ledger: consumes Faction.SFXEvent_HUD_Enemy_Special_Weapon_Ready
+    if (!fired) return own ? "SFXEvent_HUD_Special_Weapon_Ready" : "SFXEvent_HUD_Enemy_Special_Weapon_Ready";
+    // ledger: consumes Faction.SFXEvent_HUD_Special_Weapon_Firing
+    // ledger: consumes Faction.SFXEvent_HUD_Enemy_Special_Weapon_Firing
+    return own ? "SFXEvent_HUD_Special_Weapon_Firing" : "SFXEvent_HUD_Enemy_Special_Weapon_Firing";
+}
+
+std::string_view GameAudioHost::nth_field(std::span<const std::pair<std::string, std::string>> fields, std::string_view tag,
+                                          int32_t index) {
+    int32_t n = 0;
+    for (const auto& [k, v] : fields) {
+        if (!ascii_iequals(k, tag)) continue;
+        if (n++ == index) return v;
+    }
+    return {};
+}
+
+std::string_view GameAudioHost::base_shield_line(bool online, bool friendly) {
+    // ledger: consumes Faction.SFXEvent_HUD_Base_Shield_Online
+    // ledger: consumes Faction.SFXEvent_HUD_Enemy_Base_Shield_Online
+    if (online) return friendly ? "SFXEvent_HUD_Base_Shield_Online" : "SFXEvent_HUD_Enemy_Base_Shield_Online";
+    // ledger: consumes Faction.SFXEvent_HUD_Base_Shield_Offline
+    // ledger: consumes Faction.SFXEvent_HUD_Enemy_Base_Shield_Offline
+    return friendly ? "SFXEvent_HUD_Base_Shield_Offline" : "SFXEvent_HUD_Enemy_Base_Shield_Offline";
+}
+
+std::string_view GameAudioHost::strike_available_tag(bool bombard, bool local, bool friendly) {
+    // ledger: consumes Faction.SFXEvent_Bombard_Available
+    // ledger: consumes Faction.SFXEvent_Bombard_Ally_Available
+    if (bombard) return local ? "SFXEvent_Bombard_Available" : friendly ? "SFXEvent_Bombard_Ally_Available" : "SFXEvent_Bombard_Enemy_Available";
+    // ledger: consumes Faction.SFXEvent_Bombard_Enemy_Available
+    // ledger: consumes Faction.SFXEvent_Bombing_Run_Available
+    return local ? "SFXEvent_Bombing_Run_Available"  // ledger: consumes Faction.SFXEvent_Bombing_Run_Ally_Available
+                 : friendly ? "SFXEvent_Bombing_Run_Ally_Available"
+                            : "SFXEvent_Bombing_Run_Enemy_Available";  // ledger: consumes Faction.SFXEvent_Bombing_Run_Enemy_Available
+}
+
+GameAudioHost::ResultMusic GameAudioHost::result_music(int32_t local, int32_t winner, int32_t attacker, int32_t defender) {
+    ResultMusic m;
+    const int32_t loser = winner == attacker ? defender : attacker;
+    if (local < 0 || winner < 0 || loser < 0) return m;
+    m.play = true;
+    m.won = local == winner;
+    m.other = m.won ? loser : winner;
+    return m;
+}
+
+GameAudioHost::PadLines GameAudioHost::pad_lines(PadLine kind, bool local) {
+    PadLines l;
+    switch (kind) {
+        case PadLine::Started:
+            if (local) l.type_tags = {"SFXEvent_Tactical_Build_Started", "SFXEvent_Build_Started"};
+            l.faction_tag = "SFXEvent_Tactical_Object_Building_Started";  // ledger: consumes Faction.SFXEvent_Tactical_Object_Building_Started
+            l.loop_tag = "SFXEvent_Tactical_Object_Building_Loop";  // ledger: consumes Faction.SFXEvent_Tactical_Object_Building_Loop
+            break;
+        case PadLine::Completed:
+            if (local) l.type_tags = {"SFXEvent_Tactical_Build_Complete", "SFXEvent_Build_Complete"};
+            l.faction_tag = "SFXEvent_Tactical_Object_Building_Complete";  // ledger: consumes Faction.SFXEvent_Tactical_Object_Building_Complete
+            break;
+        case PadLine::Sold:
+            if (local) l.type_tags = {"SFXEvent_Sold_Tactical", ""};  // ledger: consumes GameObjectType.SFXEvent_Sold_Tactical
+            l.faction_tag = "SFXEvent_Tactical_Object_Sold";  // ledger: consumes Faction.SFXEvent_Tactical_Object_Sold
+            break;
+    }
+    return l;
+}
+
+int32_t GameAudioHost::land_damage_stage(std::span<const std::string_view> thresholds, float fraction) {
+    int32_t stage = -1;
+    for (size_t k = 0; k < thresholds.size(); ++k)
+        if (fraction <= static_cast<float>(objects::c_atof(ascii_trim(thresholds[k])))) stage = static_cast<int32_t>(k);
+    return stage;
+}
+
+GameAudioHost::ControlLines GameAudioHost::control_lines(bool friendly_old, bool friendly_new, bool hostile_old, bool hostile_new,
+                                                         bool old_neutral, bool new_neutral) {
+    ControlLines c;
+    if (friendly_old || friendly_new)
+        c.friendly = friendly_old ? "SFXEvent_Tactical_Lose_Friendly_Control" : "SFXEvent_Tactical_Gain_Friendly_Control";
+    if (!old_neutral && hostile_old) c.enemy = "SFXEvent_Tactical_Lose_Enemy_Control";
+    else if (!new_neutral && hostile_new) c.enemy = "SFXEvent_Tactical_Gain_Enemy_Control";
+    return c;
+}
+
+std::string_view GameAudioHost::hardpoint_kind_event(std::span<const std::string_view> tokens, uint8_t kind) {
+    static constexpr const char* kNames[13] = {
+        "HARD_POINT_ENGINE",         "HARD_POINT_SHIELD_GENERATOR", "HARD_POINT_GRAVITY_WELL",  "HARD_POINT_FIGHTER_BAY",
+        "HARD_POINT_TRACTOR_BEAM",   "HARD_POINT_WEAPON_LASER",     "HARD_POINT_WEAPON_MISSILE", "HARD_POINT_WEAPON_TORPEDO",
+        "HARD_POINT_WEAPON_ION_CANNON", "HARD_POINT_WEAPON_MASS_DRIVER", "HARD_POINT_WEAPON_SPECIAL",
+        "HARD_POINT_ENABLE_SPECIAL_ABILITY", "HARD_POINT_DUMMY_ART"};
+    if (kind >= 13) return {};
+    const auto is_kind = [](std::string_view t) { return t.size() > 11 && ascii_istarts_with(t, "HARD_POINT_"); };
+    std::string_view hit;  // a later line for the same kind replaces an earlier one (one slot per kind)
+    for (size_t i = 0; i < tokens.size(); ++i) {
+        if (!is_kind(tokens[i]) || !ascii_iequals(tokens[i], kNames[kind])) continue;
+        hit = i + 1 < tokens.size() && !is_kind(tokens[i + 1]) ? tokens[i + 1] : std::string_view();
+    }
+    return hit;
+}
+
+std::string_view GameAudioHost::clash_win_speech(const tactical::combat::HeroClashData* data, uint32_t entry, bool first_won) {
+    if (!data || entry >= data->entries.size()) return {};
+    return first_won ? data->entries[entry].first_speech : data->entries[entry].second_speech;
+}
+
+std::string_view GameAudioHost::weather_name(uint8_t type) {
+    static constexpr const char* kNames[] = {"CLEAR", "RAIN", "SNOW", "SANDSTORM", "ASH"};  // LandModeClass::tLandWeather order
+    return type < std::size(kNames) ? std::string_view(kNames[type]) : std::string_view("CLEAR");
+}
+
+bool GameAudioHost::base_attacked(bool victim_is_base, bool attacker_hostile, int32_t victim_owner, int32_t local_player,
+                                  bool owner_is_ally, bool community_property) {
+    if (!victim_is_base || !attacker_hostile || local_player < 0 || victim_owner < 0) return false;
+    return victim_owner == local_player || (owner_is_ally && community_property);
+}
+
+std::string_view GameAudioHost::fire_event(std::string_view hardpoint_fire, std::string_view shooter_fire) {
+    return hardpoint_fire.empty() ? shooter_fire : hardpoint_fire;
+}
+
+std::string_view GameAudioHost::terrain_name(uint32_t type) {
+    static constexpr const char* kNames[] = {"Temperate", "Arctic", "Desert", "Forest", "Swamp", "Volcanic", "Urban", "Space"};  // 0x5e8770
+    return type < std::size(kNames) ? std::string_view(kNames[type]) : std::string_view();
+}
 
 Vec3 GameAudioHost::position_of(uint64_t id) const {
     const auto it = positions_.find(id);
@@ -63,6 +289,9 @@ bool GameAudioHost::init(const GameData& data, AudioBackendKind kind, uint32_t s
     }
     game_data_ = std::make_unique<audio::GameAudioData>();
     game_data_->load(*data.files);
+    // mcx4 t13: the health warning thresholds (MCX4_T13_RE_ANSWERS "GameObjectType.SFXEvent_Health_Low_Warning family").
+    health_low_ = data.db.constants().shared.health_low_percent_threshold.value_or(health_low_);  // ref4 t06: GameConstants::shared
+    health_critical_ = data.db.constants().get_float("Health_Critical_Percent_Threshold", health_critical_);
     audio::GameSampleConfig sc;
     if (data.vfs) sc.sfx_megs = audio::GameSampleSource::default_sfx_megs(*data.vfs, sc.language);
     samples_ = std::make_unique<audio::GameSampleSource>(*data.files, sc);
@@ -89,6 +318,7 @@ bool GameAudioHost::init(const GameData& data, AudioBackendKind kind, uint32_t s
         audio::AudioSystem::ObjectAudio a;
         a.position = it->second;
         a.audible = inaudible_.find(owner) == inaudible_.end();  // §3.5 item 8: fog / hidden / stealth mute, no stop
+        a.hidden = hidden_.find(owner) != hidden_.end();          // AUDIO.md §1.6 (b0280): a cinematic unmutes fog only
         return a;
     });
     return true;
@@ -191,32 +421,37 @@ void GameAudioHost::negative_feedback() {
 }
 
 void GameAudioHost::unit_response(const objects::GameObjectTypes& types, objects::TypeIndex type, uint64_t object, UnitResponse kind,
-                                  bool group, int32_t owner) {
+                                  bool group, int32_t owner, uint32_t dest_fields, int32_t hardpoint_kind) {
     if (!game_) return;
     // The mode's "excluded set" = the retreat coordinator's retreating units (STRATEGIC_GAPS §7.4 [M]): no response.
     if (owner >= 0 && owner == retreating_player_) {
         ++stats_.excluded;
         return;
     }
-    if (game_->unit_response(object, sounds(types, type), order_of(kind, group), position_of(object), group)) ++stats_.responses;
+    const audio::UnitOrder order = order_of(kind, group);
+    // ledger: consumes GameObjectType.SFXEvent_Attack_Hardpoint
+    if (kind == UnitResponse::Attack && hardpoint_kind >= 0 && hardpoint_kind < 13 && type != objects::kNone && type < types.size())
+        if (const std::string_view ev = hardpoint_kind_event(types.get_list(type, "SFXEvent_Attack_Hardpoint"),
+                                                             static_cast<uint8_t>(hardpoint_kind));
+            !ev.empty()) {
+            audio::UnitSounds s = sounds(types, type);  // step 1 of the response chain: the hard point line first
+            s.response[static_cast<size_t>(order)] = std::string(ev);
+            if (game_->unit_response(object, s, order, position_of(object), group)) ++stats_.responses;
+            return;
+        }
+    if (const std::string_view tag = kind == UnitResponse::Move ? move_into_field_tag(dest_fields) : std::string_view(); !tag.empty())
+        if (const std::string_view ev = types.get_string(type, tag); !ev.empty()) {
+            audio::UnitSounds s = sounds(types, type);  // the field line replaces the move response (0x3738b0)
+            s.response[static_cast<size_t>(order)] = std::string(ev);
+            if (game_->unit_response(object, s, order, position_of(object), group)) ++stats_.responses;
+            return;
+        }
+    if (game_->unit_response(object, sounds(types, type), order, position_of(object), group)) ++stats_.responses;
 }
 
-void GameAudioHost::battle_reset() {
-    last_serial_ = 0;
-    have_serial_ = false;
-    spawned_.clear();
-    moving_.clear();
-    inaudible_.clear();
-    upgrades_seen_ = 0;
-    retreating_player_ = -1;
-}
-
-void GameAudioHost::battle_end(bool won, std::string_view enemy_faction) {
+void GameAudioHost::battle_end(bool won, std::string_view other_faction) {
     if (!game_) return;
-    audio::BattleResult r;
-    r.won = won;
-    r.enemy_faction = std::string(enemy_faction);
-    game_->battle_end(r);  // mode 16 (STRATEGIC_GAPS §7.4)
+    game_->tactical_result_music(won, other_faction);  // modes 9 / 10 (MCX4_T13_RE_ANSWERS)
     ++stats_.battle_end_music;
 }
 
@@ -238,29 +473,69 @@ void GameAudioHost::battle_tick(const sim::TacticalBattle& battle, const objects
     // stealthed for the local player (running loops are muted, never stopped).
     const tactical::abilities::AbilitySystem& ab = battle.abilities();
     const float threshold = battle.engine_moving_threshold();
+    if (!super_weapon_types_ready_) {  // AUDIO.md §2.3 (b0286): the factions' Faction_Super_Weapon types
+        super_weapon_types_ready_ = true;
+        for (const audio::FactionAudio& f : game_data_->factions()) {
+            const objects::TypeIndex t = types.resolve_name(f.get("Faction_Super_Weapon"));
+            if (t != objects::kNone && std::find(super_weapon_types_.begin(), super_weapon_types_.end(), t) == super_weapon_types_.end())
+                super_weapon_types_.push_back(t);
+        }
+    }
+    bool super_weapon = false;
     std::vector<objects::ObjectId> live;
     for (const objects::ObjectId id : mv.unit_ids()) {
         const objects::ObjectHandle h = store.find(id);
         if (!store.alive(h)) continue;
         live.push_back(id);
+        // [port] any owner: only the Empire names a Faction_Super_Weapon (Death_Star) in shipped data.
+        if (std::find(super_weapon_types_.begin(), super_weapon_types_.end(), store.type(h)) != super_weapon_types_.end())
+            super_weapon = true;
         if (spawned_.insert(id).second) {
             game_->object_spawned(static_cast<uint64_t>(id), sounds(types, store.type(h)), store.position(h));
             ++stats_.spawned;
         }
-        const bool hidden = battle.fog_object_hidden(local_player, id, false) || ab.is_stealthed(id, battle.frame()) ||
+        const bool hidden = ab.is_stealthed(id, battle.frame()) ||
                             (script_hidden && script_hidden(id));  // q6 t19: Lua Hide(true) mutes the object's sound
-        if (hidden) inaudible_.insert(static_cast<uint64_t>(id));
+        const bool fogged = battle.fog_object_hidden(local_player, id, false);
+        if (hidden || fogged) inaudible_.insert(static_cast<uint64_t>(id));
         else inaudible_.erase(static_cast<uint64_t>(id));
+        if (hidden) hidden_.insert(static_cast<uint64_t>(id));
+        else hidden_.erase(static_cast<uint64_t>(id));
         if (battle.hyperspace().departing(id)) continue;  // hyperspace states: the locomotor leaves the loops alone
         const bool moving = mv.view(id).speed >= threshold;
         moving_[id] = moving;
         game_->object_moving(static_cast<uint64_t>(id), moving);
     }
+    if (!super_weapon && battle.lead_object() != objects::kNoObjectId) {  // the spawned super weapon (§4.8 lead object)
+        const objects::ObjectHandle lh = store.find(battle.lead_object());
+        super_weapon = store.alive(lh) && std::find(super_weapon_types_.begin(), super_weapon_types_.end(), store.type(lh)) !=
+                                              super_weapon_types_.end();
+    }
+    super_weapon_report(super_weapon);
     // §3.3 engine-loop requests of the tick (TacticalBattle::engine_loop_requests, hangar::EngineLoops): mode enter,
-    // locomotor services, engines offline / online - start = fade-in, stop = fade-out.
+    // locomotor services, engines offline / online - start = fade-in, stop = fade-out. cu8g t01: HOLSTER_WEAPON / Saber_Throw
+    // suppress (0x392410: every engine loop stopped with the request's fade, < 0 = the event's own) / unsuppress (0x393970)
+    // and the draw / holster SFX attached to the hero.
     for (const tactical::hangar::EngineLoopRequest& r : battle.engine_loop_requests()) {
-        if (r.loop == tactical::hangar::EngineLoop::Idle) game_->set_engine_idle_loop(static_cast<uint64_t>(r.id), r.start);
-        else game_->set_engine_moving_loop(static_cast<uint64_t>(r.id), r.start);
+        using Op = tactical::hangar::EngineLoopOp;
+        const auto id = static_cast<uint64_t>(r.id);
+        switch (r.op) {
+            case Op::Loop:
+                if (r.loop == tactical::hangar::EngineLoop::Idle) game_->set_engine_idle_loop(id, r.start);
+                else game_->set_engine_moving_loop(id, r.start);
+                break;
+            case Op::Suppress: game_->suppress_engine_audio(id, r.fade); break;
+            case Op::Unsuppress: game_->clear_engine_audio_suppression(id); break;
+            case Op::DrawWeapon:
+            case Op::HolsterWeapon: {
+                const objects::ObjectHandle h = handle_of(r.id);
+                if (!store.alive(h)) break;
+                const std::string_view ev =
+                    types.get_string(store.type(h), r.op == Op::DrawWeapon ? "SFXEvent_Draw_Weapon" : "SFXEvent_Holster_Weapon");
+                if (!ev.empty()) game_->object_sfx(id, ev, store.position(h));
+                break;
+            }
+        }
         ++stats_.engine_loop_requests;
     }
     // HARDPOINT_DISABLED.md §9.1: engines back online (an ENGINE hardpoint repaired): idle on (GameAudio::engines_online).
@@ -289,6 +564,7 @@ void GameAudioHost::battle_tick(const sim::TacticalBattle& battle, const objects
         if (std::find(died.begin(), died.end(), *it) == died.end()) ++stats_.removed;
         moving_.erase(*it);
         inaudible_.erase(static_cast<uint64_t>(*it));
+        hidden_.erase(static_cast<uint64_t>(*it));
         it = spawned_.erase(it);
     }
     // §1.2 step 11: the 2D station-upgrade announcement for the local player (own / ally / enemy).
@@ -300,10 +576,257 @@ void GameAudioHost::battle_tick(const sim::TacticalBattle& battle, const objects
         faction_sfx(ev);
         ++stats_.station_upgrades;
     }
+    // L1_S4_REMAINING §4.1 (b0289): a unit that actually entered a garrison this tick -> the local faction's
+    // SFXEvent_Bunker_Garrisoned [M: played for the local player's own units only].
+    for (const sim::TacticalBattle::StoryGarrisonEvent& e : battle.story_garrisoned()) {
+        const std::string_view line = garrison_line(owner_of(e.unit), local_player);
+        if (line.empty()) continue;
+        faction_sfx(line);
+        ++stats_.garrison_lines;
+    }
+    // mcx4 t13 (MCX4_T13_RE_ANSWERS "Faction.SFXEvent_Bunker_Vacated", garrison eject 0x444dd0): once per unit leaving a
+    // garrison, when its owner is the local player: the owner's faction line, attached to the unit (3D at its position).
+    if (local_player >= 0 && local_player < static_cast<int32_t>(player_factions_.size()))
+        if (const audio::FactionAudio* lf = game_data_->find_faction(player_factions_[static_cast<size_t>(local_player)]))
+            for (const sim::TacticalBattle::StoryGarrisonEvent& e : battle.story_vacated()) {
+                if (owner_of(e.unit) != local_player) continue;
+                // ledger: consumes Faction.SFXEvent_Bunker_Vacated
+                const std::string_view ev = lf->get("SFXEvent_Bunker_Vacated");
+                if (!ev.empty() && game_->impact(ev, position_of(static_cast<uint64_t>(e.unit)))) ++stats_.garrison_lines;
+            }
+    // Self-destruct countdowns (MCX4_T13_RE_ANSWERS "GameObjectType.Selt_Destruct_SFXEvent_Start_Die", SelfDestructBehavior
+    // 0x630950 / 0x630840 / 0x6306f0): while a unit's SELF_DESTRUCT ability is active its type's line plays attached to
+    // it, any owner; it stops when the countdown is cancelled or the unit blows up (gone from the battle).
+    {
+        std::vector<SelfDestructCue> counting;
+        for (const objects::ObjectId id : battle.movement().unit_ids()) {
+            const objects::ObjectHandle h = store.find(id);
+            if (!store.alive(h)) continue;
+            const objects::TypeIndex t = store.type(h);
+            if (t == objects::kNone || t >= types.size()) continue;
+            // ledger: consumes GameObjectType.Selt_Destruct_SFXEvent_Start_Die
+            const std::string_view ev = types.get_string(t, "Selt_Destruct_SFXEvent_Start_Die");
+            if (ev.empty() || !battle.abilities().is_active(id, tactical::abilities::kSelfDestruct)) continue;
+            counting.push_back({static_cast<uint64_t>(id), ev, position_of(static_cast<uint64_t>(id))});
+        }
+        self_destruct_lines(counting);
+    }
+    // Super weapon approach (MCX4_T13_RE_ANSWERS "Faction.SpeechEvent_Super_Weapon_Moving_Range_60_Seconds family"): while
+    // a TSW arms (state 3) its ETA crossing 60 / 30 / 15 / 5 s plays the highest crossed threshold once; reaching its
+    // attack distance (state 4 after 3) plays the moved-into-range line once. The local faction's speech, the _Enemy_
+    // form when the local player is hostile to the TSW owner. [M] the first service's ETA is the baseline (no line).
+    if (local_player >= 0 && local_player < static_cast<int32_t>(player_factions_.size()))
+        if (const audio::FactionAudio* lf = game_data_->find_faction(player_factions_[static_cast<size_t>(local_player)]))
+            for (const objects::ObjectId id : battle.movement().unit_ids()) {
+                const int32_t s = battle.tsw_state(id);
+                if (s < 0) continue;
+                const objects::ObjectHandle h = store.find(id);
+                if (!store.alive(h)) continue;
+                const int32_t o = store.owner(h);
+                const bool enemy = o != local_player && o >= 0 && cs.is_enemy(local_player, o);
+                TswApproach& a = tsw_approach_[static_cast<int64_t>(id)];
+                std::string_view tag;
+                if (s == 3) {
+                    const Vec3 tp = store.position(h);
+                    const float eta = battle.special_weapons().tsw_eta_seconds(static_cast<tactical::abilities::ObjectId>(id),
+                                                                               tactical::Vec3{tp.x, tp.y, tp.z});
+                    if (a.arming) {
+                        const int32_t t = tsw_threshold_crossed(a.eta, eta);
+                        const uint8_t bit = t == 60 ? 1u : t == 30 ? 2u : t == 15 ? 4u : t == 5 ? 8u : 0u;
+                        if (bit != 0 && (a.said & bit) == 0) {
+                            a.said = static_cast<uint8_t>(a.said | bit);
+                            tag = tsw_speech_tag(t, enemy);
+                        }
+                    }
+                    a.arming = true;
+                    a.eta = eta;
+                } else if (s == 4 && a.arming && !a.in_range) {
+                    a.in_range = true;
+                    tag = tsw_speech_tag(0, enemy);
+                }
+                if (!tag.empty())
+                    if (const std::string_view ev = lf->get(tag); !ev.empty()) {
+                        speech(ev);
+                        ++stats_.strike_lines;
+                    }
+            }
+    // Land strikes started (MCX4_T13_RE_ANSWERS "Faction.SFXEvent_Bombard_Available family" / "GameObjectType.
+    // SFXEvent_Bombard_Incoming family"): a bombing run whose owner is the local player or not hostile to it plays the
+    // owner's faction crosstalk attached to the first bomber; the local player's bombardment plays the ship type's
+    // SFXEvent_Bombard_Incoming, 2D.
+    if (local_player >= 0)
+        for (const sim::TacticalBattle::StrikeEvent& e : battle.strike_starts()) {
+            if (e.bombard) {
+                if (e.player != local_player || e.ship_type == objects::kNone || e.ship_type >= types.size()) continue;
+                // ledger: consumes GameObjectType.SFXEvent_Bombard_Incoming
+                if (const std::string_view ev = types.get_string(e.ship_type, "SFXEvent_Bombard_Incoming"); !ev.empty() && game_->gui_sfx(ev))
+                    ++stats_.strike_lines;
+                continue;
+            }
+            if (e.player < 0 || static_cast<size_t>(e.player) >= player_factions_.size() || e.first_bomber == objects::kNoObjectId) continue;
+            if (e.player != local_player && cs.is_enemy(local_player, e.player)) continue;
+            const audio::FactionAudio* f = game_data_->find_faction(player_factions_[static_cast<size_t>(e.player)]);
+            // ledger: consumes Faction.SFXEvent_Bombing_Run_Begin_Crosstalk
+            const std::string_view ev = f ? f->get("SFXEvent_Bombing_Run_Begin_Crosstalk") : std::string_view();
+            if (!ev.empty() && game_->object_sfx(static_cast<uint64_t>(e.first_bomber), ev, position_of(static_cast<uint64_t>(e.first_bomber))))
+                ++stats_.strike_lines;
+        }
+    // Turret motor loop (MCX4_T13_RE_ANSWERS "GameObjectType.SFXEvent_Turret_Rotating_Loop"): attached, any owner, started
+    // when the turret begins to turn and stopped when it stops. [port] the turrets the movement system models
+    // (UnitDesc::turret, the Deploys units); a turret pose that changed this tick = turning.
+    for (const objects::ObjectId id : battle.movement().unit_ids()) {
+        const tactical::movement::UnitView v = battle.movement().view(id);
+        const auto [it, fresh] = turret_turn_.try_emplace(static_cast<int64_t>(id));
+        TurretTurn& tt = it->second;
+        const bool turning = turret_turning(!fresh, tt.yaw, tt.elevation, v.turret_yaw, v.turret_elevation);
+        tt.yaw = v.turret_yaw;
+        tt.elevation = v.turret_elevation;
+        if (turning == tt.playing) continue;
+        tt.playing = turning;
+        const objects::ObjectHandle h = store.find(static_cast<objects::ObjectId>(id));
+        if (!store.alive(h)) continue;
+        // ledger: consumes GameObjectType.SFXEvent_Turret_Rotating_Loop
+        const std::string_view loop = types.get_string(store.type(h), "SFXEvent_Turret_Rotating_Loop");
+        if (loop.empty()) continue;
+        if (turning) game_->object_sfx(static_cast<uint64_t>(id), loop, store.position(h));
+        else game_->stop_object_sfx(static_cast<uint64_t>(id), loop);
+    }
+    // Ability loops (MCX4_PRES_RE_ANSWERS_2 Q3): while one of the six loop abilities is active, the record's
+    // SFXEvent_Special_Ability_Loop runs attached to the user (and to its target for ENERGY_WEAPON / SUPER_LASER, the
+    // target the special holds when the loop starts); stopped when the ability ends or the user is gone. Any owner.
+    // [port] the event's Play_Count < 0 gate is not checked (every shipped loop event has -1).
+    {
+        namespace ta = tactical::abilities;
+        static constexpr uint8_t kLoopKinds[] = {ta::kTractorBeam, ta::kEnergyWeapon, ta::kRadioactiveContaminate,
+                                                 ta::kForceSight, ta::kSuperLaser, ta::kLeechShields};
+        const ta::AbilitySystem& abs = battle.abilities();
+        for (auto it = ability_loop_.begin(); it != ability_loop_.end();) {  // ends first
+            const auto id = static_cast<objects::ObjectId>(it->first.first);
+            if (store.alive(store.find(id)) && abs.is_active(id, it->first.second)) {
+                ++it;
+                continue;
+            }
+            game_->stop_object_sfx(static_cast<uint64_t>(id), it->second.event);
+            if (it->second.target != 0) game_->stop_object_sfx(it->second.target, it->second.event);
+            it = ability_loop_.erase(it);
+        }
+        for (const objects::ObjectId id : battle.movement().unit_ids())
+            for (const uint8_t k : kLoopKinds) {
+                if (!abs.is_active(id, k) || ability_loop_.count({static_cast<int64_t>(id), k})) continue;
+                const objects::ObjectHandle h = store.find(id);
+                if (!store.alive(h)) continue;
+                // ledger: consumes Unit_Ability.SFXEvent_Special_Ability_Loop
+                const std::string_view ev = ability_record_line(types, store.type(h), k, "SFXEvent_Special_Ability_Loop");
+                if (ev.empty() || !special_ability_loop_user(k)) continue;
+                AbilityLoop& l = ability_loop_[{static_cast<int64_t>(id), k}];
+                l.event = std::string(ev);
+                game_->object_sfx(static_cast<uint64_t>(id), ev, store.position(h));
+                if (!special_ability_loop_on_target(k)) continue;
+                const ta::UnitAbilityRecord* rec = abs.record(id, k);
+                const ta::ObjectId tg = rec ? abs.special_target(id, rec->gui_name_crc) : ta::kNoObject;
+                if (tg == ta::kNoObject) continue;
+                const objects::ObjectHandle th = store.find(static_cast<objects::ObjectId>(tg));
+                if (!store.alive(th)) continue;
+                l.target = static_cast<uint64_t>(tg);
+                game_->object_sfx(l.target, ev, store.position(th));
+            }
+    }
+    // Summoned / contamination / buzz-droid objects (MCX4_T13_RE_ANSWERS "Tractor_Beam_Attack_Ability.SFXEvent_Unit_Summoned"
+    // family): the user's ability element line, attached to the new object (2D when the event is Is_2D). Any owner except
+    // Buzz_Droids (the local droid owner only). Once per spawn.
+    for (const sim::TacticalBattle::SummonSpawn& e : battle.summon_spawns()) {
+        const SpawnLine sl = spawn_line(e.ability);
+        if (sl.element.empty() || (sl.local_only && (local_player < 0 || e.owner != local_player))) continue;
+        const objects::ObjectHandle src = store.find(static_cast<objects::ObjectId>(e.source));
+        if (!store.alive(src)) continue;  // [port] a user gone before the spawn: no line
+        const objects::TypeIndex st = store.type(src);
+        const std::string_view ev = special_line(types, st, sl.element, sl.field);
+        if (!ev.empty() && game_->object_sfx(static_cast<uint64_t>(e.spawned), ev, position_of(static_cast<uint64_t>(e.spawned))) != 0)
+            ++stats_.ability_lines;
+    }
+    // Ability toggles (MCX4_T13_RE_ANSWERS "Faction.SFXEvent_GUI_Toggle_Non_Hero_Ability_On family", 0x430270): the
+    // issuer's faction list entry for the ability (`ABILITY, SFXEvent` lines), the _Enemy_ variant when the local player
+    // is hostile to the issuer; 2D. [M] the auto-deactivation reader 0x42f460 is not modelled.
+    if (local_player >= 0)
+        for (const sim::TacticalBattle::AbilityToggleEvent& e : battle.ability_toggles()) {
+            if (e.player < 0 || static_cast<size_t>(e.player) >= player_factions_.size()) continue;
+            const audio::FactionAudio* f = game_data_->find_faction(player_factions_[static_cast<size_t>(e.player)]);
+            if (!f) continue;
+            const bool hostile = e.player != local_player && cs.is_enemy(local_player, e.player);
+            const std::vector<std::string> v =
+                f->pair_values(toggle_line_tag(e.on, hostile), tactical::abilities::ability_type_info(e.ability).name);
+            if (!v.empty() && !v.front().empty() && game_->gui_sfx(v.front())) ++stats_.ability_lines;
+        }
+    // Start-force re-delivery (MCX4_T13_RE_ANSWERS "Faction.Reinforcements_Selection_SFXEvent family", 0x287e70): the local
+    // player's timer expired -> the local faction's line, 2D.
+    for (const int32_t p : battle.garrison_redelivered())
+        if (p == local_player && local_player >= 0) faction_sfx("Reinforcements_Ready_SFXEvent");  // ledger: consumes Faction.Reinforcements_Ready_SFXEvent
+    // Build pads (MCX4_T13_RE_ANSWERS "Faction.SFXEvent_Tactical_Object_Building_Started family"): per start / completion /
+    // sale, the local builder's / seller's type line (2D), then the owner's faction line for any owner. The start's loop
+    // stays attached to the under-construction object until its completion (an under-construction object that dies
+    // takes its sounds with it).
+    for (const sim::TacticalBattle::PadEvent& e : battle.pad_events()) {
+        using K = sim::TacticalBattle::PadEvent::Kind;
+        const PadLine kind = e.kind == K::Started ? PadLine::Started : e.kind == K::Completed ? PadLine::Completed : PadLine::Sold;
+        const bool local = local_player >= 0 && e.owner == local_player && (e.kind != K::Started || e.sfx);
+        const PadLines l = pad_lines(kind, local);
+        if (e.type != objects::kNone && e.type < types.size())
+            for (const std::string_view tag : l.type_tags) {
+                const std::string_view ev = tag.empty() ? std::string_view() : types.get_string(e.type, tag);
+                if (ev.empty()) continue;
+                if (game_->gui_sfx(ev)) ++stats_.pad_lines;
+                break;
+            }
+        if (e.kind == K::Completed)
+            if (const auto it = pad_loops_.find(static_cast<int64_t>(e.uc)); it != pad_loops_.end()) {
+                game_->stop_object_sfx(static_cast<uint64_t>(e.uc), it->second);
+                pad_loops_.erase(it);
+            }
+        const audio::FactionAudio* of = e.owner >= 0 && static_cast<size_t>(e.owner) < player_factions_.size()
+                                            ? game_data_->find_faction(player_factions_[static_cast<size_t>(e.owner)])
+                                            : nullptr;
+        if (!of) continue;
+        const std::string_view ev = of->get(l.faction_tag);
+        const uint64_t obj = static_cast<uint64_t>(e.object);
+        if (!ev.empty() && (e.kind == K::Sold ? game_->impact(ev, e.position) : game_->object_sfx(obj, ev, e.position)))
+            ++stats_.pad_lines;
+        if (const std::string_view loop = l.loop_tag.empty() ? std::string_view() : of->get(l.loop_tag); !loop.empty()) {
+            if (game_->object_sfx(obj, loop, e.position)) ++stats_.pad_lines;
+            pad_loops_[static_cast<int64_t>(e.object)] = std::string(loop);
+        }
+    }
+    // HERO_CLASH §3.8 (b0300): a clash end plays the winner's First_ / Second_Hero_Win_Speech (speech queue).
+    {
+        const auto& ends = battle.hero_clashes().ended();
+        const tactical::combat::HeroClashData* cd = battle.hero_clashes().data();
+        if (ends.size() < clash_ends_seen_) clash_ends_seen_ = 0;  // cleared (load / new battle)
+        for (; clash_ends_seen_ < ends.size(); ++clash_ends_seen_) {
+            const auto& e = ends[clash_ends_seen_];
+            const std::string_view line = clash_win_speech(cd, e.entry, e.first_won);
+            if (line.empty()) continue;
+            speech(line);
+            ++stats_.clash_win_speech;
+        }
+    }
+    // ccpgu t01 (SKIRMISH_SETUP 4.2): the control point domination countdown lines.
+    {
+        const int32_t timer = battle.control_point_timer(), leader = battle.control_point_leader();
+        const std::string_view line =
+            control_point_line(cp_timer_, timer, leader, local_player, leader >= 0 && local_player >= 0 && cs.is_enemy(local_player, leader));
+        cp_timer_ = timer;
+        if (!line.empty()) {
+            faction_sfx(line);
+            ++stats_.control_point_lines;
+        }
+    }
     for (const tactical::combat::HitEvent& e : cs.hit_events()) {
         if (e.projectile_desc < cs.data().projectiles.size()) {
             const objects::TypeIndex pt = types.resolve_name(cs.data().projectiles[e.projectile_desc].name);
-            if (pt != objects::kNone) {
+            // tru1 t08 (TRU1_A_RE_ANSWERS B1): the expiry / commanded paths play the detonation sound only when their
+            // lifetime particle exists; a ground hit always plays it.
+            const bool silent = e.victim == tactical::combat::kNoObject && !e.ground && pt != objects::kNone &&
+                                types.get_string(pt, "Projectile_Lifetime_Detonation_Particle").empty();
+            if (pt != objects::kNone && !silent) {
                 std::string_view ev = e.armor_reduced ? types.get_string(pt, "Projectile_SFXEvent_Detonate_Reduced_By_Armor") : std::string_view();
                 if (ev.empty()) ev = sounds(types, pt).projectile_detonate;
                 if (!ev.empty() && game_->impact(ev, v3(e.position))) ++stats_.hits;
@@ -311,27 +834,537 @@ void GameAudioHost::battle_tick(const sim::TacticalBattle& battle, const objects
         }
         combat = combat || e.owner == local_player || (e.victim != tactical::combat::kNoObject && owner_of(e.victim) == local_player);
     }
+    // aud1 t04 (AUDIO.md §9.5): a new projectile's fire sound, 3D at the projectile's spawn position (fog test applies):
+    // a hardpoint shot plays the hardpoint type's Fire_SFXEvent, else the parent's SFXEvent_Fire; a unit weapon shot the
+    // shooter's SFXEvent_Fire. The hardpoint comes from this tick's ShotEvents by projectile serial.
+    // trl2 t08 (MCX4_T10_RE_ANSWERS §3, TACTICAL_COMBAT §2 step 11): a shot held by Projectile_Appearance_Delay_Frames
+    // (spawn_frame after this frame) plays nothing at the shot; its sound plays on the frame equal to its appearance
+    // frame, at the projectile's position then (still the muzzle: it is held there), if the projectile and shooter remain.
     uint32_t max_serial = last_serial_;
+    const auto shots = cs.shot_events();
+    const uint32_t now = battle.frame();
     for (size_t i = 0; i < cs.projectile_count(); ++i) {
         const tactical::combat::ProjectileView v = cs.projectile(i);
         if (have_serial_ && v.serial <= last_serial_) continue;
         max_serial = std::max(max_serial, v.serial);
         const objects::ObjectHandle sh = handle_of(v.shooter);
         if (store.exists(sh)) {
-            const std::string& ev = sounds(types, store.type(sh)).fire;
-            if (!ev.empty() && game_->weapon_fire(static_cast<uint64_t>(v.shooter), ev, store.position(sh))) ++stats_.fires;
+            int32_t hp = -1;
+            for (const tactical::combat::ShotEvent& e : shots)
+                if (e.serial == v.serial && e.shooter == v.shooter) {
+                    hp = e.hardpoint;
+                    break;
+                }
+            const std::string& hp_fire = hardpoint_fire_sfx(types, cs, hp);
+            const std::string_view own_fire = sounds(types, store.type(sh)).fire;
+            if (!delayed_shots_.offer({v.serial, v.spawn_frame, v.shooter, hp, hp_fire, std::string(own_fire)}, now))
+                weapon_fired(static_cast<uint64_t>(v.shooter), hp_fire, own_fire, v3(v.pos));
         }
         combat = combat || v.owner == local_player;
     }
     last_serial_ = max_serial;
     have_serial_ = true;
+    delayed_shots_.take_due(now, [&](const DelayedFireSounds::Shot& d) {
+        for (size_t i = 0; i < cs.projectile_count(); ++i) {
+            const tactical::combat::ProjectileView v = cs.projectile(i);
+            if (v.serial != d.serial) continue;
+            if (v.alive) weapon_fired(static_cast<uint64_t>(d.shooter), d.hardpoint_fire, d.shooter_fire, v3(v.pos));
+            break;
+        }
+    });
     tsw_audio(tsw_cues(battle.special_weapon_events(), store), types);  // refix t06
-    if (combat) {
-        audio::CombatEvent ce;
-        ce.local_player_involved = true;
-        game_->combat(ce);
-        ++stats_.combat_notes;
+    cue_lines(battle, store, types, local_player);                         // mcx4 t13 batch A
+    object_events(battle, store, types, player_factions_);  // aud1 t05: abilities, hyperspace, shields (AUDIO.md §9.6)
+    // aud1 t02 (L1_S4_REMAINING §3.2): the land weather's type and intensity after the tick -> the weather audio manager
+    // and the faction's SFXEvent_Weather_Begin / _End lines (GameAudio::set_weather; unchanged values do nothing). Weather
+    // off (no scenario, space) = CLEAR at 1.0, as retail's 0x323110(0, 1.0).
+    weather(weather_name(battle.weather().active() ? static_cast<uint8_t>(battle.weather().type()) : uint8_t{0}),
+            battle.weather().active() ? battle.weather().intensity() : 1.0f, local_player < 0 || ab.weather_affected(local_player));
+    // aud1 t08 (AUDIO.md §9.8): this tick's hits on the local player's (or a community-property ally's) base objects.
+    bool base_hit = false;
+    if (local_player >= 0) {
+        using namespace objects;
+        if (!base_behaviors_ready_) {
+            base_behaviors_ready_ = true;
+            base_behaviors_[0] = behavior_type_id("DUMMY_GROUND_STRUCTURE");
+            base_behaviors_[1] = behavior_type_id("DUMMY_LAND_BASE_LEVEL_COMPONENT");
+            base_behaviors_[2] = behavior_type_id("DUMMY_STAR_BASE");
+            base_behaviors_[3] = behavior_type_id("DUMMY_ORBITAL_STRUCTURE");
+        }
+        const bool space = battle.is_space_battle();
+        const BehaviorSet set = space ? BehaviorSet::Space : BehaviorSet::Land;
+        for (const tactical::combat::DamageEvent& d : cs.damage_events()) {
+            if (base_hit) break;
+            const ObjectHandle vh = handle_of(d.victim);
+            if (!store.exists(vh) || d.source_owner < 0) continue;
+            const TypeIndex vt = store.type(vh);
+            const int32_t vo = store.owner(vh);
+            const BehaviorTypeId a = base_behaviors_[space ? 2 : 0], b = base_behaviors_[space ? 3 : 1];
+            // The object's behaviours in this mode = the generic <Behavior> list plus the mode's own list (shipped bases
+            // name DUMMY_GROUND_STRUCTURE / DUMMY_STAR_BASE in the generic one).
+            const auto has = [&](BehaviorTypeId id) {
+                return id != kNoBehavior && (types.has_behavior(vt, set, id) || types.has_behavior(vt, BehaviorSet::Generic, id));
+            };
+            const bool is_base = has(a) || has(b);
+            const bool ally = vo >= 0 && vo != local_player && !cs.is_enemy(local_player, vo);
+            base_hit = base_attacked(is_base, cs.is_enemy(d.source_owner, vo), vo, local_player, ally,
+                                     ally && types.get_bool(vt, "Is_Community_Property"));
+        }
     }
+    if (combat || base_hit) this->combat(combat, base_hit);
+}
+
+uint32_t GameAudioHost::weapon_fired(uint64_t shooter, std::string_view hardpoint_fire, std::string_view shooter_fire, const Vec3& position) {
+    if (!game_) return 0;
+    const std::string_view ev = fire_event(hardpoint_fire, shooter_fire);
+    const uint32_t id = ev.empty() ? 0u : game_->weapon_fire(shooter, ev, position);
+    if (id != 0) ++stats_.fires;
+    return id;
+}
+
+uint32_t GameAudioHost::animation_sounds(std::span<const AnimSound> list) {
+    if (!game_) return 0;
+    uint32_t n = 0;
+    for (const AnimSound& a : list)
+        if (!a.event.empty() && game_->object_sfx(a.object, a.event, a.position) != 0) ++n;
+    stats_.anim_sounds += n;
+    return n;
+}
+
+uint32_t GameAudioHost::self_destruct_lines(std::span<const SelfDestructCue> counting) {
+    if (!game_) return 0;
+    uint32_t n = 0;
+    std::map<int64_t, std::string> now;
+    for (const SelfDestructCue& c : counting) {
+        if (c.event.empty()) continue;
+        const int64_t key = static_cast<int64_t>(c.object);
+        if (self_destructs_.find(key) == self_destructs_.end() && game_->object_sfx(c.object, c.event, c.position) != 0) ++n;
+        now.emplace(key, std::string(c.event));
+    }
+    for (const auto& [id, ev] : self_destructs_)
+        if (now.find(id) == now.end()) game_->stop_object_sfx(static_cast<uint64_t>(id), ev);
+    self_destructs_ = std::move(now);
+    stats_.anim_sounds += n;
+    return n;
+}
+
+uint32_t GameAudioHost::spin_away_deaths(std::span<const SpinDeath> deaths, const objects::GameObjectTypes& types) {
+    if (!game_) return 0;
+    uint32_t n = 0;
+    for (const SpinDeath& d : deaths) {
+        if (d.type == objects::kNone || d.type >= types.size() || !spun_.insert(d.object).second) continue;
+        // ledger: consumes GameObjectType.Spin_Away_On_Death_SFXEvent_Start_Die
+        const std::string_view ev = types.get_string(d.type, "Spin_Away_On_Death_SFXEvent_Start_Die");
+        if (!ev.empty() && game_->object_sfx(d.object, ev, d.position) != 0) ++n;
+    }
+    stats_.anim_sounds += n;
+    return n;
+}
+
+void GameAudioHost::weather(std::string_view type, float intensity, bool local_affected) {
+    if (game_) game_->set_weather(type, intensity, local_affected);
+}
+
+void GameAudioHost::combat(bool local_involved, bool local_base_attacked) {
+    if (!game_ || (!local_involved && !local_base_attacked)) return;
+    audio::CombatEvent ce;
+    ce.local_player_involved = local_involved;
+    ce.local_base_attacked = local_base_attacked;
+    game_->combat(ce);
+    ++stats_.combat_notes;
+}
+
+void GameAudioHost::cue_lines(const sim::TacticalBattle& battle, const objects::ObjectStore& store, const objects::GameObjectTypes& types,
+                              int32_t local_player) {
+    namespace tcb = tactical::combat;
+    const tcb::CombatSystem& cs = battle.combat();
+    const auto type_of = [&](int64_t id) {
+        const objects::ObjectHandle h = store.find(static_cast<objects::ObjectId>(id));
+        return store.exists(h) ? store.type(h) : objects::kNone;
+    };
+    const auto owner_of = [&](int64_t id) {
+        const objects::ObjectHandle h = store.find(static_cast<objects::ObjectId>(id));
+        return store.exists(h) ? store.owner(h) : -1;
+    };
+    // Health warnings (MCX4_T13_RE_ANSWERS "GameObjectType.SFXEvent_Health_Low_Warning family"): one line per hit that
+    // crosses a threshold. The tick's damage events are replayed in order from the health before the tick (the health now
+    // plus every hull loss of the tick). [port] a killing hit plays none [L]; 2D.
+    std::map<tcb::ObjectId, float> lost;  // victim -> hull lost this tick (lookup by id; presentation only)
+    for (const tcb::DamageEvent& d : cs.damage_events()) lost[d.victim] += std::max(0.0f, d.hull_lost);
+    std::map<tcb::ObjectId, float> running;
+    for (const tcb::DamageEvent& d : cs.damage_events()) {
+        if (d.hull_lost <= 0.0f || d.killed) continue;
+        const float max_h = cs.max_health(d.victim);
+        if (!(max_h > 0.0f)) continue;
+        auto [it, fresh] = running.try_emplace(d.victim, 0.0f);
+        if (fresh) it->second = cs.health(d.victim) + lost[d.victim];
+        const float before = it->second, after = before - d.hull_lost;
+        it->second = after;
+        // The attacker: the source object, or for a projectile its shooter (this tick's hit on the victim).
+        int64_t attacker = static_cast<int64_t>(d.source);
+        if (d.source_is_projectile)
+            for (const tcb::HitEvent& h : cs.hit_events())
+                if (h.victim == d.victim && h.shooter != tcb::kNoObject) attacker = static_cast<int64_t>(h.shooter);
+        const bool local_victim = local_player >= 0 && owner_of(static_cast<int64_t>(d.victim)) == local_player;
+        const bool local_attacker = local_player >= 0 && d.source_owner == local_player;
+        const std::string_view tag = health_warning_tag(before / max_h, after / max_h, health_low_, health_critical_, local_victim,
+                                                        local_attacker);
+        if (tag.empty()) continue;
+        const objects::TypeIndex t = local_victim ? type_of(static_cast<int64_t>(d.victim)) : type_of(attacker);
+        // ledger: consumes GameObjectType.SFXEvent_Health_Low_Warning
+        // ledger: consumes GameObjectType.SFXEvent_Health_Critical_Warning
+        const std::string_view ev = t != objects::kNone ? types.get_string(t, tag) : std::string_view();
+        // ledger: consumes GameObjectType.SFXEvent_Enemy_Damaged_Health_Low_Warning
+        // ledger: consumes GameObjectType.SFXEvent_Enemy_Damaged_Health_Critical_Warning
+        if (!ev.empty() && game_->gui_sfx(ev)) ++stats_.health_warnings;
+    }
+    // Tactical production lines: ref2 t02, on_events (the battle reports begin / cancel / complete as presentation events).
+    // Battle won / lost HUD line (MCX4_T13_RE_ANSWERS "Faction.SFXEvent_HUD_Won_Land_Battle family"): once, on the tick the
+    // victory is declared. The flags walk the players in index order and stop at the first enemy of the local player
+    // owning a TACTICAL_SUPER_WEAPON object, so the own-killer test has only seen lower players by then [H loop, M effect].
+    if (battle.victory_declared() && !victory_seen_) {
+        victory_seen_ = true;
+        const int32_t winner = battle.victory_declared_player();
+        // The music change comes first and ignores the silent flag (types 0x0b..0x16 only).
+        if (battle_result_gate(battle.victory_declared_type(), false)) {
+            const ResultMusic rm = result_music(local_player, winner, battle.request().info.attacker, battle.request().info.defender);
+            if (rm.play && static_cast<size_t>(rm.other) < player_factions_.size())
+                battle_end(rm.won, player_factions_[static_cast<size_t>(rm.other)]);
+        }
+        if (local_player >= 0 && winner >= 0 && battle_result_gate(battle.victory_declared_type(), battle.victory_declared_silent())) {
+            const bool space = battle.is_space();
+            const objects::BehaviorSet set = space ? objects::BehaviorSet::Space : objects::BehaviorSet::Land;
+            bool enemy_tsw = false, own_killer = false;
+            const int32_t players = static_cast<int32_t>(player_factions_.size());
+            for (int32_t p = 0; p < players && !enemy_tsw; ++p) {
+                const bool enemy = p != local_player && cs.is_enemy(local_player, p);
+                if (!enemy && p != local_player) continue;
+                for (const objects::ObjectId id : battle.movement().unit_ids()) {  // [port] the battle units
+                    const objects::ObjectHandle h = store.find(id);
+                    if (!store.alive(h) || store.owner(h) != p) continue;
+                    const objects::TypeIndex t = store.type(h);
+                    if (enemy && types.has_behavior(t, set, objects::beh::TacticalSuperWeapon)) {
+                        enemy_tsw = true;
+                        break;
+                    }
+                    if (!enemy && !hidden_.count(static_cast<uint64_t>(id)) && types.get_bool(t, "Is_Super_Weapon_Killer"))
+                        own_killer = true;
+                }
+            }
+            const bool local_won = winner == local_player;
+            const bool hostile = !local_won && cs.is_enemy(local_player, winner);
+            const std::string_view line = battle_result_line(local_won, hostile, space, enemy_tsw, own_killer, corruption_mission_);
+            // ledger: consumes Faction.SFXEvent_HUD_Won_Land_Battle
+            // ledger: consumes Faction.SFXEvent_HUD_Lost_Land_Battle
+            if (!line.empty()) {
+                faction_sfx(line);
+                ++stats_.battle_result_lines;
+            }
+        }
+    }
+    // Asteroid damage (MCX4_T13_RE_ANSWERS "GameObjectType.SFXEvent_Damaged_By_Asteroid", 0x436920): every hit, any owner,
+    // the damaged object's type line attached to it (3D at its position).
+    for (const objects::ObjectId id : battle.asteroid_hits()) {
+        const objects::TypeIndex t = type_of(static_cast<int64_t>(id));
+        if (t == objects::kNone) continue;
+        // ledger: consumes GameObjectType.SFXEvent_Damaged_By_Asteroid
+        const std::string_view ev = types.get_string(t, "SFXEvent_Damaged_By_Asteroid");
+        if (!ev.empty() && game_->impact(ev, position_of(static_cast<uint64_t>(id)))) ++stats_.hits;
+    }
+    // Special weapons (MCX4_T13_RE_ANSWERS "Faction.SFXEvent_HUD_Special_Weapon_Ready family"): ready 0x492010 (only while
+    // SpecialWeaponsAllowed holds for the owner; an own / friendly weapon's type SFXEvent_Special_Weapon_Ready replaces
+    // the faction line) and firing 0x491cd0; the local faction's list entry [Special_Weapon_Target_Action_Index]; 2D.
+    if (local_player >= 0 && local_player < static_cast<int32_t>(player_factions_.size()))
+        if (const audio::FactionAudio* lf = game_data_->find_faction(player_factions_[static_cast<size_t>(local_player)]))
+            for (const tactical::abilities::SpecialWeaponEvent& e : battle.special_weapon_events()) {
+                const bool fired = e.kind == tactical::abilities::SwEventKind::Fired;
+                if (!fired && e.kind != tactical::abilities::SwEventKind::Ready) continue;
+                const int32_t o = owner_of(static_cast<int64_t>(e.id));
+                const objects::TypeIndex t = type_of(static_cast<int64_t>(e.id));
+                if (o < 0 || t == objects::kNone) continue;
+                if (!fired && !battle.special_weapons_allowed(o)) continue;
+                const bool own = o == local_player || !cs.is_enemy(local_player, o);
+                std::string_view ev;
+                // ledger: consumes GameObjectType.SFXEvent_Special_Weapon_Ready
+                if (!fired && own) ev = types.get_string(t, "SFXEvent_Special_Weapon_Ready");
+                if (ev.empty())
+                    ev = nth_field(lf->fields, special_weapon_tag(fired, own), types.get_int(t, "Special_Weapon_Target_Action_Index"));
+                if (!ev.empty() && game_->gui_sfx(ev)) ++stats_.special_weapon_lines;
+            }
+    // Land damage stages (MCX4_T13_RE_ANSWERS "GameObjectType.Land_Damage_SFX"): a damaged object whose stage changed this
+    // tick plays the stage's Land_Damage_SFX entry attached to it (3D at its position), any owner. The first hit of an
+    // object compares with the full-health stage.
+    for (const tcb::DamageEvent& d : cs.damage_events()) {
+        const objects::TypeIndex t = type_of(static_cast<int64_t>(d.victim));
+        if (t == objects::kNone) continue;
+        const std::span<const std::string_view> th = types.get_list(t, "Land_Damage_Thresholds");
+        if (th.empty()) continue;
+        const float max_h = cs.max_health(d.victim);
+        if (!(max_h > 0.0f)) continue;
+        const int32_t stage = land_damage_stage(th, std::max(0.0f, cs.health(d.victim)) / max_h);
+        auto [it, fresh] = land_damage_stage_.try_emplace(static_cast<int64_t>(d.victim), land_damage_stage(th, 1.0f));
+        if (it->second == stage) continue;
+        it->second = stage;
+        if (stage < 0) continue;
+        // ledger: consumes GameObjectType.Land_Damage_SFX
+        const std::span<const std::string_view> sfx = types.get_list(t, "Land_Damage_SFX");
+        if (static_cast<size_t>(stage) >= sfx.size()) continue;
+        const std::string_view ev = ascii_trim(sfx[static_cast<size_t>(stage)]);
+        if (ev.empty() || ascii_iequals(ev, "NULL")) continue;
+        if (game_->impact(ev, position_of(static_cast<uint64_t>(d.victim)))) ++stats_.land_damage_sfx;
+    }
+    // Sightings (MCX4_T13_RE_ANSWERS "GameObjectType.Play_SFXEvent_On_Sighting", HideWhenFogged 0x53ddc0): the first tick
+    // a unit of another player is visible to the local player. A Play_SFXEvent_On_Sighting type not yet announced this
+    // battle plays the unit-type line; otherwise an enemy's sighting plays SFXEvent_Enemy_Spotted, once per battle.
+    // [M] own units are never "sighted"; the +0x33a slot and attacker / defender tests are not modelled.
+    if (local_player >= 0)
+        for (const objects::ObjectId id : battle.movement().unit_ids()) {
+            const objects::ObjectHandle h = store.find(id);
+            if (!store.alive(h)) continue;
+            const int32_t o = store.owner(h);
+            if (o < 0 || o == local_player || battle.fog_object_hidden(local_player, id, false)) continue;
+            if (!sighted_.insert(static_cast<int64_t>(id)).second) continue;
+            const objects::TypeIndex t = store.type(h);
+            // ledger: consumes GameObjectType.Play_SFXEvent_On_Sighting
+            if (types.get_bool(t, "Play_SFXEvent_On_Sighting") && spotted_types_.insert(static_cast<int32_t>(t)).second) {
+                if (game_->unit_type_spotted(types.raw().types().name[t])) ++stats_.sighting_lines;
+            } else if (!enemy_spotted_done_ && cs.is_enemy(local_player, o)) {
+                enemy_spotted_done_ = true;
+                if (game_->enemy_spotted()) ++stats_.sighting_lines;
+            }
+        }
+    // Strike availability (MCX4_T13_RE_ANSWERS "Faction.SFXEvent_Bombard_Available family"): per manager, every player's
+    // available flag is tracked; the first player (index order) whose flag went 0 -> 1 this tick is announced in that
+    // player's faction voice, 2D; frame > 0. [port] the flag = bombardment_available / bombing_run_available (gate included).
+    if (local_player >= 0 && battle.frame() > 0) {
+        const size_t players = player_factions_.size();
+        if (strike_avail_.size() < players) strike_avail_.resize(players, 0);
+        for (const bool bombard : {true, false}) {
+            const uint8_t bit = static_cast<uint8_t>(bombard ? 1u : 2u);
+            bool announced = false;
+            for (size_t p = 0; p < players; ++p) {
+                const int32_t pi = static_cast<int32_t>(p);
+                const bool now = bombard ? battle.bombardment_available(pi) : battle.bombing_run_available(pi);
+                const bool was = (strike_avail_[p] & bit) != 0;
+                strike_avail_[p] = static_cast<uint8_t>(now ? (strike_avail_[p] | bit) : (strike_avail_[p] & ~bit));
+                if (!now || was || announced) continue;
+                announced = true;
+                const audio::FactionAudio* pf = game_data_->find_faction(player_factions_[p]);
+                const std::string_view ev =
+                    pf ? pf->get(strike_available_tag(bombard, pi == local_player, !cs.is_enemy(local_player, pi))) : std::string_view();
+                if (!ev.empty() && game_->gui_sfx(ev)) ++stats_.strike_lines;
+            }
+        }
+    }
+    // Gravity control (MCX4_T13_RE_ANSWERS "Faction.SFXEvent_HUD_Gravity_Control_Generator_On family", TRU1_GRAVITY_FIELD.md
+    // §1.2): a generator's power change plays the local faction's line, 2D, whoever owns the generator.
+    for (const sim::TacticalBattle::GravityPowerEvent& e : battle.gravity_power_changes()) {
+        // ledger: consumes Faction.SFXEvent_HUD_Gravity_Control_Generator_On
+        // ledger: consumes Faction.SFXEvent_HUD_Gravity_Control_Generator_Off
+        faction_sfx(e.on ? "SFXEvent_HUD_Gravity_Control_Generator_On" : "SFXEvent_HUD_Gravity_Control_Generator_Off");
+        ++stats_.gravity_lines;
+    }
+    // Tactical pop cap (P4_SIM_SYSTEMS §2.7.3, MCX4_T13_RE_ANSWERS "Faction.SFXEvent_Tactical_Unit_Cap_Reached family"):
+    // once each time the local player's room for one more unit turns false; the local faction's line, 2D.
+    if (local_player >= 0) {
+        const bool room = unit_room(battle.population_used(local_player), battle.population_cap(local_player));
+        if (unit_room_ && !room) {
+            faction_sfx("SFXEvent_Tactical_Pop_Cap_Reached");  // ledger: consumes Faction.SFXEvent_Tactical_Pop_Cap_Reached
+            ++stats_.pop_cap_lines;
+        }
+        unit_room_ = room;
+    }
+    // Base shields (MCX4_T13_RE_ANSWERS "Faction.SFXEvent_HUD_Base_Shield_Online family"; TRU1_A_RE_ANSWERS Set_State
+    // 0x56b540 step 2): a generator's Set_State that changed its on / off state plays the local faction's line, 2D. The
+    // previous state is the host's (the first report is the 0 -> 1 / 0 -> 2 evaluation: silent).
+    for (const tcb::CombatSystem::BaseShieldSetState& e : cs.base_shield_set_states()) {
+        uint8_t& prev = base_shield_state_[static_cast<int64_t>(e.id)];
+        const uint8_t was = prev, now = e.on ? 1 : 2;
+        prev = now;
+        // mcx4 t13 ("GameObjectType.SFXEvent_Powered_Active_Loop", 0x56ac00 / 0x56b540): the generator type's loop runs
+        // attached while the shield is on (any owner); started on, stopped off.
+        if (was != now)
+            if (const objects::TypeIndex gt = type_of(static_cast<int64_t>(e.id)); gt != objects::kNone) {
+                // ledger: consumes GameObjectType.SFXEvent_Powered_Active_Loop
+                const std::string_view loop = types.get_string(gt, "SFXEvent_Powered_Active_Loop");
+                if (!loop.empty()) {
+                    if (now == 1) game_->object_sfx(static_cast<uint64_t>(e.id), loop, position_of(static_cast<uint64_t>(e.id)));
+                    else game_->stop_object_sfx(static_cast<uint64_t>(e.id), loop);
+                }
+            }
+        if (local_player < 0 || was == 0 || was == now) continue;
+        const int32_t o = owner_of(static_cast<int64_t>(e.id));
+        if (o < 0) continue;
+        faction_sfx(base_shield_line(now == 1, o == local_player || !cs.is_enemy(local_player, o)));
+        ++stats_.base_shield_lines;
+    }
+    // Reinforcement point contested (MCX4_T13_RE_ANSWERS "Faction.SFXEvent_HUD_Reinforcement_Point_Contested"): local
+    // faction, 2D, once per capture attempt (progress restarting from 0).
+    if (const tactical::garrison::CapturePointSystem* cps = battle.captures()) {
+        static const objects::BehaviorTypeId kPoint = objects::behavior_type_id("REINFORCEMENT_POINT");
+        for (size_t i = 0; i < cps->point_count(); ++i) {
+            const auto pid = cps->point_at(i);
+            const float prog = cps->progress(pid);
+            float& prev = point_progress_[static_cast<int64_t>(pid)];
+            const float was = prev;
+            prev = prog;
+            const objects::ObjectHandle h = store.find(static_cast<objects::ObjectId>(pid));
+            const bool rp = store.alive(h) && kPoint != objects::kNoBehavior && store.has_behavior(h, kPoint);
+            if (point_contested(rp, cps->owner(pid), local_player, was, prog, cps->pending(pid))) {
+                faction_sfx("SFXEvent_HUD_Reinforcement_Point_Contested");  // ledger: consumes Faction.SFXEvent_HUD_Reinforcement_Point_Contested
+                ++stats_.control_lines;
+            }
+        }
+    }
+    // Base shield absorb (MCX4_T13_RE_ANSWERS "Faction.SFXEvent_HUD_Base_Shield_Online family", 0x56ba20): a hit the dome
+    // absorbed plays the shield owner's faction line, 3D at the hit ([port] the source's position when it still exists,
+    // else the generator's). Any owner.
+    for (const tcb::DamageEvent& d : cs.damage_events()) {
+        if (d.hardpoint != tcb::kHardpointBaseShieldDome || !(d.absorbed > 0.0f)) continue;
+        const int32_t o = owner_of(static_cast<int64_t>(d.victim));
+        if (o < 0 || static_cast<size_t>(o) >= player_factions_.size()) continue;
+        const audio::FactionAudio* f = game_data_->find_faction(player_factions_[static_cast<size_t>(o)]);
+        // ledger: consumes Faction.SFXEvent_Base_Shield_Absorb_Damage
+        const std::string_view ev = f ? f->get("SFXEvent_Base_Shield_Absorb_Damage") : std::string_view();
+        if (ev.empty()) continue;
+        const objects::ObjectHandle sh = store.find(static_cast<objects::ObjectId>(d.source));
+        const Vec3 at = store.alive(sh) ? store.position(sh) : position_of(static_cast<uint64_t>(d.victim));
+        if (game_->impact(ev, at)) ++stats_.base_shield_lines;
+    }
+    // Retreat begin (MCX4_T13_RE_ANSWERS "Faction.Land_Retreat_Begin_SFXEvent family"): on the tick a retreat countdown
+    // starts; 2D. A local retreater first tries its retreating units' SFXEvent_Retreat_Start ([port] the retreater's
+    // battle units in id order stand for the coordinator's list). Cancel lines: below (trl2 t04).
+    if (const int32_t rp = battle.retreating_player(); rp != last_retreater_) {
+        last_retreater_ = rp;
+        if (rp >= 0 && local_player >= 0) {
+            const bool local = rp == local_player;
+            bool played = false;
+            if (local)
+                for (const objects::ObjectId id : battle.movement().unit_ids()) {
+                    const objects::ObjectHandle h = store.find(id);
+                    if (!store.alive(h) || store.owner(h) != rp) continue;
+                    const std::string_view ev = types.get_string(store.type(h), "SFXEvent_Retreat_Start");
+                    if (ev.empty()) continue;
+                    played = game_->gui_sfx(ev) != 0;
+                    break;
+                }
+            const std::string_view line = retreat_begin_tag(local, !local && cs.is_enemy(local_player, rp), battle.is_space());
+            if (!played && !line.empty()) {
+                faction_sfx(line);
+                played = true;
+            }
+            if (played) ++stats_.retreat_lines;
+        }
+    }
+    // trl2 t04: retreat cancel lines (retreat_cancel_tag); 2D. The type line: the first unit of the retreat list whose
+    // type sets SFXEvent_Retreat_Cancel. The space faction line is the retreater's faction's.
+    if (local_player >= 0)
+        for (const sim::TacticalBattle::RetreatCancel& c : battle.retreat_cancels()) {
+            const bool local = c.player == local_player, space = battle.is_space();
+            bool played = false;
+            if (retreat_cancel_type_first(space, local, c.by_player))
+                for (const objects::ObjectId id : c.units) {
+                    const objects::ObjectHandle h = store.find(id);
+                    if (!store.alive(h)) continue;
+                    // ledger: consumes GameObjectType.SFXEvent_Retreat_Cancel
+                    const std::string_view ev = types.get_string(store.type(h), "SFXEvent_Retreat_Cancel");
+                    if (ev.empty()) continue;
+                    played = game_->gui_sfx(ev) != 0;
+                    break;
+                }
+            const std::string_view line = retreat_cancel_tag(space, local, c.by_player);
+            if (!played && !line.empty()) {
+                if (space) {
+                    const audio::FactionAudio* f = c.player >= 0 && static_cast<size_t>(c.player) < player_factions_.size()
+                                                       ? game_data_->find_faction(player_factions_[static_cast<size_t>(c.player)])
+                                                       : nullptr;
+                    const std::string_view ev = f ? f->get(line) : std::string_view();
+                    played = !ev.empty() && game_->gui_sfx(ev) != 0;
+                } else {
+                    faction_sfx(line);
+                    played = true;
+                }
+            }
+            if (played) ++stats_.retreat_lines;
+        }
+    // Capture point owner changes (MCX4_T13_RE_ANSWERS "Faction.SFXEvent_Tactical_Gain_Friendly_Control family"): the
+    // local faction's lists, first entry whose object type is the point's type; 2D. [port] the faction's Is_Neutral is
+    // read from its Factions.xml entry.
+    if (local_player >= 0 && local_player < static_cast<int32_t>(player_factions_.size())) {
+        const audio::FactionAudio* lf = game_data_->find_faction(player_factions_[static_cast<size_t>(local_player)]);
+        const auto neutral = [&](int32_t p) {
+            if (p < 0 || p >= static_cast<int32_t>(player_factions_.size())) return true;  // no owner: as neutral
+            const audio::FactionAudio* f = game_data_->find_faction(player_factions_[static_cast<size_t>(p)]);
+            return f && data::parse_bool_or(f->get("Is_Neutral"), false);
+        };
+        const auto rel_friendly = [&](int32_t p) { return p >= 0 && (p == local_player || !cs.is_enemy(local_player, p)); };
+        const auto rel_hostile = [&](int32_t p) { return p >= 0 && p != local_player && cs.is_enemy(local_player, p); };
+        for (const sim::TacticalBattle::StoryCaptureEvent& e : battle.story_captured()) {
+            if (!lf) break;
+            const objects::TypeIndex t = type_of(static_cast<int64_t>(e.object));
+            if (t == objects::kNone) continue;
+            const ControlLines cl = control_lines(rel_friendly(e.old_owner), rel_friendly(e.new_owner), rel_hostile(e.old_owner),
+                                                  rel_hostile(e.new_owner), neutral(e.old_owner), neutral(e.new_owner));
+            // ledger: consumes Faction.SFXEvent_Tactical_Gain_Friendly_Control
+            // ledger: consumes Faction.SFXEvent_Tactical_Lose_Friendly_Control
+            for (const std::string_view tag : {cl.friendly, cl.enemy}) {
+                // ledger: consumes Faction.SFXEvent_Tactical_Gain_Enemy_Control
+                // ledger: consumes Faction.SFXEvent_Tactical_Lose_Enemy_Control
+                if (tag.empty()) continue;
+                const std::vector<std::string> ev = lf->pair_values(tag, types.raw().types().name[t]);
+                if (!ev.empty() && !ev.front().empty() && game_->gui_sfx(ev.front())) ++stats_.control_lines;
+            }
+        }
+    }
+    // Hard point losses (MCX4_T13_RE_ANSWERS "GameObjectType.SFXEvent_Hardpoint_Destroyed family", 0x386660).
+    for (const tcb::HardpointEvent& e : cs.hardpoint_events()) {
+        const objects::TypeIndex pt = type_of(static_cast<int64_t>(e.owner));
+        if (pt == objects::kNone) continue;
+        const auto kind = static_cast<uint8_t>(e.kind);
+        bool weapons_left = false;
+        for (uint8_t k = 5; k <= 10; ++k) weapons_left = weapons_left || cs.live_hardpoints(e.owner, static_cast<tcb::HardpointKind>(k)) > 0;
+        const std::string_view tag =
+            hardpoint_lost_tag(kind, local_player >= 0 && owner_of(static_cast<int64_t>(e.owner)) == local_player, e.owner_dying,
+                               e.last_of_kind, weapons_left);
+        // ledger: consumes GameObjectType.SFXEvent_Hardpoint_All_Weapons_Destroyed
+        // ledger: consumes GameObjectType.SFXEvent_Hardpoint_Destroyed
+        const std::string_view line = tag.empty() ? std::string_view()
+                                      : tag == "SFXEvent_Hardpoint_Destroyed" ? hardpoint_kind_event(types.get_list(pt, tag), kind)
+                                                                              : types.get_string(pt, tag);
+        if (!line.empty() && game_->gui_sfx(line)) ++stats_.hardpoint_lines;
+        // The explosion: the hard point type's Death_Explosion_SFXEvent, 3D at the hard point, any owner; unset -> the
+        // Death_Breakoff_Prop type's Death_SFXEvent_Start_Die. The hard point type = the parent's HardPoints entry at the
+        // event's index [M].
+        const std::span<const std::string_view> hps = types.get_list(pt, "HardPoints");
+        const objects::TypeIndex ht = e.index < hps.size() ? types.resolve_name(hps[e.index]) : objects::kNone;
+        // ledger: consumes HardPoint.Death_Explosion_SFXEvent
+        std::string_view boom = ht != objects::kNone ? types.get_string(ht, "Death_Explosion_SFXEvent") : std::string_view();
+        if (boom.empty() && e.breakoff_type >= 0 && static_cast<size_t>(e.breakoff_type) < types.size())
+            boom = sounds(types, static_cast<objects::TypeIndex>(e.breakoff_type)).death_start;
+        if (boom.empty()) continue;
+        tactical::Vec3 hp_pos{};
+        const Vec3 at = cs.hardpoint_world(e.owner, static_cast<int32_t>(e.index), hp_pos) ? v3(hp_pos)
+                                                                                           : position_of(static_cast<uint64_t>(e.owner));
+        if (game_->impact(boom, at)) ++stats_.hardpoint_explosions;
+    }
+}
+
+const std::string& GameAudioHost::hardpoint_fire_sfx(const objects::GameObjectTypes& types, const tactical::combat::CombatSystem& cs,
+                                                     int32_t hardpoint) {
+    static const std::string kNone;
+    if (hardpoint < 0 || static_cast<size_t>(hardpoint) >= cs.data().hardpoints.size()) return kNone;
+    auto it = hardpoint_fire_.find(hardpoint);
+    if (it == hardpoint_fire_.end()) {
+        const objects::TypeIndex t = types.resolve_name(cs.data().hardpoints[static_cast<size_t>(hardpoint)].name);
+        it = hardpoint_fire_.emplace(hardpoint, t != objects::kNone ? std::string(types.get_string(t, "Fire_SFXEvent")) : std::string()).first;
+    }
+    return it->second;
+}
+
+void GameAudioHost::super_weapon_report(bool present) {
+    const bool first = !battle_reported_;
+    battle_reported_ = true;
+    if (game_) game_->set_super_weapon_present(present, first);
 }
 
 void GameAudioHost::tsw_audio(std::span<const TswCue> cues, const objects::GameObjectTypes& types) {
@@ -400,11 +1433,6 @@ void GameAudioHost::music(MusicScene scene, std::string_view faction, bool space
     }
 }
 
-void GameAudioHost::set_object_positions(std::vector<std::pair<uint64_t, Vec3>> positions) {
-    positions_.clear();
-    for (const auto& [id, p] : positions) positions_[id] = p;
-}
-
 void GameAudioHost::set_listener(const Vec3& eye, const Vec3& look_at, bool cinematic) {
     if (!game_) return;
     Vec3 f{look_at.x - eye.x, look_at.y - eye.y, look_at.z - eye.z};
@@ -443,13 +1471,76 @@ double GameAudioHost::output_latency_seconds() const { return backend_ ? backend
 void GameAudioHost::set_volumes(float master, float sfx, float speech, float music) {
     if (!system_) return;
     system_->set_bus_level(audio::AudioBus::Master, master);
+    system_->save_master_volume();  // aud2 t02: the profile's master is what Lua Master_Volume_Restore restores
     system_->set_bus_level(audio::AudioBus::Sfx, sfx);
     system_->set_bus_level(audio::AudioBus::Speech, speech);
     system_->set_bus_level(audio::AudioBus::Music, music);
 }
 
 void GameAudioHost::update(double dt) {
-    if (game_) game_->update(dt);
+    if (game_ && app_active_) game_->update(dt);  // aud2 t04: step 14 runs only while the application is active
+}
+
+void GameAudioHost::planet_revealed() {
+    if (!game_ || !db_) return;
+    const std::string& event = db_->constants().sfx_planet_revealed;
+    if (event.empty()) return;
+    ++stats_.planet_reveals;
+    ui(event);
+}
+
+void GameAudioHost::set_app_active(bool active) {
+    if (active == app_active_) return;
+    app_active_ = active;
+    if (!active) ++stats_.deactivations;
+    if (!system_) return;
+    if (active) system_->resume_music();
+    else system_->pause_music();
+}
+
+uint32_t GameAudioHost::production(const objects::GameObjectTypes& types, objects::TypeIndex type, Production kind, bool tactical) {
+    if (!game_ || type == objects::kNone || type >= types.size()) return 0;
+    uint32_t id = 0;
+    const std::array<std::string_view, 3> tags = production_tags(kind, tactical);
+    // ledger: consumes GameObjectType.SFXEvent_Tactical_Build_Started
+    // ledger: consumes GameObjectType.SFXEvent_Tactical_Build_Complete
+    for (size_t i = 0; i < tags.size(); ++i) {
+        // ledger: consumes GameObjectType.SFXEvent_Tactical_Build_Cancelled
+        const std::string_view ev = tags[i].empty() ? std::string_view() : types.get_string(type, tags[i]);
+        if (ev.empty()) continue;
+        id = i == 0 ? game_->speech(ev) : game_->gui_sfx(ev);  // the Build_Speech_* line is speech (queued)
+        if (id) ++stats_.production_sfx;
+        break;
+    }
+    if (kind == Production::Complete && !tactical) {  // no build music in a battle [port: as before]
+        const std::string_view music = types.get_string(type, "Build_Music_Completed");
+        if (!music.empty()) {
+            game_->build_complete(music);  // mode 4, the previous music resumes after it
+            ++stats_.build_music;
+        }
+    }
+    return id;
+}
+
+uint32_t GameAudioHost::fleet_departure(bool local_owner, bool local_sees) {
+    if (!game_ || !(local_owner || local_sees)) return 0;
+    const uint32_t id = game_->gui_sfx(kFleetHyperspaceEvent);
+    if (id) ++stats_.fleet_jumps;
+    return id;
+}
+
+void GameAudioHost::campaign_end(bool won, std::string_view enemy_faction) {
+    if (!game_) return;
+    // mcx4 t13 (MCX4_T13_RE_ANSWERS "Faction.Music_Event_Strategic_Win family" [H]): retail never reads the faction's
+    // Music_Event_Strategic_Win / _Lose; the end dialogs play Audio.xml Music_Event_Battle_End_Summary_Screen_<Win/Lose>
+    // in music mode 16 (0x87770 / 0x88050). The winner's faction no longer picks a row.
+    (void)enemy_faction;
+    game_->battle_summary_screen(won);
+    ++stats_.campaign_end_music;
+}
+
+void GameAudioHost::set_log_limit(size_t limit) {
+    if (system_) system_->set_log_limit(limit);
 }
 
 void GameAudioHost::apply_presentation(const std::vector<lua::PresentationEvent>& events, uint32_t* next_seq) {
@@ -489,28 +1580,23 @@ void GameAudioHost::movie_started(bool movie_music, bool halt_music) {  // same 
 }
 void GameAudioHost::movie_cue(std::string_view) {}
 void GameAudioHost::movie_ended() { movie_music_on_ = movie_halted_ = false; }
-void GameAudioHost::unit_response(const objects::GameObjectTypes&, objects::TypeIndex, uint64_t, UnitResponse, bool, int32_t) {}
+void GameAudioHost::unit_response(const objects::GameObjectTypes&, objects::TypeIndex, uint64_t, UnitResponse, bool, int32_t, uint32_t,
+                                  int32_t) {}
 void GameAudioHost::battle_tick(const sim::TacticalBattle&, const objects::ObjectStore&, const objects::GameObjectTypes&, int32_t,
                                 const std::function<bool(objects::ObjectId)>&) {}
-void GameAudioHost::battle_reset() {  // same bookkeeping as with audio (nothing reads it here)
-    last_serial_ = 0;
-    have_serial_ = false;
-    spawned_.clear();
-    moving_.clear();
-    inaudible_.clear();
-    upgrades_seen_ = 0;
-    retreating_player_ = -1;
-}
 void GameAudioHost::battle_end(bool, std::string_view) {}
 void GameAudioHost::tsw_audio(std::span<const TswCue>, const objects::GameObjectTypes&) {}
 void GameAudioHost::sim_tick() {}
+uint32_t GameAudioHost::animation_sounds(std::span<const AnimSound>) { return 0; }
+uint32_t GameAudioHost::spin_away_deaths(std::span<const SpinDeath>, const objects::GameObjectTypes&) { return 0; }
+uint32_t GameAudioHost::self_destruct_lines(std::span<const SelfDestructCue>) { return 0; }
+uint32_t GameAudioHost::weapon_fired(uint64_t, std::string_view, std::string_view, const Vec3&) { return 0; }
+void GameAudioHost::weather(std::string_view, float, bool) {}
+void GameAudioHost::combat(bool, bool) {}
+void GameAudioHost::super_weapon_report(bool) { battle_reported_ = true; }
 void GameAudioHost::music(MusicScene scene, std::string_view, bool, std::string_view) {
     if (scene != scene_) pending_played_ = false;
     scene_ = scene;
-}
-void GameAudioHost::set_object_positions(std::vector<std::pair<uint64_t, Vec3>> positions) {
-    positions_.clear();
-    for (const auto& [id, p] : positions) positions_[id] = p;
 }
 void GameAudioHost::set_listener(const Vec3&, const Vec3&, bool) {}
 void GameAudioHost::set_flags(bool modal, bool gui_only, bool attract) {  // same bookkeeping as with audio
@@ -524,9 +1610,95 @@ void GameAudioHost::set_flags(bool modal, bool gui_only, bool attract) {  // sam
 double GameAudioHost::output_latency_seconds() const { return 0.0; }
 void GameAudioHost::set_volumes(float, float, float, float) {}
 void GameAudioHost::update(double) {}
+void GameAudioHost::planet_revealed() {}
+void GameAudioHost::set_app_active(bool active) {  // same bookkeeping as with audio
+    if (active == app_active_) return;
+    app_active_ = active;
+    if (!active) ++stats_.deactivations;
+}
+uint32_t GameAudioHost::production(const objects::GameObjectTypes&, objects::TypeIndex, Production, bool) { return 0; }
+uint32_t GameAudioHost::fleet_departure(bool, bool) { return 0; }
+void GameAudioHost::campaign_end(bool, std::string_view) {}
+void GameAudioHost::set_log_limit(size_t) {}
 void GameAudioHost::apply_presentation(const std::vector<lua::PresentationEvent>&, uint32_t*) {}
 
 #endif
+
+// Shared by both builds: production() is a no-op without engine/audio.
+void GameAudioHost::on_events(const sim::PresentationEvents& events, const objects::GameObjectTypes& types, int32_t local_player) {
+    using K = sim::PresentationEventKind;
+    for (const sim::PresentationEvent& e : events) {
+        if (local_player < 0 || e.player != local_player || e.type < 0) continue;
+        const auto t = static_cast<objects::TypeIndex>(e.type);
+        switch (e.kind) {
+            case K::ProductionBegin: production(types, t, Production::Begin, true); break;
+            case K::ProductionCanceled: production(types, t, Production::Cancel, true); break;
+            case K::ProductionCompleted: production(types, t, Production::Complete, true); break;
+        }
+    }
+}
+
+std::array<std::string_view, 3> GameAudioHost::production_tags(Production kind, bool tactical) {
+    switch (kind) {
+        case Production::Begin:
+            return {"Build_Speech_Underway", tactical ? "SFXEvent_Tactical_Build_Started" : "", "SFXEvent_Build_Started"};
+        case Production::Cancel:
+            return {"Build_Speech_Stopped", tactical ? "SFXEvent_Tactical_Build_Cancelled" : "", "SFXEvent_Build_Cancelled"};
+        case Production::Complete:
+            return {"Build_Speech_Completed", tactical ? "SFXEvent_Tactical_Build_Complete" : "", "SFXEvent_Build_Complete"};
+    }
+    return {};
+}
+
+std::string_view GameAudioHost::production_tag(Production kind) {
+    switch (kind) {
+        case Production::Begin: return "SFXEvent_Build_Started";
+        case Production::Cancel: return "SFXEvent_Build_Cancelled";
+        case Production::Complete: return "SFXEvent_Build_Complete";
+    }
+    return {};
+}
+
+// Shared by both builds (cu9 t09): the same bookkeeping with and without engine/audio (nothing reads it without).
+void GameAudioHost::battle_reset() {
+    last_serial_ = 0;
+    delayed_shots_.clear();   // trl2 t08
+    hardpoint_fire_.clear();  // aud1 t04: hardpoint indices are per battle
+    victory_seen_ = false;    // mcx4 t13 batch D
+    last_retreater_ = -1;     // mcx4 t13 batch E
+    base_shield_state_.clear();  // mcx4 t13 batch I
+    unit_room_ = true;           // mcx4 t13 batch J
+    strike_avail_.clear();       // mcx4 t13 batch M
+    sighted_.clear();            // mcx4 t13 batch N
+    spotted_types_.clear();
+    enemy_spotted_done_ = false;
+    land_damage_stage_.clear();  // mcx4 t13 batch O
+    pad_loops_.clear();          // mcx4 t13 batch P
+    spun_.clear();               // mcx4 t13 batch Q
+    self_destructs_.clear();
+    tsw_approach_.clear();       // mcx4 t13 batch S
+    point_progress_.clear();     // mcx4 t13 batch U
+    turret_turn_.clear();        // mcx4 t13
+    ability_loop_.clear();       // mcx4 t13 (the battle's objects and their sounds go with it)
+    intro_decided_ = false;   // aud1 t07: a new battle decides its intro again
+    object_events_reset();    // aud1 t05
+    intro_frame_ = 0;
+    have_serial_ = false;
+    spawned_.clear();
+    moving_.clear();
+    inaudible_.clear();
+    hidden_.clear();
+    battle_reported_ = false;
+    clash_ends_seen_ = 0;
+    upgrades_seen_ = 0;
+    cp_timer_ = -1;
+    retreating_player_ = -1;
+}
+
+void GameAudioHost::set_object_positions(std::vector<std::pair<uint64_t, Vec3>> positions) {
+    positions_.clear();
+    for (const auto& [id, p] : positions) positions_[id] = p;
+}
 
 std::vector<std::string> GameAudioHost::take_speech_done() {
     std::vector<std::string> v;

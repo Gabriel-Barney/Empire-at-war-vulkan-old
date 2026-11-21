@@ -5,8 +5,11 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdio>
 #include <map>
+#include <span>
 
+#include "alamo/ai/pp_marshallers.hpp"  // ref5 t05
 #include "alamo/core/sim_rng.hpp"
 #include "alamo/galactic/auto_resolve.hpp"
 
@@ -16,12 +19,9 @@ namespace {
 
 constexpr float kVeto = kAiBigFloat;
 
-struct ContrastEntry {
-    int32_t row = -1;   // contrast-table row; -1 = the untyped layer total
-    bool space = false; // layer
-    double target = 0.0;
-    bool escort = false;  // q6 t19: entry of the escort list (AI_TACTICAL §7.7.1, flag 1)
-};
+// A contrast list entry (ref5 t05: the galactic shape, so both modes share the 0x72ac70 / 0x72b940 arithmetic in
+// pp_marshallers.hpp). Which list an entry is in follows from its index (esc_base).
+using ContrastEntry = PpContrastEntry;
 
 struct PpRec {  // rec[i]
     int32_t type = -1;
@@ -76,6 +76,7 @@ struct TacPp {
 
     std::vector<uint32_t> sel_rec;
     std::vector<int32_t> sel_unit, sel_pool, sel_pad, sel_slot, sel_entry;
+    std::vector<float> sel_health;  // skai t15 re-test: per selection, the live unit's health (< 0 none: full power)
     uint64_t selected_mask = 0;
     bool any_hero_attach = false, any_special = false, any_escort = false;
     bool main_met = false, escort_met = false;
@@ -113,6 +114,28 @@ struct TacPp {
     const TaskForceDef& tf_def(uint32_t tf) const { return def.task_forces[tf]; }
     const TeamDef& team_def(const PpSlot& s) const { return def.task_forces[s.tf].teams[s.team]; }
 
+    // ---- ref5 t05: the hooks of the shared marshallers (alamo/ai/pp_marshallers.hpp) ----
+    void pp_begin_slots() { slot_types.clear(); }
+    void pp_init_slot(PpSlot&, uint32_t tf, uint32_t team) {
+        const TaskForceDef& d = def.task_forces[tf];
+        slot_types.push_back(pp_team_types(d, d.teams[team], types, in.category_mask));
+    }
+    template <class F>
+    void pp_team_candidates(size_t si, F&& add) {  // 0x729550 (no galactic upgrade variants)
+        for (const int32_t t : slot_types[si])
+            if (affiliated(t) || free_store_holds(t)) add(t);
+    }
+    int32_t pp_draw_start_team(int32_t teams) { return in.rng->range_int(0, teams - 1); }
+    float pp_percent_money() const { return in.credits; }  // [M] tactical PP+0x3C: the player's credits (no budget category)
+    float pp_cost(int32_t t) const { return cost_of(t); }
+    uint64_t pp_mask(int32_t t) const { return mask_of(t); }
+    float pp_power(int32_t t) const { return power_of(t); }
+    int32_t pp_tech_level(int32_t t) const {
+        const PerceptionType* x = ti(t);
+        return x ? x->tech_level : 0;
+    }
+    bool pp_tech_veto(const PpRec&, int32_t) const { return false; }  // 0x729190: the veto is galactic only
+
     uint32_t ensure_rec(int32_t type) {
         const auto it = rec_of_type.find(type);
         if (it != rec_of_type.end()) return it->second;
@@ -146,20 +169,30 @@ struct TacPp {
     }
 
     // ---- contrast (0x72ac70 / 0x6c4b20) ----
+    // a2k t11: the AI PotentialPlan weight 0x5f1f90 (ContrastTable::ai_weight, A2K_T02_RE_ANSWERS Q2(b)) [H], as the galactic
+    // solve (galactic_pp.cpp weight()): the solver 0x6c3da0 is shared by both modes.
     float weight(int32_t t, int32_t row) const {
         if (!in.contrast || row < 0) return 0.0f;
         const auto* x = ti(t);
-        return x ? in.contrast->contrast(static_cast<size_t>(row), x->name, x->category) : 0.0f;
+        return x ? in.contrast->ai_weight(static_cast<size_t>(row), x->name, x->category) : 0.0f;
     }
+    // The list's entries: the main list [0, esc_base), the escort list [esc_base, end), and their remaining values.
+    size_t list_begin(bool escort) const { return escort ? esc_base : 0; }
+    size_t list_end(bool escort) const { return escort ? entries.size() : std::min(esc_base, entries.size()); }
+    std::span<const ContrastEntry> list(bool escort) const {
+        return std::span<const ContrastEntry>(entries).subspan(list_begin(escort), list_end(escort) - list_begin(escort));
+    }
+    std::span<const double> list_remaining(bool escort) const {
+        const size_t b = std::min(list_begin(escort), remaining.size()), e = std::min(list_end(escort), remaining.size());
+        return std::span<const double>(remaining).subspan(b, e - b);
+    }
+    // 0x72ac70 in float (ref5 t05, AI_GALACTIC_TOKENS §9.8 item 4 / §9.8a), shared with galactic.
     bool layer_satisfied(bool space, bool escort = false) const {
-        double total = 0.0, residual = 0.0;
-        for (size_t e = 0; e < entries.size(); ++e) {
-            if (entries[e].row < 0 || entries[e].space != space || entries[e].escort != escort) continue;
-            total += entries[e].target;
-            residual += std::max(remaining[e], 0.0);
-        }
-        if (total <= 0.0) return true;
-        return residual / total <= static_cast<double>(tolerance);
+        return pp_contrast_layer_satisfied(list(escort), list_remaining(escort), space, tolerance);
+    }
+    // 0x72b940 "still allowed": an untyped total of the list (row -1) still short on a layer the candidate covers.
+    bool total_open(bool escort, bool covers_space, bool covers_ground) const {
+        return pp_contrast_total_open(list(escort), list_remaining(escort), covers_space, covers_ground);
     }
     // 0x6bff00: every active layer of the list passes 0x72ac70.
     bool list_met(bool escort) const {
@@ -175,8 +208,10 @@ struct TacPp {
     // Selection i subtracts from one list (0x6bf840): its contrast entry's row (weight x P) and the layer total (P).
     void subtract(size_t i, bool escort) {
         const PpRec& r = recs[sel_rec[i]];
-        const double P = static_cast<double>(power_of(r.type)) *
-                         (sel_unit[i] >= 0 ? static_cast<double>(in.free_units[static_cast<size_t>(units[static_cast<size_t>(sel_unit[i])].index)].health) : 1.0);
+        double h = 1.0;
+        if (sel_unit[i] >= 0) h = static_cast<double>(in.free_units[static_cast<size_t>(units[static_cast<size_t>(sel_unit[i])].index)].health);
+        else if (i < sel_health.size() && sel_health[i] >= 0.0f) h = static_cast<double>(sel_health[i]);
+        const double P = static_cast<double>(power_of(r.type)) * h;
         const int32_t e = entry_in(sel_entry[i], escort);
         if (e >= 0 && entries[static_cast<size_t>(e)].row >= 0)
             remaining[static_cast<size_t>(e)] -= static_cast<double>(weight(r.type, entries[static_cast<size_t>(e)].row)) * P;
@@ -284,127 +319,8 @@ private:
     TacPp& p_;
 };
 
-class TechTreeM final : public PpMarshaller {
-public:
-    explicit TechTreeM(TacPp& p) : p_(p) {}
-    float score(uint32_t i) override {  // 0x729190: the veto is galactic only
-        const PerceptionType* x = p_.ti(p_.recs[i].type);
-        const int32_t tech = x ? x->tech_level : 0;
-        return static_cast<float>(tech) / 5.0f * 2.0f;
-    }
-
-private:
-    TacPp& p_;
-};
-
-class PlanM final : public PpMarshaller {
-public:
-    explicit PlanM(TacPp& p) : p_(p) {}
-    bool permanent_veto() const override { return true; }
-    void setup_a() override {  // 0x72a3b0
-        p_.slots.clear();
-        p_.slot_types.clear();
-        for (uint32_t tf = 0; tf < p_.def.task_forces.size(); ++tf) {
-            const TaskForceDef& d = p_.def.task_forces[tf];
-            p_.any_hero_attach = p_.any_hero_attach || !d.deny_hero_attach;
-            p_.any_special = p_.any_special || !d.deny_special_weapon_attach;
-            p_.any_escort = p_.any_escort || d.escort;
-            for (uint32_t team = 0; team < d.teams.size(); ++team) {
-                PpSlot s;
-                s.tf = tf;
-                s.team = team;
-                p_.slots.push_back(std::move(s));
-                p_.slot_types.push_back(pp_team_types(d, d.teams[team], p_.types, p_.in.category_mask));
-            }
-        }
-        for (PpRec& r : p_.recs) r.teams.clear();
-    }
-    void setup_b() override {  // 0x729550 (no galactic upgrade variants)
-        for (size_t si = 0; si < p_.slots.size(); ++si)
-            for (const int32_t t : p_.slot_types[si]) {
-                if (!(p_.affiliated(t) || p_.free_store_holds(t))) continue;
-                PpRec& r = p_.recs[p_.ensure_rec(t)];
-                if (std::find(r.teams.begin(), r.teams.end(), static_cast<int32_t>(si)) == r.teams.end()) r.teams.push_back(static_cast<int32_t>(si));
-            }
-    }
-    void setup_c() override {  // 0x729cc0: one synced int per candidate with >= 2 teams
-        for (PpRec& r : p_.recs)
-            r.start_team = r.teams.empty() ? -1 : p_.in.rng->range_int(0, static_cast<int32_t>(r.teams.size()) - 1);
-    }
-    float score(uint32_t i) override {  // 0x72a170
-        PpRec& r = p_.recs[i];
-        r.team_slot = -1;
-        const auto n = static_cast<int32_t>(r.teams.size());
-        for (int32_t k = 0; k < n; ++k) {
-            const int32_t s = r.teams[static_cast<size_t>((r.start_team + k) % n)];
-            const PpSlot& slot = p_.slots[static_cast<size_t>(s)];
-            if (p_.team_def(slot).percent || static_cast<int32_t>(slot.assigned.size()) < p_.team_def(slot).max) {
-                r.team_slot = s;
-                break;
-            }
-        }
-        for (const int32_t s : r.teams) {
-            const PpSlot& slot = p_.slots[static_cast<size_t>(s)];
-            const TeamDef& td = p_.team_def(slot);
-            if (!td.percent) {
-                if (static_cast<int32_t>(slot.assigned.size()) < td.max)
-                    return 1.0f - static_cast<float>(slot.assigned.size()) / static_cast<float>(td.max);
-            } else {
-                if (!p_.def.ignore_target) return 1.0f;
-                // [M] tactical PP+0x3C: the player's credits (no budget category)
-                if (td.percent_value / 100.0f * p_.in.credits > p_.cost_of(r.type) + slot.cost_sum) return 1.0f;
-            }
-        }
-        if (p_.any_hero_attach && r.is_hero) return 0.0f;
-        return kVeto;
-    }
-    bool place(uint32_t sel, uint32_t rec, bool respect_met) {
-        const PpRec& r = p_.recs[rec];
-        const auto n = static_cast<int32_t>(r.teams.size());
-        for (int32_t k = 0; k < n; ++k) {
-            const int32_t s = r.teams[static_cast<size_t>((std::max(r.start_team, 0) + k) % n)];
-            PpSlot& slot = p_.slots[static_cast<size_t>(s)];
-            const bool escort = p_.tf_def(slot.tf).escort;
-            // First pass (0x729830, AI_GALACTIC_TOKENS §9.10): a non-escort slot is skipped when main is met and escort is
-            // not, an escort slot when escort is met and main is not. The second pass ignores the flags.
-            if (respect_met && ((!escort && p_.main_met && !p_.escort_met) || (escort && p_.escort_met && !p_.main_met))) continue;
-            if (!(p_.team_def(slot).percent || static_cast<int32_t>(slot.assigned.size()) < p_.team_def(slot).max)) continue;
-            slot.assigned.push_back(sel);
-            slot.cost_sum += p_.cost_of(r.type);
-            slot.mask |= p_.mask_of(r.type);
-            for (PpSlot& o : p_.slots)
-                if (o.tf == slot.tf) {
-                    ++o.tf_count;
-                    o.tf_force += p_.power_of(r.type);
-                }
-            p_.sel_slot[sel] = s;
-            return true;
-        }
-        return false;
-    }
-    void commit(uint32_t i) override {  // 0x72a720 -> 0x729830
-        const auto sel = static_cast<uint32_t>(p_.sel_rec.size() - 1);
-        p_.selected_mask |= p_.mask_of(p_.recs[i].type);
-        if (!place(sel, i, true)) place(sel, i, false);
-    }
-    void finalize(bool& success) override {  // 0x72a060
-        bool required_tf = false;
-        for (const TaskForceDef& d : p_.def.task_forces) required_tf = required_tf || d.required;
-        if (p_.sel_rec.empty() && !required_tf) success = false;
-        for (const PpSlot& s : p_.slots) {
-            const TeamDef& td = p_.team_def(s);
-            const TaskForceDef& d = p_.tf_def(s.tf);
-            if (!td.percent && static_cast<int32_t>(s.assigned.size()) < td.min) success = false;
-            if (s.tf_force < d.minimum_total_force) success = false;
-            if (s.tf_count < d.minimum_total_size) success = false;
-        }
-        for (const uint64_t m : p_.required_masks())
-            if ((m & p_.selected_mask) == 0) success = false;
-    }
-
-private:
-    TacPp& p_;
-};
+using TechTreeM = TechTreeMarshaller<TacPp>;  // ref5 t05: 0x729190, shared with galactic
+using PlanM = PlanMarshaller<TacPp>;          // ref5 t05: 0x72a3b0 .. 0x72a060, shared with galactic
 
 // Reinforcement (AI_GALACTIC_3 §1.3-1.5) [H]: pool units score 2.0 and replace a free unit of the same type unless that
 // unit is already at the stage (key < 300); no pool entry and no free unit -> veto (not permanent). No RNG.
@@ -528,7 +444,8 @@ public:
         }
         const float fp = static_cast<float>(p_.in.recent_failures) * p_.def.per_failure_contrast_adjust;
         p_.tolerance = 1.0f - (fp + p_.def.min_contrast_scale) / (fp + p_.def.max_contrast_scale);
-        const double scale = static_cast<double>(p_.def.max_contrast_scale + fp) * static_cast<double>(p_.in.contrast_multiplier);
+        // ref5 t05 (AI_GALACTIC_TOKENS §9.8a, 0x5f1d00): both terms widened before the add, as galactic (§9.8 item 3).
+        const double scale = pp_contrast_scale(p_.def.max_contrast_scale, fp, p_.in.contrast_multiplier);
         const bool space_mode = p_.in.mode == TacticalMode::Space;
         // [M] tactical layers: the mode's own layer holds every enemy; the other layer is empty.
         const double total = p_.in.enemy_strength(~uint64_t{0});
@@ -552,13 +469,13 @@ public:
             p_.has_escort_list = true;
             const double et = es(~uint64_t{0});
             const double es_space = space_mode ? et : 0.0, es_ground = space_mode ? 0.0 : et;
-            p_.entries.push_back({-1, true, es_space, true});
-            p_.entries.push_back({-1, false, es_ground, true});
+            p_.entries.push_back({-1, true, es_space});
+            p_.entries.push_back({-1, false, es_ground});
             for (const bool space : {true, false})
                 for (size_t j = 0; j < rows; ++j) {
                     const double t = space ? es_space : es_ground;
                     const double v = t > 0.0 ? es(p_.in.contrast->rows[j].enemy_mask) * scale : 0.0;
-                    p_.entries.push_back({static_cast<int32_t>(j), space, v, true});
+                    p_.entries.push_back({static_cast<int32_t>(j), space, v});
                 }
         }
         p_.remaining.resize(p_.entries.size());
@@ -592,43 +509,28 @@ public:
         double v = -1.0;
         r.contrast_entry = -1;
         const double P = p_.power_eff(i);
-        for (const auto& [e, wgt] : r.pairs) {  // tactical: every pair is considered
-            // q6 t19 (AI_GALACTIC_2 §1.4): the main list only for a candidate with a non-escort team, the escort list when
-            // the candidate has an escort team or the main contrast is met.
-            if (p_.escort_entry(static_cast<size_t>(e)) ? !(r.escort || p_.main_met) : (r.escort && !r.non_escort)) continue;
+        // ref5 t05 (AI_GALACTIC_TOKENS §9.8a): 0x72b6a0 counts a pair only with P > 0, w > 0 and R > 0 in every mode (the
+        // tactical flag skips only the tolerance / pop-cap test). The main list needs a non-escort team (rec+0xB0); the escort
+        // list needs an escort team or the main contrast met.
+        for (const auto& [e, wgt] : r.pairs) {
+            if (p_.escort_entry(static_cast<size_t>(e)) ? !(r.escort || p_.main_met) : !r.non_escort) continue;
             const double R = p_.remaining[static_cast<size_t>(e)];
-            const double wp = static_cast<double>(wgt) * P;
-            const double d = std::max(R - wp, 0.0), m = std::max(R, wp);
-            const double s = m > 0.0 ? (1.0 - (d / m) * (d / m)) * static_cast<double>(wgt) : 0.0;
+            if (!(P > 0.0 && wgt > 0.0f && R > 0.0)) continue;
+            const double s = pp_contrast_pair_score(R, wgt, P);
             if (s > v) {
                 v = s;
                 r.contrast_entry = e;
             }
         }
         if (v > 0.0) return static_cast<float>(v * 2.0);  // x2 in tactical modes
-        // Gate: main side [port: the candidate's own layers, kept] with a non-escort team, or (q6 t19) the escort flag
-        // with an escort team.
-        const bool layer_ok = (!r.space || p_.layer_satisfied(true)) && (!r.ground || p_.layer_satisfied(false));
-        const bool main_side = layer_ok && (r.non_escort || !r.escort);
-        if (!main_side && !(p_.escort_met && r.escort)) return kVeto;
+        // The gate: the plan-wide flags with the candidate's teams (0x528 && rec+0xB0, or 0x529 && rec+0xB1), not the
+        // candidate's own layers (§9.8 item 2, §9.8a).
+        if (!((p_.main_met && r.non_escort) || (p_.escort_met && r.escort))) return kVeto;
         if (p_.def.minimum_cost + p_.def.additional_cost > p_.gross) return 0.0f;
-        if (main_side &&
-            ((r.space && !p_.remaining.empty() && p_.remaining[0] > 0.0) || (r.ground && p_.remaining.size() > 1 && p_.remaining[1] > 0.0)))
-            return 0.0f;
-        if (p_.has_escort_list) {  // the escort list's untyped totals (0x140b3a525 set)
-            const size_t b = p_.esc_base;
-            if ((r.space && p_.remaining[b] > 0.0) || (r.ground && p_.remaining.size() > b + 1 && p_.remaining[b + 1] > 0.0)) return 0.0f;
-        }
-        for (const uint64_t m : p_.required_masks())
-            if ((m & p_.selected_mask) == 0 && (m & p_.mask_of(r.type)) != 0) return 0.0f;
-        for (const int32_t s : r.teams) {
-            const PpSlot& slot = p_.slots[static_cast<size_t>(s)];
-            const TeamDef& td = p_.team_def(slot);
-            const TaskForceDef& d = p_.tf_def(slot.tf);
-            if ((!td.percent && static_cast<int32_t>(slot.assigned.size()) < td.min) || slot.tf_force < d.minimum_total_force ||
-                slot.tf_count < d.minimum_total_size)
-                return 0.0f;
-        }
+        // Untyped totals by their layer: the main list's with 0x528 && rec+0xB0, the escort list's with 0x525 && 0x529 && rec+0xB1.
+        if (p_.main_met && r.non_escort && p_.total_open(false, r.space, r.ground)) return 0.0f;
+        if (p_.has_escort_list && p_.escort_met && r.escort && p_.total_open(true, r.space, r.ground)) return 0.0f;
+        if (pp_contrast_still_needed(p_, r, p_.mask_of(r.type))) return 0.0f;  // ref5 t05: shared with galactic
         return kVeto;
     }
     void commit(uint32_t) override {
@@ -728,16 +630,6 @@ private:
 };
 
 }  // namespace
-
-const char* pp_source_name(PpSource s) {
-    switch (s) {
-        case PpSource::FreeStore: return "free store";
-        case PpSource::Reinforcement: return "reinforcement";
-        case PpSource::Build: return "pad";
-        case PpSource::Produce: return "produce";
-    }
-    return "?";
-}
 
 std::vector<int32_t> pp_team_types(const TaskForceDef& d, const TeamDef& t, const std::vector<PerceptionType>& types,
                                    const std::function<uint64_t(std::string_view)>& category_mask) {
@@ -839,9 +731,73 @@ bool solve_tactical_pp(const TacticalPpInput& in, TacticalPpResult& out) {
             k.tf = static_cast<int32_t>(pp.slots[static_cast<size_t>(slot)].tf);
             k.team = static_cast<int32_t>(pp.slots[static_cast<size_t>(slot)].team);
         }
+        k.contrast_entry = pp.sel_entry[i];
         out.picks.push_back(k);
     }
+    out.layer_space = pp.layer_active_space;
+    out.layer_ground = pp.layer_active_ground;
     return out.ok;
+}
+
+bool retest_tactical_pp(const TacticalPpInput& in, const std::vector<PpRetestPick>& picks, bool layer_space, bool layer_ground,
+                        std::string* why) {
+    if (!in.def || !in.types) return true;
+    TacPp pp(in);
+    PlanM planm(pp);
+    planm.setup_a();  // the team slots and the EscortForce flag (0x140b3a525)
+    ContrastM contrast(pp);
+    contrast.setup_a();  // the lists, step for step as at a solve (0x6c5de0), with the current f
+    if (pp.entries.empty()) return true;
+    pp.layer_active_space = layer_space;  // not rewritten by the re-test (§1.2)
+    pp.layer_active_ground = layer_ground;
+    for (const PpRetestPick& k : picks) {
+        const auto i = static_cast<uint32_t>(pp.sel_rec.size());
+        pp.sel_rec.push_back(pp.ensure_rec(k.type));
+        pp.sel_unit.push_back(-1);
+        pp.sel_pool.push_back(-1);
+        pp.sel_pad.push_back(-1);
+        pp.sel_entry.push_back(k.contrast_entry);
+        pp.sel_health.push_back(k.health);
+        int32_t slot = -1;
+        for (size_t s = 0; s < pp.slots.size(); ++s)
+            if (static_cast<int32_t>(pp.slots[s].tf) == k.tf && static_cast<int32_t>(pp.slots[s].team) == k.team) slot = static_cast<int32_t>(s);
+        pp.sel_slot.push_back(slot);
+        if (slot >= 0) pp.slots[static_cast<size_t>(slot)].assigned.push_back(i);
+    }
+    pp.recompute_remaining();  // 0x6c4b20 over the stored selection
+    bool ok = true;
+    contrast.finalize(ok);  // 0x72af80
+    if (!ok && why) {  // name each failing list / layer: its untyped total and its typed rows (the two checks of 0x72af80)
+        std::string s = "contrast re-test failed:";
+        for (const bool escort : {false, true}) {
+            if (escort && !pp.has_escort_list) continue;
+            const size_t base = escort ? pp.esc_base : 0;
+            for (const bool space : {true, false}) {
+                if (!(space ? pp.layer_active_space : pp.layer_active_ground)) continue;
+                const size_t e = base + (space ? 0 : 1);
+                double total = 0.0, residual = 0.0;
+                for (size_t r = pp.list_begin(escort); r < pp.list_end(escort); ++r) {
+                    if (pp.entries[r].row < 0 || pp.entries[r].space != space) continue;
+                    total += pp.entries[r].target;
+                    residual += std::max(pp.remaining[r], 0.0);
+                }
+                char buf[200];
+                std::snprintf(buf, sizeof buf, " %s %s: total %.1f of %.1f left, rows %.1f of %.1f left;", escort ? "escort" : "main",
+                              space ? "space" : "ground", pp.remaining[e], pp.entries[e].target, residual, total);
+                s += buf;
+            }
+        }
+        int32_t typed = 0;
+        for (size_t i = 0; i < pp.sel_rec.size(); ++i) {
+            const int32_t e = pp.sel_entry[i];
+            if (e >= 0 && static_cast<size_t>(e) < pp.entries.size() && pp.entries[static_cast<size_t>(e)].row >= 0) ++typed;
+        }
+        char tol[96];
+        std::snprintf(tol, sizeof tol, " tolerance %.3f; %zu selected, %d on a typed row", static_cast<double>(pp.tolerance),
+                      pp.sel_rec.size(), typed);
+        *why = s + tol;
+    }
+    return ok;
 }
 
 }  // namespace alamo::ai::tactical

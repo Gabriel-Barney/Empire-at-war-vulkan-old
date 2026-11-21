@@ -577,7 +577,9 @@ For each threat cell (zone: the evaluator's threat-cell set in list order; rect:
 
 - Admission (0x4d2c90) builds every new entry with +0x30 = 0.
 - Removal (0x4d5000, vf+0xa0; galactic override 0x6907d0) erases the whole node. A unit that leaves the store and
-  comes back gets a fresh entry with +0x30 = 0.
+  comes back gets a fresh entry with +0x30 = 0. **Corrected (SKAI_T22_SPACE_AI_RE Part 5.2):** 0x6907d0 is the Space
+  override; land and galactic use 0x4d5000. In land and space a Produce_Force hand-over does not call it: the entry
+  stays (store +0x48 = 0).
 - The debug owner string 0x5259d0 confirms the meaning: +0x30 = 0 prints "Freestore", otherwise "<goal>(<plan>)",
   read through PP+0x20 (the goal).
 
@@ -649,7 +651,9 @@ Lua `Get_Object_Count` (0x4d4690) and `Is_Object_On_Free_Store` (0x4d48c0) do **
 
 Consequences:
 - A unit is reserved from the accept of its goal until one of: the task force takes it off the store
-  (Produce_Force / Collect), it leaves the PP (0x6c27d0), or the goal is released.
+  (Produce_Force / Collect), it leaves the PP (0x6c27d0), or the goal is released. **Galactic only (SKAI_T22_SPACE_AI_RE
+  Part 5):** in land and space Produce_Force leaves the unit on the store, so a task-force member stays reserved, and
+  stealable at each commit, for its plan's whole life.
 - Step 2 suspends every reservation first. So a goal kept in a later category can lose a unit to a goal accepted in
   an earlier category. Its validity check (0x6c45e0) then fails.
 
@@ -741,7 +745,7 @@ object init 0x3989a0 := 0, and the MISSILE_SHIELD inline +/− in 0x38a350)** [H
 - *Move orders, coordinator level:* `Coordinator::Move_To` (0x4f8200) returns without doing anything when **any**
   member is locked (the whole order is dropped for every member). (Before that it also does nothing when, in space,
   the order's target object (block +0x28) is a TEAM member, or for type 3 with no target.) Coordinator remove-unit (vf+0x20 0x4f7d30, also via the
-  space override 0x5d5130) **refuses a locked unit** unless obj +0x3a0 bit 0x02 is set [M: dying]. Coordinator add
+  space override 0x5d5130) **refuses a locked unit** unless obj +0x3a0 bit 0x02 is set (destroyed / removed by `Detach` 0x3a8380; TACTICAL_COMBAT §5.4.3). Coordinator add
   (0x4f6b60 via 0x438b40) refuses a unit that some coordinator already holds (0x397260 → 0x426140).
 - *Group move* (0x2a7b80, every player move event and most AI moves): has no lock test, but for a locked unit the
   leave-old-coordinator step is refused, so the add to the new coordinator is refused too: **the locked unit is left
@@ -956,7 +960,8 @@ Team data pack = obj +0x110 (TeamDataPackClass, ctor 0x4ec680 zeroes +0x50 / +0x
 - Position = the container's own position (obj +0x78 / +0x7c).
   - At spawn it is the members' centroid.
   - After that, each TEAM service (0x405b10) sets it to the centre of the members' joint bounding box. It is skipped
-    when the locomotor's vf+0x230 says so [M: when that applies].
+    when the locomotor's vf+0x230 is true, i.e. for every land squad container (LandTeamContainer), which its own
+    locomotor moves instead (TACTICAL_COMBAT §5.4.4 item 2, 2026-11-10).
   - Re-projection follows the container's transform (§14).
 
 ### 29.5 Values for one fresh team (9 live members, land)
@@ -1830,6 +1835,59 @@ its break function and `BreakBlock`.
   pending once when it stops moving and is never re-added (AI save version 12). Space still returns true on the
   target's death [port, unchanged].
 
+#### 33.2.3 SpaceMovementBlockStatus: subscriptions and signal handler (aitac t05 RE, 2026-11-19) [H unless tagged]
+
+Functions: primary vtable 0x8cee80 (IsFinished vf19 0x7394f0, Result vf20 0x6af930), SignalListener vtable 0x8cef30 at
+status +0x30 with the handler **0x739890**, object init 0x7390e0 (callers 0x6e4fc0 `Attack_Move`, 0x6e54d0, 0x6e72c0),
+issue / re-target 0x738b90, unit collector 0x739200. Status offsets below are from the status (handler offset + 0x30).
+
+**Fields.** +0x40 finished byte, +0x41 attack flag (issueAttack), +0x42 repeat flag, +0x50 target object, +0x58 the
+chosen target hard point, +0x60 threat, +0x64 move flags (bit 0x02 = guard, as on land), +0x68 avoidance, +0x70
+pending (moving) list, +0x78 all-units list (TACTICAL_COMBAT §2.8 A).
+
+**Subscriptions** [H]:
+- On the **object** (0x7390e0): **0x1a and 0x10 only**. Land also listens to the object's 0xb (§33.2 table); space does
+  not.
+- On each **unit** (0x739200): signal 0xb is first raised on the unit, then the status subscribes to **9, 10, 0xb, 0x10
+  and 0x1a** (the 0x1a argument read in the bytes at 0x739425; TACTICAL_COMBAT §2.8 A step 2 lists only four). Units
+  whose representative type has +0x1e set (`Is_Special_Weapon_In_Space`, AI_TACTICAL §12 item 3), movement-locked units
+  (0x39ad40) and units the coordinator manager refuses (0x425e30) are not collected.
+
+**Handler 0x739890** (it holds a reference on the status for the call):
+
+| Signal | From | Effect |
+|---|---|---|
+| 9 | any | ignored |
+| 10 (movement finished) | a unit | Pending list missing → **finish**. Else remove the unit from pending and fire TF event 0x12 (`Unit_Move_Finished`) with the unit wrapped for the TF's player, for the unit itself (no team-container step as on land). If pending is now empty, run the pending-empty test |
+| 0xb, 0x10, 0x1a | the block's object | Unsubscribe 9 / 10 / 0xb / 0x10 / 0x1a on it. **0x1a**: hostile = 0x39a4e0(object, TF player); attack flag set and not hostile → finish; guard bit set and hostile → finish (each finish releases the object and clears the hard point +0x58). **0xb or 0x10**: finish, release the object, clear +0x58, and fire plan event **0xb = 11 `Current_Target_Destroyed`** (no argument) on **every task force of the owning TF's plan** (0x5f6c60(plan, 11, null); event table AI_GALACTIC_2 §5.2) |
+| 0xb, 0x10, 0x1a | a unit | Unsubscribe the five signals. Pending or all-units list missing → **finish**. Else remove the unit from both lists; if pending is now empty run the pending-empty test; then **finish when the all-units list is empty** |
+
+**Pending-empty test** (same as land without the zone-route step; space has no zone route):
+- no object → finish;
+- an object: guard bit clear → finish when the object is no longer hostile (0x39a4e0) or fails 0x5680b0 (§33.2.1);
+  every mode → finish when its type has neither `Last_State_Visible_Under_FOW` (+0x88) nor
+  `Initial_State_Visible_Under_FOW` (+0x89) and it is fogged for the TF's player (0x35f470, force 1);
+- otherwise the block stays open after arrival.
+
+**IsFinished 0x7394f0** (the space-only part): when a target hard point is held (+0x58) and its record says it is
+destroyed (hard-point record +0x20 → +0x4d == 1 and health +0x28 ≤ 0): with the repeat flag clear → finish; with it set
+→ re-target 0x738b90(object, collect = 0, same hard-point type): the next hard point of that type with the lowest health
+fraction, or, if none is left, release the object and finish. Then return finished **or** the task force has no members
+(0x5fca10 = 0).
+
+**Compared with land (0x73ce80, §33.2)** [H both]:
+- same: 9 ignored; the unit rows (remove from both lists, pending-empty test, finish on an empty all-units list); the
+  0x1a rules on the object; the pending-empty object tests; a missing pending list finishes the block;
+- space only: the object's 0x10 (and a 0xb, which reaches the handler only when the object is also one of the status's
+  units, since 0xb is not subscribed on the object) fires `Current_Target_Destroyed` on every TF of the plan and clears
+  the hard-point target; `Unit_Move_Finished` is per unit with no team-container dedupe; the hard-point re-target in
+  IsFinished; no zone-route leg;
+- land only: the object's 0xb subscription (a new order given to the object finishes a land block), the zone route.
+
+**Port** (`tactical_ai.cpp`, `step_object_block` / `movement_block_signal`): space blocks should take the same unit
+rows and pending-empty test as land; on the object's death fire `Current_Target_Destroyed` on all the plan's task forces
+and end; do not end a space block on the object receiving a new order (no 0xb subscription on the object).
+
 ### 33.3 Superseded statuses
 
 **Who raises signal 0xb.** The signal means "a new order replaces this unit's order" [M: name]. It is raised on a unit
@@ -1946,7 +2004,7 @@ Flag 0x02 = guard, block +0x24 = kind, +0x28 = object.
           speed it is travelling at).
      3. The cap is min(F speed, 2 × S). If F's path already equals the object's path (0x40ded0), F speed := the cap
         and the update **returns** (no re-issue, no step 4). Else copy the object's current path into F's path
-        (+0x68, 0x40dbc0); F speed := the cap; footprint check 0x40eb90(members, 2, 1).
+        (+0x68, 0x40dbc0); F speed := the cap; the layout driver 0x40eb90(members, 2, 1) (not a footprint check: MOVEMENT §4.3.1 item 1, 2026-11-10).
      4. Every member that is not deployed / deploying (or has type +0x23b0 ≠ 0) gets the new path (locomotor
         vf +0x158(0), vf +0x190(path), vf +0x148(0)). Its waypoint index (path +0x60 / +0x64) is set to the object's,
         so the escort joins the object's path at the object's progress.
@@ -2213,8 +2271,8 @@ the order.
   before [port: the original spawns nothing visible for such a skirmish type and still unloads nothing; kept so
   synthetic data without transports works].
 - Timing: the unload steps use the RE timer, 2 s × (1 + s) per step, s = `AbilitySystem::player_list(ReinforcementDeploy)`.
-  The `Land` / `Takeoff` clip lengths are unknown to the headless host [M], so landing and take-off take no time [port];
-  no clearance wait (state 4) and no skirmish `Reinforcement_Time_Multiplier` wait (its constant F is unknown).
+  Since r3g t01 the timed mode waits for the `Land` / `Takeoff` clips (1.15, past 98 %) on static clip data
+  (R3G_ANIM_TIMED_RE.md §1); a model without them takes no time [port]. No clearance wait (state 4) and no skirmish `Reinforcement_Time_Multiplier` wait (its constant F is unknown).
 - **Two modes (`BattleConfig::landing_unload_timed`).** The port's tactical AI (`tf_reinforce`) takes the units it
   finds right after the Reinforce order and finishes the status at once; it has no in-flight count and no 0x19 handler.
   - **Untimed [port] (the default until a1j, §36.3):** every unload step runs at the order (members placed at their unload slots), the 0x19
@@ -2241,7 +2299,7 @@ the order.
    state 0x19 (Deployed); every other locomotor returns 0 (0x13b7d0). Extents 0x371d20: x = `Custom_Hard_XExtent_Deployed`
    × `Scale_Factor` when > 0, else the normal x (0x371be0); **y = `Custom_Hard_YExtent_Deployed` × `Scale_Factor`
    whenever XExtent_Deployed > 0** (also when YExtent_Deployed ≤ 0), else the normal y. FoC sets no
-   `Custom_Hard_XExtent_Deployed` (one type sets only `Custom_Hard_YExtent_Deployed`), so no FoC footprint changes.
+   `Custom_Hard_XExtent_Deployed` (two types, `MPTL` and `MAL_Rocket_Vehicle`, set only `Custom_Hard_YExtent_Deployed`; TACTICAL_COMBAT §5.4.6), so no FoC footprint changes.
    Port: deploying / deployed = the DEPLOY ability active (`AbilitySystem::deployed`) [M: the +0x2b3 byte];
    `drop_deployed_extents`.
 2. **Persist flag.** `Create_Cinematic_Transport`'s `persist` is TransportDataPack +0xc9 (TACTICAL_GAPS §4.2.2 item 3).
@@ -2598,6 +2656,11 @@ BUSYTACTICALFREESTORE.LUA).
   (`ScriptObjectState::targeting_priorities`, objects outside the combat model); `BattleAi` clears the combat override
   (`CombatSystem::set_priority_override(id, -1)`; hard points share the unit's set there). [port] The stickiness
   threshold has no combat-side override, so there is nothing to reset for it.
+  **Correction (cu8f t04, 2026-11-07):** the last sentence is wrong. The release writes the type's
+  `Targeting_Stickiness_Time_Threshold` into the unit's TD +0x158 and each TEAM member's (`CU8F_T04_T06_RE.md` §1.1
+  writer 3), and that field (spawn value 0.0, not the type's) is what `Is_Target_Sticky` reads. The port now has the
+  override (`CombatSystem` `Unit::stickiness`) and `BattleAi::unit_left_task_force` resets it
+  (`CombatSystem::reset_stickiness`).
 - No save-format change (no saved field added; tactical AI save version stays 8).
 - Test: `alamo_ai_tactical_world_tests` `test_replan_and_priority_lifetime` (variant 9): a sweep plan collects
   `"Corvette"` and must never get a frigate; every unit that carried a plan's set gets `unit_left_task_force` and its
@@ -2784,6 +2847,9 @@ pusher's path test rejects; the next rings are 1, 2.8, 5.4, 8.8, ... units out u
      half size r + 5 × `FormationSpacing` around the sample (the collision tree, AABB overlap) [M: what the object
      grid 0x538330 stores per object was not traced; 0x5d7c00 → 0x6b24f0 is a time-sliced structure per movement
      class];
+     *(settled 2026-11-10, MOVEMENT §5.4.3 "Occupancy": retail's test is a directional-radius distance test
+     against the layer-0x10 rectangles: blocked when a record's centre is within (r + margin) + its directional
+     radius of the sample, the sample swept one unit along world +x.)*
    - paths = the movers of the live MovingVsStopped collisions with b as the stopped participant (collision-list
      order): each mover's **remaining path** from its position (no approximation window), clearance = its hard Y
      extent (0x372040; soft radius when unset) + r + 4; the sample is rejected when its distance to a segment is < the
@@ -2796,3 +2862,38 @@ pusher's path test rejects; the next rings are 1, 2.8, 5.4, 8.8, ... units out u
    `kReplanAfterBlocked` frames ends where it is; a new move, stop or teleport of b ends it. While pushed, b takes no
    part in StoppedVsStopped collisions (its locomotor moves). Saved (movement save version bump); hashed only while a
    push is active.
+
+## 41. foc-land seed 1: an 18600-frame `Clear_Infantry` fight is a terrain-blocked standoff (a2l t04) [port observation]
+
+**Question.** a2k t14 found that in `--skirmish-ai foc-land --seed 1` (dev 9ab7d8bb) the Rebel's first `Clear_Infantry`
+task force (5 Rebel_Trooper_Team) blocked on `Attack_Move(Empire squad 811)` from frame 4674 to 23280. Combat rate or
+attack-move behaviour?
+
+**Trace (port, 9ab7d8bb, headless trace of positions, targets, shots, ground / object hits; not committed).**
+- Neither side moves from about frame 5000: the Empire's 8-10 `Squad_Stormtrooper` (teams 811 / 812, held by their own
+  `Clear_Infantry`) stand on a ledge at z 9.3 around (1720-1780, 4580-4660); the Rebel troopers stand below a cliff at
+  z −43.3 around (1780-1860, 4480-4720), 100-140 apart (XY), all in weapon range (140 / 150).
+- Both sides keep firing at their locked targets (about one shot per 33 frames each, `Projectile_Fire_Recharge_Seconds`
+  1.0), but most shots detonate on the terrain: the ledge troopers' shots hit the ledge top 20-30 units in front of
+  them, the Rebels' shots hit the cliff face (z −9..−4). Only troopers standing at the edge hit. Shots by XY distance,
+  frames 4674-23280: < 80 units 97 % hit; 100-159 units 211 hits in 4470 shots (4.7 %); frames 10500-20000, 100-119
+  units: 22 hits in 2407 shots.
+- Per hit 0.8-1.4 damage (blaster 2.0 / 3.0 × `Damage_Blaster_Hand`-vs-`Armor_Infantry` 1.3 × the 0.5 cover factor and
+  difficulty multipliers) against 40 / 48 health: not the limiting factor. No healing, no reinforcement: squad 811's
+  members only die (10 → 8 by frame 10500, then flat until 21000, when other Rebel units reached the ledge).
+- The block ends only by the target's death (§33.2: an object Attack_Move stays open after arrival while the target is
+  a valid, hostile, unfogged object), so the plan holds its units for the whole standoff.
+
+**Verdict: not a port bug.** The ground test of straight laser shots is retail behaviour (§37.4 [H]) and retail has no
+line-of-fire test before firing (TACTICAL_COMBAT §2.7 [M]), so a unit keeps shooting into a ridge. What is not proven
+is where the original's formation stops: the port's object attack-move moves the formation to the object's position
+and its 2D slots fall below the ledge; TACTICAL_COMBAT §2.8 "Stopping is not traced here [L]". Probe or RE item if
+this matters: does a land object Attack_Move formation in the original end at slots below a ledge (Utapau, Rebel base
+cliff) or climb to the target?
+
+**Later dev.** On 03940b96 (after cu8f / cu8g / cu8i rng-stream changes) seed 1 no longer reaches this standoff: the
+Rebel's first Secure_Contestable succeeds (refinery at frame 1509) and the battle ends at frame 18496 (Rebel win). Other
+seeds on 03940b96 (`--ticks 30000 --workers 4 --expect-battle-end`): 3 ends at 17827, 4 at 28675 (16678 when the test
+was pinned to it), 5 at 20486; seed 2 does not end, for another reason: from about frame 20000 the Rebel sits at 40000
+credits with its units in LANDSCOUT / SECUREBUILDPAD / CLEARVEHICLES plans and never attacks the Empire base (shots at
+100-119 units hit 96 %; no standoff). The test `alamo_headless_skirmish_ai_foc_land_end` stays pinned to `--seed 4`.

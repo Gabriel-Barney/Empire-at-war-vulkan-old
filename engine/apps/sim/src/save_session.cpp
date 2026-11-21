@@ -3,6 +3,7 @@
 
 #include <algorithm>
 
+#include "alamo/core/ascii.hpp"
 #include "alamo/core/sim_crc.hpp"
 #include "alamo/galactic/campaign.hpp"
 #include "alamo/galactic/galactic_rules.hpp"
@@ -13,28 +14,30 @@ namespace alamo::sim {
 
 namespace {
 
+// limit: guard save decode: counts, refuses
 constexpr uint32_t kMaxCount = 1u << 20;  // sanity bound for counts read from a save
 
 void write_scheduler(ByteWriter& w, const commands::SchedulerConfig& c) {
-    w.u32(c.delay).u8(c.max_players).u8(static_cast<uint8_t>(c.late)).u64(c.first_tick).u8(static_cast<uint8_t>(c.mode));
-    w.u32(c.turn).u32(c.max_ahead);
+    // late / mode / turn / max_ahead: the retired lockstep bytes (commands/scheduler.hpp), kept as constants.
+    // mcx5 t01 (descriptor version 2): max_players is a u16; version 1 wrote a u8.
+    w.u32(c.delay).u16(c.max_players).u8(commands::kSchedLateByte).u64(c.first_tick).u8(commands::kSchedModeByte);
+    w.u32(commands::kSchedTurn).u32(commands::kSchedMaxAhead);
 }
 
-bool read_scheduler(ByteReader& r, commands::SchedulerConfig& c) {
+bool read_scheduler(ByteReader& r, commands::SchedulerConfig& c, uint32_t version) {
     c.delay = r.u32();
-    c.max_players = r.u8();
-    c.late = static_cast<commands::LatePolicy>(r.u8());
+    c.max_players = static_cast<uint16_t>(version == 1 ? r.u8() : r.u16());
+    const uint8_t late = r.u8();
     c.first_tick = r.u64();
-    c.mode = static_cast<commands::ScheduleMode>(r.u8());
-    c.turn = r.u32();
-    c.max_ahead = r.u32();
-    return r.ok();
+    const uint8_t mode = r.u8();
+    const uint32_t turn = r.u32(), max_ahead = r.u32();
+    return r.ok() && late == commands::kSchedLateByte && mode == commands::kSchedModeByte && turn == commands::kSchedTurn &&
+           max_ahead == commands::kSchedMaxAhead;
 }
 
 bool same_scheduler(const commands::SchedulerConfig& a, const commands::SchedulerConfig& b) {
-    // first_tick is the host's (SimHost forces 1); max_ahead is the initial lockstep value.
-    return a.delay == b.delay && a.max_players == b.max_players && a.late == b.late && a.mode == b.mode && a.turn == b.turn &&
-           a.max_ahead == b.max_ahead;
+    // first_tick is the host's (SimHost forces 1).
+    return a.delay == b.delay && a.max_players == b.max_players;
 }
 
 std::vector<std::pair<std::string, std::string>> sorted(std::vector<std::pair<std::string, std::string>> v) {
@@ -92,10 +95,15 @@ void SessionDescriptor::write(ByteWriter& w) const {
     for (const auto& [k, v] : opts) w.str(k).str(v);
     w.u64(data_fingerprint);
     w.str(writer);
+    if (!mods.empty()) {  // mcx3 t05: optional trailing block
+        w.u32(static_cast<uint32_t>(mods.size()));
+        for (const SaveMod& m : mods) w.str(m.key).str(m.name).str(m.version).u64(m.content_hash);
+    }
 }
 
 bool SessionDescriptor::read(ByteReader& r) {
-    if (r.u32() != kVersion) return false;
+    const uint32_t version = r.u32();
+    if (version != kVersion && version != 1) return false;  // 1: before mcx5 (u8 scheduler max_players)
     SessionDescriptor d;
     d.kind = r.str();
     d.campaign = r.str();
@@ -105,7 +113,7 @@ bool SessionDescriptor::read(ByteReader& r) {
     for (uint32_t i = 0; i < na && r.ok(); ++i) d.data_args.push_back(r.str());
     d.seed = r.u32();
     d.players = r.u32();
-    if (!read_scheduler(r, d.scheduler)) return false;
+    if (!read_scheduler(r, d.scheduler, version)) return false;
     d.story_crc = r.boolean();
     const uint32_t np = r.u32();
     if (!r.ok() || np > kMaxCount) return false;
@@ -128,6 +136,18 @@ bool SessionDescriptor::read(ByteReader& r) {
     }
     d.data_fingerprint = r.u64();
     d.writer = r.str();
+    if (r.ok() && !r.done()) {  // mcx3 t05: the mods block
+        const uint32_t nm = r.u32();
+        if (!r.ok() || nm > kMaxCount) return false;
+        for (uint32_t i = 0; i < nm && r.ok(); ++i) {
+            SaveMod m;
+            m.key = r.str();
+            m.name = r.str();
+            m.version = r.str();
+            m.content_hash = r.u64();
+            d.mods.push_back(std::move(m));
+        }
+    }
     if (!r.ok() || !r.done()) return false;
     *this = std::move(d);
     return true;
@@ -136,7 +156,10 @@ bool SessionDescriptor::read(ByteReader& r) {
 std::string SessionDescriptor::mismatch(const SessionDescriptor& s, const SessionDescriptor& c) {
     if (s.kind != c.kind) return "session kind '" + s.kind + "' != '" + c.kind + "'";
     if (s.campaign != c.campaign) return "campaign '" + s.campaign + "' != '" + c.campaign + "'";
-    if (s.data_args != c.data_args) return "data arguments (mod path) differ";
+    if (s.data_args != c.data_args) {
+        const std::vector<std::string> lines = mod_changes(s, c);
+        return lines.empty() ? std::string("data arguments (mod path) differ") : join_changes(lines);
+    }
     if (s.seed != c.seed) return "session seed " + std::to_string(s.seed) + " != " + std::to_string(c.seed);
     if (s.players != c.players) return "player slots " + std::to_string(s.players) + " != " + std::to_string(c.players);
     if (!same_scheduler(s.scheduler, c.scheduler)) return "command scheduler settings differ";
@@ -146,8 +169,70 @@ std::string SessionDescriptor::mismatch(const SessionDescriptor& s, const Sessio
     for (size_t i = 0; i < s.setup.size(); ++i)
         if (!(s.setup[i] == c.setup[i])) return "player " + std::to_string(i) + " setup differs (" + s.setup[i].faction + ")";
     if (s.difficulty != c.difficulty) return "difficulty '" + s.difficulty + "' != '" + c.difficulty + "'";
-    if (sorted(s.options) != sorted(c.options)) return "session options differ";
-    if (s.data_fingerprint != c.data_fingerprint)
+    // sp3: the AI-lane options (ai_lane, k_ai) are not compared: a lane-off save also loads into an AI-lane session (bench,
+    // harness), and the battle.ai chunk refuses a lane save in a lane-off session itself.
+    const auto compared = [](const std::vector<std::pair<std::string, std::string>>& o) {
+        std::vector<std::pair<std::string, std::string>> v;
+        for (const auto& kv : o)
+            if (kv.first != "ai_lane" && kv.first != "k_ai") v.push_back(kv);
+        return sorted(std::move(v));
+    };
+    if (compared(s.options) != compared(c.options)) return "session options differ";
+    if (s.data_fingerprint != c.data_fingerprint) return data_change(s, c);
+    return {};
+}
+
+bool SessionDescriptor::only_data_differs(const SessionDescriptor& s, const SessionDescriptor& c) {
+    if (mismatch(s, c).empty()) return false;
+    SessionDescriptor same = s;
+    same.data_args = c.data_args;
+    same.data_fingerprint = c.data_fingerprint;
+    same.mods = c.mods;
+    return mismatch(same, c).empty();
+}
+
+std::vector<std::string> SessionDescriptor::mod_changes(const SessionDescriptor& s, const SessionDescriptor& c) {
+    std::vector<std::string> out;
+    // A side with mod arguments but no mods block (a save from before mcx3) does not say which mods it had.
+    const auto known = [](const SessionDescriptor& d) {
+        if (!d.mods.empty()) return true;
+        for (const std::string& a : d.data_args) {
+            const std::string up = ascii_upper(std::string_view(a).substr(0, 9));
+            if (up.rfind("MODPATH=", 0) == 0 || up.rfind("STEAMMOD=", 0) == 0) return false;
+        }
+        return true;
+    };
+    if (!known(s) || !known(c)) return out;
+    const auto add = [&out](const std::string& line) { out.push_back(line); };
+    const auto find = [](const std::vector<SaveMod>& v, const std::string& key) -> const SaveMod* {
+        for (const SaveMod& m : v)
+            if (m.key == key) return &m;
+        return nullptr;
+    };
+    for (const SaveMod& m : s.mods) {
+        const SaveMod* now = find(c.mods, m.key);
+        if (!now) add(m.name + " was in this save and is not loaded now");
+        else if (now->version != m.version)
+            add(m.name + " updated since this save (version " + (m.version.empty() ? "?" : m.version) + " -> " +
+                (now->version.empty() ? "?" : now->version) + ")");
+        else if (now->content_hash != m.content_hash)
+            add(m.name + " changed since this save (version " + (m.version.empty() ? "?" : m.version) + ")");
+    }
+    for (const SaveMod& m : c.mods)
+        if (!find(s.mods, m.key)) add(m.name + " is loaded now and was not in this save");
+    return out;
+}
+
+std::string SessionDescriptor::join_changes(const std::vector<std::string>& lines) {
+    std::string out;
+    for (const std::string& l : lines) out += (out.empty() ? "" : "; ") + l;
+    return out;
+}
+
+std::string SessionDescriptor::data_change(const SessionDescriptor& s, const SessionDescriptor& c) {
+    const std::vector<std::string> lines = mod_changes(s, c);
+    if (!lines.empty()) return join_changes(lines);
+    if (s.data_fingerprint != c.data_fingerprint || s.data_args != c.data_args)
         return "game data differs (fingerprint " + hex64(s.data_fingerprint) + " != " + hex64(c.data_fingerprint) + ")";
     return {};
 }
@@ -159,7 +244,7 @@ bool read_session(const SaveFile& save, SessionDescriptor& out, std::string* err
         return false;
     }
     ByteReader r(c->data);
-    if (c->version != SessionDescriptor::kVersion || !out.read(r)) {
+    if ((c->version != SessionDescriptor::kVersion && c->version != 1) || !out.read(r)) {
         if (err) *err = "session chunk: unknown version or bad data";
         return false;
     }

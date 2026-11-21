@@ -8,6 +8,7 @@
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
+#include <span>
 #include <string>
 #include <vector>
 
@@ -23,6 +24,7 @@
 #include "alamo/ui/hud_input.hpp"
 #include "alamo/ui/load_screen.hpp"
 #include "alamo/ui/picking.hpp"
+#include "alamo/test/support.hpp"
 #ifdef ALAMO_UI_HAVE_VFS
 #include "alamo/vfs/vfs.hpp"
 #endif
@@ -34,14 +36,7 @@
 using namespace alamo;
 using namespace alamo::ui;
 
-static int g_fail = 0;
-#define CHECK(c)                                                     \
-    do {                                                             \
-        if (!(c)) {                                                  \
-            std::printf("FAIL %s:%d: %s\n", __FILE__, __LINE__, #c); \
-            ++g_fail;                                                \
-        }                                                            \
-    } while (0)
+using ::alamo::test::g_fail;
 
 namespace {
 
@@ -92,6 +87,7 @@ BEGIN
     PUSHBUTTON      "TEXT_BUTTON_SKIRMISH",IDC_SKIRMISH_GAMES_BUTTON,265,598,236,23
     PUSHBUTTON      "TEXT_BUTTON_DEBUG_LOAD_SKIRMISH_MAP",
                     IDC_DEBUG_LOAD_SKIRMISH_MAP_BUTTON,284,723,196,22
+    LISTBOX         IDC_HINT_LIST,284,658,228,107,LBS_SORT | LBS_NOINTEGRALHEIGHT | WS_TABSTOP
 END
 
 IDD_CAMPAIGN_SELECTION_DIALOG DIALOGEX 0, 0, 620, 441
@@ -146,6 +142,8 @@ BEGIN
     PUSHBUTTON      "TEXT_BUTTON",IDC_DIALOG_BOX_BUTTON_LEFT,22,95,128,24
     PUSHBUTTON      "TEXT_BUTTON",IDC_DIALOG_BOX_BUTTON_RIGHT,181,95,128,24
     LTEXT           "USER STRING 1 HERE",IDC_USER_TEXT_STRING_1,17,45,296,8
+    LTEXT           "USER STRING 2 HERE",IDC_USER_TEXT_STRING_2,17,63,296,8
+    LTEXT           "USER STRING 3 HERE",IDC_USER_TEXT_STRING_3,17,81,296,8
 END
 
 IDD_AUDIO_OPTIONS_DIALOG DIALOGEX 0, 0, 551, 372
@@ -190,6 +188,17 @@ BEGIN
     RTEXT           "Name 0",IDC_PLAYER_NAME_0,401,595,247,18
     RTEXT           "Name 1",IDC_PLAYER_NAME_1,401,578,247,18
     LTEXT           "TEXT_SAVELOAD_LOADING_MSG",IDC_STATIC_LOADING,457,616,445,14
+END
+
+IDD_TEST_WIDGETS DIALOGEX 0, 0, 400, 300
+STYLE DS_SETFONT | WS_POPUP
+CAPTION "Widgets"
+FONT 8, "Arial", 400, 0, 0x0
+BEGIN
+    COMBOBOX        IDC_W_COMBO,10,10,150,70,CBS_DROPDOWNLIST | WS_TABSTOP
+    LISTBOX         IDC_W_LIST,10,100,200,100,WS_VSCROLL | WS_TABSTOP
+    EDITTEXT        IDC_W_EDIT,220,10,60,16,ES_AUTOHSCROLL
+    EDITTEXT        IDC_W_EDIT_FIXED,220,40,60,16
 END
 
 IDD_TEST_CONTROLS DIALOGEX 0, 0, 400, 300
@@ -263,6 +272,13 @@ const char* kSkinXml = R"(<?xml version="1.0" encoding="utf-8"?>
     <IDC_MENU_CREDITS>
       <Button_Right>i_button_credits.tga</Button_Right>
     </IDC_MENU_CREDITS>
+    <IDD_TEST_WIDGETS>
+      <Combo_Box_Popdown_Button>i_test_combo_button.tga</Combo_Box_Popdown_Button>
+      <Scroll_Up_Button>i_test_scroll_up.tga</Scroll_Up_Button>
+      <Scroll_Down_Button>i_test_scroll_down.tga</Scroll_Down_Button>
+      <Scroll_Down_Button_Mouse_Over>i_test_scroll_down_mouse_over.tga</Scroll_Down_Button_Mouse_Over>
+      <Scroll_Down_Button_Pressed>i_test_scroll_down_pressed.tga</Scroll_Down_Button_Pressed>
+    </IDD_TEST_WIDGETS>
   </Textures>
   <Fonts>
     <Default>
@@ -293,6 +309,11 @@ TextureAtlas gui_atlas() {
     a.add({"i_dialogue_button_large_right.tga", 48, 0, 8, 32, true});
     a.add({"i_dialogue_button_large_middle_mouse_over.tga", 56, 0, 8, 32, true});
     a.add({"i_dialogue_check_on.tga", 64, 0, 12, 12, true});
+    a.add({"i_test_combo_button.tga", 80, 0, 22, 25, true});
+    a.add({"i_test_scroll_up.tga", 104, 0, 16, 16, true});
+    a.add({"i_test_scroll_down.tga", 120, 0, 16, 16, true});
+    a.add({"i_test_scroll_down_mouse_over.tga", 136, 0, 16, 16, true});
+    a.add({"i_test_scroll_down_pressed.tga", 152, 0, 16, 16, true});
     return a;
 }
 
@@ -318,6 +339,7 @@ struct Env {
         text.add("TEXT_BUTTON_BEGIN", u"Begin");
         text.add("TEXT_DIFFICULTY_NORMAL_NAME", u"Normal");
         text.add("TEXT_BUTTON_YES", u"Yes");
+        text.add("Hint_IDC_SKIRMISH_GAMES_BUTTON", u"Fight a single battle.");
         gui.init(script, skin, atlas, fonts, &text);
         gui.resize(1024, 768);
         gui.set_sfx_hook([this](std::string_view e, int32_t) { sfx.emplace_back(e); });
@@ -345,6 +367,9 @@ struct Env {
             f.keys_down.set(k);
         }
         if (shift) f.keys_down.set(vk::kShift);
+        if (ctrl) f.keys_down.set(vk::kControl);
+        f.wheel = wheel;
+        wheel = 0.0f;
         RouteHooks hooks;
         gui.install(hooks);
         RoutedInput ri;
@@ -366,6 +391,10 @@ struct Env {
         return ev;
     }
     InputFrame last;
+    bool ctrl = false;    // Ctrl held in the next frames
+    float wheel = 0.0f;   // wheel notches of the next frame
+    Vec2f at(Vec2f canvas) const { return gui.canvas().canvas_to_pixel(canvas.x, canvas.y); }
+    static Vec2f mid(const GuiRect& r) { return {0.5f * (r.min.x + r.max.x), 0.5f * (r.min.y + r.max.y)}; }
 };
 
 bool has_event(const std::vector<GuiEvent>& ev, GuiEvent::Kind k, std::string_view control, int32_t value = -999) {
@@ -377,7 +406,7 @@ bool has_event(const std::vector<GuiEvent>& ev, GuiEvent::Kind k, std::string_vi
 void test_parse() {
     Env env;
     const DialogScript& s = env.script;
-    CHECK(s.dialogs().size() == 10);
+    CHECK(s.dialogs().size() == 11);
     CHECK(s.warnings.empty());
     for (const std::string& w : s.warnings) std::printf("  warning: %s\n", w.c_str());
     const RcDialog* mm = s.find("IDD_MAIN_MENU_DIALOG");
@@ -427,6 +456,22 @@ void test_parse() {
     CHECK(k.font("IDD_X", "IDC_HINT_LIST", GuiGadgetType::ListBox, TextAlign::Left).face == "Arial Unicode MS");
     CHECK(k.font("IDD_X", "", GuiGadgetType::Text, TextAlign::Center).face == "EmpireAtWar-Medium");  // C_Text -> global
     CHECK(k.tooltip("idc_test_check") == "TEXT_TIP" && k.tooltip_count() == 1);
+    // modc t34 (UI.md 3.2): a run of commas is one separator, as spaces and tabs ("215,,22": height 22, no empty field).
+    {
+        DialogScript dc;
+        std::string err;
+        dc.parse("IDD_DC DIALOGEX 0, 0, 512, 1024\nBEGIN\n    PUSHBUTTON      \"TEXT_A\",\n                    IDC_A,265,550,215,,22\n"
+                 "    PUSHBUTTON      \"TEXT_B\",IDC_B,265,,590 ,\t215,23\nEND\n",
+                 &err);
+        const RcDialog* d = dc.find("IDD_DC");
+        CHECK(d && d->controls.size() == 2);
+        if (d && d->controls.size() == 2) {
+            const RcControl& a = d->controls[0];
+            const RcControl& b = d->controls[1];
+            CHECK(a.id == "IDC_A" && a.x == 265 && a.y == 550 && a.w == 215 && a.h == 22 && a.visible);
+            CHECK(b.id == "IDC_B" && b.x == 265 && b.y == 590 && b.w == 215 && b.h == 23);
+        }
+    }
 }
 
 void test_placement() {
@@ -549,8 +594,12 @@ void test_routing_and_controls() {
         const GuiRect r = d->control_rect(static_cast<size_t>(d->find("IDC_TEST_SLIDER")));
         const Vec2f right = env.gui.canvas().canvas_to_pixel(r.max.x - 0.5f, 0.5f * (r.min.y + r.max.y));
         const Vec2f left = env.gui.canvas().canvas_to_pixel(r.min.x + 0.5f, 0.5f * (r.min.y + r.max.y));
+        env.sfx.clear();
+        env.frame(right, false);  // UI5 t06: entering the slider is a hover, the press a Button_Press
+        CHECK(env.sfx.size() == 1 && env.sfx[0] == "GUI_Common_Dialog_Button_Hilight");
         ev = env.frame(right, true);
         CHECK(has_event(ev, GuiEvent::Kind::ValueChanged, "IDC_TEST_SLIDER", 100));
+        CHECK(env.sfx.size() == 2 && env.sfx[1] == "GUI_Common_Dialog_Button_Press");
         ev = env.frame(left, true);
         CHECK(has_event(ev, GuiEvent::Kind::ValueChanged, "IDC_TEST_SLIDER", 0));
         env.frame(left, false);
@@ -588,13 +637,28 @@ void test_routing_and_controls() {
         d->set_items("IDC_TEST_COMBO", {U"Rebel", U"Empire", U"Underworld"}, 0);
         const GuiRect f = d->control_rect(static_cast<size_t>(d->find("IDC_TEST_COMBO")));
         const Vec2f field = env.gui.canvas().canvas_to_pixel(f.min.x + 20.0f, f.max.y - 7.0f);  // closed field (15 units)
+        env.sfx.clear();
         env.frame(field, false);
         env.frame(field, true);
         env.frame(field, false);
         CHECK(d->get("IDC_TEST_COMBO")->open);
+        // UI5 t06: hover and the open click sound like a button.
+        CHECK(env.sfx.size() == 2 && env.sfx[0] == "GUI_Common_Dialog_Button_Hilight" && env.sfx[1] == "GUI_Common_Dialog_Button_Press");
         const float rh = static_cast<float>(env.fonts.metrics(env.gui.control_font(*d, static_cast<size_t>(d->find("IDC_TEST_COMBO")))).line_height) *
                          env.gui.canvas().units_per_pixel_y;
         const Vec2f row2 = env.gui.canvas().canvas_to_pixel(f.min.x + 10.0f, f.max.y - 15.0f - 2.0f - 2.5f * rh);
+        // UI5 t06 (UI.md §3.6): the open drop-down is silent; coming back onto the field hovers, the closing click presses.
+        env.sfx.clear();
+        env.frame(row2, false);
+        CHECK(env.sfx.empty());
+        env.frame(field, false);
+        CHECK(env.sfx.size() == 1 && env.sfx[0] == "GUI_Common_Dialog_Button_Hilight");
+        env.frame(field, true);
+        env.frame(field, false);
+        CHECK(!d->get("IDC_TEST_COMBO")->open && env.sfx.size() == 2 && env.sfx[1] == "GUI_Common_Dialog_Button_Press");
+        env.frame(field, true);  // open again for the row pick
+        env.frame(field, false);
+        CHECK(d->get("IDC_TEST_COMBO")->open);
         env.frame(row2, false);
         ev = env.frame(row2, true);
         env.frame(row2, false);
@@ -602,7 +666,10 @@ void test_routing_and_controls() {
     }
     // Edit: typed text (WM_CHAR), VK fallback, Backspace, Enter = Submitted.
     {
+        env.sfx.clear();
         env.click(*d, "IDC_TEST_EDIT");
+        CHECK(!env.sfx.empty() && env.sfx.back() == "GUI_Common_Dialog_Button_Press");  // UI5 t06: no hover sound, a press
+        CHECK(std::count(env.sfx.begin(), env.sfx.end(), std::string("GUI_Common_Dialog_Button_Hilight")) == 0);
         ev = env.frame({0, 0}, false, {}, false, U"Save 1");
         CHECK(has_event(ev, GuiEvent::Kind::TextChanged, "IDC_TEST_EDIT") && d->get("IDC_TEST_EDIT")->text == U"Save 1");
         env.frame({0, 0}, false, {vk::kBack});
@@ -643,6 +710,227 @@ void test_routing_and_controls() {
     CHECK(gradient);
 }
 
+// UI5 t03 / t04: combo field height and drop-down scrolling, list scroll bar (arrows with art and auto-repeat, thumb
+// drag, track paging, Home / End), edit boxes (ES_AUTOHSCROLL scrolling, caret placement, selection, clipboard).
+void test_widgets_ui5() {
+    Env env;
+    GuiDialog* d = env.gui.open("IDD_TEST_WIDGETS");
+    CHECK(d != nullptr);
+    if (!d) return;
+    const auto ci = static_cast<size_t>(d->find("IDC_W_COMBO"));
+    const auto li = static_cast<size_t>(d->find("IDC_W_LIST"));
+    env.frame({1000, 700}, false);
+    // Combo: the closed field is the skin's 25-unit pop-down button height (UI.md §3.7.1), not 15.
+    CHECK(std::fabs(env.gui.combo_field_height(*d, ci) - 25.0f) < 1e-3f && std::fabs((*d)[ci].field_height - 25.0f) < 1e-3f);
+    std::vector<std::u32string> many;
+    for (int k = 0; k < 30; ++k) many.push_back(U"fps " + std::u32string(1, U'A' + static_cast<char32_t>(k)));
+    d->set_items("IDC_W_COMBO", many, 0);
+    const GuiRect cr = d->control_rect(ci);
+    const Vec2f field = env.at({cr.min.x + 20.0f, cr.max.y - 20.0f});  // inside the 25-unit field, below the old 15
+    env.frame(field, false);
+    env.frame(field, true);
+    env.frame(field, false);
+    CHECK((*d)[ci].open);
+    GuiManager::ScrollBar sb = env.gui.scroll_bar(*d, ci);
+    const int32_t rows = env.gui.combo_rows(*d, ci);
+    CHECK(sb.active && rows < 30 && sb.vis == rows && sb.max_top == 30 - rows && (*d)[ci].top == 0);
+    // Wheel over the drop-down scrolls it (3 rows a notch), still open.
+    env.frame(env.at({Env::mid(sb.col).x - 30.0f, Env::mid(sb.col).y}), false);
+    env.wheel = -1.0f;
+    env.frame(env.at({Env::mid(sb.col).x - 30.0f, Env::mid(sb.col).y}), false);
+    CHECK((*d)[ci].top == std::min(3, sb.max_top) && (*d)[ci].open);
+    // Down arrow: one row on the press, auto-repeat after the delay while held; the drop-down stays open.
+    sb = env.gui.scroll_bar(*d, ci);
+    const int32_t t0 = (*d)[ci].top;
+    env.frame(env.at(Env::mid(sb.down)), false);
+    env.frame(env.at(Env::mid(sb.down)), true);
+    CHECK((*d)[ci].top == t0 + 1 && (*d)[ci].open);
+    for (int k = 0; k < 6; ++k) env.frame(env.at(Env::mid(sb.down)), true);  // 0.30 s: below the 0.4 s delay
+    CHECK((*d)[ci].top == t0 + 1);
+    for (int k = 0; k < 6; ++k) env.frame(env.at(Env::mid(sb.down)), true);
+    CHECK((*d)[ci].top > t0 + 2);
+    env.frame(env.at(Env::mid(sb.down)), false);
+    CHECK((*d)[ci].open);
+    // Thumb drag to the top.
+    sb = env.gui.scroll_bar(*d, ci);
+    env.frame(env.at(Env::mid(sb.thumb)), false);
+    env.frame(env.at(Env::mid(sb.thumb)), true);
+    env.frame(env.at({Env::mid(sb.thumb).x, sb.up.min.y + 50.0f}), true);
+    CHECK((*d)[ci].top == 0);
+    env.frame(env.at({Env::mid(sb.thumb).x, sb.up.min.y + 50.0f}), false);
+    // A row of the scrolled list: scroll by 5 with the wheel, click the second visible row -> item top + 1.
+    env.wheel = -2.0f;
+    env.frame(env.at({Env::mid(sb.col).x - 30.0f, Env::mid(sb.col).y}), false);
+    const int32_t top = (*d)[ci].top;
+    CHECK(top == std::min(6, sb.max_top));
+    {
+        const float rh = static_cast<float>(env.fonts.metrics(env.gui.control_font(*d, ci)).line_height) * env.gui.canvas().units_per_pixel_y;
+        const Vec2f row = env.at({cr.min.x + 10.0f, cr.max.y - 25.0f - 2.0f - 1.5f * rh});
+        env.frame(row, false);
+        std::vector<GuiEvent> ev = env.frame(row, true);
+        env.frame(row, false);
+        CHECK(has_event(ev, GuiEvent::Kind::SelectionChanged, "IDC_W_COMBO", top + 1) && !(*d)[ci].open);
+    }
+    // Opening again scrolls to the selection; End / Home keys.
+    env.frame(field, true);
+    env.frame(field, false);
+    CHECK((*d)[ci].open && (*d)[ci].top == std::min(top + 1, sb.max_top));
+    env.frame(field, false, {vk::kEnd});
+    CHECK((*d)[ci].selected == 29 && (*d)[ci].top == sb.max_top);
+    env.frame(field, false, {vk::kHome});
+    CHECK((*d)[ci].selected == 0 && (*d)[ci].top == 0);
+    env.frame(field, false, {vk::kEscape});
+    CHECK(!(*d)[ci].open);
+
+    // List: 50 rows, scroll column = the Scroll_Up_Button art width (16), not a fixed 12.
+    std::vector<std::u32string> rowsv;
+    for (int k = 0; k < 50; ++k) rowsv.push_back(U"row " + std::u32string(1, U'0' + static_cast<char32_t>(k % 10)));
+    d->set_items("IDC_W_LIST", rowsv);
+    sb = env.gui.scroll_bar(*d, li);
+    CHECK(sb.active && std::fabs(sb.col.width() - 16.0f) < 1e-3f && sb.max_top == 50 - sb.vis);
+    // Arrow art: mouse-over under the cursor, pressed while held.
+    auto has_tex = [&](const char* tex, uint32_t layer) {
+        const AtlasEntry* e = env.atlas.find(tex);
+        HudDrawList dl;
+        env.gui.build(dl, env.now);
+        for (const HudQuad& q : dl.items(layer, HudList::Alpha))
+            if (e && q.page == kHudPageAtlas && std::fabs(q.uv0.x - static_cast<float>(e->x) / 256.0f) < 1e-4f) return true;
+        return false;
+    };
+    env.frame(env.at(Env::mid(sb.down)), false);
+    CHECK(has_tex("i_test_scroll_down_mouse_over.tga", 0) && !has_tex("i_test_scroll_down_pressed.tga", 0));
+    env.frame(env.at(Env::mid(sb.down)), true);
+    CHECK((*d)[li].top == 1 && has_tex("i_test_scroll_down_pressed.tga", 0));
+    for (int k = 0; k < 14; ++k) env.frame(env.at(Env::mid(sb.down)), true);  // 0.7 s held: repeats
+    CHECK((*d)[li].top > 3);
+    env.frame(env.at(Env::mid(sb.down)), false);
+    env.frame({1000, 700}, false);
+    CHECK(has_tex("i_test_scroll_down.tga", 0) && !has_tex("i_test_scroll_down_mouse_over.tga", 0));
+    // Thumb drag to the bottom, then back to the top; the list does not select a row meanwhile.
+    sb = env.gui.scroll_bar(*d, li);
+    env.frame(env.at(Env::mid(sb.thumb)), false);
+    env.frame(env.at(Env::mid(sb.thumb)), true);
+    env.frame(env.at({Env::mid(sb.thumb).x, sb.down.max.y - 1.0f}), true);
+    CHECK((*d)[li].top == sb.max_top && (*d)[li].selected == -1);
+    env.frame(env.at({Env::mid(sb.thumb).x, sb.up.min.y + 200.0f}), true);
+    CHECK((*d)[li].top == 0);
+    env.frame(env.at({Env::mid(sb.thumb).x, sb.up.min.y + 200.0f}), false);
+    // Track below the thumb: one page.
+    sb = env.gui.scroll_bar(*d, li);
+    env.frame(env.at({Env::mid(sb.col).x, sb.down.max.y + 2.0f}), true);
+    env.frame(env.at({Env::mid(sb.col).x, sb.down.max.y + 2.0f}), false);
+    CHECK((*d)[li].top == sb.vis && (*d)[li].selected == -1);
+    // Home / End on the focused list.
+    d->focus("IDC_W_LIST");
+    env.frame({1000, 700}, false, {vk::kEnd});
+    CHECK((*d)[li].selected == 49 && (*d)[li].top == sb.max_top);
+    env.frame({1000, 700}, false, {vk::kHome});
+    CHECK((*d)[li].selected == 0 && (*d)[li].top == 0);
+
+    // Edit with ES_AUTOHSCROLL: long text scrolls (not squeezed), the caret stays in view.
+    const auto ei = static_cast<size_t>(d->find("IDC_W_EDIT"));
+    const std::u32string longt = U"abcdefghijklmnopqrstuvwxyz0123456789";
+    env.click(*d, "IDC_W_EDIT");
+    env.frame({0, 0}, false, {}, false, longt);
+    CHECK((*d)[ei].text == longt && (*d)[ei].caret == longt.size() && (*d)[ei].scroll_x > 0);
+    env.frame({0, 0}, false, {vk::kHome});
+    CHECK((*d)[ei].caret == 0 && (*d)[ei].scroll_x == 0);
+    // A click puts the caret near the cursor, not at the end.
+    const GuiRect er = d->control_rect(ei);
+    env.frame(env.at({er.min.x + 6.0f, Env::mid(er).y}), false);
+    env.frame(env.at({er.min.x + 6.0f, Env::mid(er).y}), true);
+    env.frame(env.at({er.min.x + 6.0f, Env::mid(er).y}), false);
+    CHECK((*d)[ei].caret <= 1);
+    env.frame(env.at({Env::mid(er).x, Env::mid(er).y}), true);
+    env.frame(env.at({Env::mid(er).x, Env::mid(er).y}), false);
+    const size_t mid_caret = (*d)[ei].caret;
+    CHECK(mid_caret > 1 && mid_caret < longt.size());
+    // Drag selects from the press point.
+    env.frame(env.at({er.min.x + 6.0f, Env::mid(er).y}), true);
+    env.frame(env.at({er.max.x - 4.0f, Env::mid(er).y}), true);
+    env.frame(env.at({er.max.x - 4.0f, Env::mid(er).y}), false);
+    CHECK((*d)[ei].sel_anchor <= 1 && (*d)[ei].caret > (*d)[ei].sel_anchor + 1);
+    // Typing replaces the selection.
+    std::vector<GuiEvent> ev = env.frame({0, 0}, false, {}, false, U"Z");
+    const size_t removed = (*d)[ei].caret;  // caret after "Z"
+    CHECK(has_event(ev, GuiEvent::Kind::TextChanged, "IDC_W_EDIT") && (*d)[ei].text.size() < longt.size() && removed >= 1 &&
+          (*d)[ei].text[removed - 1] == U'Z');
+    // Shift+Home selects to the start, Backspace deletes the selection.
+    env.frame({0, 0}, false, {vk::kHome}, true);
+    CHECK((*d)[ei].caret == 0 && (*d)[ei].sel_anchor == removed);
+    env.frame({0, 0}, false, {vk::kBack});
+    CHECK((*d)[ei].text == longt.substr(longt.size() - ((*d)[ei].text.size())) && (*d)[ei].text.front() != U'Z' && (*d)[ei].caret == 0);
+    // Clipboard (manager-private): Ctrl+A, Ctrl+C, End, Ctrl+V doubles the text; Ctrl+X empties it.
+    d->set_text("IDC_W_EDIT", U"abc");
+    env.ctrl = true;
+    env.frame({0, 0}, false, {vk::key('a')});
+    env.frame({0, 0}, false, {vk::key('c')});
+    env.ctrl = false;
+    env.frame({0, 0}, false, {vk::kEnd});
+    env.ctrl = true;
+    env.frame({0, 0}, false, {vk::key('v')});
+    CHECK((*d)[ei].text == U"abcabc");  // no 'v' typed by the VK fallback while Ctrl is down
+    env.frame({0, 0}, false, {vk::key('a')});
+    env.frame({0, 0}, false, {vk::key('x')});
+    env.ctrl = false;
+    CHECK((*d)[ei].text.empty());
+    // Host clipboard hooks.
+    std::u32string host = U"from host";
+    env.gui.set_clipboard([&] { return host; }, [&](std::u32string_view t) { host = std::u32string(t); });
+    env.frame({0, 0}, false, {vk::kInsert}, true);  // Shift+Insert pastes
+    CHECK((*d)[ei].text == U"from host");
+    env.frame({0, 0}, false, {vk::kHome}, true);  // select all backwards
+    env.ctrl = true;
+    env.frame({0, 0}, false, {vk::kInsert});  // Ctrl+Insert copies
+    env.ctrl = false;
+    CHECK(host == U"from host");
+    // Without ES_AUTOHSCROLL typing stops at the field width.
+    env.click(*d, "IDC_W_EDIT_FIXED");
+    env.frame({0, 0}, false, {}, false, longt);
+    const GuiControl& fx = (*d)[static_cast<size_t>(d->find("IDC_W_EDIT_FIXED"))];
+    CHECK(!fx.text.empty() && fx.text.size() < longt.size() && fx.scroll_x == 0 && longt.starts_with(fx.text));
+    // Drawing stays deterministic with the scrolled / selected states.
+    HudDrawList a, b;
+    env.gui.build(a, env.now);
+    env.gui.build(b, env.now);
+    CHECK(a.digest() == b.digest());
+    // UI5 t08: a dialog tooltip sits below-right of the cursor, flips at the right / bottom edge and stays on screen.
+    {
+        const HudCanvas& cv = env.gui.canvas();
+        const float hw = 0.5f * cv.width, hh = 0.5f * cv.height;
+        const Vec2f size{120.0f, 30.0f};
+        const GuiRect mid = env.gui.tooltip_box({0.0f, 0.0f}, size);
+        CHECK(mid.min.x > 0.0f && mid.max.y < 0.0f && std::fabs(mid.width() - size.x) < 1e-3f);
+        const GuiRect corner = env.gui.tooltip_box({hw - 5.0f, -hh + 5.0f}, size);  // bottom-right corner
+        CHECK(corner.max.x <= hw + 1e-3f && corner.min.y >= -hh - 1e-3f && corner.max.x < hw - 5.0f && corner.min.y > -hh + 5.0f);
+        const GuiRect huge = env.gui.tooltip_box({0.0f, 0.0f}, {cv.width + 50.0f, 10.0f});  // wider than the screen: left edge
+        CHECK(std::fabs(huge.min.x + hw) < 1e-3f);
+    }
+}
+
+// mcx4 t07 (docs/re/MCX4_RE_ANSWERS_GALACTIC.md Q7.3): Is_Listed false hides a custom (conquest) campaign from the
+// setup list; story and tutorial entries stay (retail starts story campaigns by name, its tutorial list ignores the flag).
+// ledger: verifies Campaign.Is_Listed
+void test_campaign_menu_is_listed() {
+    auto def = [](const char* name, const char* set, bool custom, const char* listed) {
+        data::CampaignDef c;
+        c.name = name;
+        c.campaign_set = set;
+        c.starting_active_player = "Rebel";
+        c.raw.emplace_back("Supports_Custom_Settings", custom ? "True" : "False");
+        if (listed) c.raw.emplace_back("Is_Listed", listed);
+        return c;
+    };
+    const data::CampaignDef defs[] = {def("GC_Shown", "Set_Shown", true, nullptr), def("GC_Hidden", "Set_Hidden", true, "False"),
+                                      def("GC_Yes", "Set_Yes", true, "yes"), def("Story_Hidden", "Story", false, "False"),
+                                      def("Tutorial_Hidden", "Tutorial_One", true, "false")};
+    std::vector<const data::CampaignDef*> sorted;
+    for (const data::CampaignDef& c : defs) sorted.push_back(&c);
+    const CampaignMenu m = build_campaign_menu(std::span<const data::CampaignDef* const>(sorted));
+    CHECK(m.custom.size() == 2u && m.custom[0].set == "Set_Shown" && m.custom[1].set == "Set_Yes");
+    CHECK(m.story.size() == 1u && m.tutorials.size() == 1u);
+}
+
 void test_menus() {
     Env env;
     CampaignMenu menu;
@@ -675,9 +963,26 @@ void test_menus() {
     CHECK(fe.top() == "IDD_MAIN_MENU_DIALOG");
     GuiDialog* mm = env.gui.top();
     CHECK(!mm->get("IDC_MAIN_MENU_PLAY_DEMO")->visible && mm->get("IDC_MAIN_MENU_SINGLE_PLAYER_GAMES")->visible);
+    {  // multiplayer is out of scope: its button is hidden and Load Game / Options / Exit move up one slot each
+        CHECK(!mm->get("IDC_MAIN_MENU_MULTIPLAYER")->visible);
+        auto top_of = [&](const char* id) { return mm->control_rect(static_cast<size_t>(mm->find(id))).max.y; };
+        CHECK(top_of("IDC_LOAD_GAME_MAIN") == top_of("IDC_MAIN_MENU_SINGLE_PLAYER_GAMES") - 36.0f);  // the old 598 slot
+        CHECK(top_of("IDC_OPTIONS") == top_of("IDC_MAIN_MENU_SINGLE_PLAYER_GAMES") - 72.0f);         // 634
+        CHECK(top_of("IDC_MAIN_MENU_EXIT2") == top_of("IDC_MAIN_MENU_SINGLE_PLAYER_GAMES") - 108.0f);  // 670
+        CHECK(mm->get("IDC_MENU_CREDITS")->offset.y == 0.0f && mm->get("IDC_MENU_PETRO_LOGO")->offset.y == 0.0f);
+    }
     step(env.click(*mm, "IDC_MAIN_MENU_SINGLE_PLAYER_GAMES"));
     CHECK(fe.top() == "IDD_SINGLE_PLAYER_GAMES_MENU_DIALOG" && env.gui.open_count() == 1);
     CHECK(!env.gui.top()->get("IDC_DEBUG_LOAD_SKIRMISH_MAP_BUTTON")->visible);
+    {  // UI5 t08 (UI.md §4.5 Hint list): hidden until a button is hovered, then "Hint_<id>" (a blank row without one)
+        GuiDialog* sp = env.gui.top();
+        CHECK(!sp->get("IDC_HINT_LIST")->visible);
+        step(env.frame(env.px_of(*sp, "IDC_SKIRMISH_GAMES_BUTTON"), false));
+        const GuiControl* hl = sp->get("IDC_HINT_LIST");
+        CHECK(hl->visible && hl->items.size() == 1 && hl->items[0] == U"Fight a single battle.");
+        step(env.frame(env.px_of(*sp, "IDC_BACK_BUTTON_MAIN"), false));
+        CHECK(hl->visible && hl->items.size() == 1 && hl->items[0] == U" ");
+    }
     step(env.click(*env.gui.top(), "IDC_NEW_CAMPAIGN_BUTTON"));
     CHECK(fe.top() == "IDD_CAMPAIGN_SELECTION_DIALOG");
     GuiDialog* cs = env.gui.top();
@@ -773,6 +1078,62 @@ void test_menus() {
     CHECK(fe.top() == "IDD_GAME_OPTIONS_DIALOG");
     blocker.clear();
     exists = false;
+    {
+        // [port: Gabriel] the saved games tree: campaign > faction > playthrough, newest first; the newest save's groups
+        // open; a click on a group row opens / closes it (closing closes the groups inside it); Load on a group toggles it.
+        auto lvl = [](const char* key, const char32_t* label, const char* icon = "") { return SaveGroupLevel{key, label, icon}; };
+        saves = {
+            {"new", U"new  -  Week 9", "i_icon_empire.tga", {lvl("c:GCW", U"Galactic Civil War"), lvl("Empire", U"Empire", "i_icon_empire.tga"), lvl("p2", U"Game 2")}},
+            {"rebel", U"rebel  -  Week 2", "i_icon_rebel.tga", {lvl("c:GCW", U"Galactic Civil War"), lvl("Rebel", U"Rebel", "i_icon_rebel.tga"), lvl("p3", U"Game 3")}},
+            {"old", U"old  -  Week 4", "i_icon_empire.tga", {lvl("c:GCW", U"Galactic Civil War"), lvl("Empire", U"Empire", "i_icon_empire.tga"), lvl("p1", U"Game 1")}},
+            {"older", U"older  -  Week 3", "i_icon_empire.tga", {lvl("c:GCW", U"Galactic Civil War"), lvl("Empire", U"Empire", "i_icon_empire.tga"), lvl("p2", U"Game 2")}},
+            {"bad", U"bad  -  (unreadable)"},
+        };
+        step(env.click(*env.gui.top(), "IDC_SAVE_GAME"));
+        sv = env.gui.top();
+        const GuiControl* l = sv->get("IDC_SAVE_GAME_LIST");
+        const std::vector<std::u32string> open_rows = {U"[-] Galactic Civil War  (4)", U"[-] Empire  (3)", U"[-] Game 2  (2)",
+                                                      U"new  -  Week 9", U"older  -  Week 3", U"[+] Game 1  (1)",
+                                                      U"[+] Rebel  (1)", U"bad  -  (unreadable)"};
+        CHECK(l->items == open_rows);
+        CHECK((l->item_indent == std::vector<uint8_t>{0, 1, 2, 3, 3, 2, 1, 0}));
+        CHECK(l->item_icons.size() == 8 && l->item_icons[1] == "i_icon_empire.tga" && l->item_icons[3] == "i_icon_empire.tga" &&
+              l->item_icons[0].empty() && l->item_icons[7].empty());
+        auto row_event = [&](GuiEvent::Kind k, int32_t row) {
+            std::vector<GuiEvent> e(1);
+            e[0].kind = k;
+            e[0].dialog = "IDD_SAVE_GAME_DIALOG";
+            e[0].control = "IDC_SAVE_GAME_LIST";
+            e[0].value = row;
+            step(e);
+        };
+        row_event(GuiEvent::Kind::SelectionChanged, 4);  // a save row: its name into the edit
+        CHECK(sv->get("IDC_SAVE_GAME_NAME_EDIT")->text == U"older");
+        row_event(GuiEvent::Kind::SelectionChanged, 6);  // a group row: the edit keeps the name
+        row_event(GuiEvent::Kind::RowClicked, 6);
+        CHECK(sv->get("IDC_SAVE_GAME_NAME_EDIT")->text == U"older" && l->items.size() == 9 && l->items[6] == U"[-] Rebel  (1)" &&
+              l->items[7] == U"[+] Game 3  (1)" && l->item_indent[7] == 2 && l->selected == 6);
+        row_event(GuiEvent::Kind::RowClicked, 0);  // closing the campaign closes everything inside it
+        CHECK(l->items.size() == 2 && l->items[0] == U"[+] Galactic Civil War  (4)");
+        row_event(GuiEvent::Kind::RowClicked, 0);  // ... and opening it shows its factions closed
+        CHECK(l->items.size() == 4 && l->items[1] == U"[+] Empire  (3)" && l->items[2] == U"[+] Rebel  (1)");
+        step(env.click(*sv, "IDC_SAVE_CANCEL_BUTTON"));
+        step(env.click(*env.gui.top(), "IDC_SAVE_GAME"));  // reopened: the newest save's groups open again
+        sv = env.gui.top();
+        l = sv->get("IDC_SAVE_GAME_LIST");
+        CHECK(fe.top() == "IDD_SAVE_GAME_DIALOG" && l->items.size() == 8 && l->items[2] == U"[-] Game 2  (2)");
+        sv->set_selected("IDC_SAVE_GAME_LIST", 2);
+        acts.clear();
+        step(env.click(*sv, "IDC_DELETE_GAME_BUTTON"));  // Delete on a group row: nothing
+        CHECK(acts.empty() && fe.top() == "IDD_SAVE_GAME_DIALOG");
+        sv->set_selected("IDC_SAVE_GAME_LIST", 4);
+        step(env.click(*sv, "IDC_DELETE_GAME_BUTTON"));  // ... on a save row: that save
+        CHECK(fe.top() == "IDD_DIALOG_BOX_QUIT_CONFIRM" && env.gui.top()->get("IDC_USER_TEXT_STRING_1")->text == U"older");
+        step(env.click(*env.gui.top(), "IDC_DIALOG_BOX_BUTTON_RIGHT"));
+        CHECK(acts.empty() && fe.top() == "IDD_SAVE_GAME_DIALOG");
+        step(env.click(*sv, "IDC_SAVE_CANCEL_BUTTON"));
+        CHECK(fe.top() == "IDD_GAME_OPTIONS_DIALOG");
+    }
     step(env.click(*env.gui.top(), "IDC_GAME_OPTIONS_QUIT"));
     CHECK(fe.top() == "IDD_DIALOG_BOX_QUIT_CONFIRM" && env.gui.top()->get("IDC_DIALOG_BOX_BUTTON_LEFT")->text == U"Yes");
     acts.clear();
@@ -824,10 +1185,18 @@ void test_menus() {
     CHECK(fe.top() == "IDD_KEYBOARD_OPTIONS_DIALOG" && kb->get("IDC_EDIT_STOP")->text == U"H" &&
           kb->get("IDC_EDIT_GROUP_1_SELECT")->text == U"1");
     step(env.click(*kb, "IDC_EDIT_STOP"));
-    step(env.frame({0, 0}, false, {vk::key('x')}));
-    CHECK(kb->get("IDC_EDIT_STOP")->text == U"X" && keys.binding(hk::kStop).key == 'H');  // not applied yet
-    step(env.frame({0, 0}, false, {vk::kControl, vk::key('q')}));  // Ctrl+Q (select like's key) moves here
-    CHECK(kb->get("IDC_EDIT_STOP")->text == U"Ctrl+Q");
+    step(env.frame({0, 0}, false, {vk::key('j')}));  // a free key: taken at once
+    CHECK(kb->get("IDC_EDIT_STOP")->text == U"J" && keys.binding(hk::kStop).key == 'H');  // not applied yet
+    step(env.frame({0, 0}, false, {vk::kControl, vk::key('q')}));  // Ctrl+Q is select like's key: UI5 t09 asks first
+    CHECK(fe.top() == "IDD_DIALOG_BOX_QUIT_CONFIRM" && kb->get("IDC_EDIT_STOP")->text == U"J");
+    {
+        GuiDialog* qb = env.gui.top();
+        CHECK(qb->get("IDC_USER_TEXT_STRING_1")->text == U"Ctrl+Q is already assigned to the game command Select Like." &&
+              qb->get("IDC_USER_TEXT_STRING_1")->visible);
+        CHECK(qb->get("IDC_USER_TEXT_STRING_2")->text == U"Do you want to re-assign Ctrl+Q to game command Stop?");
+        step(env.click(*qb, "IDC_DIALOG_BOX_BUTTON_LEFT"));  // OK: the key moves here
+    }
+    CHECK(fe.top() == "IDD_KEYBOARD_OPTIONS_DIALOG" && kb->get("IDC_EDIT_STOP")->text == U"Ctrl+Q");
     acts.clear();
     step(env.click(*kb, "IDC_APPLY"));
     CHECK(acts.size() == 1 && acts[0].kind == MenuAction::Kind::KeybindingsChanged);
@@ -838,6 +1207,63 @@ void test_menus() {
           keyboard_edit_slot("IDC_EDIT_SCROLL_UP") == hk::kScrollUp && keyboard_edit_slot("IDC_EDIT_IP") == -1);
     CHECK(hotkey_label({0x7B, HotkeyMod::None}) == U"F12" && hotkey_label({0x6D, HotkeyMod::None}) == U"Numpad -" &&
           hotkey_label({'1', HotkeyMod::Shift}) == U"Shift+1");
+
+    // UI5 t09 (UI.md §4.3 Capture): Delete / Backspace bind like any key, Tab is a key (focus stays), a conflict can be
+    // refused (Cancel), Back closes without applying or asking, Esc on a field in capture restores its applied key.
+    CHECK(std::string_view(hotkey_action_text_id(hk::kSelectLike)) == "TEXT_SELECT_LIKE" &&
+          std::string_view(hotkey_action_text_id(130)) == "TEXT_GROUP_8_SELECT" && hotkey_action_text_id(160) == nullptr);
+    CHECK(hotkey_action_label(hk::kSelectLike) == U"Select Like" &&
+          hotkey_action_label(static_cast<uint16_t>(hotkey_slot("Ability_SpreadOut"))) == U"Spread Out" &&
+          hotkey_action_label(static_cast<uint16_t>(hotkey_slot("Taunt1"))) == U"Taunt 1");
+    {
+        HotkeyTable t;
+        const auto holo = static_cast<uint16_t>(hotkey_slot("MissionHolocron"));
+        CHECK(t.conflicts(hk::kStop, {vk::kTab, HotkeyMod::None}) == std::vector<uint16_t>{holo});
+        CHECK(t.conflicts(hk::kStop, {'J', HotkeyMod::None}).empty() && t.conflicts(hk::kStop, HotkeyBinding{}).empty());
+        CHECK(t.conflicts(0, {'2', HotkeyMod::None}).size() == 4);  // group 2's recall key and its three derived keys
+    }
+    auto open_keys = [&] {
+        std::vector<GuiEvent> e(1);
+        e[0].kind = GuiEvent::Kind::Clicked;
+        e[0].dialog = "IDD_IN_GAME_OPTIONS_DIALOG";
+        e[0].control = "IDC_IN_GAME_OPTIONS_KEYBOARD";
+        step(e);
+        GuiDialog* k = env.gui.top();
+        step(env.click(*k, "IDC_EDIT_STOP"));
+        return k;
+    };
+    kb = open_keys();
+    CHECK(fe.top() == "IDD_KEYBOARD_OPTIONS_DIALOG" && kb->get("IDC_EDIT_STOP")->text == U"Ctrl+Q");
+    step(env.frame({0, 0}, false, {vk::kDelete}));  // a key like any other
+    CHECK(kb->get("IDC_EDIT_STOP")->text == U"Delete" && keys.binding(hk::kStop).key == 'Q');
+    step(env.frame({0, 0}, false, {vk::kTab}));  // Tab: MissionHolocron's key -> asks; focus stays on the field
+    CHECK(fe.top() == "IDD_DIALOG_BOX_QUIT_CONFIRM" && env.gui.top()->get("IDC_DIALOG_BOX_BUTTON_RIGHT")->text == U"Cancel");
+    step(env.click(*env.gui.top(), "IDC_DIALOG_BOX_BUTTON_RIGHT"));  // Cancel: nothing changes
+    CHECK(fe.top() == "IDD_KEYBOARD_OPTIONS_DIALOG" && kb->get("IDC_EDIT_STOP")->text == U"Delete" &&
+          kb->focus_index() == kb->find("IDC_EDIT_STOP"));
+    step(env.frame({0, 0}, false, {vk::kEscape}));  // Esc on the field in capture: back to the applied key, focus gone
+    CHECK(fe.top() == "IDD_KEYBOARD_OPTIONS_DIALOG" && kb->get("IDC_EDIT_STOP")->text == U"Ctrl+Q" && kb->focus_index() < 0);
+    step(env.click(*kb, "IDC_EDIT_STOP"));
+    step(env.frame({0, 0}, false, {vk::kBack}));
+    CHECK(kb->get("IDC_EDIT_STOP")->text == U"Backspace");
+    acts.clear();
+    step(env.click(*kb, "IDC_OK"));  // Back with an unapplied edit: closes, nothing applied, no question
+    CHECK(fe.top() != "IDD_KEYBOARD_OPTIONS_DIALOG" && fe.top() != "IDD_DIALOG_BOX_QUIT_CONFIRM" && acts.empty() &&
+          keys.binding(hk::kStop).key == 'Q');
+    kb = open_keys();
+    CHECK(kb->get("IDC_EDIT_STOP")->text == U"Ctrl+Q");  // the dropped edit is gone
+    // Esc with no field in capture closes the page the same way.
+    step(env.frame({0, 0}, false, {vk::kEscape}));
+    step(env.frame({0, 0}, false, {vk::kEscape}));
+    CHECK(fe.top() != "IDD_KEYBOARD_OPTIONS_DIALOG" && fe.top() != "IDD_DIALOG_BOX_QUIT_CONFIRM" && acts.empty());
+    // UI5 t07: Esc in the tutorial list goes where its Cancel goes (the main menu, which opened it).
+    {
+        std::vector<GuiEvent> e(1);
+        e[0].kind = GuiEvent::Kind::Cancel;
+        e[0].dialog = "IDD_SELECT_TUTORIAL_DIALOG";
+        step(e);
+        CHECK(fe.top() == "IDD_MAIN_MENU_DIALOG");
+    }
 }
 
 void test_load_screen() {
@@ -933,6 +1359,24 @@ const char* kGalacticXml = R"(<?xml version="1.0"?>
     <Font_Point_Size>7</Font_Point_Size><Text_Outline>True</Text_Outline><No_Shell>True</No_Shell><Left_Justified>True</Left_Justified>
     <Offset>30 0</Offset></CommandBarComponent>
   <CommandBarComponent Name="b_filters0"><Type>Button</Type><Toggle>True</Toggle></CommandBarComponent>
+  <CommandBarComponent Name="b_filters1"><Type>Button</Type><Toggle>True</Toggle></CommandBarComponent>
+  <CommandBarComponent Name="b_filters2"><Type>Button</Type><Toggle>True</Toggle></CommandBarComponent>
+  <CommandBarComponent Name="b_filters3"><Type>Button</Type><Toggle>True</Toggle></CommandBarComponent>
+  <CommandBarComponent Name="g_ground_level"><Type>Bar</Type><Bar_Texture_Name>i_pip0.tga i_pip1.tga i_pip2.tga</Bar_Texture_Name>
+    <No_Shell>True</No_Shell><Default_Offset>0 -20</Default_Offset></CommandBarComponent>
+  <CommandBarComponent Name="g_weather"><Type>Button</Type><No_Shell>True</No_Shell><Color>255 255 255 255</Color><Offset>-20 -31</Offset></CommandBarComponent>
+  <CommandBarComponent Name="g_planet_ability"><Type>Button</Type><No_Shell>True</No_Shell><Color>255 255 255 255</Color><Offset>0 -34</Offset></CommandBarComponent>
+  <CommandBarComponent Name="g_build"><Type>Button</Type><Icon_Texture_Name>i_icon_build.tga</Icon_Texture_Name><No_Shell>True</No_Shell></CommandBarComponent>
+  <CommandBarComponent Name="g_ground_level_pips"><Type>Button</Type><Icon_Alternate_Texture_Name>i_pip1.tga i_pip1.tga</Icon_Alternate_Texture_Name><No_Shell>True</No_Shell><Default_Offset>34 -26</Default_Offset></CommandBarComponent>
+  <CommandBarComponent Name="g_space_level_pips"><Type>Button</Type><Icon_Alternate_Texture_Name>i_pip2.tga i_pip2.tga</Icon_Alternate_Texture_Name><No_Shell>True</No_Shell><Default_Offset>34 -13</Default_Offset></CommandBarComponent>
+  <CommandBarComponent Name="Text_Land_Fleet"><Type>TextButton</Type><Font_Name>EmpireAtWar-Medium</Font_Name><Font_Point_Size>10</Font_Point_Size><Text_Offset2>0 -20</Text_Offset2></CommandBarComponent>
+  <CommandBarComponent Name="g_corruption_icon"><Type>Button</Type><Icon_Texture_Name>i_icon_corrupted.tga</Icon_Texture_Name><No_Shell>True</No_Shell></CommandBarComponent>
+  <CommandBarComponent Name="g_enemy_hero"><Type>Button</Type><Icon_ALternate_Texture_Name>i_icon_hero.tga i_icon_empire_hero.tga</Icon_ALternate_Texture_Name>
+    <No_Shell>True</No_Shell></CommandBarComponent>
+  <CommandBarComponent Name="g_corruption_text"><Type>TextButton</Type><No_Shell>True</No_Shell><Font_Name>EmpireAtWar-Medium</Font_Name>
+    <Font_Point_Size>6</Font_Point_Size><Text_Color>255 242 0 255</Text_Color><Offset>30 15</Offset><Left_Justified>True</Left_Justified></CommandBarComponent>
+  <CommandBarComponent Name="g_credit_bar"><Type>Bar</Type><Bar_Texture_Name>cb0.tga cb1.tga cb2.tga</Bar_Texture_Name><Max_Bar_Level>2</Max_Bar_Level>
+    <No_Shell>True</No_Shell><Default_Offset>0 8</Default_Offset></CommandBarComponent>
   <CommandBarComponent Name="g_planet_value"><Type>TextButton</Type><Font_Name>EmpireAtWar-Medium</Font_Name>
     <Font_Point_Size>6</Font_Point_Size><Text_Color>255 255 255 180</Text_Color><No_Shell>True</No_Shell>
     <Left_Justified>True</Left_Justified><Offset>30 -11</Offset></CommandBarComponent>
@@ -964,17 +1408,30 @@ const char* kGalacticXml = R"(<?xml version="1.0"?>
   <CommandBarComponent Name="hero_slot_good00"><Type>TextButton</Type><Blank_Texture_Name>rebel_hero_ring.tga</Blank_Texture_Name>
     <No_Shell>True</No_Shell><Hidden>True</Hidden></CommandBarComponent>
   <CommandBarComponent Name="build_pad00"><Type>TextButton</Type><Blank_Texture_Name>i_button_units.tga</Blank_Texture_Name>
-    <Group>build_pad</Group><Build_Texture_Name>i_button_build.tga</Build_Texture_Name></CommandBarComponent>
+    <Group>build_pad</Group><Build_Texture_Name>i_button_build.tga</Build_Texture_Name><Drag_And_Drop>True</Drag_And_Drop></CommandBarComponent>
   <CommandBarComponent Name="build_pad01"><Type>TextButton</Type><Blank_Texture_Name>i_button_units.tga</Blank_Texture_Name></CommandBarComponent>
   <CommandBarComponent Name="b_Create_00"><Type>TextButton</Type><Blank_Texture_Name>i_button_units.tga</Blank_Texture_Name>
     <Build_Texture_Name>i_button_build.tga</Build_Texture_Name></CommandBarComponent>
   <CommandBarComponent Name="b_Create_01"><Type>TextButton</Type><Blank_Texture_Name>i_button_units.tga</Blank_Texture_Name></CommandBarComponent>
   <CommandBarComponent Name="b_Create_02"><Type>TextButton</Type><Blank_Texture_Name>i_button_units.tga</Blank_Texture_Name></CommandBarComponent>
+  <CommandBarComponent Name="b_Create_03"><Type>TextButton</Type><Blank_Texture_Name>i_button_units.tga</Blank_Texture_Name></CommandBarComponent>
+  <CommandBarComponent Name="b_Create_04"><Type>TextButton</Type><Blank_Texture_Name>i_button_units.tga</Blank_Texture_Name></CommandBarComponent>
+  <CommandBarComponent Name="b_Create_05"><Type>TextButton</Type><Blank_Texture_Name>i_button_units.tga</Blank_Texture_Name></CommandBarComponent>
+  <CommandBarComponent Name="b_space_tab"><Type>Button</Type><Icon_Texture_Name>i_button_units.tga</Icon_Texture_Name><Group>Build_Tab</Group><Tab>True</Tab></CommandBarComponent>
+  <CommandBarComponent Name="b_planet_tab"><Type>Button</Type><Icon_Texture_Name>i_button_units.tga</Icon_Texture_Name><Group>Build_Tab</Group><Tab>True</Tab></CommandBarComponent>
+  <CommandBarComponent Name="b_dial"><Type>Button</Type><Icon_Alternate_Texture_Name>i_button_units.tga i_button_options.tga</Icon_Alternate_Texture_Name></CommandBarComponent>
   <CommandBarComponent Name="queue00"><Type>TextButton</Type><Blank_Texture_Name>i_button_hologram.tga</Blank_Texture_Name>
     <Build_Texture_Name>i_button_build.tga</Build_Texture_Name></CommandBarComponent>
   <CommandBarComponent Name="q1_0001"><Type>TextButton</Type><Blank_Texture_Name>i_button_unit_frame.tga</Blank_Texture_Name></CommandBarComponent>
   <CommandBarComponent Name="q1_0002"><Type>TextButton</Type><Blank_Texture_Name>i_button_unit_frame.tga</Blank_Texture_Name></CommandBarComponent>
-  <CommandBarComponent Name="land_fleet_00"><Type>TextButton</Type></CommandBarComponent>
+  <CommandBarComponent Name="land_fleet_00"><Type>TextButton</Type><Drag_And_Drop>True</Drag_And_Drop></CommandBarComponent>
+  <CommandBarComponent Name="map_window"><Type>Icon</Type><Size>512 512</Size><Scale>1.25</Scale><Color>200 200 200 255</Color></CommandBarComponent>
+  <CommandBarComponent Name="unit_pad00"><Type>TextButton</Type><Blank_Texture_Name>i_button_buildings.tga</Blank_Texture_Name>
+    <Drag_And_Drop>True</Drag_And_Drop></CommandBarComponent>
+  <CommandBarComponent Name="unit_pad01"><Type>TextButton</Type><Blank_Texture_Name>i_button_buildings.tga</Blank_Texture_Name>
+    <Drag_And_Drop>True</Drag_And_Drop></CommandBarComponent>
+  <CommandBarComponent Name="unit_cap_number"><Type>TextButton</Type></CommandBarComponent>
+  <CommandBarComponent Name="back_button"><Type>TextButton</Type><Icon_Texture_Name>back_button.tga</Icon_Texture_Name></CommandBarComponent>
   <CommandBarComponent Name="objective_back"><Type>TextButton</Type><Blank_Texture_Name>i_tooltip_back.tga</Blank_Texture_Name>
     <No_Shell>True</No_Shell><Base_Layer>3</Base_Layer><Color>255 255 255 80</Color><Size>266 14</Size>
     <Default_Offset>383 -180 </Default_Offset><Default_Offset_Widescreen>530 -350 </Default_Offset_Widescreen><Offset>5 2</Offset></CommandBarComponent>
@@ -1167,11 +1624,17 @@ void test_galactic_dialogs() {
         planets[0].name = U"Kuat";
         hud.build(f);
     }
-    // §5.1 pads: blue (index 1) for the space option, amber (0) for the ground one; cost not in text2 (drawn at the bottom).
+    // §5.1.1 pads: the land tab (the start) lists the ground option on an amber pad (index 0), the space tab the space one
+    // on a blue pad (1); cost not in text2 (drawn at the bottom).
     {
         const ButtonRuntime* c0 = state("b_Create_00");
-        const ButtonRuntime* c1 = state("b_Create_01");
-        CHECK(c0 && c1 && c0->alt == 1 && c1->alt == 0 && c0->text2.empty() && hud.stats().build_buttons == 2);
+        CHECK(c0 && c0->alt == 0 && c0->text2.empty() && hud.stats().build_buttons == 1);
+        hud.set_build_tab(true);
+        hud.build(f);
+        c0 = state("b_Create_00");
+        CHECK(c0 && c0->alt == 1 && hud.stats().build_buttons == 1);
+        hud.set_build_tab(false);
+        hud.build(f);
     }
     // §5.2 queue: space entries on queue00.., ground on queue05...
     CHECK(has_hit("queue00") && has_hit("queue01") && has_hit("queue05") && !has_hit("queue02") && !has_hit("queue06") &&
@@ -1339,6 +1802,9 @@ void test_galactic_hud() {
     atlas.add({"i_bar_fight_red.tga", 120, 0, 6, 10, true});
     atlas.add({"i_bar_fight_blue.tga", 126, 0, 6, 10, true});
     atlas.add({"i_bar_fight_flash.tga", 132, 0, 6, 10, true});
+    for (const char* n : {"i_pip0.tga", "i_pip1.tga", "i_pip2.tga", "i_pa_weather_rain.tga", "i_pa_galactic_production_boost.tga",
+                          "i_icon_build.tga", "i_icon_corrupted.tga", "i_icon_hero.tga", "cb0.tga", "cb1.tga", "cb2.tga"})
+        atlas.add({n, 200, 200, 12, 12, true});
     auto raster = make_box_rasterizer();
     FontCache fonts(*raster);
     GalacticHud hud;
@@ -1408,6 +1874,22 @@ void test_galactic_hud() {
                 s.label_icons, s.buttons, s.build_buttons, s.queue_entries, s.fleet_slots, s.objectives, s.hit_boxes);
     CHECK(s.labels == 2 && s.label_icons == 1 && s.build_buttons == 1 && s.queue_entries == 1 && s.fleet_slots == 2 &&
           s.objectives == 2 && hud.selected_planet() == 1);
+    // ui4 t07 (HUD_GAPS §2.2): the encyclopedia subject of each pad - the build pad's and the queue hologram's type, the
+    // organiser unit pads' units; nothing for the other components.
+    {
+        uint32_t build_types = 0, queue_types = 0, units = 0, other = 0;
+        for (int32_t c = 0; c < static_cast<int32_t>(table.size()); ++c) {
+            GalacticHud::PadSubject ps;
+            if (!hud.pad_subject(c, ps)) continue;
+            if (ps.object == 0 && ps.type == 7) ++queue_types;
+            else if (ps.object == 0 && ps.type == planets[1].planet) ++build_types;
+            else if (ps.object == 901 || ps.object == 902) ++units;
+            else ++other;
+        }
+        CHECK(build_types == 1 && queue_types == 1 && units == 2 && other == 0);
+        GalacticHud::PadSubject ps;
+        CHECK(!hud.pad_subject(-1, ps));
+    }
     // t49: g_planet_ring round every visible planet, at its atlas size, selected or not, fogged too; g_planet_value only with
     // the b_filters0 toggle on.
     {
@@ -1426,6 +1908,51 @@ void test_galactic_hud() {
             hud.buttons().state(static_cast<uint32_t>(filter)).selected = false;
             hud.build(f);
         }
+    }
+    // ui4 t03 / t10 (GALAXY_MAP_PRESENTATION §1.7): b_filters1 gates the level pip rows (one pip per level up to the max,
+    // full owner colour below the level, half above), b_filters2 the weather / ability icons and a corrupted planet's
+    // corruption icon, b_filters0 the "+N" value; no credit bar; the uncorrupted info icon, g_build and the corruption line
+    // need no filter; g_enemy_hero (multiplayer) is never drawn.
+    {
+        std::vector<GalacticPlanetInfo> fp = planets;
+        for (GalacticPlanetInfo& p : fp) {
+            p.ground_level = 1;
+            p.ground_max = 3;
+            p.space_level = 0;
+            p.space_max = 2;
+            p.owner_color = {200, 100, 50, 255};
+            p.weather_icon = "i_pa_weather_rain.tga";
+            p.ability_icon = "i_pa_galactic_production_boost.tga";
+            p.credits = 40;
+            p.credit_level = 2;
+        }
+        fp[0].building = fp[0].corrupted = true;
+        fp[0].corruption_icon = "i_icon_corrupted.tga";
+        fp[1].corruption_icon = "i_icon_build.tga";  // the uncorrupted info icon
+        fp[0].enemy_hero = 1;
+        fp[0].corruption_text = U"Corrupting: 40%";
+        GalacticHudFrame ff = f;
+        ff.planets = fp;
+        hud.build(ff);
+        const uint32_t icons_off = hud.stats().label_icons;
+        CHECK(hud.filter_bits() == 0 && hud.stats().level_pips == 0 && hud.stats().weather_icons == 0 && hud.stats().ability_icons == 0 &&
+              hud.stats().credit_bars == 0 && hud.stats().corruption_texts == 1 && hud.stats().planet_values == 0);
+        hud.build(f);
+        CHECK(icons_off == hud.stats().label_icons + 2);  // g_build on planet 0, the info icon on planet 1
+        const char* names[4] = {"b_filters0", "b_filters1", "b_filters2", "b_filters3"};
+        for (const char* n : names) hud.buttons().state(static_cast<uint32_t>(table.find(n))).selected = true;
+        hud.build(ff);
+        CHECK(hud.filter_bits() == (kFilterCredit | kFilterBaseLevel | kFilterAbilityWeather | kFilterHero));
+        CHECK(hud.stats().level_pips == 10 && hud.stats().weather_icons == 2 && hud.stats().ability_icons == 2 &&
+              hud.stats().credit_bars == 0 && hud.stats().planet_values == 2 && hud.stats().label_icons == icons_off + 1);
+        uint32_t full = 0, half = 0;
+        for (const HudQuad& q : hud.draw_list().items(0, HudList::Alpha)) {
+            if (q.color.r == 200 && q.color.g == 100 && q.color.b == 50) ++full;
+            if (q.color.r == 100 && q.color.g == 50 && q.color.b == 25) ++half;
+        }
+        CHECK(full >= 2 && half == 8);  // per planet: ground pip 0 full, 1-2 half; space pips 0-1 half
+        for (const char* n : names) hud.buttons().state(static_cast<uint32_t>(table.find(n))).selected = false;
+        hud.build(f);
     }
     // [port: Gabriel, original screenshot] resource texts: "Day: 1" (TEXT_CYCLES), "Tech: 3" (TEXT_TECH), credits and income
     // with thousands separators; minimap blips for the visible planets and the camera footprint.
@@ -1561,17 +2088,18 @@ void test_galactic_hud() {
             stack3 = stack3 || (std::fabs(w - 24.0f) < 0.01f && std::fabs(h - 12.0f) < 0.01f);
         }
         CHECK(stack3);
-        // §1.5: one medal per faction with a surface hero, none on a fogged planet.
+        // §1.5 / §1.7: one medal per faction with a hero the host reports (it applies the visibility gates; the HUD adds no
+        // fog gate of its own, ui4 t10).
         const uint32_t no_medal = h2.stats().label_icons;
         icons[0].hero_rebel = icons[0].hero_empire = true;
         icons[1].hero_empire = true;
         g.planets = icons;
         h2.build(g);
-        CHECK(h2.stats().label_icons == no_medal + 2);
+        CHECK(h2.stats().label_icons == no_medal + 3);
         size_t medals = 0;
         for (const HudQuad& q : h2.draw_list().items(0, HudList::Alpha))
             if (std::fabs(q.max.x - q.min.x - 14.0f) < 0.01f && std::fabs(q.max.y - q.min.y - 14.0f) < 0.01f) ++medals;
-        CHECK(medals == 2);
+        CHECK(medals == 3);
     }
     // Zoomed out (state 1 at z = 0.2): no labels.
     GalacticHudFrame f2 = f;
@@ -1610,7 +2138,7 @@ void test_galactic_hud() {
         bool any = false;
         for (const HudHitBox& h : hud.hit_boxes()) any = any || h.component == pi;
         CHECK(!any);
-        const auto ms = static_cast<uint32_t>(table.find("map_shell"));
+        const auto ms = static_cast<uint32_t>(table.find("i_main_commandbar"));  // any active shell bone (§5.4: not a fallback)
         ShellBone pb;
         pb.name = "planet_info";
         pb.x = 300.0f;
@@ -1621,10 +2149,136 @@ void test_galactic_hud() {
     }
     click_component("planet_info", cmds, acts);
     CHECK(acts.size() == 2 && acts[1].kind == HudAction::Kind::PlanetInfo && acts[1].unit == 101);
+    // ui4 t04 (GALACTIC_PLANET_MAP): the planet map. map_shell's bones (planetary_mode.alo); the command bar and organiser
+    // shells hide; pads sit over map_window at the marker position; an orbit stack dropped on the map lands its unit, a
+    // landed unit dropped on an orbit stack launches it into a new fleet.
+    {
+        auto state = [&](const char* n) { return hud.buttons().find_state(static_cast<uint32_t>(table.find(n))); };
+        auto has_hit = [&](const char* n) {
+            for (const HudHitBox& h : hud.hit_boxes())
+                if (h.component == table.find(n)) return true;
+            return false;
+        };
+        const auto ms = static_cast<uint32_t>(table.find("map_shell"));
+        auto bone = [](const char* n, float x, float y) {
+            ShellBone b;
+            b.name = n;
+            b.x = x;
+            b.y = y;
+            return b;
+        };
+        hud.layout().set_shell_bones(ms, {bone("map_window", 92.0f, 7.0f), bone("land_fleet_00", -459.0f, 255.0f),
+                                          bone("unit_pad00", 0.0f, 0.0f), bone("back_button", 164.0f, -360.0f),
+                                          bone("unit_cap_number", -295.0f, -71.0f)});
+        hud.resize(1024, 768);
+        GalacticHudFrame m = f;
+        m.advanced_map_open = true;
+        m.planet_map.planet = 101;
+        m.planet_map.units = 3;
+        m.planet_map.unit_cap = 10;
+        GalacticMapPad up;
+        up.unit_pad = true;
+        up.uv = {0.75f, 0.25f};
+        up.object = 555;
+        up.marker = 4;
+        up.icon = "i_button_units.tga";
+        GalacticMapPad up1;  // an empty unit pad (marker 11)
+        up1.unit_pad = true;
+        up1.index = 1;
+        up1.uv = {0.9f, 0.1f};
+        up1.marker = 11;
+        GalacticMapPad bp;  // an In-base structure 901 on marker 3
+        bp.uv = {0.5f, 0.5f};
+        bp.tag = 1;
+        bp.object = 901;
+        bp.marker = 3;
+        bp.shield = 0.25f;
+        bp.alt = 1;  // §4.2: the build-pad alternate, whatever the player's faction
+        GalacticMapPad bp1;  // a free In-base pad (marker 9)
+        bp1.index = 1;
+        bp1.uv = {0.25f, 0.75f};
+        bp1.tag = 1;
+        bp1.marker = 9;
+        m.planet_map.pads = {up, up1, bp, bp1};
+        m.planet_map.orbit = {{777, 50, 2, "i_button_units.tga"}};
+        hud.build(m);
+        CHECK(hud.stats().planet_map && hud.stats().map_pads == 4 && hud.stats().map_stacks == 1 && hud.stats().map_shields == 1);
+        bool bar_off = false, map_on = false;
+        for (const GalacticShellVisibility& v : hud.shell_visibility()) {
+            bar_off = bar_off || (v.component == static_cast<uint32_t>(table.find("i_main_commandbar")) && !v.visible);
+            map_on = map_on || (v.component == ms && v.visible);
+        }
+        CHECK(bar_off && map_on && !has_hit("b_Create_00") && !has_hit("queue00") && hud.stats().labels == 0);
+        // §4.3: map_window's centre + (320 (2 x 0.75 - 1), 320 (2 x 0.25 - 1)) = + (160, -160).
+        Vec2f pad_at{-1e9f, -1e9f};
+        for (const HudHitBox& h : hud.hit_boxes())
+            if (h.component == table.find("unit_pad00")) pad_at = {0.5f * (h.min.x + h.max.x), 0.5f * (h.min.y + h.max.y)};
+        const ComponentPlacement& wp = hud.layout().placement(static_cast<uint32_t>(table.find("map_window")));
+        CHECK(wp.from_bone && std::fabs(pad_at.x - wp.center.x - 160.0f) < 1e-3f && std::fabs(pad_at.y - wp.center.y + 160.0f) < 1e-3f);
+        const ButtonRuntime* uc = state("unit_cap_number");
+        CHECK(uc && uc->text == U"3/10" && state("land_fleet_00")->text == U"2" && !state("build_pad00")->hidden &&
+              state("build_pad00")->alt == 1);
+        auto map_drag = [&](const char* from, const char* to) {
+            const int32_t fc = table.find(from), tc = table.find(to);
+            Vec2f a{}, b{};
+            for (const HudHitBox& h : hud.hit_boxes()) {
+                if (h.component == fc) a = hud.canvas().canvas_to_pixel(0.5f * (h.min.x + h.max.x), 0.5f * (h.min.y + h.max.y));
+                if (h.component == tc) b = hud.canvas().canvas_to_pixel(0.5f * (h.min.x + h.max.x), 0.5f * (h.min.y + h.max.y));
+            }
+            std::vector<commands::EventData> out;
+            RoutedInput r;
+            r.world.mouse_x = static_cast<int32_t>(a.x);
+            r.world.mouse_y = static_cast<int32_t>(a.y);
+            r.hover_component = fc;
+            r.owner[static_cast<size_t>(Button::Left)] = PointerTarget::Hud;
+            r.hud = {{HudPointerEvent::Kind::Press, Button::Left, fc, r.world.mouse_x, r.world.mouse_y}};
+            hud.update_input(r, false, false, 1.0, out);
+            r.hud.clear();
+            r.world.mouse_x = static_cast<int32_t>(b.x);
+            r.world.mouse_y = static_cast<int32_t>(b.y);
+            r.hover_component = tc;
+            hud.update_input(r, false, false, 1.1, out);
+            const bool valid = hud.drag().active && hud.drag().valid;
+            r.owner = {};
+            r.hud = {{HudPointerEvent::Kind::Release, Button::Left, tc, r.world.mouse_x, r.world.mouse_y}};
+            hud.update_input(r, false, false, 1.2, out);
+            CHECK(valid == !out.empty());
+            hud.build(m);
+            return out;
+        };
+        std::vector<commands::EventData> o = map_drag("land_fleet_00", "map_window");
+        CHECK(o.size() == 1 && o[0] == commands::fleet_management_event(commands::kFleetLand, 101, 50, 777));
+        // §6.2 rule 2 (ui4 t13): the unit is given the pad's marker and lands; the pad's occupant goes to orbit as a new fleet
+        // and forgets its marker.
+        const commands::EventData launch555 = commands::fleet_management_event(commands::kFleetMoveNew, 101, commands::kNoObject, 555, 101);
+        o = map_drag("land_fleet_00", "unit_pad00");
+        CHECK(o.size() == 4 && o[0] == commands::ev::set_marker_id(777, 4) &&
+              o[1] == commands::fleet_management_event(commands::kFleetLand, 101, 50, 777) && o[2] == launch555 &&
+              o[3] == commands::ev::set_marker_id(555, -1));
+        o = map_drag("unit_pad00", "land_fleet_00");  // rule 4
+        CHECK(o.size() == 2 && o[0] == launch555 && o[1] == commands::ev::set_marker_id(555, -1));
+        o = map_drag("unit_pad00", "unit_pad01");  // rule 3: an empty pad just takes the unit
+        CHECK(o.size() == 1 && o[0] == commands::ev::set_marker_id(555, 11));
+        o = map_drag("build_pad00", "build_pad01");  // rule 5: In-base structures move between tag-1 pads
+        CHECK(o.size() == 1 && o[0] == commands::ev::set_marker_id(901, 9));
+        o = map_drag("build_pad00", "unit_pad01");  // a structure never goes onto a unit pad
+        CHECK(o.empty());
+        m.planet_map.surface_full = true;  // §5: the stacks are disabled, no drag
+        hud.build(m);
+        CHECK(!hud.draggable(table.find("land_fleet_00")) && hud.draggable(table.find("unit_pad00")));
+        m.planet_map.foreign = true;  // §1.1 foreign view: nothing drags
+        hud.build(m);
+        CHECK(!hud.draggable(table.find("unit_pad00")));
+        hud.layout().set_shell_bones(ms, {});
+        hud.resize(1024, 768);
+        hud.build(f);
+        CHECK(!hud.stats().planet_map && state("unit_pad00")->hidden);
+        CHECK(!state("land_fleet_00")->disabled);  // closing after a full surface leaves the organiser's pads usable
+    }
     click_component("b_option_g", cmds, acts);
     CHECK(acts.size() == 3 && acts[2].kind == HudAction::Kind::Button && acts[2].name == "b_option_g");
-    // Production-disabled options (story DISABLE_BUILDABLE, REMAINING_GAPS §1.5): no pad by default; greyed and
-    // unclickable with show_production_disabled.
+    // Production-disabled options (story DISABLE_BUILDABLE, REMAINING_GAPS §1.5; GALACTIC_DIALOGS §5.1.1): listed greyed,
+    // clicks swallowed.
     GalacticHudFrame f3 = f;
     f3.providers.build_options = [](uint32_t, std::vector<GalacticBuildOption>& out) {
         GalacticBuildOption o;
@@ -1637,47 +2291,113 @@ void test_galactic_hud() {
         out.push_back(o);
     };
     hud.build(f3);
-    CHECK(hud.stats().build_buttons == 1);
-    cmds.clear();
-    click_component("b_Create_00", cmds, acts);  // the enabled option took the first pad
-    CHECK(cmds.size() == 1 && cmds[0] == commands::ev::production(41, 101));
-    f3.show_production_disabled = true;
-    hud.build(f3);
     CHECK(hud.stats().build_buttons == 2);
     cmds.clear();
     click_component("b_Create_00", cmds, acts);  // greyed: swallowed
-    click_component("b_Create_01", cmds, acts);
+    click_component("b_Create_02", cmds, acts);  // GUI_Row != 0: the upper row, every other pad
     CHECK(cmds.size() == 1 && cmds[0] == commands::ev::production(41, 101));
-    // QA D3: one grid. Structures first, units straight after them on the same pads, column by column; the unit pads
-    // of the old second grid stay empty, and every pad has its own spot.
-    GalacticHudFrame f4 = f;
-    f4.providers.build_options = [](uint32_t, std::vector<GalacticBuildOption>& out) {
+    // ui4 t12 (GALACTIC_DIALOGS §5.1.1): only the current tab's options (land at the start); GUI_Row 0 fills the odd pads
+    // (lower row), other rows the even pads (upper row), each from the left; a full row drops the rest. b_space_tab /
+    // b_planet_tab switch the tab (GUI_Dial_Switch_SFX on a change only); the pads take the tab's Blank texture; an
+    // inaccessible surface forces the space tab and disables b_planet_tab.
+    {
+        std::vector<std::string> sfx;
+        hud.set_sfx_hook([&sfx](std::string_view e, int32_t) { sfx.emplace_back(e); });
+        GalacticHudFrame f4 = f;
+        f4.providers.build_options = [](uint32_t, std::vector<GalacticBuildOption>& out) {
+            GalacticBuildOption o;
+            o.icon = "i_button_units.tga";
+            o.type_index = 50;  // unit (GUI_Row 1)
+            out.push_back(o);
+            o.type_index = 51;  // structure (GUI_Row 0)
+            o.row = 0;
+            out.push_back(o);
+            o.type_index = 52;
+            o.row = 1;
+            out.push_back(o);
+            o.type_index = 53;
+            out.push_back(o);
+            o.type_index = 54;  // the upper row has three pads here: dropped
+            out.push_back(o);
+            o.type_index = 55;  // a space-tab option
+            o.space = true;
+            out.push_back(o);
+        };
+        hud.build(f4);
+        CHECK(!hud.build_space_tab() && hud.stats().build_buttons == 4);
+        cmds.clear();
+        for (const char* p : {"b_Create_00", "b_Create_01", "b_Create_02", "b_Create_04"}) click_component(p, cmds, acts);
+        CHECK(cmds.size() == 4 && cmds[0] == commands::ev::production(50, 101) && cmds[1] == commands::ev::production(51, 101) &&
+              cmds[2] == commands::ev::production(52, 101) && cmds[3] == commands::ev::production(53, 101));
+        CHECK(hud.buttons().state(static_cast<uint32_t>(table.find("b_Create_03"))).hidden);
+        CHECK(hud.buttons().state(static_cast<uint32_t>(table.find("b_Create_00"))).alt == 0);
+        CHECK(hud.buttons().state(static_cast<uint32_t>(table.find("b_planet_tab"))).selected);
+        CHECK(hud.buttons().state(static_cast<uint32_t>(table.find("b_dial"))).alt == 1);
+        cmds.clear();
+        click_component("b_planet_tab", cmds, acts);  // already the land tab: silent
+        CHECK(sfx.empty() && cmds.empty());
+        click_component("b_space_tab", cmds, acts);
+        CHECK(hud.build_space_tab() && sfx.size() == 1 && sfx[0] == "GUI_Dial_Switch_SFX");
+        hud.build(f4);
+        CHECK(hud.stats().build_buttons == 1 && hud.buttons().state(static_cast<uint32_t>(table.find("b_Create_00"))).alt == 1 &&
+              hud.buttons().state(static_cast<uint32_t>(table.find("b_space_tab"))).selected &&
+              hud.buttons().state(static_cast<uint32_t>(table.find("b_dial"))).alt == 0);
+        click_component("b_Create_00", cmds, acts);
+        CHECK(cmds.size() == 1 && cmds[0] == commands::ev::production(55, 101));
+        click_component("b_planet_tab", cmds, acts);
+        CHECK(!hud.build_space_tab() && sfx.size() == 2);
+        f4.land_tab_allowed = false;
+        hud.build(f4);
+        CHECK(hud.build_space_tab() && sfx.size() == 3 && hud.buttons().state(static_cast<uint32_t>(table.find("b_planet_tab"))).disabled);
+        hud.set_build_tab(true);
+        CHECK(sfx.size() == 3);
+        f4.land_tab_allowed = true;
+        hud.build(f4);
+        hud.set_build_tab(false);
+        CHECK(!hud.build_space_tab() && sfx.size() == 4);
+        hud.set_sfx_hook({});
+        {
+            const ComponentPlacement& c0 = hud.layout().placement(static_cast<uint32_t>(table.find("b_Create_00")));
+            const ComponentPlacement& c1 = hud.layout().placement(static_cast<uint32_t>(table.find("b_Create_01")));
+            const ComponentPlacement& c2 = hud.layout().placement(static_cast<uint32_t>(table.find("b_Create_02")));
+            CHECK(c0.center.x == c1.center.x && c0.center.y > c1.center.y && std::fabs(c2.center.x - c0.center.x - 54.0f) < 1e-3f &&
+                  c2.center.y == c0.center.y);
+        }
+        hud.build(f);
+    }
+    // ui4 t02: a blocked option (can_enqueue's reason) is greyed, its Tooltip_Text entry follows the reason, a left click
+    // is BuildRefused (negative feedback) with no command; the queued count is the Text_Offset2 line.
+    GalacticHudFrame f5 = f;
+    f5.providers.build_options = [](uint32_t, std::vector<GalacticBuildOption>& out) {
         GalacticBuildOption o;
         o.icon = "i_button_units.tga";
-        o.type_index = 50;  // unit
-        out.push_back(o);
-        o.type_index = 51;
-        o.structure = true;
-        out.push_back(o);
-        o.type_index = 52;  // unit
-        o.structure = false;
-        out.push_back(o);
+        const HudBuildOption::Block blocks[3] = {HudBuildOption::Block::QueueFull, HudBuildOption::Block::PopCap,
+                                                 HudBuildOption::Block::None};
+        for (uint16_t k = 0; k < 3; ++k) {
+            o.type_index = static_cast<uint16_t>(60 + k);
+            o.block = blocks[k];
+            o.enabled = o.block == HudBuildOption::Block::None;
+            o.queued = k == 2 ? 2u : 0u;
+            out.push_back(o);
+        }
     };
-    hud.build(f4);
+    hud.build(f5);
     CHECK(hud.stats().build_buttons == 3);
-    cmds.clear();
-    click_component("b_Create_00", cmds, acts);
-    click_component("b_Create_01", cmds, acts);
-    click_component("b_Create_02", cmds, acts);
-    CHECK(cmds.size() == 3 && cmds[0] == commands::ev::production(51, 101) && cmds[1] == commands::ev::production(50, 101) &&
-          cmds[2] == commands::ev::production(52, 101));
-    for (const HudHitBox& h : hud.hit_boxes()) CHECK(h.component != table.find("build_pad00") && h.component != table.find("build_pad01"));
     {
-        const ComponentPlacement& c0 = hud.layout().placement(static_cast<uint32_t>(table.find("b_Create_00")));
-        const ComponentPlacement& c1 = hud.layout().placement(static_cast<uint32_t>(table.find("b_Create_01")));
-        const ComponentPlacement& c2 = hud.layout().placement(static_cast<uint32_t>(table.find("b_Create_02")));
-        CHECK(c0.center.x == c1.center.x && c0.center.y > c1.center.y && std::fabs(c2.center.x - c0.center.x - 54.0f) < 1e-3f &&
-              c2.center.y == c0.center.y);
+        const char* pads[3] = {"b_Create_00", "b_Create_02", "b_Create_04"};
+        const int32_t tips[3] = {0, 1, -1};
+        for (int k = 0; k < 3; ++k) {
+            const ButtonRuntime& r = hud.buttons().state(static_cast<uint32_t>(table.find(pads[k])));
+            CHECK(r.disabled == (k < 2) && r.tooltip_index == tips[k] && r.text2 == (k == 2 ? U"2" : U""));
+        }
+        cmds.clear();
+        acts.clear();
+        for (const char* p : pads) click_component(p, cmds, acts);
+        CHECK(cmds.size() == 1 && cmds[0] == commands::ev::production(62, 101));
+        CHECK(acts.size() == 2);
+        for (size_t k = 0; k < acts.size() && k < 2; ++k)
+            CHECK(acts[k].kind == HudAction::Kind::BuildRefused && acts[k].unit == 60u + k && acts[k].name == pads[k] &&
+                  acts[k].value == static_cast<int32_t>(k + 1));
     }
 }
 
@@ -1869,6 +2589,8 @@ int main() {
     test_parse();
     test_placement();
     test_routing_and_controls();
+    test_widgets_ui5();
+    test_campaign_menu_is_listed();
     test_menus();
     test_load_screen();
     test_galactic_hud();

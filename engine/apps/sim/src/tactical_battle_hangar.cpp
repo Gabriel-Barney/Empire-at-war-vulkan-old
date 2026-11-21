@@ -18,14 +18,17 @@
 //    (selection / control groups, announcement).
 //  * Engine loops: mode_enter at creation, locomotor_service every SimpleSpace service (not fighters / squadrons),
 //    engines offline / online from the ability events, remove on death / removal; the tick's requests are published
-//    for the audio host (engine_loop_requests()).
+//    for the audio host (engine_loop_requests()). cu8g t01: land Walk-locomotor units get mode enter and walk_service;
+//    HOLSTER_WEAPON heroes are attached before their mode enter and serviced every frame after the hangar services.
 #include <algorithm>
 #include <cmath>
 #include <cstddef>
 #include <cstdlib>
+#include <iterator>
 #include <string>
 #include <vector>
 
+#include "alamo/core/ascii.hpp"
 #include "alamo/core/dmath.hpp"
 #include "alamo/core/sim_crc.hpp"
 #include "alamo/objects/behaviors.hpp"
@@ -33,6 +36,7 @@
 #include "alamo/sim/tactical_battle.hpp"
 #include "alamo/tactical/movement/special_locomotors.hpp"
 #include "alamo/tactical/movement/unit_params.hpp"
+#include "alamo/tactical/services/stream_rng.hpp"  // SP5 t03: counter-based streams
 
 namespace alamo::sim {
 
@@ -43,12 +47,7 @@ namespace th = alamo::tactical::hangar;
 
 namespace {
 Vec3 hg_sv(tactical::Vec3 v) { return Vec3{v.x, v.y, v.z}; }
-std::string_view hg_trim(std::string_view s) {
-    auto ws = [](char c) { return c == ' ' || c == '\t' || c == '\r' || c == '\n'; };
-    while (!s.empty() && ws(s.front())) s.remove_prefix(1);
-    while (!s.empty() && ws(s.back())) s.remove_suffix(1);
-    return s;
-}
+std::string_view hg_trim(std::string_view s) { return ascii_trim(s); }
 objects::BehaviorTypeId spawn_squadron_behavior() {
     static const objects::BehaviorTypeId id = objects::behavior_type_id("SPAWN_SQUADRON");
     return id;
@@ -62,17 +61,19 @@ objects::BehaviorTypeId dummy_upgrade_behavior() {
     return id;
 }
 bool hg_same(std::string_view a, std::string_view b) {
-    a = hg_trim(a);
-    b = hg_trim(b);
-    if (a.size() != b.size()) return false;
-    for (size_t i = 0; i < a.size(); ++i) {
-        const char x = (a[i] >= 'a' && a[i] <= 'z') ? static_cast<char>(a[i] - 32) : a[i];
-        const char y = (b[i] >= 'a' && b[i] <= 'z') ? static_cast<char>(b[i] - 32) : b[i];
-        if (x != y) return false;
-    }
-    return true;
+    return ascii_iequals(ascii_trim(a), ascii_trim(b));
 }
-constexpr const char* kBuildList = "Tactical_Buildable_Objects_Multiplayer";
+constexpr const objects::ListTag& kBuildList = objects::tags::Tactical_Buildable_Objects_Multiplayer;
+// Starting / Reserve_Spawned_Units_Tech_0..5, one handle per tech slot.
+constexpr const objects::ListTag* kStartingTech[] = {
+    &objects::tags::Starting_Spawned_Units_Tech_0, &objects::tags::Starting_Spawned_Units_Tech_1,
+    &objects::tags::Starting_Spawned_Units_Tech_2, &objects::tags::Starting_Spawned_Units_Tech_3,
+    &objects::tags::Starting_Spawned_Units_Tech_4, &objects::tags::Starting_Spawned_Units_Tech_5};
+constexpr const objects::ListTag* kReserveTech[] = {
+    &objects::tags::Reserve_Spawned_Units_Tech_0, &objects::tags::Reserve_Spawned_Units_Tech_1,
+    &objects::tags::Reserve_Spawned_Units_Tech_2, &objects::tags::Reserve_Spawned_Units_Tech_3,
+    &objects::tags::Reserve_Spawned_Units_Tech_4, &objects::tags::Reserve_Spawned_Units_Tech_5};
+static_assert(std::size(kStartingTech) == th::kTechSlots && std::size(kReserveTech) == th::kTechSlots);
 }  // namespace
 
 bool TacticalBattle::hg_is_spawner(uint32_t type) const {
@@ -112,21 +113,20 @@ void TacticalBattle::hg_add_types() {
             const auto ti = static_cast<objects::TypeIndex>(t);
             // Skirmish (space; skai t03: land too): the tactical production lists (every faction row) join the tables.
             if (cfg_.skirmish)
-                for (const std::string_view tok : types.get_list(ti, kBuildList)) {
+                for (const std::string_view tok : types.get(ti, kBuildList)) {
                     const objects::TypeIndex x = types.resolve_name(hg_trim(tok));
                     if (x != objects::kNone) use_spawnable(static_cast<int32_t>(x));
                 }
             if (hg_is_spawner(t))
-                for (const char* kind : {"Starting_Spawned_Units_Tech_", "Reserve_Spawned_Units_Tech_"})
+                for (const auto* slots : {kStartingTech, kReserveTech})
                     for (uint32_t k = 0; k < th::kTechSlots; ++k) {
-                        const std::string tag = std::string(kind) + std::to_string(k);
-                        const th::SpawnList list = th::parse_spawn_list(types.get_list(ti, tag), [&types](std::string_view n) {
+                        const th::SpawnList list = th::parse_spawn_list(types.get(ti, *slots[k]), [&types](std::string_view n) {
                             const objects::TypeIndex x = types.resolve_name(n);
                             return x == objects::kNone ? -1 : static_cast<int32_t>(x);
                         });
                         for (const th::SpawnEntry& e : list) use_spawnable(e.type);
                     }
-            const std::string_view next = hg_trim(types.get_string(ti, "Next_Level_Base"));
+            const std::string_view next = hg_trim(types.get(ti, objects::tags::Next_Level_Base));
             if (!next.empty()) use(types.resolve_name(next));
         }
         if (types_used_.size() == before) break;
@@ -135,7 +135,7 @@ void TacticalBattle::hg_add_types() {
 }
 
 void TacticalBattle::hg_setup(TacticalMode& mode) {
-    (void)mode;
+    hg_mode_ = &mode;  // cu8g t01: the HOLSTER_WEAPON attach of map-load objects runs before l1_setup
     const objects::GameObjectTypes& types = catalog_->types();
     engine_loops_.set_space_idle_movement_speed(catalog_->space_idle_movement_speed());
     hg_tech_bonus_.assign(bt_players_, 0);
@@ -151,27 +151,90 @@ void TacticalBattle::hg_setup(TacticalMode& mode) {
         th::HangarDesc d;
         if (t < galaxy_->rules().types.size()) d.name = galaxy_->rules().types[t].name;
         for (uint32_t k = 0; k < th::kTechSlots; ++k) {
-            d.starting[k] = th::parse_spawn_list(types.get_list(ti, "Starting_Spawned_Units_Tech_" + std::to_string(k)), resolve);
-            d.reserve[k] = th::parse_spawn_list(types.get_list(ti, "Reserve_Spawned_Units_Tech_" + std::to_string(k)), resolve);
+            d.starting[k] = th::parse_spawn_list(types.get(ti, *kStartingTech[k]), resolve);
+            d.reserve[k] = th::parse_spawn_list(types.get(ti, *kReserveTech[k]), resolve);
         }
         // The schema types it as an int; the value as written (default "5.0") is read as a float.
-        const std::string delay(hg_trim(types.get_string(ti, "Spawned_Squadron_Delay_Seconds")));
+        const std::string delay(hg_trim(types.get(ti, objects::tags::Spawned_Squadron_Delay_Seconds)));
         if (!delay.empty()) d.delay_seconds = std::strtof(delay.c_str(), nullptr);
-        d.community_property = types.get_bool(ti, "Is_Community_Property");
+        d.community_property = types.get(ti, objects::tags::Is_Community_Property);
         d.station = star_base_behavior() != objects::kNoBehavior &&
                     types.has_behavior(ti, objects::BehaviorSet::Union, star_base_behavior());
+        // r3g t03 (STATION_HANGARS_SOUND §2.1 / §2.5 land): the spawn bones, their fly-out distances, the distance
+        // without one ([port] the type's movement radius; retail: a model size) and Spawn_Garrison_On_Load.
+        std::vector<std::string> bones;
+        for (const std::string_view b : types.get(ti, objects::tags::Spawned_Squadron_Location_Bones))
+            if (!hg_trim(b).empty()) bones.emplace_back(hg_trim(b));
+        d.land_bones = static_cast<uint32_t>(bones.size());
+        for (const std::string_view f : types.get(ti, objects::tags::Spawned_Squadron_Location_Flyout_Distances)) {
+            const std::string v(hg_trim(f));
+            if (!v.empty()) d.land_flyouts.push_back(std::strtof(v.c_str(), nullptr));
+        }
+        d.default_flyout = mv::unit_desc_from_type(types, t).radius;
+        d.garrison_on_load = types.get(ti, objects::tags::Spawn_Garrison_On_Load);
+        hg_land_bones_.push_back(std::move(bones));
         hangar_desc_[t] = static_cast<int32_t>(descs.size());
         descs.push_back(std::move(d));
     }
     th::HangarConfig hc;
     hc.skirmish = cfg_.skirmish;
+    hc.land = !space_;  // r3g t03
     hangars_ = std::make_unique<th::HangarSystem>(*combat_, std::move(descs), hc);
     hangars_->set_abilities(abilities_.get());
     th::HangarHost h;
     h.tech_level = [this](int32_t p) { return hg_tech(p); };
     h.in_hyperspace = [this](tc::ObjectId id) { return l1_jumps_.departing(static_cast<objects::ObjectId>(id)); };
-    // [port] unset: cinematic camera (no tactical cinematics gate yet), corruption / planet restrictions, the skirmish
-    // pending-delivery list, bay bones (the hangar's fallback: the hardpoint attachment offset with the carrier facing).
+    // skm1 t07: the skirmish start-force re-delivery list (SKIRMISH_SETUP §2.4; skirmish map battles only).
+    if (skirmish_map()) h.pending_delivery = [this](int32_t p, bool pop) { return sk_pending_delivery(p, pop); };
+    // r3g t03: the land structure clips (Structure Open / Hold / Close: static clip data from the model, the clip played on
+    // the animation world when one is attached; the finish = one_shot_frames) and the spawn bones (bind-pose bone point,
+    // [port] the structure's facing: the bone's own yaw is not read).
+    h.clip = [this](tc::ObjectId id, int32_t anim_type, bool loop, uint32_t& finish) {
+        if (!hg_mode_) return false;
+        uint32_t frames = 0;
+        float fps = 0.0f;
+        if (!anim_clip_info(*hg_mode_, static_cast<objects::ObjectId>(id), anim_type, frames, fps) || !(fps > 0.0f)) return false;
+        (void)play_clip(*hg_mode_, static_cast<objects::ObjectId>(id), static_cast<uint8_t>(anim_type), 0.0f, 1.0f, tick_.global_frame);
+        finish = loop ? 0u : clip_finish_frames(frames, fps);
+        return true;
+    };
+    h.land_bone = [this](tc::ObjectId id, uint32_t bone, tactical::Vec3& pos, tactical::Vec3& facing) {
+        if (!hg_mode_) return false;
+        const objects::ObjectStore& st = hg_mode_->primary();
+        const objects::ObjectHandle oh = st.find(static_cast<objects::ObjectId>(id));
+        if (!st.exists(oh) || st.type(oh) >= hangar_desc_.size()) return false;
+        const int32_t di = hangar_desc_[st.type(oh)];
+        if (di < 0 || static_cast<size_t>(di) >= hg_land_bones_.size() || bone >= hg_land_bones_[static_cast<size_t>(di)].size()) return false;
+        Vec3 p{};
+        if (model_bone_point(st, oh, hg_land_bones_[static_cast<size_t>(di)][bone], p) <= 0) return false;
+        const Vec3 f = st.facing(oh);
+        pos = tactical::Vec3{p.x, p.y, p.z};
+        facing = tactical::Vec3{f.x, f.y, 0.0f};
+        return true;
+    };
+    // trl2 t06 (STATION_HANGARS_SOUND §2.4 items 2 and 7, read 2026-11-20 from 0x593350 / 0x594600):
+    // item 2 - a campaign battle at a planet whose corruption is Corruption_Bribery (5): nothing launches unless the
+    // battle planet's OWNER's faction has Benefits_From_Corruption (the planet object's +0x58, not the spawner's owner).
+    // [port] a planet without an owning player does not block (retail reads through a null faction there).
+    // item 7 - a spawn type the battle planet's type restricts (Planet_Restricted_Unit_Categories / _Types, 0x373490).
+    // Item 1 (cinematic camera) stays unset: its second condition, controller int +0x380 (0x140b27d90) == 0, never holds
+    // in retail (static init -1, End_Cinematic_Mode 0x2cbb80 resets it to -1, no other writer), so the gate is dead.
+    // Bay bones: the hangar's own bind-pose frame of the attachment bone (HardpointDesc attach_x), no host hook.
+    if (!cfg_.skirmish && req_.info.planet < galaxy_->planets().size() && galaxy_->planets()[req_.info.planet].is_planet) {
+        const PlanetIndex bp = req_.info.planet;
+        h.corruption_blocked = [this, bp](int32_t) {
+            constexpr int8_t kCorruptionBribery = 5;
+            const galactic::PlanetState& ps = galaxy_->planets()[bp];
+            if (ps.corruption != kCorruptionBribery) return false;
+            const int32_t po = ps.owner;
+            if (po < 0 || static_cast<size_t>(po) >= galaxy_->players().size()) return false;
+            const uint32_t f = galaxy_->players()[static_cast<size_t>(po)].faction;
+            return f < galaxy_->rules().factions.size() && !galaxy_->rules().factions[f].benefits_from_corruption;
+        };
+        h.planet_restricted = [this, bp](int32_t type) {
+            return type >= 0 && galaxy_->planet_restricts(bp, static_cast<uint32_t>(type));
+        };
+    }
     hangars_->set_host(std::move(h));
     contents_ = std::make_unique<th::ContentsSystem>();
     production_ = std::make_unique<th::TacticalProduction>();
@@ -201,10 +264,131 @@ bool TacticalBattle::hg_engine_unit(const Unit& u) const {
     return rules_->type(parts_[u.participant].type).members.empty();
 }
 
+bool TacticalBattle::hg_walk_engine_unit(const Unit& u) const {
+    // cu8g t01 (§3.3 last row): the land Walk locomotor (LocomotorKind::Default on land) calls the same switch.
+    if (space_ || !u.movable || !movement_ || !movement_->has_unit(u.id)) return false;
+    return movement_->view(u.id).locomotor == mv::LocomotorKind::Default;
+}
+
+const TacticalBattle::HgHolsterType* TacticalBattle::hg_holster_type(objects::TypeIndex t) {
+    const objects::GameObjectTypes& types = catalog_->types();
+    if (t >= types.size()) return nullptr;
+    if (hg_holster_types_.size() != types.size()) hg_holster_types_.resize(types.size());
+    HgHolsterType& h = hg_holster_types_[t];
+    if (!h.known) {
+        h.known = 1;
+        constexpr uint32_t kFps = 30;
+        h.desc.transition_frames = th::holster_frames(types.get(t, objects::tags::Holster_Transition_Time_In_Secs), kFps);
+        h.desc.min_drawn_frames = th::holster_frames(types.get(t, objects::tags::Holster_Minimum_Drawn_Time_In_Secs), kFps);
+        h.desc.disable_engine_loops = types.get(t, objects::tags::Holster_Disable_Engine_Loops);
+        h.bone = std::string(hg_trim(types.get(t, objects::tags::Holster_Weapon_Bone_Name)));
+        h.has_bone_name = h.bone.empty() ? 0 : 1;
+    }
+    return &h;
+}
+
+void TacticalBattle::hg_holster_attach(const Unit& u) {
+    // Initialise (0x6355c0) / placed (0x635180): only for an object that carries HOLSTER_WEAPON in its current behaviour
+    // list and whose model has Holster_Weapon_Bone_Name (BattleCatalog model data); else the behaviour does nothing.
+    if (!hg_mode_) return;
+    const objects::ObjectStore& st = hg_mode_->primary();
+    if (!st.alive(u.h) || !st.has_behavior(u.h, objects::beh::HolsterWeapon)) return;
+    const HgHolsterType* ht = hg_holster_type(st.type(u.h));
+    if (!ht || !ht->has_bone_name) return;
+    Vec3 unused{};
+    if (model_bone_point(st, u.h, ht->bone, unused) <= 0) return;
+    engine_loops_.holster_attach(u.id, frame_);
+}
+
+void TacticalBattle::saber_throw_service(TacticalMode& mode) {
+    // cu8k t01 (CU8F_T01_T02_T07_RE.md §2.7 items 1, 2, 4): the throw at SWORD_THROW's half (kSaberThrowDelay [M]); from the
+    // throw + 6 SWORD_CONTROL: the saber gone (expired / detonated) -> the ability ends now; within Catch_Dist (3D, the
+    // thrower's position to the saber's) -> SWORD_CATCH (snap drawn now) and the end 11 frames later. A thrower that is
+    // gone drops its record (the saber flies on as a projectile).
+    if (sabers_.empty()) return;
+    const objects::ObjectStore& st = mode.primary();
+    size_t w = 0;
+    for (size_t k = 0; k < sabers_.size(); ++k) {
+        SaberThrowState& s = sabers_[k];
+        const Unit* u = unit_by_id(s.thrower);
+        bool keep = u && u->alive && !u->retreated && st.alive(u->h) && combat_ && combat_->has_unit(s.thrower);
+        // r3h t01 (§2.7 item 2): SWORD_THROW finishes 5 frames after the throw -> SWORD_CONTROL (0x6d) loops (speed 1)
+        // while the saber flies. [port] blend 0.1 (as the throw); SWORDSPIN (0x6f) on the saber needs a model row the
+        // port's saber projectile does not have.
+        if (keep && s.serial != 0 && s.end_frame == 0 && frame_ == s.throw_frame + 5) play_battle_clip(s.thrower, 0x6d, true, 1.0f, 0.1f);
+        if (keep && s.serial == 0) {
+            if (frame_ >= s.throw_frame) {
+                // Spawn_Projectile 0x54ade0: shooter the thrower, target the recorded object, fire-at point T, max travel =
+                // the Saber_Name type's Projectile_Max_Flight_Distance (+ radius + |dz|). [port] spawned at the thrower's
+                // target point (position + Ranged_Target_Z_Adjust): retail's spawn point is about 19 units off (a bone).
+                tc::SaberLaunch l;
+                l.thrower = s.thrower;
+                l.owner = combat_->owner(s.thrower);
+                l.projectile = s.projectile >= 0 ? static_cast<uint32_t>(s.projectile) : 0xFFFFFFFFu;
+                l.from = combat_->target_point(s.thrower);
+                l.fire_at = tactical::Vec3{s.aim.x, s.aim.y, s.aim.z};
+                l.target = s.target;
+                s.serial = s.projectile >= 0 ? combat_->launch_saber(l, frame_) : 0u;
+                if (s.serial == 0) {  // spawn failure: the ability ends
+                    engine_loops_.saber_resolve(s.thrower, 0u, frame_);
+                    keep = false;
+                }
+            }
+        } else if (keep && s.end_frame != 0) {
+            keep = frame_ < s.end_frame;
+        } else if (keep && frame_ >= s.throw_frame + 6) {
+            tactical::Vec3 sp;
+            if (!combat_->saber_position(s.serial, sp)) {  // gone: end now (epsilon 0: the saber stepped before)
+                engine_loops_.saber_resolve(s.thrower, 0u, frame_);
+                keep = false;
+            } else {
+                const tactical::Vec3 me = combat_->position(s.thrower);
+                const float dx = sp.x - me.x, dy = sp.y - me.y, dz = sp.z - me.z;
+                if (s.catch_dist > 0.0f && dx * dx + dy * dy + dz * dz < s.catch_dist * s.catch_dist) {
+                    s.end_frame = frame_ + 11u;  // SWORD_CATCH (30 frames at speed 3) finishes at the 10th advance after its play
+                    engine_loops_.saber_resolve(s.thrower, frame_, s.end_frame);
+                    play_battle_clip(s.thrower, 0x6e, false, 3.0f, 0.1f);  // r3h t01: SWORD_CATCH (0x6e), speed 3 [port: blend 0.1]
+                }
+            }
+        }
+        if (!keep) continue;
+        if (w != k) sabers_[w] = sabers_[k];
+        ++w;
+    }
+    sabers_.resize(w);
+}
+
+void TacticalBattle::hg_holster_service() {
+    // Service 0x635750 (interval 1), ascending id. Engaged: a current attack target (0x397a40), a running Berserker (SAP
+    // +0x2cc), the current clip ATTACK / SPINMOVE, or a hero clash (+0x3b4, s78n t06: kUnitHeroClash). cu8j t03
+    // (CU8F_T01_T02_T07_RE §2.6 / §2.7): a thrown saber is in flight from the throw up to and including the ability's end
+    // (the stand-in scheduled by saber_schedule); on the end frame the service still sees it in flight, so the held draw
+    // transition clears and the hum is unsuppressed on the next frame, as in retail.
+    if (!hg_mode_) return;
+    const objects::ObjectStore& st = hg_mode_->primary();
+    for (const Unit& u : units_) {
+        if (!u.alive || u.retreated || !engine_loops_.has_holster(u.id) || !st.alive(u.h)) continue;
+        const HgHolsterType* ht = hg_holster_type(st.type(u.h));
+        if (!ht) continue;
+        const bool engaged = (combat_ && combat_->has_unit(u.id) && combat_->current_target(u.id) != tc::kNoObject) ||
+                             (abilities_ && abilities_->is_active(u.id, ta::kBerserker)) || anim_engaged_clip(u.id) ||
+                             (combat_ && combat_->has_unit(u.id) && (combat_->flags(u.id) & tc::kUnitHeroClash) != 0);
+        // cu8j t03: the scheduled throw, then the service (the saber in flight from the throw to the ability's end), then
+        // the catch snap (only a real catch) and the end.
+        engine_loops_.saber_service(u.id, frame_, true);
+        engine_loops_.holster_service(u.id, ht->desc, engaged, engine_loops_.saber_in_flight(u.id), frame_);
+        engine_loops_.saber_service(u.id, frame_, false);
+    }
+}
+
 void TacticalBattle::hg_adopt(const Unit& u, SimRng& rng) {
-    if (hg_engine_unit(u)) engine_loops_.mode_enter(u.id, frame_);
+    hg_holster_attach(u);  // cu8g t01: before mode enter, so a holster hero starts suppressed (no hum)
+    if (hg_engine_unit(u) || hg_walk_engine_unit(u)) engine_loops_.mode_enter(u.id, frame_);
     if (!hangars_ || u.type >= hangar_desc_.size() || hangar_desc_[u.type] < 0) return;
-    if (hangars_->add_carrier(u.id, static_cast<uint32_t>(hangar_desc_[u.type]), frame_, &rng)) hg_used_ = true;
+    if (hangars_->add_carrier(u.id, static_cast<uint32_t>(hangar_desc_[u.type]), frame_, &rng)) {
+        hg_used_ = true;
+        if (hg_spawn_off_) hangars_->set_spawn_enabled(u.id, false);  // bkg3 b0028: +0x3CB = 0 (tactical_battle.hpp)
+    }
 }
 
 void TacticalBattle::hg_unit_removed(objects::ObjectId id) {
@@ -228,10 +412,35 @@ void TacticalBattle::hg_unit_removed(objects::ObjectId id) {
     if (hangars_->carrier_of(id) != tc::kNoObject) hangars_->squadron_removed(id, frame_);
 }
 
+// SP5 (read old, write new, commit in index order): the per-unit inputs (which service, speed / hyperspace or moving) come
+// from const reads and are gathered in parallel into per-unit slots; EngineLoops (sorted records, an op list) is then
+// serviced serially in unit order, as before.
 void TacticalBattle::hg_engine_service() {
-    for (const Unit& u : units_) {
-        if (!u.alive || u.retreated || !hg_engine_unit(u)) continue;
-        engine_loops_.locomotor_service(u.id, movement_->view(u.id).speed, l1_jumps_.departing(u.id), frame_);
+    struct In {
+        uint8_t kind = 0;  // 0 none, 1 SimpleSpace locomotor service, 2 land Walk service
+        bool flag = false;  // kind 1: in hyperspace (departing); kind 2: moving
+        float speed = 0.0f;
+    };
+    const auto n = static_cast<uint32_t>(units_.size());
+    std::vector<In> in(n);
+    const auto fill = [&](uint32_t b, uint32_t e) {
+        for (uint32_t i = b; i < e; ++i) {
+            const Unit& u = units_[i];
+            if (!u.alive || u.retreated) continue;
+            if (hg_engine_unit(u)) {
+                in[i] = {1, l1_jumps_.departing(u.id), movement_->view(u.id).speed};
+            } else if (hg_walk_engine_unit(u)) {
+                // cu8g t01 [port]: the Walk "moving" test is untraced (§3.3 [M]); an order in progress or speed, as kUnitMoving.
+                const mv::UnitView v = movement_->view(u.id);
+                in[i] = {2, v.has_goal || v.speed > 0.0f, 0.0f};
+            }
+        }
+    };
+    if (tick_.pf && n >= svc_parallel_min_) (*tick_.pf)(n, kSvcParallelGrain, fill);
+    else fill(0, n);
+    for (uint32_t i = 0; i < n; ++i) {
+        if (in[i].kind == 1) engine_loops_.locomotor_service(units_[i].id, in[i].speed, in[i].flag, frame_);
+        else if (in[i].kind == 2) engine_loops_.walk_service(units_[i].id, in[i].flag, frame_);
     }
 }
 
@@ -302,6 +511,7 @@ objects::ObjectId TacticalBattle::hg_spawn(TacticalMode& mode, int32_t type, int
                     md.z = p.z;
                     md.yaw_deg = dmath::atan2(f.y, f.x) * (180.0f / dmath::kPiF);
                     md.owner = owner;
+                    mv_type_extents(md, ut);  // s78n t20
                     movement_->add_unit(md);
                     u->movable = true;
                 }
@@ -316,6 +526,9 @@ objects::ObjectId TacticalBattle::hg_spawn(TacticalMode& mode, int32_t type, int
                 store.destroy(containers_[ci].h);
             } else {
                 abilities_->add_container(containers_[ci].id, desc_of(team_beh), owner, group, frame_, &rng);
+                // cu8j t02 (MOVEMENT §4.7.3): SpawnSquadron 0x593960 runs the team helper 0x2a5a60, which adopts the
+                // container (0x39bcb0, return 0x2a61d5): one ctor draw when it qualifies (space: a fighter member).
+                (void)mv_adopt(mode, containers_[ci].h, rng);
                 bound = containers_[ci].id;
             }
         } else if (!group.empty()) {
@@ -358,11 +571,24 @@ objects::ObjectId TacticalBattle::hg_spawn(TacticalMode& mode, int32_t type, int
 
 void TacticalBattle::hg_tick(TacticalMode& mode, SimRng& rng) {
     if (!hangars_) return;
-    hangars_->update(frame_, rng);
+    // SP5 t03: with the Hangar stream on, each carrier's entry / bay draws come from its own counter-based stream.
+    if (svc_streams_ & (1u << static_cast<uint32_t>(tactical::services::StreamId::Hangar))) {
+        const tactical::hangar::HangarSystem::StreamOf own = [this](tactical::hangar::ObjectId carrier) {
+            return tactical::services::stream_rng(cfg_.session_seed, frame_, tactical::services::StreamId::Hangar,
+                                                  static_cast<uint64_t>(static_cast<uint32_t>(carrier)));
+        };
+        hangars_->update(frame_, rng, &own);
+    } else {
+        hangars_->update(frame_, rng);
+    }
     objects::ObjectStore& store = mode.primary();
     const std::vector<th::LaunchRequest> launches(hangars_->launches().begin(), hangars_->launches().end());
     for (const th::LaunchRequest& r : launches) {
         if (r.type < 0) continue;
+        if (r.land) {  // r3g t03: a land structure's unit
+            hg_land_launch(mode, r, rng);
+            continue;
+        }
         std::vector<objects::ObjectId> ordered;
         const objects::ObjectId bound = hg_spawn(mode, r.type, r.owner, hg_sv(r.origin), hg_sv(r.facing), hg_sv(r.flyout), true, rng, ordered);
         if (bound == objects::kNoObjectId) continue;
@@ -388,6 +614,46 @@ void TacticalBattle::hg_tick(TacticalMode& mode, SimRng& rng) {
         }
     }
     hangars_->clear_requests();
+    // r3g t03 (signal 10): a land unit that has finished its exit move has left its structure (Close).
+    for (const objects::ObjectId id : hangars_->leaving_units())
+        if (hg_move_done(id)) hangars_->unit_left(id, frame_);
+}
+
+void TacticalBattle::hg_land_launch(TacticalMode& mode, const tactical::hangar::LaunchRequest& r, SimRng& rng) {
+    // r3g t03 (0x594dc0 land branch): the unit (or a company: its members at the spawn point, then the team container) at
+    // the spawn point with the spawn facing, spawned flag, then a move to the fly-out point (along the facing).
+    std::vector<objects::ObjectId> ordered;
+    objects::ObjectId bound = objects::kNoObjectId;
+    std::vector<int32_t> members;
+    if (oi_company_members(r.type, members) && !members.empty()) {
+        bound = hg_spawn(mode, r.type, r.owner, hg_sv(r.origin), hg_sv(r.facing), hg_sv(r.origin), true, rng, ordered);
+    } else {
+        bound = oi_spawn_unit(mode, r.type, hg_sv(r.origin), hg_sv(r.facing), r.owner);
+        if (Unit* u = unit_by_id(bound)) {
+            u->flags_3a2 = static_cast<uint8_t>(u->flags_3a2 | 2u);  // spawned (+0x3a2 |= 2)
+            if (u->movable) ordered.push_back(bound);
+        }
+    }
+    if (bound == objects::kNoObjectId) return;
+    hangars_->bind_launch(r.serial, bound);
+    ++hg_launches_;
+    if (!ordered.empty()) exec_move(mode, ordered, r.flyout.x, r.flyout.y, rng, mv::kNoFacing, false);
+}
+
+bool TacticalBattle::hg_move_done(objects::ObjectId id) const {
+    // [port] signal 10 = the object's move finished: no goal left on the mover, or on every live member of a container.
+    if (!movement_) return true;
+    if (movement_->has_unit(id)) {
+        const mv::UnitView v = movement_->view(id);
+        return !v.has_goal && !v.pushed;
+    }
+    for (const Unit& u : units_) {
+        if (!u.alive || u.retreated || u.container >= containers_.size() || containers_[u.container].id != id) continue;
+        if (!movement_->has_unit(u.id)) continue;
+        const mv::UnitView v = movement_->view(u.id);
+        if (v.has_goal || v.pushed) return false;
+    }
+    return true;
 }
 
 void TacticalBattle::hg_station_upgrade(TacticalMode& mode, const tactical::abilities::SpawnRequest& q) {
@@ -396,7 +662,7 @@ void TacticalBattle::hg_station_upgrade(TacticalMode& mode, const tactical::abil
     objects::ObjectStore& store = mode.primary();
     Unit* s = unit_by_id(q.source);
     if (!s || !s->alive || s->retreated || !store.alive(s->h)) return;
-    const objects::TypeIndex next = types.resolve_name(hg_trim(types.get_string(static_cast<objects::TypeIndex>(s->type), "Next_Level_Base")));
+    const objects::TypeIndex next = types.resolve_name(hg_trim(types.get(static_cast<objects::TypeIndex>(s->type), objects::tags::Next_Level_Base)));
     if (next == objects::kNone || next >= types.size()) return;  // top level: no upgrade
     const objects::ObjectHandle sh = s->h;
     const int32_t owner = store.owner(sh);
@@ -438,7 +704,16 @@ uint8_t TacticalBattle::hg_build_check(const objects::ObjectStore& st, int32_t p
     const objects::GameObjectTypes& types = catalog_->types();
     if (!production_enabled() || player < 0 || static_cast<size_t>(player) >= galaxy_->players().size()) return 1;
     if (type == objects::kNone || type >= types.size()) return 1;
+    // mcx4 t04 (check 0x497140, first test [H]; SKIRMISH_SETUP §7): the type's Tactical_Production_Queue (+0xa30) must be
+    // Tactical_Units (2) or Tactical_Upgrades (3); the default -1 (and Land / Space) is never built in a battle.
+    if (hg_queue_of(type) < 0) return 1;
     if (std::find(types_used_.begin(), types_used_.end(), static_cast<uint32_t>(type)) == types_used_.end()) return 1;
+    // skm1 t02 (0x288b80): named heroes (+0x13 Is_Named_Hero) only with the heroes option bit 0x1, skirmish super weapons
+    // (+0x1c Is_Skirmish_Tactical_Super_Weapon) only with bit 0x4 (BattleConfig::skirmish_options, skirmish battles).
+    if (cfg_.skirmish && cfg_.skirmish_options.set) {
+        if (!cfg_.skirmish_options.heroes && types.get(type, objects::tags::Is_Named_Hero)) return 1;
+        if (!cfg_.skirmish_options.super_weapons && types.get(type, objects::tags::Is_Skirmish_Tactical_Super_Weapon)) return 1;
+    }
     const objects::ObjectHandle bh = st.find(builder);
     if (!st.alive(bh) || st.owner(bh) != player) return 1;
     bool unit = false;
@@ -451,7 +726,7 @@ uint8_t TacticalBattle::hg_build_check(const objects::ObjectStore& st, int32_t p
     if (f < galaxy_->rules().factions.size()) faction = galaxy_->rules().factions[f].name;
     const std::string name = type < galaxy_->rules().types.size() ? galaxy_->rules().types[type].name : std::string();
     bool listed = false, in_row = false;
-    for (const std::string_view tok : types.get_list(st.type(bh), kBuildList)) {
+    for (const std::string_view tok : types.get(st.type(bh), kBuildList)) {
         if (types.resolve_name(hg_trim(tok)) == objects::kNone) {
             in_row = hg_same(tok, faction);
             continue;
@@ -460,7 +735,7 @@ uint8_t TacticalBattle::hg_build_check(const objects::ObjectStore& st, int32_t p
     }
     if (!listed) return 1;
     // Tactical_Build_Prerequisites: every listed type owned alive by the player [port: all-of].
-    for (const std::string_view tok : types.get_list(type, "Tactical_Build_Prerequisites")) {
+    for (const std::string_view tok : types.get(type, objects::tags::Tactical_Build_Prerequisites)) {
         const objects::TypeIndex pre = types.resolve_name(hg_trim(tok));
         if (pre == objects::kNone) continue;
         bool have = false;
@@ -471,8 +746,30 @@ uint8_t TacticalBattle::hg_build_check(const objects::ObjectStore& st, int32_t p
             }
         if (!have) return 4;
     }
+    // mcx4 t04 (check 0x497140, SKIRMISH_SETUP §7 [H]): the lifetime limits. Build_Limit_Lifetime_Per_Player (+0x888) and
+    // Build_Limit_Lifetime_For_All_Allies (+0x88c): 0 refuses; > 0 refuses once the lifetime count (player +0x198, read by
+    // 0x281c70) reaches it - the player's own count, or the sum over the player and its allies. [port] the lifetime count
+    // is the galactic campaign's built count (GalacticSim player `built`) plus this battle's completed builds; 0x281c70's
+    // company / squadron member terms (+0x958, +0x938, +0x978) are not added.
+    auto lifetime = [&](int32_t p) -> int64_t {
+        int64_t n = production_->built_count(p, static_cast<int32_t>(type));
+        if (p >= 0 && static_cast<size_t>(p) < galaxy_->players().size())
+            for (const auto& [bt, k] : galaxy_->players()[static_cast<size_t>(p)].built)
+                if (bt == static_cast<uint32_t>(type)) n += k;
+        return n;
+    };
+    const int32_t life_own = types.get(type, objects::tags::Build_Limit_Lifetime_Per_Player);  // default -1: none
+    if (life_own == 0 || (life_own > 0 && lifetime(player) >= life_own)) return 5;
+    const int32_t life_allies = types.get(type, objects::tags::Build_Limit_Lifetime_For_All_Allies);  // default -1: none
+    if (life_allies == 0) return 5;
+    if (life_allies > 0) {
+        int64_t n = 0;
+        for (uint32_t p = 0; p < bt_players_; ++p)
+            if (static_cast<int32_t>(p) == player || (combat_ && !combat_->is_enemy(player, static_cast<int32_t>(p)))) n += lifetime(static_cast<int32_t>(p));
+        if (n >= life_allies) return 5;
+    }
     // Build_Limit_Current_For_All_Allies: live objects of the player and allies plus their queued orders.
-    const int32_t limit = types.get_int(type, "Build_Limit_Current_For_All_Allies");  // default -1: none
+    const int32_t limit = types.get(type, objects::tags::Build_Limit_Current_For_All_Allies);  // default -1: none
     if (limit > 0) {
         auto allied = [&](int32_t o) { return o == player || (o >= 0 && combat_ && !combat_->is_enemy(player, o)); };
         uint32_t n = 0;
@@ -481,6 +778,18 @@ uint8_t TacticalBattle::hg_build_check(const objects::ObjectStore& st, int32_t p
         for (uint32_t p = 0; p < bt_players_; ++p)
             if (allied(static_cast<int32_t>(p))) n += production_->count_type(static_cast<int32_t>(p), static_cast<int32_t>(type));
         if (n >= static_cast<uint32_t>(limit)) return 5;
+    }
+    // skai t10 (STRATEGIC_GAPS 23, the galactic rule; SKAI_T06_LAND_RUNS 3 item 6: retail fields one Han_Solo_Team_Land_MP,
+    // the port landed a second while the first lived): Build_Limit_Current_Per_Player 0 -> fail; > 0 -> the player's live
+    // count + queued orders < limit. [port] Live count = the player's battle participants of that type (one per galactic-level
+    // object: a company counts once) that wait in the reinforcement pool or are on the field with a live unit.
+    const int32_t per_player = types.get(type, objects::tags::Build_Limit_Current_Per_Player);  // default -1: none
+    if (per_player == 0) return 5;
+    if (per_player > 0) {
+        uint32_t n = production_->count_type(player, static_cast<int32_t>(type));
+        for (const Participant& q : parts_)
+            if (q.owner == player && q.type == static_cast<uint32_t>(type) && ((q.reserve && !q.deployed) || (q.deployed && q.alive > 0))) ++n;
+        if (n >= static_cast<uint32_t>(per_player)) return 5;
     }
     return 0;
 }
@@ -497,7 +806,7 @@ std::vector<TacticalBattle::BuildOptionInfo> TacticalBattle::station_build_optio
     if (f < galaxy_->rules().factions.size()) faction = galaxy_->rules().factions[f].name;
     const float credits = credits_get_ ? credits_get_(player) : 0.0f;
     bool in_row = false;
-    for (const std::string_view tok : types.get_list(st.type(bh), kBuildList)) {
+    for (const std::string_view tok : types.get(st.type(bh), kBuildList)) {
         const objects::TypeIndex t = types.resolve_name(hg_trim(tok));
         if (t == objects::kNone) {
             in_row = hg_same(tok, faction);
@@ -506,12 +815,13 @@ std::vector<TacticalBattle::BuildOptionInfo> TacticalBattle::station_build_optio
         if (!in_row) continue;
         BuildOptionInfo o;
         o.type = static_cast<int32_t>(t);
-        o.cost = std::max(0, types.get_int(t, "Tactical_Build_Cost_Multiplayer"));
+        o.cost = std::max(0, types.get(t, objects::tags::Tactical_Build_Cost_Multiplayer));
         for (const th::BuildOrder& q : production_->queue(player))
             if (q.builder == builder && q.type == o.type) ++o.queued;
         const uint8_t c = hg_build_check(st, player, builder, t);
         if (c == 1) continue;  // not buildable here (e.g. outside the battle tables)
         o.block = c != 0 ? c : (static_cast<float>(o.cost) > credits ? uint8_t{3} : uint8_t{0});
+        if (o.block == 0 && hg_queue_full(player, t)) o.block = 1;  // mcx4 t04: QueueFull (build bar item 4)
         out.push_back(o);
     }
     return out;
@@ -543,6 +853,7 @@ commands::RejectReason TacticalBattle::hg_production_command(TacticalMode& mode,
             if (o.builder != builder) continue;
             if (k++ != want) continue;
             const uint32_t id = o.id;
+            present(PresentationEventKind::ProductionCanceled, p, builder, o.type, id);  // ref2 t02 (before cancel drops o)
             production_->cancel(id);
             hg_refund(id, true);
             prod_used_ = hg_used_ = true;
@@ -552,16 +863,28 @@ commands::RejectReason TacticalBattle::hg_production_command(TacticalMode& mode,
     }
     const auto type = static_cast<objects::TypeIndex>(ev.u("type_index"));
     if (!hg_buildable(st, p, builder, type)) return R::NotAllowed;
-    const float cost = static_cast<float>(std::max(0, types.get_int(type, "Tactical_Build_Cost_Multiplayer")));  // int field
+    if (hg_queue_full(p, type)) return R::NotAllowed;  // mcx4 t04: a human's queue holds Max_Build_Queue entries
+    const float cost = static_cast<float>(std::max(0, types.get(type, objects::tags::Tactical_Build_Cost_Multiplayer)));  // int field
     if (cost > 0.0f) {
         const float have = credits_get_ ? credits_get_(p) : 0.0f;
         if (have < cost) return R::CannotAfford;
         if (credits_add_) credits_add_(p, -cost);
     }
-    // [port] Tactical_Build_Time_Seconds without the AI Space_Build_Time_Multiplier / build-time modifiers.
-    const float seconds = static_cast<float>(types.get_int(type, "Tactical_Build_Time_Seconds"));  // int field
-    const uint32_t id = production_->enqueue(p, builder, static_cast<int32_t>(type), seconds, frame_);
+    // 0x496f00: Tactical_Build_Time_Seconds x (skm1 t04) the AI difficulty multiplier for a non-human AI player (Space_ /
+    // Land_Build_Time_Multiplier, set by BattleAi), in the order of SKIRMISH_SETUP §3 [H]: seconds x GC
+    // Tactical_Build_Time_Multiplier (mcx4 t10; shipped 1.0) x the AI multiplier. [port] The build-time modifiers (list 10)
+    // are not applied. mcx4 t07 (Q7.2): in a campaign battle the faction's
+    // Corruption_Tactical_Production_Time_Multipliers entry (planet corrupted ? 1 : 0) multiplies the time; production only
+    // runs in skirmish here (production_enabled), where retail's factor is 1.0. The price factor (0x496d80) applies only
+    // while a tactical price modifier is active for the type; the port has no such modifier map, so it is not applied.
+    float seconds = static_cast<float>(types.get(type, objects::tags::Tactical_Build_Time_Seconds));  // int field
+    seconds = seconds * catalog_->tactical_build_time_multiplier();
+    if (static_cast<size_t>(p) < ai_build_time_mult_.size()) seconds *= ai_build_time_mult_[static_cast<size_t>(p)];
+    if (!cfg_.skirmish && galaxy_)
+        seconds *= galaxy_->tactical_corruption_multiplier(req_.info.planet, p, galactic::GalacticSim::TacticalCorruption::ProductionTime);
+    const uint32_t id = production_->enqueue(p, builder, static_cast<int32_t>(type), seconds, frame_, static_cast<uint8_t>(hg_queue_of(type)));
     hg_order_cost_.push_back(HgOrderCost{id, p, cost});
+    present(PresentationEventKind::ProductionBegin, p, builder, static_cast<int32_t>(type), id);  // ref2 t02
     prod_used_ = hg_used_ = true;
     return R::None;
 }
@@ -585,6 +908,17 @@ void TacticalBattle::hg_production(TacticalMode& mode, SimRng& rng) {
         const std::vector<objects::ObjectId> orphans = std::move(hg_orphans_);
         hg_orphans_.clear();
         for (const objects::ObjectId id : orphans) {
+            // mcx4 t04 (REMAINING_GAPS §1.4 callers, kill path 0x391310 [H]; STATION_HANGARS_SOUND §2.9: Kill kills the
+            // contents list): in a skirmish an object with Tactical_Destruction_Decrements_Tech_Level that dies lowers its
+            // owner's tech level by 1 (the owner only, no ally sweep). [M] the orphaned contents of a dead container count
+            // as killed. ledger: consumes GameObjectType.Tactical_Destruction_Decrements_Tech_Level
+            if (cfg_.skirmish) {
+                const objects::ObjectHandle oh = store.find(id);
+                if (store.alive(oh) && catalog_->types().get(store.type(oh), objects::tags::Tactical_Destruction_Decrements_Tech_Level)) {
+                    const int32_t ow = store.owner(oh);
+                    if (ow >= 0 && static_cast<size_t>(ow) < hg_tech_bonus_.size()) --hg_tech_bonus_[static_cast<size_t>(ow)];
+                }
+            }
             hg_remove_silently(id);
             bt_kill_silently(mode, store.find(id));
         }
@@ -599,6 +933,7 @@ void TacticalBattle::hg_production(TacticalMode& mode, SimRng& rng) {
         hg_refund(o.id, false);
         const Unit* b = unit_by_id(o.builder);
         if (!b || !b->alive || b->retreated || !store.alive(b->h) || o.type < 0) continue;  // builder gone: dropped
+        present(PresentationEventKind::ProductionCompleted, o.player, o.builder, o.type, o.id);  // ref2 t02
         const auto t = static_cast<objects::TypeIndex>(o.type);
         const Vec3 pos = store.position(b->h), facing = store.facing(b->h);
         if (dummy_upgrade_behavior() != objects::kNoBehavior && types.has_behavior(t, objects::BehaviorSet::Union, dummy_upgrade_behavior())) {
@@ -616,6 +951,18 @@ void TacticalBattle::hg_production(TacticalMode& mode, SimRng& rng) {
             const std::vector<tc::ObjectId> none;
             abilities_->add_container(id, desc_of(static_cast<uint32_t>(t)), o.player, none, frame_, &rng);
             hg_upgrade_objs_.push_back(HgUpgradeObject{id, h});
+            // s78n t20 fix (SKIRMISH_SETUP §3 "Completion (0x498f70)": signal 0x22 is raised for every finished build,
+            // before the DUMMY_UPGRADE branch; AI_GALACTIC_3 §1.11: the AI build task waits for it): the upgrade's
+            // completion is reported too (no pool entry). Without it a land task force whose to-produce list holds an
+            // upgrade never finished Produce_Force - Tactical_Multiplayer_Build_Land_Units_Generic (not removable by
+            // the goal system) then held its plan for the rest of the battle and its player built no more units.
+            // [port] land only: in space the AI claims the new object of the type (claim_produced).
+            if (!space_) {
+                ProductionDone d;
+                d.player = o.player;
+                d.type = static_cast<uint32_t>(t);
+                production_done_.push_back(d);
+            }
         } else if (!space_) {
             // q6 t19 (SKIRMISH_SETUP §3 / §3.1 item 1): a finished land build never spawns. 0x27fad0 appends the type to
             // the player's reinforcement pool; the human / AI Reinforce drops it later through its landing object
@@ -631,7 +978,40 @@ void TacticalBattle::hg_production(TacticalMode& mode, SimRng& rng) {
             std::vector<objects::ObjectId> ordered;
             (void)hg_spawn(mode, o.type, o.player, pos, facing, pos, false, rng, ordered);
         }
+        // mcx4 t04 (build service 0x498170 [H], REMAINING_GAPS §1.4): a finished build of a type with
+        // Tactical_Build_Increments_Tech_Level sets every player allied with the builder's owner (itself included) that
+        // has the same faction to the owner's tech level + 1 (FoC: the skirmish EC_ / RC_ / UC_Level_*_Tech_Upgrade).
+        if (types.get(t, objects::tags::Tactical_Build_Increments_Tech_Level)) hg_raise_tech(o.player);
     }
+}
+
+int32_t TacticalBattle::hg_queue_of(objects::TypeIndex type) const {
+    const int32_t q = catalog_->types().get(type, objects::tags::Tactical_Production_Queue);
+    return q == 2 || q == 3 ? q - 2 : -1;  // the build manager's queue index (+0 / +0x18)
+}
+
+bool TacticalBattle::hg_queue_full(int32_t player, objects::TypeIndex type) const {
+    // mcx4 t04 (SKIRMISH_SETUP §3 [H], build bar item 4): a human player's queue for the type's Tactical_Production_Queue
+    // takes fewer than GC Max_Build_Queue entries; an AI player is not limited.
+    if (!production_ || player < 0 || static_cast<size_t>(player) >= galaxy_->players().size()) return false;
+    if (!galaxy_->players()[static_cast<size_t>(player)].human) return false;
+    const int32_t q = hg_queue_of(type);
+    if (q < 0) return false;
+    const int32_t cap = galaxy_->rules().constants.max_build_queue;
+    return static_cast<int64_t>(production_->count_queue(player, static_cast<uint8_t>(q))) >= static_cast<int64_t>(cap);
+}
+
+void TacticalBattle::hg_raise_tech(int32_t player) {
+    if (player < 0 || static_cast<size_t>(player) >= hg_tech_bonus_.size() || static_cast<size_t>(player) >= galaxy_->players().size()) return;
+    const int32_t next = hg_tech(player) + 1;
+    const uint32_t faction = galaxy_->players()[static_cast<size_t>(player)].faction;
+    for (size_t p = 0; p < hg_tech_bonus_.size() && p < galaxy_->players().size(); ++p) {
+        const auto pi = static_cast<int32_t>(p);
+        if (pi != player && (!combat_ || combat_->is_enemy(player, pi))) continue;  // 0x2823e0: allied (itself included)
+        if (galaxy_->players()[p].faction != faction) continue;
+        hg_tech_bonus_[p] = next - static_cast<int32_t>(galaxy_->players()[p].tech_level);
+    }
+    prod_used_ = true;
 }
 
 void TacticalBattle::set_garrison_spawn(objects::ObjectId id, bool on) {
@@ -661,6 +1041,65 @@ void TacticalBattle::hg_hash(StateHasher& h) const {
     }
     h.u32(static_cast<uint32_t>(hg_upgrade_objs_.size()));
     for (const HgUpgradeObject& u : hg_upgrade_objs_) h.i32(u.id);
+}
+
+}  // namespace alamo::sim
+
+namespace alamo::sim {
+
+// ---- galab t03: planet-bonus upgrade objects (docs/re/GALAB_ABILITIES_RE.md §4.3) ----------------------------------------
+
+void TacticalBattle::ga_add_types() {
+    if (cfg_.skirmish) ga_upgrades_.clear();  // no galactic planets behind a skirmish
+    if (!tables_ || ga_upgrades_.empty()) return;
+    const size_t before = types_used_.size();
+    for (const auto& [player, t] : ga_upgrades_) {
+        (void)player;
+        if (std::find(types_used_.begin(), types_used_.end(), t) == types_used_.end()) types_used_.push_back(t);
+    }
+    if (types_used_.size() != before) tables_extend();
+}
+
+void TacticalBattle::ga_spawn_upgrades(TacticalMode& mode) {
+    // 0x2afc10 per battle player [H]: each listed type that has no Previous_Upgrade_Level_Type (type +0xa60) and is not
+    // yet owned by the player at that level or a later one (the Next_Upgrade_Level_Type chain, type +0xa70) is created
+    // for the player at the origin (0x29f810). The affiliation test (0x3751a0) was applied when the list was made.
+    // [port] The object joins the ability system like a produced DUMMY_UPGRADE (add_container), so its automatic
+    // abilities apply; it is tracked with the production upgrades (hashed and saved with them).
+    if (!ga_spawn_) ga_upgrades_.clear();  // a battle rebuilt by a save load: the objects come from the save
+    if (ga_upgrades_.empty() || !abilities_) return;
+    const objects::GameObjectTypes& types = catalog_->types();
+    objects::ObjectStore& store = mode.primary();
+    const auto owns_level = [&](int32_t player, uint32_t t) {
+        for (int guard = 0; guard < 16 && t < types.size(); ++guard) {
+            for (const objects::ObjectHandle h : store.all_objects())
+                if (store.alive(h) && store.owner(h) == player && static_cast<uint32_t>(store.type(h)) == t) return true;
+            const objects::TypeIndex next =
+                types.resolve_name(hg_trim(types.get(static_cast<objects::TypeIndex>(t), objects::tags::Next_Upgrade_Level_Type)));
+            if (next == objects::kNone) break;
+            t = static_cast<uint32_t>(next);
+        }
+        return false;
+    };
+    for (const auto& [player, t] : ga_upgrades_) {
+        if (t >= types.size()) continue;
+        const auto ti = static_cast<objects::TypeIndex>(t);
+        if (!hg_trim(types.get(ti, objects::tags::Previous_Upgrade_Level_Type)).empty()) continue;
+        if (owns_level(player, t)) continue;
+        objects::SpawnParams sp;
+        sp.type = ti;
+        sp.owner = player;
+        sp.position = Vec3{};
+        sp.facing = Vec3{1.0f, 0.0f, 0.0f};
+        const objects::ObjectHandle h = store.create(sp);
+        if (!store.alive(h)) continue;
+        const objects::ObjectId id = store.id(h);
+        const std::vector<tc::ObjectId> none;
+        abilities_->add_container(id, desc_of(t), player, none, frame_, bt_rng_);
+        hg_upgrade_objs_.push_back(HgUpgradeObject{id, h});
+        prod_used_ = true;
+    }
+    ga_upgrades_.clear();
 }
 
 }  // namespace alamo::sim

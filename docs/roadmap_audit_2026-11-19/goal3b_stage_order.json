@@ -1,0 +1,116 @@
+[
+ {
+  "op": "update",
+  "collection": "lanes",
+  "doc_id": "st0",
+  "data": {
+   "order": 0
+  }
+ },
+ {
+  "op": "update",
+  "collection": "lanes",
+  "doc_id": "st1",
+  "data": {
+   "order": 1
+  }
+ },
+ {
+  "op": "update",
+  "collection": "lanes",
+  "doc_id": "st2",
+  "data": {
+   "order": 2
+  }
+ },
+ {
+  "op": "update",
+  "collection": "lanes",
+  "doc_id": "st4",
+  "data": {
+   "order": 3
+  }
+ },
+ {
+  "op": "update",
+  "collection": "lanes",
+  "doc_id": "st3",
+  "data": {
+   "order": 4
+  }
+ },
+ {
+  "op": "update",
+  "collection": "lanes",
+  "doc_id": "st6",
+  "data": {
+   "order": 5
+  }
+ },
+ {
+  "op": "update",
+  "collection": "lanes",
+  "doc_id": "st7",
+  "data": {
+   "order": 6
+  }
+ },
+ {
+  "op": "update",
+  "collection": "lanes",
+  "doc_id": "st9",
+  "data": {
+   "order": 7
+  }
+ },
+ {
+  "op": "update",
+  "collection": "lanes",
+  "doc_id": "st10",
+  "data": {
+   "order": 8
+  }
+ },
+ {
+  "op": "update",
+  "collection": "lanes",
+  "doc_id": "st5",
+  "data": {
+   "order": 9
+  }
+ },
+ {
+  "op": "update",
+  "collection": "lanes",
+  "doc_id": "side5",
+  "data": {
+   "order": 10
+  }
+ },
+ {
+  "op": "update",
+  "collection": "lanes",
+  "doc_id": "st8",
+  "data": {
+   "order": 11
+  }
+ },
+ {
+  "op": "update",
+  "collection": "lanes",
+  "doc_id": "st11",
+  "data": {
+   "order": 12
+  }
+ },
+ {
+  "op": "set",
+  "collection": "log",
+  "doc_id": "roadmap-audit-2026-11-19-g3b",
+  "data": {
+   "at": "2026-11-19T00:00:00+00:00",
+   "by": "roadmap-audit-08a8b0",
+   "text": "Roadmap audit goal 3b (stage order, README core goals 1 -> 2 -> 3): Parity and Full QA before Mod system, Performance and the benchmark after it; stages renumbered"
+  }
+ }
+]

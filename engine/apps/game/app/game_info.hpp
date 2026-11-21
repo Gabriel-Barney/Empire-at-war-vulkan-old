@@ -28,9 +28,10 @@ std::u32string type_label(const GameData& d, const ui::TextDatabase& text, objec
 // Encyclopedia entry from the type data (t40, HUD_GAPS §2.2): header = name, icon = the HUD icon, cost = Build_Cost_Credits,
 // population = Population_Value, unit_class = Encyclopedia_Unit_Class, abilities = the Unit_Abilities_Data button art,
 // strong / weak = the HUD icons of the Encyclopedia_Good_Against / _Vulnerable_To type lists, description = the
-// Encyclopedia_Text ids (MasterTextFile) joined. A planet has one row instead, its income [port].
+// Encyclopedia_Text ids (MasterTextFile) joined (`skirmish_battle`: game::encyclopedia_text_tag picks the MP text). A
+// planet has one row instead, its income [port].
 ui::EncyclopediaEntry encyclopedia_entry(const GameData& d, const ui::TextDatabase& text, std::span<const ui::HudTypeInfo> hud_types,
-                                         objects::TypeIndex t);
+                                         objects::TypeIndex t, bool skirmish_battle = false);
 
 // Holocron pages from the galactic sim. The data chart needs a history: sample() once per frame on the galactic map
 // (one sample per galactic day per non-neutral player: credits, combat power, planets owned).
@@ -45,7 +46,10 @@ public:
     }
     void sample(const galactic::GalacticSim& g);
     // Conflict results (ConflictManager log) and the local plot set's story dialogs, newest first.
-    ui::DroidLogInfo droid_log(const GameSession& s, const GameData& d, const ui::TextDatabase& text) const;
+    // ui4 t11: the story dialog log, then `advisor_rows` (droid_log_rows of the advisor lines shown so far).
+    // `advisor_colors`: one colour per advisor row (mcx4 t14; shorter: the skin's colours).
+    ui::DroidLogInfo droid_log(const GameSession& s, const GameData& d, const ui::TextDatabase& text,
+                               std::span<const std::u32string> advisor_rows, std::span<const ui::Rgba8> advisor_colors = {}) const;
     ui::DataChartInfo chart(const galactic::GalacticSim& g, const GameData& d, const ui::TextDatabase& text) const;
     // Tech tree of the player's faction (Underworld: the black-market tree): researched = Tech_Level <= the player's,
     // available = one above, locked = higher; types without a tech level are researched.
@@ -134,14 +138,23 @@ SpecialPanelData special_panel(const galactic::GalacticSim& g, const GameData& d
                                std::span<const ui::HudTypeInfo> hud_types, int32_t player, uint32_t kind, PlanetIndex planet,
                                uint32_t hero_id);
 
-// Campaign end (Int-verify): the host calls galactic::victory_outcome with the campaign's VictoryRules (victory.hpp)
+// Campaign end (Int-verify): the host calls galactic::victory_outcome (victory.hpp; q6 t21: the sim holds the records)
 // instead of the former campaign_outcome stand-in.
 struct BattleTally {
     uint32_t kills = 0, losses = 0;  // units destroyed by / of the local player (battle deaths)
 };
-// Campaign score [port formulas]: military = battles won / fought (conflict log), conquest = planets owned / all
-// planets, kill efficiency = kills / (kills + losses); rank title by their mean.
+// ui1 t05 (GAME_SCORING.md §7): the statistics dialog's values from the GameScoring script's
+// Get_Game_Stat_For_Control_ID (efficiencies 0..1+, title = a TEXT_*_TITLEnn key). ok = false: no script answer.
+struct ScoringStats {
+    bool ok = false;
+    double military = 0.0, conquest = 0.0, kill = 0.0;
+    std::string title_key;
+};
+// Campaign score. With `stats.ok` the script's values (efficiency x 100, clamped 0..100 as Update_GameSpy_Kill_Stats
+// shows them [port]; the title's text; the victory list is left empty: its retail content is not recovered, backlog).
+// Without a scoring script the [port] formulas stand in: military = battles won / fought (conflict log), conquest =
+// planets owned / all planets, kill efficiency = kills / (kills + losses), no title.
 ui::CampaignScoreInfo campaign_score(const GameSession& s, const galactic::GalacticSim& g, const ui::TextDatabase& text, bool victory,
-                                     const BattleTally& tally);
+                                     const BattleTally& tally, const ScoringStats& stats = {});
 
 }  // namespace alamo::game

@@ -1,0 +1,964 @@
+"""Tag ledger generator (docs/MOD_COMPAT_DESIGN.md §7.2, roadmap mcx0 t02).
+
+One row per (class, tag) of retail's XML descriptor tables (docs/re/xml_field_tables.md, through the generated
+engine/objects/src/field_schema_table.inc; class = the row's segment owner), with the port's state:
+
+  unread    the port's loader for the class does not keep the tag, and no engine code reads it
+  stored    the port keeps the value (a generic store: the typed object view, its sub-object fields, GameConstants,
+            the campaign's raw list) but no engine code reads it
+  consumed  engine code reads it: a string literal naming the tag in engine source outside the descriptor tables,
+            tests, tools and the load report (every typed read goes through an accessor taking the tag name:
+            GameObjectTypes::get_*(t, "Tag"), GameConstants::get*("Tag"), XmlNode::child*("Tag"), CampaignDef::raw_value) or
+            a typed handle named in code (objects::tags::Tag, alamo/objects/type_tags.hpp; ref6 t01),
+            a name the code builds from such literals ("Corruption_" + n + "_Type": built_tag_reads),
+            or an annotation "// ledger: consumes <Class>.<Tag>" next to an indirect read (a column filled from the
+            tag, a struct member set by a loader)
+  verified  consumed, and a test carries "// ledger: verifies <Class>.<Tag>" (a test that checks the tag's effect
+            against a docs/re spec or a probe)
+  retail_unused
+            no engine code reads it, and an RE answer found no reader in retail either: the row is in RETAIL_UNUSED
+            with the docs/re section that says so (roadmap mcx4). Not an honour gap; the lint counts it as settled.
+            A RETAIL_UNUSED row that the code does read, or whose citation is not a docs/re page naming the tag, is
+            an error.
+  out_of_scope
+            no engine code reads it, and the port leaves it out on purpose: the row is in OUT_OF_SCOPE with one of
+            the scope reasons of docs/DECISIONS.md "Out-of-scope tag-ledger rows" (multiplayer, hardware detection,
+            graphic detail levels, debug keys, localised splash / credits; roadmap mcx4 t16). Not an honour gap; shown
+            like retail_unused. A row a single-player or skirmish game reads in retail is never out of scope.
+  misfiled  no engine code reads it under this class, because the row is a segment error of xml_field_tables.md:
+            the descriptor belongs to another class (docs/re/XML_FIELD_TABLE_SEGMENTS.md names the real owner). The
+            row is in MISFILED with an engine file that reads the real owner's field; it settles only while that file
+            names the tag in a string literal. A misfiled row whose real owner the port does not read stays a gap.
+
+A literal naming a tag that several classes list (72 of the 2,764 tag names) counts for the object type and sub-object
+classes (the shared typed readers) and for the other classes the file names (literal_classes).
+
+Other columns: code (parser type code), consumers (how many files read it), spec (a docs/re page that names the tag
+in backticks, by a sticky rule: the page the committed ledger cites while it still names the tag, else the
+alphabetically first, so a new docs/re page does not rewrite other rows: roadmap ref1 t01), base_uses (how often base
+FoC's XML in extracted/foc_data_text.zip writes an element of that name, any class, outside XML comments), tier (1 for
+every row until a row says otherwise: TIER_OVERRIDES). corpus_uses / corpus_mods are filled by the corpus runner
+(mcx7), not here.
+
+Outputs (both generated, never edited by hand):
+  engine/objects/generated/tag_ledger.inc   rows compiled into alamo_objects (objects/tag_ledger.hpp): class, tag,
+                                            code, state, spec, base uses, tier. No consumer column (ref1 t01): moving
+                                            a tag read between files leaves it unchanged
+  docs/status/tag-ledger.md                 the human view, with the consumer counts
+
+    python engine/objects/tools/gen_tag_ledger.py            write both
+    python engine/objects/tools/gen_tag_ledger.py --allow-regress Class.Tag ...
+                                                             write although a row moves consumed -> stored / unread /
+                                                             retail_unused / out_of_scope
+tools/lint/check_tag_ledger.py imports this module and checks that the committed ledger matches the code.
+"""
+import argparse
+import os
+import re
+import sys
+import zipfile
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+ROOT = os.path.normpath(os.path.join(HERE, "..", "..", ".."))
+ENGINE = os.path.join(ROOT, "engine")
+SCHEMA = os.path.join(ENGINE, "objects", "src", "field_schema_table.inc")
+OUT_INC = os.path.join(ENGINE, "objects", "generated", "tag_ledger.inc")
+OUT_MD = os.path.join(ROOT, "docs", "status", "tag-ledger.md")
+DOCS_RE = os.path.join(ROOT, "docs", "re")
+FOC_ZIP = os.path.join(ROOT, "extracted", "foc_data_text.zip")
+
+STATES = ("unread", "stored", "consumed", "verified", "retail_unused", "out_of_scope", "misfiled")
+STATE_ENUM = {"unread": "Unread", "stored": "Stored", "consumed": "Consumed", "verified": "Verified",
+              "retail_unused": "RetailUnused", "out_of_scope": "OutOfScope", "misfiled": "Misfiled"}
+SETTLED_UNREAD = ("retail_unused", "out_of_scope", "misfiled")  # states of rows nothing reads that are not honour gaps
+
+# Classes whose port loader keeps every tag of an entry, read or not (so an unread tag there is "stored"):
+#   * the typed object view keeps every descriptor field of GameObjectType / SpaceProp / HeroUnit, and the raw store
+#     keeps every element below a type, so the ability / action sub-object fields are kept too;
+#   * data::GameConstants keeps every child of <GameConstants>; CampaignDef::raw every child of a campaign.
+# Every other class has a loader that reads named tags only.
+GENERIC_STORE = {"GameObjectType", "SpaceProp", "HeroUnit", "GameConstants", "Campaign", "Ability_Base"}
+SUB_OBJECT_OWNER = re.compile(r"(_Ability|_Action)$|^(Unit_Ability|Hero_Clash|Destroy_Unit)$")
+
+TIER_OVERRIDES = {}  # (class, tag) -> tier, for rows that are distribution-level only (tier 2)
+
+# Rows retail parses but never reads (roadmap mcx4, Gabriel 2026-11-18): (class, tag) -> the docs/re section whose RE
+# answer found no reader, as "docs/re/<FILE>.md <section>". The file must exist and name the tag. Class and tag are
+# spelled as in docs/re/xml_field_tables.md (matched case-insensitively). Keep the list sorted by class, then tag.
+RETAIL_UNUSED = {
+    ("Arc_Sweep_Attack_Ability", "Aggressiveness"): "docs/re/MCX4_T10_RE_ANSWERS.md §14 Round 3 [M]",
+    ("Arc_Sweep_Attack_Ability", "Focus"): "docs/re/MCX4_T10_RE_ANSWERS.md §14 Round 3 [M]",
+    ("Attack_Action", "Attack_Accuracy_Modifier"): "docs/re/MCX4_T10_RE_ANSWERS.md §11 [H]",
+    ("Cable_Ability", "Cable_Fadeout_Time"): "docs/re/MCX4_T15_RE_ANSWERS.md Cable_Ability.Cable_Width family [H]",
+    ("Campaign", "Camera_Distance"): "docs/re/MCX4_T15_RE_ANSWERS.md Campaign.Camera_Distance family [M]",
+    ("Campaign", "Camera_Shift_X"): "docs/re/MCX4_T15_RE_ANSWERS.md Campaign.Camera_Distance family [M]",
+    ("Campaign", "Camera_Shift_Y"): "docs/re/MCX4_T15_RE_ANSWERS.md Campaign.Camera_Distance family [M]",
+    ("CommandBarComponent", "Should_Render_At_Drag_Pos"): "docs/re/MCX4_T15_RE_ANSWERS.md CommandBarComponent.Swap_Texture family [H]",
+    ("Decal", "Category"): "docs/re/MCX4_PRES_RE_ANSWERS_2.md Q6 Decal Category [H]",
+    ("Eat_Attack_Ability", "Needs_To_Rotate"): "docs/re/MCX4_T11_T12_RE_ANSWERS.md §B3 [M]",
+    ("Eat_Attack_Ability", "Rotation_Base_Bone_Name"): "docs/re/MCX4_T15_RE_ANSWERS.md Eat_Attack_Ability.Rotation_Base_Bone_Name [M]",
+    ("Faction", "Can_Win_By_Destroying_Super_Weapon"): "docs/re/MCX4_RE_ANSWERS_GALACTIC.md Q7.5 [H]",
+    ("Faction", "Carrier_Icon_Name"): "docs/re/MCX4_T14_RE_ANSWERS.md Faction.Fleet_Icon_Name family [M]",
+    ("Faction", "Corruption_Tactical_Build_Pad_Time_Multipliers"): "docs/re/MCX4_RE_ANSWERS_GALACTIC.md Q7.2 [H]",
+    ("Faction", "Corvette_Icon_Name"): "docs/re/MCX4_T14_RE_ANSWERS.md Faction.Fleet_Icon_Name family [M]",
+    ("Faction", "Credits_Accumulation_Factor"): "docs/re/MCX4_RE_ANSWERS_GALACTIC.md Q7.1 [M]",
+    ("Faction", "Fleet_Icon_Name"): "docs/re/MCX4_T14_RE_ANSWERS.md Faction.Fleet_Icon_Name family [M]",
+    ("Faction", "Frigate_Icon_Name"): "docs/re/MCX4_T14_RE_ANSWERS.md Faction.Fleet_Icon_Name family [M]",
+    ("Faction", "Ground_Base_Icon_Name"): "docs/re/MCX4_T14_RE_ANSWERS.md Faction.Fleet_Icon_Name family [M]",
+    ("Faction", "Ground_Transport_Icon_Name"): "docs/re/MCX4_T14_RE_ANSWERS.md Faction.Fleet_Icon_Name family [M]",
+    ("Faction", "Land_Mode_Garrison_Selection_Blob_Material_Name"): "docs/re/MCX4_T15_RE_ANSWERS.md Faction.Land_Mode_Garrison_Selection_Blob_Material_Name family [M]",
+    ("Faction", "Land_Skirmish_Unit_Buy_Credits"): "docs/re/MCX4_T10_RE_ANSWERS.md §17 [M]",
+    ("Faction", "Land_Surrender_SFXEvent"): "docs/re/MCX4_T13_RE_ANSWERS.md Faction.Land_Surrender_SFXEvent family [H]",
+    ("Faction", "Music_Event_Strategic_Lose"): "docs/re/MCX4_T13_RE_ANSWERS.md Faction.Music_Event_Strategic_Win family [H]",
+    ("Faction", "Music_Event_Strategic_Win"): "docs/re/MCX4_T13_RE_ANSWERS.md Faction.Music_Event_Strategic_Win family [H]",
+    ("Faction", "Planet_Icon_Offset"): "docs/re/MCX4_T14_RE_ANSWERS.md Faction.Fleet_Icon_Name family [M]",
+    ("Faction", "Planet_Icon_Scale"): "docs/re/MCX4_T14_RE_ANSWERS.md Faction.Fleet_Icon_Name family [M]",
+    ("Faction", "Reinforcements_Requesting_SFXEvent"): "docs/re/MCX4_T13_RE_ANSWERS.md Faction.Reinforcements_Selection_SFXEvent family [H]",
+    ("Faction", "SFXEvent_Build_Impossible_Location_Blockaded"): "docs/re/P4_SIM_SYSTEMS.md §2.7.3 [M: byte scan]",
+    ("Faction", "SFXEvent_HUD_Advisor_Urgent"): "docs/re/MCX4_T13_RE_ANSWERS.md Faction.SFXEvent_HUD_Advisor_Urgent [M]",
+    ("Faction", "SFXEvent_HUD_Base_Shield_Penetrated"): "docs/re/TRU1_A_RE_ANSWERS.md Penetration SFX [M: byte scan]",
+    ("Faction", "SFXEvent_HUD_Build_Pad_Captured"): "docs/re/MCX4_T13_RE_ANSWERS.md Faction.SFXEvent_HUD_Landing_Zone_Captured family [H]",
+    ("Faction", "SFXEvent_HUD_Build_Pad_Lost"): "docs/re/MCX4_T13_RE_ANSWERS.md Faction.SFXEvent_HUD_Landing_Zone_Captured family [H]",
+    ("Faction", "SFXEvent_HUD_Enemy_Base_Shield_Penetrated"): "docs/re/TRU1_A_RE_ANSWERS.md Penetration SFX [M: byte scan]",
+    ("Faction", "SFXEvent_HUD_Enemy_Special_Weapon_Charging"): "docs/re/MCX4_T13_RE_ANSWERS.md Faction.SFXEvent_HUD_Special_Weapon_Ready family [H]",
+    ("Faction", "SFXEvent_HUD_Landing_Zone_Captured"): "docs/re/MCX4_T13_RE_ANSWERS.md Faction.SFXEvent_HUD_Landing_Zone_Captured family [H]",
+    ("Faction", "SFXEvent_HUD_Landing_Zone_Lost"): "docs/re/MCX4_T13_RE_ANSWERS.md Faction.SFXEvent_HUD_Landing_Zone_Captured family [H]",
+    ("Faction", "SFXEvent_HUD_Last_Landing_Zone_Lost"): "docs/re/MCX4_T13_RE_ANSWERS.md Faction.SFXEvent_HUD_Landing_Zone_Captured family [H]",
+    ("Faction", "SFXEvent_HUD_Special_Weapon_Charging"): "docs/re/MCX4_T13_RE_ANSWERS.md Faction.SFXEvent_HUD_Special_Weapon_Ready family [H]",
+    ("Faction", "SFXEvent_Max_Credits_Limit_Reached"): "docs/re/P4_SIM_SYSTEMS.md §2.7.3 [M: byte scan]",
+    ("Faction", "Ship_Icon_Name"): "docs/re/MCX4_T14_RE_ANSWERS.md Faction.Fleet_Icon_Name family [M]",
+    ("Faction", "Space_Mode_Garrison_Selection_Blob_Material_Name"): "docs/re/MCX4_T15_RE_ANSWERS.md Faction.Land_Mode_Garrison_Selection_Blob_Material_Name family [M]",
+    ("Faction", "Space_Retreat_Off_Map_Dest_Pos"): "docs/re/TRU1_C_RE.md §2.1 [H]",
+    ("Faction", "Space_Skirmish_Unit_Buy_Credits"): "docs/re/MCX4_T10_RE_ANSWERS.md §17 [M]",
+    ("Faction", "Space_Surrender_SFXEvent"): "docs/re/MCX4_T13_RE_ANSWERS.md Faction.Land_Surrender_SFXEvent family [H]",
+    ("Faction", "SpeechEvent_Super_Weapon_Enemy_Moving_Into_Range"): "docs/re/MCX4_T13_RE_ANSWERS.md Faction.SpeechEvent_Super_Weapon_Moving_Range_60_Seconds family [H]",
+    ("Faction", "SpeechEvent_Super_Weapon_Moving_Into_Range"): "docs/re/MCX4_T13_RE_ANSWERS.md Faction.SpeechEvent_Super_Weapon_Moving_Range_60_Seconds family [H]",
+    ("Faction", "Squadron_Icon_Name"): "docs/re/MCX4_T14_RE_ANSWERS.md Faction.Fleet_Icon_Name family [M]",
+    ("Faction", "Star_Base_Icon_Name"): "docs/re/MCX4_T14_RE_ANSWERS.md Faction.Fleet_Icon_Name family [M]",
+    ("Faction", "Text_Nickname_ID"): "docs/re/MCX4_T14_RE_ANSWERS.md Faction.Fleet_Icon_Name family [M]",
+    ("Faction", "Vehicle_Icon_Name"): "docs/re/MCX4_T14_RE_ANSWERS.md Faction.Fleet_Icon_Name family [M]",
+    ("Force_Confuse_Ability", "Confuse_Effect"): "docs/re/MCX4_T15_RE_ANSWERS.md Force_Confuse_Ability.Confuse_Effect [M]",
+    ("GameConstants", "AI_LandThreatDistanceFactor"): "docs/re/MCX4_T11_T12_RE_ANSWERS.md §S [M: export scan]",
+    ("GameConstants", "AI_LandThreatTurnRateFactor"): "docs/re/MCX4_T11_T12_RE_ANSWERS.md §S [M: export scan]",
+    ("GameConstants", "AI_SpaceThreatDistanceFactor"): "docs/re/MCX4_T11_T12_RE_ANSWERS.md §S [M: export scan]",
+    ("GameConstants", "AI_SpaceThreatTurnRateFactor"): "docs/re/MCX4_T11_T12_RE_ANSWERS.md §S [M: export scan]",
+    ("GameConstants", "AutomaticAutoResolve"): "docs/re/MCX4_T09_RE_ANSWERS.md Q3 AutomaticAutoResolve [H]",
+    ("GameConstants", "Battle_Pending_Message_Font"): "docs/re/MCX4_T14_RE_ANSWERS.md GameConstants.Battle_Pending_Message_Font family [H]",
+    ("GameConstants", "Battle_Pending_Message_Font_Size"): "docs/re/MCX4_T14_RE_ANSWERS.md GameConstants.Battle_Pending_Message_Font family [H]",
+    ("GameConstants", "Battle_Pending_Message_Pos_X"): "docs/re/MCX4_T14_RE_ANSWERS.md GameConstants.Battle_Pending_Message_Font family [H]",
+    ("GameConstants", "Battle_Pending_Message_Pos_Y"): "docs/re/MCX4_T14_RE_ANSWERS.md GameConstants.Battle_Pending_Message_Font family [H]",
+    ("GameConstants", "Camera_Stop_Left"): "docs/re/STRATEGIC_GAPS.md §7.1 [H]",
+    ("GameConstants", "Camera_Stop_Right"): "docs/re/STRATEGIC_GAPS.md §7.1 [H]",
+    ("GameConstants", "Camera_Z_Position"): "docs/re/STRATEGIC_GAPS.md §7.1 [H]",
+    ("GameConstants", "CB_Flash_Duration"): "docs/re/MCX4_T14_RE_ANSWERS.md GameConstants.CB_Flash_Count [H]",
+    ("GameConstants", "CrouchMoveBlendTime"): "docs/re/MCX4_T11_T12_RE_ANSWERS.md §S [M: export scan]",
+    ("GameConstants", "Default_Defense_Adjust"): "docs/re/MCX4_T11_T12_RE_ANSWERS.md §S [M: export scan]",
+    ("GameConstants", "Droid_Text_Color"): "docs/re/MCX4_T15_RE_ANSWERS.md GameConstants.Droid_Text_Color [H]",
+    ("GameConstants", "Event_Message_Default_Font_Name"): "docs/re/MCX4_T14_RE_ANSWERS.md GameConstants.In_Game_Message_Default_Font_Name family [H]",
+    ("GameConstants", "Event_Message_Default_Font_Size"): "docs/re/MCX4_T14_RE_ANSWERS.md GameConstants.In_Game_Message_Default_Font_Name family [H]",
+    ("GameConstants", "First_Strike_Extra_Damage_Percent"): "docs/re/MCX4_RE_ANSWERS_GALACTIC.md Q2.4 [H]",
+    ("GameConstants", "First_Strike_Particle"): "docs/re/MCX4_RE_ANSWERS_GALACTIC.md Q2.4 [H]",
+    ("GameConstants", "Fleet_Maintenance_Update_Delay_Seconds"): "docs/re/STRATEGIC_GAPS.md §2.3 [H]",
+    ("GameConstants", "Galactic_Zoom_Acceleration"): "docs/re/P1_CAMERA_INPUT.md §0 item 6 [M: no reader]",
+    ("GameConstants", "Galactic_Zoom_In_Station_Offset"): "docs/re/MCX4_T14_RE_ANSWERS.md GameConstants.Galactic_Zoom_In_Station_Rotation [H]",
+    ("GameConstants", "GUI_Hilite_Level"): "docs/re/MCX4_T14_RE_ANSWERS.md GameConstants.GUI_Cycle_Speed family [M: read, no effect]",
+    ("GameConstants", "GUI_Planet_Flash_Level"): "docs/re/MCX4_PRES_RE_ANSWERS_3.md Q10 (only the ctor writes it) [H]",
+    ("GameConstants", "GUI_Tactical_Countdown_Timers_Screen_Spacing"): "docs/re/MCX4_PRES_RE_ANSWERS_2.md Q1.4 (read on a branch that cannot run) [H]",
+    ("GameConstants", "Health_Bar_Scale"): "docs/re/STRATEGIC_GAPS.md §7.2 [H]",
+    ("GameConstants", "In_Game_Message_Default_Font_Name"): "docs/re/MCX4_T14_RE_ANSWERS.md GameConstants.In_Game_Message_Default_Font_Name family [H: read, no effect]",
+    ("GameConstants", "In_Game_Message_Default_Font_Size"): "docs/re/MCX4_T14_RE_ANSWERS.md GameConstants.In_Game_Message_Default_Font_Name family [H: read, no effect]",
+    ("GameConstants", "Income_Redistribution"): "docs/re/MCX4_RE_ANSWERS_GALACTIC.md Q2.2 [H]",
+    ("GameConstants", "Land_Health_Bar_Scale"): "docs/re/STRATEGIC_GAPS.md §7.2 [H]",
+    ("GameConstants", "Large_Coin_Stack_Size"): "docs/re/MCX4_T14_RE_ANSWERS.md GameConstants.Large_Coin_Stack_Size family [H]",
+    ("GameConstants", "LoopWaypointLineTextureName"): "docs/re/MCX4_T15_RE_ANSWERS.md GameConstants.WaypointLineTextureName family [H]",
+    ("GameConstants", "Map_Preview_Image_Size"): "docs/re/MCX4_T14_RE_ANSWERS.md GameConstants.Large_Coin_Stack_Size family [H]",
+    ("GameConstants", "Max_Galactic_Zoom_Distance"): "docs/re/P1_CAMERA_INPUT.md §0 item 6 [M: no reader]",
+    ("GameConstants", "Max_Galactic_Zoom_Speed"): "docs/re/P1_CAMERA_INPUT.md §0 item 6 [M: no reader]",
+    ("GameConstants", "MaxCombatAccuracyAlignmentBonus"): "docs/re/MCX4_T10_RE_ANSWERS.md §16 [H]",
+    ("GameConstants", "MaxCombatDamageAlignmentBonus"): "docs/re/MCX4_T10_RE_ANSWERS.md §16 [H]",
+    ("GameConstants", "MaxCombatSensorRangeAlignmentBonus"): "docs/re/MCX4_T10_RE_ANSWERS.md §16 [H]",
+    ("GameConstants", "MaximumSpecialStructuresLand"): "docs/re/MCX4_RE_ANSWERS_GALACTIC.md Q2.1 [H]",
+    ("GameConstants", "MaximumSpecialStructuresSpace"): "docs/re/MCX4_RE_ANSWERS_GALACTIC.md Q2.1 [H]",
+    ("GameConstants", "MaxLandFormationFormupFrames"): "docs/re/MCX4_T11_T12_RE_ANSWERS.md §S [M: export scan]",
+    ("GameConstants", "MaxObstacleCostLand"): "docs/re/MCX4_T11_T12_RE_ANSWERS.md §S [M: export scan]",
+    ("GameConstants", "MaxObstacleCostSpace"): "docs/re/MCX4_T11_T12_RE_ANSWERS.md §S [M: export scan]",
+    ("GameConstants", "Medium_Coin_Stack_Size"): "docs/re/MCX4_T14_RE_ANSWERS.md GameConstants.Large_Coin_Stack_Size family [H]",
+    ("GameConstants", "Min_Galactic_Zoom_Speed"): "docs/re/P1_CAMERA_INPUT.md §0 item 6 [M: no reader]",
+    ("GameConstants", "Min_Health_Bar_Scale"): "docs/re/STRATEGIC_GAPS.md §7.2 [H]",
+    ("GameConstants", "ObstacleAreaOverlapForMaxSpace"): "docs/re/MCX4_T11_T12_RE_ANSWERS.md §S [M: export scan]",
+    ("GameConstants", "Progressive_Taxation"): "docs/re/MCX4_RE_ANSWERS_GALACTIC.md Q2.2 [H]",
+    ("GameConstants", "RepushDistance"): "docs/re/MOVEMENT.md §5.4 [H]",
+    ("GameConstants", "Skirmish_Buy_Credits"): "docs/re/MCX4_RE_ANSWERS_GALACTIC.md Q2.3 [H: read only in a pre-game branch single player never reaches]",
+    ("GameConstants", "SpaceIdlePathCullCoefficient"): "docs/re/MCX4_T11_T12_RE_ANSWERS.md §S [M: export scan]",
+    ("GameConstants", "UseLinearCollisionChecks"): "docs/re/MCX4_T11_T12_RE_ANSWERS.md §S [M: export scan]",
+    ("GameObjectType", "Air_Vehicle_Turret_Target"): "docs/re/MCX4_RE_ANSWERS_TACTICAL.md §8 [H]",
+    ("GameObjectType", "Apply_Y_Turret_Rotate_To_Axis"): "docs/re/MCX4_PRES_RE_ANSWERS_2.md Q6 [H]",
+    ("GameObjectType", "Apply_Z_Turret_Rotate_To_Axis"): "docs/re/MCX4_PRES_RE_ANSWERS_2.md Q6 [H]",
+    ("GameObjectType", "Begin_Turn_Towards_Distance"): "docs/re/MCX4_T11_T12_RE_ANSWERS.md §B2 [H: read only by STARSHIP_LOCOMOTOR, which no base type lists]",
+    ("GameObjectType", "CanCellStack"): "docs/re/MCX4_T11_T12_RE_ANSWERS.md §B2 [M]",
+    ("GameObjectType", "Destroyed_Space_Tactical_Map"): "docs/re/TACTICAL_GAPS.md §4.10 [M: ctor / dtor / copy only]",
+    ("GameObjectType", "Disallows_Hyperspace_Retreat"): "docs/re/MCX4_RE_ANSWERS_TACTICAL.md §11 [H]",
+    ("GameObjectType", "Formation_Priority"): "docs/re/MCX4_T11_T12_RE_ANSWERS.md §B2 Round 3 [H]",
+    ("GameObjectType", "Ground_Infantry_Turret_Target"): "docs/re/MCX4_RE_ANSWERS_TACTICAL.md §8 [H]",
+    ("GameObjectType", "Ground_Vehicle_Turret_Target"): "docs/re/MCX4_RE_ANSWERS_TACTICAL.md §8 [H]",
+    ("GameObjectType", "GUI_Angles"): "docs/re/MCX4_T14_RE_ANSWERS.md GameObjectType.GUI_Angles family [M]",
+    ("GameObjectType", "GUI_Distance"): "docs/re/MCX4_T14_RE_ANSWERS.md GameObjectType.GUI_Angles family [M]",
+    ("GameObjectType", "GUI_Model_Name"): "docs/re/MCX4_T15_RE_ANSWERS.md GameObjectType.GUI_Model_Name [M]",
+    ("GameObjectType", "GUI_Velocity"): "docs/re/MCX4_T14_RE_ANSWERS.md GameObjectType.GUI_Angles family [M]",
+    ("GameObjectType", "GUI_X_Rot"): "docs/re/MCX4_T14_RE_ANSWERS.md GameObjectType.GUI_Angles family [M]",
+    ("GameObjectType", "Include_In_UI_Map_Header"): "docs/re/MCX4_PRES_RE_ANSWERS_2.md Q5 [M]",
+    ("GameObjectType", "Is_Escort"): "docs/re/MCX4_T10_RE_ANSWERS.md §1 Round 3 [H: no caller of the getters]",
+    ("GameObjectType", "MinimumPushReturnDistance"): "docs/re/MOVEMENT.md §5.4 [H]",
+    ("GameObjectType", "Name_Adjust"): "docs/re/MCX4_PRES_RE_ANSWERS_2.md Q5 [M]",
+    ("GameObjectType", "Planet_Ability_Name"): "docs/re/MCX4_PRES_RE_ANSWERS_2.md Q5 [M]",
+    ("GameObjectType", "Pre_Lit"): "docs/re/MCX4_PRES_RE_ANSWERS_2.md Q6 [M]",
+    ("GameObjectType", "Projectile_Acceleration_Per_Frame"): "docs/re/MCX4_T10_RE_ANSWERS.md §8 [H]",
+    ("GameObjectType", "Required_Timeline"): "docs/re/MCX4_RE_ANSWERS_TACTICAL.md §8 [H]",
+    ("GameObjectType", "SFXEvent_Bombard_Select_Target"): "docs/re/MCX4_T13_RE_ANSWERS.md GameObjectType.SFXEvent_Bombard_Incoming family [H]",
+    ("GameObjectType", "Size_Value"): "docs/re/MCX4_RE_ANSWERS_TACTICAL.md §8 [H]",
+    ("GameObjectType", "Space_Full_Stop_Command"): "docs/re/MCX4_T11_T12_RE_ANSWERS.md §B2 Round 3 [M]",
+    ("GameObjectType", "SpaceAutoResolveHitRate"): "docs/re/MCX4_T09_RE_ANSWERS.md Q4 [M: written, never read]",
+    ("GameObjectType", "SpaceAutoResolveStunRate"): "docs/re/MCX4_T09_RE_ANSWERS.md Q4 [M: written, never read]",
+    ("GameObjectType", "Tactical_Build_Start_Lower_Z"): "docs/re/MCX4_T14_RE_ANSWERS.md GameObjectType.Tactical_Build_Start_Lower_Z [M]",
+    ("GameObjectType", "TSW_Post_Music_Wait_Frames"): "docs/re/MCX4_PRES_RE_ANSWERS_2.md Q5 [M]",
+    ("GameObjectType", "Turret_Targets_Air_Vehicles"): "docs/re/MCX4_RE_ANSWERS_TACTICAL.md §8 [H]",
+    ("GameObjectType", "Turret_Targets_Anything_Else"): "docs/re/MCX4_RE_ANSWERS_TACTICAL.md §8 [H]",
+    ("GameObjectType", "Turret_Targets_Ground_Infantry"): "docs/re/MCX4_RE_ANSWERS_TACTICAL.md §8 [H]",
+    ("GameObjectType", "Turret_Targets_Ground_Vehicles"): "docs/re/MCX4_RE_ANSWERS_TACTICAL.md §8 [H]",
+    ("HardPoint", "Tooltip_Text"): "docs/re/MCX4_PRES_RE_ANSWERS_2.md Q5 [M]",
+    ("Infection_Ability", "Shoot_Anim"): "docs/re/MCX4_T11_T12_RE_ANSWERS.md §B3 [M]",
+    ("Laser_Defense_Ability", "Lightning_Effect_Name"): "docs/re/MCX4_T14_RE_ANSWERS.md Laser_Defense_Ability.Lightning_Effect_Name [M]",
+    ("LightSource", "Blob_Color"): "docs/re/MCX4_PRES_RE_ANSWERS_2.md Q6 LightSource rows [H]",
+    ("LightSource", "Blob_Intensity"): "docs/re/MCX4_PRES_RE_ANSWERS_2.md Q6 LightSource rows [H]",
+    ("Spawn_Ability", "Self_Destruct_Radius"): "docs/re/MCX4_RE_ANSWERS_TACTICAL.md §14 [H: only the load check reads it]",
+    ("Tractor_Beam_Attack_Ability", "Damage_Application_Time_In_Secs"): "docs/re/MCX4_T10_RE_ANSWERS.md §15 [M: only the post-parse clamp reads it]",
+}
+
+# Rows the port leaves out on purpose (roadmap mcx4 t16, Gabriel 2026-11-18): (class, tag) -> scope reason. Each reason
+# is a bold label in SCOPE_RECORD's SCOPE_SECTION, which ties it to the scope decision it follows from. Retail runs
+# skirmish as a multiplayer game type, so an "_MP" row that a skirmish reads (bounties, extra players, the setup
+# defaults) is not out of scope; neither is a row single player reads (Campaign.Is_Multiplayer filters the campaign
+# lists). Keep the list sorted by class, then tag.
+SCOPE_RECORD = "docs/DECISIONS.md"
+SCOPE_SECTION = "Out-of-scope tag-ledger rows"
+SCOPE_REASONS = ("multiplayer", "hardware detection", "graphic detail levels", "debug keys", "localised splash / credits")
+_MP, _HW, _GFX, _DBG, _LOC = SCOPE_REASONS
+OUT_OF_SCOPE = {
+    ("Campaign", "Is_Quickmatch_Allowed"): _MP,
+    ("Faction", "Debug_Ground_Structures"): _DBG,
+    ("Faction", "Multiplayer_Beacon_Type"): _MP,
+    # MCX4_T13_RE_ANSWERS "SFXEvent_Beacon_Placed": only the R_ / E_Multiplayer_Beacon types (Faction.Multiplayer_Beacon_Type) carry it
+    ("GameObjectType", "SFXEvent_Beacon_Placed"): _MP,
+    ("Faction", "SFXEvent_HUD_Tactical_Victory_Near"): _MP,  # MCX4_T13_RE_ANSWERS: overrun reveal, game types 1 / 2 / 4 only
+    ("Faction", "Multiplayer_Campaign_Heroes"): _MP,
+    ("Faction", "Multiplayer_Map_Preview_Icon"): _MP,
+    ("Faction", "SFXEvent_Player_Taunt"): _MP,
+    ("GameConstants", "AutoResolveVoteDefaultTimeOut"): _MP,
+    ("GameConstants", "AutoResolveVoteDefaultToTactical"): _MP,
+    ("GameConstants", "Battle_Pending_Timeout_Seconds"): _MP,  # GALACTIC_DIALOGS §1.1: MP banner countdown only
+    ("GameConstants", "Credits_Logo_1_Height"): _LOC,
+    ("GameConstants", "Credits_Logo_1_Name"): _LOC,
+    ("GameConstants", "Credits_Logo_1_Width"): _LOC,
+    ("GameConstants", "Credits_Logo_1_Y_Offset"): _LOC,
+    ("GameConstants", "Credits_Logo_2_Height"): _LOC,
+    ("GameConstants", "Credits_Logo_2_Name"): _LOC,
+    ("GameConstants", "Credits_Logo_2_Width"): _LOC,
+    ("GameConstants", "Credits_Logo_2_Y_Offset"): _LOC,
+    ("GameConstants", "Credits_Logo_3_Height"): _LOC,
+    ("GameConstants", "Credits_Logo_3_Name"): _LOC,
+    ("GameConstants", "Credits_Logo_3_Width"): _LOC,
+    ("GameConstants", "Credits_Logo_3_Y_Offset"): _LOC,
+    ("GameConstants", "Debug_Hot_Key_Load_Campaign"): _DBG,
+    ("GameConstants", "Debug_Hot_Key_Load_Map"): _DBG,
+    ("GameConstants", "Debug_Hot_Key_Load_Map_Script"): _DBG,
+    ("GameConstants", "Display_Bink_Movie_Frames"): _DBG,  # MCX4_T14_RE_ANSWERS: debug Bink frame-counter overlay
+    ("GameConstants", "Distribute_Credit_Quantum"): _MP,
+    ("GameConstants", "Japanese_ST_Line_Percent"): _LOC,
+    ("GameConstants", "Localized_Menu_Overlay"): _LOC,
+    ("GameConstants", "Localized_Splash_Screen"): _LOC,
+    ("GameConstants", "Localized_UK_English_Splash_Screen"): _LOC,
+    ("GameConstants", "Message_Of_The_Day_URL"): _MP,
+    ("GameConstants", "Quickmatch_Map_Exclusion_List"): _MP,
+    ("GameConstants", "Radar_Colorize_Multiplayer_Enemy"): _MP,
+    ("GameConstants", "Radar_Multiplayer_Enemy_Color"): _MP,
+    ("GameConstants", "ShouldDisplayPotentialPath"): _DBG,
+    ("GameConstants", "ShouldDisplayPredictionPaths"): _DBG,
+    ("GameConstants", "ShouldDisplaySyncedPaths"): _DBG,
+    ("GameConstants", "ShowUnitAIPlanAttachment"): _DBG,
+    ("GameConstants", "SyncedFrameInterval"): _MP,
+    ("GameObjectType", "No_Reflection_Below_Detail_Level"): _GFX,
+    ("GameObjectType", "No_Refraction_Below_Detail_Level"): _GFX,
+    ("GameObjectType", "SFXEvent_Debug_Test_Loop"): _DBG,
+    ("GraphicDetailLevel", "DynamicLighting"): _GFX,
+    ("GraphicDetailLevel", "EnvironmentDetail"): _GFX,
+    ("GraphicDetailLevel", "HeatDistortions"): _GFX,
+    ("GraphicDetailLevel", "MeshDetail"): _GFX,
+    ("GraphicDetailLevel", "ParticleDetail"): _GFX,
+    ("GraphicDetailLevel", "ScreenAALevel"): _GFX,
+    ("GraphicDetailLevel", "ScreenResolutionHeight"): _GFX,
+    ("GraphicDetailLevel", "ScreenResolutionWidth"): _GFX,
+    ("GraphicDetailLevel", "ShaderDetailLevel"): _GFX,
+    ("GraphicDetailLevel", "ShadowDetail"): _GFX,
+    ("GraphicDetailLevel", "ShadowVolumes"): _GFX,
+    ("GraphicDetailLevel", "SoftShadows"): _GFX,
+    ("GraphicDetailLevel", "TextureMipLevel"): _GFX,
+    ("GraphicDetailLevel", "WaterDetailLevel"): _GFX,
+    ("HardwareConfiguration", "CPUSpeed"): _HW,
+    ("HardwareConfiguration", "DefaultGraphicDetailLevel"): _HW,
+    ("HardwareConfiguration", "DeviceIDListHEX"): _HW,
+    ("HardwareConfiguration", "FillRateMpsPS13"): _HW,
+    ("HardwareConfiguration", "FillRateMpsPS14"): _HW,
+    ("HardwareConfiguration", "FillRateMpsPS20"): _HW,
+    ("HardwareConfiguration", "GraphicDetailSettingName"): _HW,
+    ("HardwareConfiguration", "PixelShaderVersionHEX"): _HW,
+    ("HardwareConfiguration", "TextureMemory"): _HW,
+    ("HardwareConfiguration", "VendorIDHEX"): _HW,
+    ("HardwareConfiguration", "VertexRateMvsVS11"): _HW,
+    ("HardwareConfiguration", "VertexShaderVersionHEX"): _HW,
+}
+
+# Source files that name tags without reading them for the game: the descriptor tables themselves, reports, tests,
+# tools, generated tables, vendored code.
+EXCLUDED_PARTS = ("/tests/", "/tools/", "/third_party/", "/generated/", "/test_support/")
+EXCLUDED_FILES = {
+    "engine/objects/src/field_schema_table.inc",
+    "engine/objects/src/sub_object_names.inc",
+    "engine/objects/src/behavior_classes.inc",
+    "engine/objects/src/coverage.cpp",
+    "engine/lua/src/binding_table.inc",
+    "engine/apps/game/src/mod_check.cpp",
+}
+SOURCE_EXT = (".cpp", ".hpp", ".h", ".inc")
+TAG_HANDLE = re.compile(r"(?<![A-Za-z0-9_])tags::([A-Za-z0-9_]+)")  # ref6 t01: typed handle reads
+ANNOTATION = re.compile(r"ledger:\s*(consumes|verifies)\s+([A-Za-z0-9_]+)\.([A-Za-z0-9_\-\.]+)")
+ROW = re.compile(r'\{"([^"]+)", (0x[0-9a-fA-F]+), (0x[0-9a-fA-F]+), "([^"]*)", (\d+)')
+
+
+def rel(path):
+    return os.path.relpath(path, ROOT).replace("\\", "/")
+
+
+def schema_rows():
+    """[(class, tag, code)] in document order, first row of each (class, tag lower)."""
+    out, seen = [], set()
+    with open(SCHEMA, encoding="utf-8") as f:
+        for line in f:
+            m = ROW.match(line)
+            if not m:
+                continue
+            tag, code, owner = m.group(1), int(m.group(2), 16), m.group(4)
+            key = (owner, tag.lower())
+            if key in seen:
+                continue
+            seen.add(key)
+            out.append((owner, tag, code))
+    return out
+
+
+def scan_source(text, concat=None):
+    """(literals, comments, code_lines): string literals (not raw strings), comment texts with their line, and the
+    set of line numbers that hold code outside comments. `concat` (optional list) gets (literal, after '+', before '+')
+    for every literal, for tag names the code builds by concatenation (built_tag_reads)."""
+    if concat is None:
+        concat = []
+    lits, comments, code_lines = [], [], set()
+    i, n, line = 0, len(text), 1
+    while i < n:
+        c = text[i]
+        if c == "\n":
+            line += 1
+            i += 1
+        elif text.startswith("//", i):
+            j = text.find("\n", i)
+            j = n if j < 0 else j
+            comments.append((line, text[i:j]))
+            i = j
+        elif text.startswith("/*", i):
+            j = text.find("*/", i + 2)
+            j = n if j < 0 else j + 2
+            comments.append((line, text[i:j]))
+            line += text.count("\n", i, j)
+            i = j
+        elif c == "R" and text.startswith('R"', i) and (i == 0 or not (text[i - 1].isalnum() or text[i - 1] == "_")
+                                                        or text[max(0, i - 2):i] in ("u8", "8") or text[i - 1] in "uUL"):
+            k = text.find("(", i + 2)
+            delim = text[i + 2:k] if k >= 0 else ""
+            end = text.find(")" + delim + '"', k + 1) if k >= 0 else -1
+            j = n if end < 0 else end + len(delim) + 2
+            code_lines.add(line)
+            line += text.count("\n", i, j)
+            i = j
+        elif c == '"' or c == "'":
+            j = i + 1
+            while j < n and text[j] != c and text[j] != "\n":
+                j += 2 if text[j] == "\\" else 1
+            if c == '"':
+                lits.append((line, text[i + 1:j]))
+                k = i - 1
+                while k >= 0 and text[k] in " \t\r\n":
+                    k -= 1
+                m = j + 1
+                while m < n and text[m] in " \t\r\n":
+                    m += 1
+                concat.append((text[i + 1:j], k >= 0 and text[k] == "+", m < n and text[m] == "+"))
+            code_lines.add(line)
+            i = j + 1
+        else:
+            if not c.isspace():
+                code_lines.add(line)
+            i += 1
+    return lits, comments, code_lines
+
+
+def built_tag_reads(concat, by_tag):
+    """Tags (lower case) a file reads under a name it builds: "Corruption_" + n + "_Type", "Starting_Spawned_Units_Tech_"
+    + n, faction + "_Victory_Conditions". A tag counts when it starts with a literal followed by '+' (4+ characters) and
+    the rest is digits or ends with a literal of the file preceded by '+'; or ends with a literal preceded by '+' that
+    starts with '_' and has 11+ characters; or is exactly a literal of the file followed by such a suffix literal
+    (read("Tractor_Beam") ... p + "_Texture")."""
+    prefixes = {s.lower() for s, _, after in concat if after and len(s) >= 4}
+    suffixes = {s.lower() for s, before, _ in concat if before and len(s) >= 3}
+    long_suffixes = {x for x in suffixes if x.startswith("_") and len(x) >= 11}
+    if not prefixes and not suffixes:
+        return set()
+    out = set()
+    words = {s.lower() for s, _, _ in concat if len(s) >= 4}
+    for w in words:
+        for x in suffixes:
+            if x.startswith("_") and w + x in by_tag:
+                out.add(w + x)
+    for tag in by_tag:
+        for p in prefixes:
+            if tag.startswith(p) and len(tag) > len(p):
+                rest = tag[len(p):]
+                if rest.isdigit() or any(tag.endswith(x) and len(tag) >= len(p) + len(x) for x in suffixes):
+                    out.add(tag)
+                    break
+        else:
+            if any(tag.endswith(x) and len(tag) > len(x) for x in long_suffixes):
+                out.add(tag)
+    return out
+
+
+def engine_sources():
+    for dirpath, dirnames, filenames in os.walk(ENGINE):
+        dirnames.sort()
+        for name in sorted(filenames):
+            if name.endswith(SOURCE_EXT):
+                yield os.path.join(dirpath, name)
+
+
+def shared_reader_class(cls):
+    """The classes the shared typed readers serve: the object type view and its sub-objects (abilities, actions)."""
+    return cls in GENERIC_STORE or bool(SUB_OBJECT_OWNER.search(cls))
+
+
+def literal_classes(classes, text):
+    """The classes a literal naming a tag counts for. One class lists the tag: that class. Several do (Type, Radius,
+    Damage_Amount, ...): the shared-reader classes, plus the others the file names, so a "Type" in a perception file
+    does not make CommandBarComponent.Type consumed. A standalone class read under a shared name without its class name
+    in the file needs a "// ledger: consumes" note."""
+    if len(classes) <= 1:
+        return classes
+    # The class name as a word in any case ("Faction", "factions", "faction_"), not inside a longer name.
+    named = [c for c in classes
+             if re.search(r"(?<![A-Za-z0-9])" + re.escape(c) + r"s?(?![A-Za-z0-9])", text, re.IGNORECASE)]
+    return [c for c in classes if c in named or shared_reader_class(c)]
+
+
+def engine_texts():
+    """(path relative to the root, text) of every engine source file, in sorted order."""
+    for path in engine_sources():
+        with open(path, encoding="utf-8", errors="replace") as f:
+            yield rel(path), f.read()
+
+
+def find_consumers(rows, exact_only=frozenset(), sources=None):
+    """Returns (consumers, verifiers, problems): consumers[(class, tag lower)] = set of files; verifiers likewise from
+    test annotations; problems = annotation errors (unknown row, no code next to it). Rows in `exact_only` (the
+    RETAIL_UNUSED keys) count only literals and annotations, not names guessed from concatenation (built_tag_reads):
+    an RE answer outweighs that heuristic ("Music_Event_" + ... + "_Super_Weapon" is no read of
+    Can_Win_By_Destroying_Super_Weapon). `sources` [(path, text)] replaces the engine tree (the lint selftest)."""
+    by_tag = {}
+    for cls, tag, _ in rows:
+        by_tag.setdefault(tag.lower(), []).append(cls)
+    known = {(cls, tag.lower()) for cls, tag, _ in rows}
+    consumers, verifiers, problems = {}, {}, []
+    for r, text in (engine_texts() if sources is None else sources):
+        is_test = "/tests/" in r
+        excluded = r in EXCLUDED_FILES or any(p in r for p in EXCLUDED_PARTS)
+        if "ledger:" not in text and excluded:
+            continue
+        concat = []
+        lits, comments, code_lines = scan_source(text, concat)
+        if not excluded:
+            for _, s in lits:
+                for cls in literal_classes(by_tag.get(s.lower(), ()), text):
+                    consumers.setdefault((cls, s.lower()), set()).add(r)
+            # ref6 t01: a typed handle read (objects::tags::Name, alamo/objects/type_tags.hpp) in code names the tag too
+            code = "\n".join(line for i, line in enumerate(text.split("\n"), 1) if i in code_lines)
+            for m in TAG_HANDLE.finditer(re.sub(r"//[^\n]*", "", code)):
+                for cls in literal_classes(by_tag.get(m.group(1).lower(), ()), text):
+                    consumers.setdefault((cls, m.group(1).lower()), set()).add(r)
+            for tag in built_tag_reads(concat, by_tag):
+                for cls in literal_classes(by_tag[tag], text):
+                    if (cls, tag) not in exact_only:
+                        consumers.setdefault((cls, tag), set()).add(r)
+        for ln, body in comments:
+            for m in ANNOTATION.finditer(body):
+                kind, cls, tag = m.group(1), m.group(2), m.group(3)
+                key = (cls, tag.lower())
+                where = f"{r}:{ln}"
+                if key not in known:
+                    problems.append(f"{where}: '{m.group(0)}' names no ledger row ({cls}.{tag})")
+                    continue
+                if kind == "consumes":
+                    if excluded:
+                        problems.append(f"{where}: a consumes annotation in a file the scan skips (tests, tools, tables)")
+                        continue
+                    if not any(l in code_lines for l in (ln, ln + 1, ln + 2)):
+                        problems.append(f"{where}: no code on the annotation's line or the two after it")
+                        continue
+                    consumers.setdefault(key, set()).add(r)
+                else:
+                    if not is_test:
+                        problems.append(f"{where}: a verifies annotation outside a tests/ folder")
+                        continue
+                    if tag.lower() not in text.lower().replace(m.group(0).lower(), ""):
+                        problems.append(f"{where}: the test names {tag} only in the annotation")
+                        continue
+                    verifiers.setdefault(key, set()).add(r)
+    return consumers, verifiers, problems
+
+
+# Segment errors of docs/re/xml_field_tables.md (mcx4, 2026-11-18): (listed class, tag) -> (real owner, engine file that
+# reads the real owner's field). The page below must name "Class.Tag"; the file must name the tag in a literal.
+SEGMENTS_PAGE = "docs/re/XML_FIELD_TABLE_SEGMENTS.md"
+MISFILED = {
+    ("HardwareConfiguration", "Apply_To_All_Allies"): ("Garrison_Upgrade_Ability and other abilities",
+                                                       "engine/tactical/abilities/src/ability_data.cpp"),
+    ("HardwareConfiguration", "Type"): ("the ability Type", "engine/tactical/abilities/src/ability_data.cpp"),
+    ("MousePointer", "Ability_Name"): ("Enable_Ability / Special_Ability_Action", "engine/tactical/abilities/src/ability_data.cpp"),
+    ("MousePointer", "Affects_All_Allies"): ("Enable_Radar_Ability / Enable_Ability", "engine/tactical/abilities/src/ability_data.cpp"),
+    ("MousePointer", "Apply_To_All_Allies"): ("ability fields", "engine/galactic/src/special_rules.cpp"),
+    ("MousePointer", "Icon_Name"): ("GameObjectType / Faction / special-ability Icon_Name", "engine/galactic/src/galactic_rules.cpp"),
+}
+
+
+def misfiled_keys(misfiled=None):
+    """{(class, tag lower): spec column} of MISFILED (or the given table)."""
+    table = MISFILED if misfiled is None else misfiled
+    return {(cls, tag.lower()): f"{SEGMENTS_PAGE}: really {owner} (read in {path})" for (cls, tag), (owner, path) in table.items()}
+
+
+def misfiled_problems(rows, consumers, misfiled=None, settled=frozenset(), page_text=None, read_file=None):
+    """Errors in the MISFILED table (or the given one): no such row, the code reads the row under its listed class, the
+    row is also RETAIL_UNUSED / OUT_OF_SCOPE (`settled`), SEGMENTS_PAGE does not name Class.Tag, or the reader file is
+    missing or names no "Tag" literal."""
+    table = MISFILED if misfiled is None else misfiled
+    known = {(cls, tag.lower()) for cls, tag, _ in rows}
+    if page_text is None:
+        path = os.path.join(ROOT, *SEGMENTS_PAGE.split("/"))
+        page_text = ""
+        if os.path.isfile(path):
+            with open(path, encoding="utf-8", errors="replace") as f:
+                page_text = f.read()
+    if read_file is None:
+        def read_file(rel_path):
+            p = os.path.join(ROOT, *rel_path.split("/"))
+            if not os.path.isfile(p):
+                return None
+            with open(p, encoding="utf-8", errors="replace") as f:
+                return f.read()
+    problems = []
+    for (cls, tag), (_, reader) in sorted(table.items()):
+        key = (cls, tag.lower())
+        name = f"MISFILED {cls}.{tag}"
+        if key not in known:
+            problems.append(f"{name}: names no ledger row")
+            continue
+        if key in consumers:
+            problems.append(f"{name}: engine code reads it as {cls} ({sorted(consumers[key])[0]}); drop the entry")
+        if key in settled:
+            problems.append(f"{name}: also in RETAIL_UNUSED / OUT_OF_SCOPE; keep one")
+        if f"{cls}.{tag}" not in page_text:
+            problems.append(f"{name}: {SEGMENTS_PAGE} does not name {cls}.{tag}")
+        text = read_file(reader)
+        if text is None:
+            problems.append(f"{name}: reader {reader} does not exist")
+        elif f'"{tag}"' not in text:
+            problems.append(f'{name}: reader {reader} names no "{tag}" literal (the real owner is no longer read: drop the entry)')
+    return problems
+
+
+def retail_unused_keys(retail_unused=None):
+    """{(class, tag lower): citation} of RETAIL_UNUSED (or the given table)."""
+    table = RETAIL_UNUSED if retail_unused is None else retail_unused
+    return {(cls, tag.lower()): cite for (cls, tag), cite in table.items()}
+
+
+def retail_unused_problems(rows, consumers, retail_unused=None):
+    """Errors in the RETAIL_UNUSED table (or the given one): no such row, the code reads the row, or the citation is
+    not an existing docs/re page that names the tag."""
+    table = RETAIL_UNUSED if retail_unused is None else retail_unused
+    known = {(cls, tag.lower()) for cls, tag, _ in rows}
+    problems = []
+    for (cls, tag), cite in sorted(table.items()):
+        key = (cls, tag.lower())
+        name = f"RETAIL_UNUSED {cls}.{tag}"
+        if key not in known:
+            problems.append(f"{name}: names no ledger row")
+            continue
+        if key in consumers:
+            problems.append(f"{name}: engine code reads it ({sorted(consumers[key])[0]}); drop the entry or the reader")
+        page = cite.split()[0] if cite.split() else ""
+        path = os.path.join(ROOT, *page.split("/"))
+        if not page.startswith("docs/re/") or not page.endswith(".md") or not os.path.isfile(path):
+            problems.append(f"{name}: citation '{cite}' is not an existing docs/re/*.md page")
+            continue
+        with open(path, encoding="utf-8", errors="replace") as f:
+            if tag.lower() not in f.read().lower():
+                problems.append(f"{name}: {page} does not name {tag}")
+    return problems
+
+
+def scope_citation(reason):
+    """The spec column of an out_of_scope row: the record and the reason's label in it."""
+    return f'{SCOPE_RECORD} "{SCOPE_SECTION}": {reason}'
+
+
+def out_of_scope_keys(out_of_scope=None):
+    """{(class, tag lower): citation} of OUT_OF_SCOPE (or the given table)."""
+    table = OUT_OF_SCOPE if out_of_scope is None else out_of_scope
+    return {(cls, tag.lower()): scope_citation(reason) for (cls, tag), reason in table.items()}
+
+
+def out_of_scope_problems(rows, consumers, out_of_scope=None, retail_unused=None, record_text=None):
+    """Errors in the OUT_OF_SCOPE table (or the given one): no such row, the code reads the row, the row is also in
+    RETAIL_UNUSED, or its reason is not one of SCOPE_REASONS with a bold label in SCOPE_RECORD's SCOPE_SECTION."""
+    table = OUT_OF_SCOPE if out_of_scope is None else out_of_scope
+    unused = retail_unused_keys(retail_unused)
+    known = {(cls, tag.lower()) for cls, tag, _ in rows}
+    if record_text is None:
+        path = os.path.join(ROOT, *SCOPE_RECORD.split("/"))
+        record_text = ""
+        if os.path.isfile(path):
+            with open(path, encoding="utf-8", errors="replace") as f:
+                record_text = f.read()
+    section = ""
+    m = re.search(r"^## " + re.escape(SCOPE_SECTION) + r".*?$(.*?)(?=^## |\Z)", record_text, re.MULTILINE | re.DOTALL)
+    if m:
+        section = m.group(1)
+    problems = []
+    if table and not section:
+        problems.append(f'OUT_OF_SCOPE: {SCOPE_RECORD} has no "## {SCOPE_SECTION}" section')
+    for (cls, tag), reason in sorted(table.items()):
+        key = (cls, tag.lower())
+        name = f"OUT_OF_SCOPE {cls}.{tag}"
+        if key not in known:
+            problems.append(f"{name}: names no ledger row")
+            continue
+        if key in consumers:
+            problems.append(f"{name}: engine code reads it ({sorted(consumers[key])[0]}); drop the entry or the reader")
+        if key in unused:
+            problems.append(f"{name}: also in RETAIL_UNUSED; keep one")
+        if reason not in SCOPE_REASONS:
+            problems.append(f"{name}: reason '{reason}' is not one of {', '.join(SCOPE_REASONS)}")
+        elif section and f"**{reason}**" not in section:
+            problems.append(f'{name}: {SCOPE_RECORD} "{SCOPE_SECTION}" has no **{reason}** label')
+    return problems
+
+
+def compute_states(rows, consumers, verifiers, retail_unused=None, out_of_scope=None, misfiled=None):
+    unused = retail_unused_keys(retail_unused)
+    scope = out_of_scope_keys(out_of_scope)
+    mis = misfiled_keys(misfiled)
+    out = {}
+    for cls, tag, _ in rows:
+        key = (cls, tag.lower())
+        if key in consumers:
+            st = "verified" if key in verifiers else "consumed"
+        elif key in unused:
+            st = "retail_unused"
+        elif key in scope:
+            st = "out_of_scope"
+        elif key in mis:
+            st = "misfiled"
+        elif cls in GENERIC_STORE or SUB_OBJECT_OWNER.search(cls):
+            st = "stored"
+        else:
+            st = "unread"
+        out[key] = st
+    return out
+
+
+def spec_page(name):
+    """A docs/re file that can be a spec: Markdown, not the descriptor tables, not a question batch (*_RE_QUESTIONS.md
+    names tags without settling them)."""
+    return name.endswith(".md") and name != "xml_field_tables.md" and not name.endswith("_RE_QUESTIONS.md")
+
+
+def spec_index(pages=None):
+    """{tag lower: docs/re pages naming it in backticks, sorted}. `pages` {name: text} replaces docs/re (the selftest)."""
+    if pages is None:
+        pages = {}
+        if os.path.isdir(DOCS_RE):
+            for name in filter(spec_page, os.listdir(DOCS_RE)):
+                with open(os.path.join(DOCS_RE, name), encoding="utf-8", errors="replace") as f:
+                    pages[name] = f.read()
+    idx = {}
+    tick = re.compile(r"`([A-Za-z][A-Za-z0-9_]*)`")
+    for name in sorted(filter(spec_page, pages)):
+        for tag in sorted({m.group(1).lower() for m in tick.finditer(pages[name])}):
+            idx.setdefault(tag, []).append("docs/re/" + name)
+    return idx
+
+
+def pick_spec(pages, pinned=""):
+    """A row's spec from the pages naming its tag (sorted): the committed one while it still names the tag, else the
+    first. Sticky, so a new docs/re page that sorts first rewrites no rows (roadmap ref1 t01: the alphabetical pick
+    alone moved rows in 53 of 120 docs/re commits)."""
+    if pinned and pinned in pages:
+        return pinned
+    return pages[0] if pages else ""
+
+
+def base_uses():
+    counts = {}
+    if not os.path.isfile(FOC_ZIP):
+        return counts
+    el = re.compile(rb"<([A-Za-z_][A-Za-z0-9_]*)[\s>/]")
+    comment = re.compile(rb"<!--.*?-->", re.DOTALL)
+    with zipfile.ZipFile(FOC_ZIP) as z:
+        for name in sorted(z.namelist()):
+            if not name.lower().endswith(".xml"):
+                continue
+            # An element inside an XML comment is not a use (mcx4: RadarMap.xml's commented *_Position_LeftTop).
+            for m in el.finditer(comment.sub(b"", z.read(name))):
+                k = m.group(1).decode("ascii").lower()
+                counts[k] = counts.get(k, 0) + 1
+    return counts
+
+
+def build(with_extras=True, committed=None):
+    """(ledger rows, problems). `committed` (parse_inc of the written ledger) pins each row's spec page (pick_spec)."""
+    rows = schema_rows()
+    consumers, verifiers, problems = find_consumers(rows, frozenset(retail_unused_keys()) | frozenset(out_of_scope_keys()))
+    problems += retail_unused_problems(rows, consumers)
+    problems += out_of_scope_problems(rows, consumers)
+    problems += misfiled_problems(rows, consumers, settled=frozenset(retail_unused_keys()) | frozenset(out_of_scope_keys()))
+    states = compute_states(rows, consumers, verifiers)
+    spec = spec_index() if with_extras else {}
+    uses = base_uses() if with_extras else {}
+    return assemble(rows, consumers, states, spec, uses, committed or {}), problems
+
+
+def assemble(rows, consumers, states, spec, uses, committed):
+    """The ledger rows from the scan: consumers {key: files}, states {key: state}, spec {tag lower: pages}
+    (spec_index), uses {tag lower: count}, committed (parse_inc) for the sticky spec."""
+    unused = {**retail_unused_keys(), **out_of_scope_keys(), **misfiled_keys()}
+    ledger = []
+    for cls, tag, code in rows:
+        key = (cls, tag.lower())
+        pinned = committed[key]["spec"] if key in committed else ""
+        ledger.append({
+            "class": cls, "tag": tag, "code": code, "state": states[key], "consumers": len(consumers.get(key, ())),
+            "spec": unused[key] if states[key] in SETTLED_UNREAD else pick_spec(spec.get(tag.lower(), []), pinned),
+            "base_uses": uses.get(tag.lower(), 0), "tier": TIER_OVERRIDES.get(key, 1),
+        })
+    return ledger
+
+
+def c_str(s):
+    return '"' + s.replace("\\", "\\\\").replace('"', '\\"') + '"'
+
+
+def render_inc(ledger):
+    lines = [
+        "// GENERATED by engine/objects/tools/gen_tag_ledger.py from docs/re/xml_field_tables.md and the engine source.",
+        "// Do not edit; tools/lint/check_tag_ledger.py checks it. Row: {class, tag, code, state, spec, base FoC uses,",
+        f"// tier}}. {len(ledger)} rows. No consumer column: the counts are in docs/status/tag-ledger.md (ref1 t01).",
+    ]
+    for r in ledger:
+        lines.append("{%s, %s, 0x%x, LedgerState::%s, %s, %d, %d}," % (
+            c_str(r["class"]), c_str(r["tag"]), r["code"], STATE_ENUM[r["state"]], c_str(r["spec"]), r["base_uses"],
+            r["tier"]))
+    return "\n".join(lines) + "\n"
+
+
+INC_FIELD = re.compile(r'"(?:[^"\\]|\\.)*"|0x[0-9a-f]+|LedgerState::\w+|\d+')
+
+
+def c_unstr(s):
+    return re.sub(r"\\(.)", r"\1", s[1:-1])
+
+
+def parse_inc(text):
+    """{(class, tag lower): {"class", "tag", "code", "state", "spec", "base_uses", "tier"}} of a written
+    tag_ledger.inc. Also reads the nine-column rows written before ref1 t01 ({..., state, consumer files, first
+    consumer, spec, base uses, tier})."""
+    inv = {v: k for k, v in STATE_ENUM.items()}
+    out = {}
+    for line in text.splitlines():
+        if not line.startswith("{"):
+            continue
+        f = INC_FIELD.findall(line)
+        if len(f) not in (7, 9) or not f[3].startswith("LedgerState::"):
+            continue
+        cls, tag, spec, uses, tier = c_unstr(f[0]), c_unstr(f[1]), c_unstr(f[-3]), int(f[-2]), int(f[-1])
+        state = f[3][len("LedgerState::"):]
+        out[(cls, tag.lower())] = {"class": cls, "tag": tag, "code": int(f[2], 16), "state": inv.get(state, state),
+                                   "spec": spec, "base_uses": uses, "tier": tier}
+    return out
+
+
+def render_md(ledger):
+    classes = {}
+    for r in ledger:
+        c = classes.setdefault(r["class"], {s: 0 for s in STATES})
+        c[r["state"]] += 1
+    tot = {s: sum(c[s] for c in classes.values()) for s in STATES}
+    out = [
+        "# Tag ledger",
+        "",
+        "Generated by `engine/objects/tools/gen_tag_ledger.py` (roadmap mcx0 t02); do not edit. Design:",
+        "`docs/MOD_COMPAT_DESIGN.md` §7.2. One row per (class, tag) of retail's descriptor tables",
+        "(`docs/re/xml_field_tables.md`; class = segment owner). The compiled copy is",
+        "`engine/objects/generated/tag_ledger.inc` (class, tag, code, state, spec, base uses, tier); the consumer counts",
+        "are only here, so moving a read between files leaves it unchanged. `tools/lint/check_tag_ledger.py` keeps both in",
+        "step with the code. Spec: the `docs/re` page the ledger already cites while that page still names the tag, else",
+        "the alphabetically first page naming it in backticks.",
+        "",
+        "States: **unread** (the port does not keep it), **stored** (kept, nothing reads it), **consumed** (engine code",
+        "reads it), **verified** (consumed, and a test checks its effect), **retail-unused** (retail never reads it",
+        "either, by an RE answer cited below), **out-of-scope** (the port leaves it out on purpose, by a scope reason",
+        "of `docs/DECISIONS.md` \"Out-of-scope tag-ledger rows\"), **misfiled** (a segment error of the descriptor tables:",
+        "the field belongs to another class that the port reads, `docs/re/XML_FIELD_TABLE_SEGMENTS.md`). An `unread` or",
+        "`stored` tag that a mod sets is an",
+        "honour gap in `alamo_mod_check` report v4. Work order (§7.2): tier 1 with the most corpus mods, then base FoC uses.",
+        "",
+        f"Totals: {len(ledger)} rows; unread {tot['unread']}, stored {tot['stored']}, consumed {tot['consumed']}, "
+        f"verified {tot['verified']}, retail-unused {tot['retail_unused']}, out-of-scope {tot['out_of_scope']}, "
+        f"misfiled {tot['misfiled']}.",
+        "",
+        "## Per class",
+        "",
+        "| Class | Rows | Unread | Stored | Consumed | Verified | Retail-unused | Out-of-scope | Misfiled |",
+        "|---|---:|---:|---:|---:|---:|---:|---:|---:|",
+    ]
+    for cls in sorted(classes, key=lambda c: (-sum(classes[c].values()), c)):
+        c = classes[cls]
+        out.append(f"| {cls} | {sum(c.values())} | {c['unread']} | {c['stored']} | {c['consumed']} | {c['verified']} "
+                   f"| {c['retail_unused']} | {c['out_of_scope']} | {c['misfiled']} |")
+    gaps = [r for r in ledger if r["state"] in ("unread", "stored") and r["base_uses"] > 0]
+    gaps.sort(key=lambda r: (-r["base_uses"], r["class"], r["tag"].lower()))
+    out += [
+        "",
+        "## Honour gaps base FoC uses",
+        "",
+        "Rows not consumed whose tag base FoC's XML writes (base uses count the element name in any class). These are",
+        "base-FoC parity gaps as well as mod gaps (`mcx4`).",
+        "",
+        "| Class | Tag | Code | State | Base uses | Spec |",
+        "|---|---|---|---|---:|---|",
+    ]
+    for r in gaps:
+        out.append(f"| {r['class']} | {r['tag']} | 0x{r['code']:x} | {r['state']} | {r['base_uses']} | {r['spec'] or '-'} |")
+    unused_rows = sorted((r for r in ledger if r["state"] == "retail_unused"), key=lambda r: (r["class"], r["tag"].lower()))
+    out += [
+        "",
+        "## Retail-unused rows",
+        "",
+        "Rows retail parses but never reads, by an RE answer (`RETAIL_UNUSED` in the generator, roadmap mcx4). The port",
+        "ignores them too.",
+        "",
+    ]
+    if unused_rows:
+        out += ["| Class | Tag | Base uses | RE answer |", "|---|---|---:|---|"]
+        out += [f"| {r['class']} | {r['tag']} | {r['base_uses']} | {r['spec']} |" for r in unused_rows]
+    else:
+        out.append("None yet.")
+    scope_rows = sorted((r for r in ledger if r["state"] == "out_of_scope"), key=lambda r: (r["class"], r["tag"].lower()))
+    out += [
+        "",
+        "## Out-of-scope rows",
+        "",
+        "Rows the port leaves out on purpose (`OUT_OF_SCOPE` in the generator, roadmap mcx4 t16): each cites its reason in",
+        "`docs/DECISIONS.md` \"Out-of-scope tag-ledger rows\". Not honour gaps.",
+        "",
+    ]
+    if scope_rows:
+        out += ["| Class | Tag | Base uses | Reason |", "|---|---|---:|---|"]
+        out += [f"| {r['class']} | {r['tag']} | {r['base_uses']} | {r['spec'].rsplit(': ', 1)[-1]} |" for r in scope_rows]
+    else:
+        out.append("None yet.")
+    mis_rows = sorted((r for r in ledger if r["state"] == "misfiled"), key=lambda r: (r["class"], r["tag"].lower()))
+    out += [
+        "",
+        "## Misfiled rows",
+        "",
+        "Segment errors of `docs/re/xml_field_tables.md` (`MISFILED` in the generator): the field belongs to another",
+        "class, which the port reads in the file named. Not honour gaps.",
+        "",
+    ]
+    if mis_rows:
+        out += ["| Class | Tag | Base uses | Real owner |", "|---|---|---:|---|"]
+        out += [f"| {r['class']} | {r['tag']} | {r['base_uses']} | {r['spec'].split(': ', 1)[-1]} |" for r in mis_rows]
+    else:
+        out.append("None yet.")
+    out += ["", "## Every row", "",
+            "Per class: `Tag` (state, consumer files; x = retail-unused, o = out-of-scope, f = misfiled).", ""]
+    for cls in sorted(classes):
+        items = [f"`{r['tag']}` ({ {'retail_unused': 'x', 'out_of_scope': 'o', 'misfiled': 'f'}.get(r['state'], r['state'][0])}"
+                 f"{'' if not r['consumers'] else ' ' + str(r['consumers'])})"
+                 for r in ledger if r["class"] == cls]
+        out.append(f"- **{cls}**: " + ", ".join(items))
+    return "\n".join(out) + "\n"
+
+
+def regressions(old, ledger, allowed):
+    bad = []
+    for r in ledger:
+        key = (r["class"], r["tag"].lower())
+        prev = old.get(key)
+        if prev and prev["state"] in ("consumed", "verified") and r["state"] in ("stored", "unread") + SETTLED_UNREAD:
+            if f"{r['class']}.{r['tag']}".lower() not in allowed:
+                bad.append(f"{r['class']}.{r['tag']}: {prev['state']} -> {r['state']} (no engine file reads it now)")
+    return bad
+
+
+def main(argv):
+    ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    ap.add_argument("--allow-regress", nargs="*", default=[], metavar="CLASS.TAG",
+                    help="rows allowed to move from consumed / verified to stored / unread")
+    a = ap.parse_args(argv)
+    if not os.path.isfile(FOC_ZIP):
+        print(f"refused: {rel(FOC_ZIP)} is missing, so every base_uses would be written as 0")
+        return 1
+    old = {}
+    if os.path.isfile(OUT_INC):
+        with open(OUT_INC, encoding="utf-8") as f:
+            old = parse_inc(f.read())
+    ledger, problems = build(committed=old)
+    for p in problems:
+        print("annotation:", p)
+    bad = regressions(old, ledger, {x.lower() for x in a.allow_regress})
+    if bad:
+        print("refused: these rows lose their consumer (pass --allow-regress Class.Tag if that is intended):")
+        for b in bad:
+            print("  " + b)
+        return 1
+    if problems:
+        return 1
+    os.makedirs(os.path.dirname(OUT_INC), exist_ok=True)
+    with open(OUT_INC, "w", encoding="utf-8", newline="\n") as f:
+        f.write(render_inc(ledger))
+    with open(OUT_MD, "w", encoding="utf-8", newline="\n") as f:
+        f.write(render_md(ledger))
+    counts = {s: sum(1 for r in ledger if r["state"] == s) for s in STATES}
+    print(f"wrote {rel(OUT_INC)} and {rel(OUT_MD)}: {len(ledger)} rows, " + ", ".join(f"{k} {v}" for k, v in counts.items()))
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))

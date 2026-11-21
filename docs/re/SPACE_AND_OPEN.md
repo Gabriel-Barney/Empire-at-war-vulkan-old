@@ -320,18 +320,34 @@ WEAPON_MASS_DRIVER 9, WEAPON_SPECIAL 10, ENABLE_SPECIAL_ABILITY 11, DUMMY_ART 12
    writes at load (B.9). It is overwritten, not combined: **a mesh hidden in the ALO that lies under the
    `Damage_Particles` bone becomes visible on destruction**, and anything under the `Engine_Particles` bone is
    hidden regardless of its ALO flag. No other bit (e.g. bit 7 collision, bit 5) is touched. [H]
-4. **`Model_To_Attach` is left as is**: 0x386660 and the gameplay routine it calls (0x384d00: engines/
-   shields/gravity well/weapons/special ability off-line, debug strings only) neither hide, detach nor swap
-   the attached model; there is **no** `Model_To_Attach_Destroyed`-style tag (the full vanilla HardPoint tag
-   set is listed below). It is affected only if its `Attachment_Bone` lies inside the `Damage_Particles` or
-   `Engine_Particles` subtree (not the case in vanilla, where `*_EMITDAMAGE` is a child of the attachment
-   bone). [H] for those functions, [M] that no other path hides it. Effects on destruction, in order:
+4. **`Model_To_Attach` is removed by step (f), 0x3a5700** (corrected 2026-11-17, r1b t05; the first reading
+   said "left as is" and missed what (f) does). 0x3a5700(owner, hardpoint index) is called on every
+   destruction (live and the post-load re-apply 0x385590 alike; 0x386660 is its only caller). When the
+   hardpoint type's `Model_To_Attach` (type +0x60) is not empty, it:
+   - copies the name, upper-cases it and cuts it at the first `.ALO` (string at 0x819540);
+   - looks up the **first** entry of the owner model's attachment list (model +0xf0, the list 0x12d770 fills)
+     whose name equals that text, case-insensitively (0x12d520, `_stricmp` against each entry's name);
+   - if one is found, **erases that entry from the list** (0x12d860: the sub-object is unlinked from the
+     scene, its owner link cleared, the later entries move down one, the list is re-indexed 0x12def0), and
+     then sets every hardpoint of the owner to "attachment index unknown" (instance +0x90 = -1; the entries
+     after the erased one changed index).
+   So the attached model is gone for good (not hidden: the post-load re-apply removes it again from the
+   freshly built model). It does not depend on `Death_Breakoff_Prop`; every destroyable hardpoint with a
+   `Model_To_Attach` loses it [H for the code path; the run saw it for the shield generator]. Two quirks
+   follow from the name lookup [H for the code, M for what the names are]: (i) the type model setup (0x375380)
+   attaches each hardpoint's model in `HardPoints` order after the ALO's own sub-objects, so when several
+   hardpoints attach the **same** ALO, a death removes the first remaining copy in that order, which may be
+   another hardpoint's turret; (ii) an ALO sub-object whose name equals the model's file stem comes earlier in
+   the list and would be the one erased (none known in vanilla). Nothing else of the hardpoint changes here;
+   0x384d00 and the visibility loops below still neither hide nor swap the model, and there is no
+   `Model_To_Attach_Destroyed`-style tag (the full vanilla HardPoint tag set is listed below).
+   Effects on destruction, in order:
    (a) if the hardpoint is a weapon (enum 5–10) and was the last live one of its weapon class on the owner, an
    owner-type event is played [L]; (b) gameplay off-line (0x384d00); (c) **`Death_Explosion_Particles`**
    object spawned at the translation of the `Attachment_Bone` transform (fallback: `Fire_Bone_A` index; origin
    when neither) [M]; (d) death sound [M]; (e) **`Death_Breakoff_Prop`** object spawned at the same position,
    **only on live destruction** (third argument 0; the post-load re-apply 0x385590 passes 1 and skips it) [H];
-   (f) owner bookkeeping (0x3a5700); (g) the visibility changes, in this order: `Damage_Decal` shown → 
+   (f) `Model_To_Attach` removal (0x3a5700, above); (g) the visibility changes, in this order: `Damage_Decal` shown → 
    `Damage_Particles` subtree shown → `Engine_Particles` subtree hidden (if flag). "Damage particles" are thus
    the ALO proxies the artist placed under the `*_EMITDAMAGE` bone (e.g. `p_hp_imperial_damage`); a renderer
    that skips particles can skip them, but must still apply the mesh part. [H] for order
@@ -363,7 +379,7 @@ WEAPON_MASS_DRIVER 9, WEAPON_SPECIAL 10, ENABLE_SPECIAL_ABILITY 11, DUMMY_ART 12
 Expected visibility (bone indices from the ALO; meshes carry ALO hidden = false unless noted):
 - SD `Weapon_FL`: before death the mesh `HP_F-L_Blast` (on bone 15 `HP_F-L_Blast`, child of `HP_F-L_Bone`) is
   hidden and the two `p_hp_imperial_damage` proxies (bones 11, 12, children of `HP_F-L_EmitDamage`) are
-  hidden; after death both are visible. `EV_StarDestroyer_HP00_L-F.alo` (attached at bone 9) stays visible and
+  hidden; after death both are visible. `EV_StarDestroyer_HP00_L-F.alo` (attached at bone 9) is removed (step (f)) and
   `Hardpoint_Breakoff_Star_Dest_Weapon_FL` is spawned.
 - SD `Engines`: after death the three `p_hp_imperial_damage` proxies (bones 53–55 under `HP_E_EmitDamage`)
   become visible; `HP_E_MainEngines` has **no** attachments in this ALO, so the hide changes nothing — the
@@ -372,6 +388,14 @@ Expected visibility (bone indices from the ALO; meshes carry ALO hidden = false 
 - Station `HP_Empire_Station_One_01`: mesh `HP01_LC_Blast` (bone 45, child of `HP01_LC_Bone`) hidden → shown;
   proxies `p_RB_Station_Damage` (bones 41, 42 under `HP01_LC_EmitDamage`) hidden → shown; breakoff
   `Hardpoint_Breakoff_Empire_Station_One_Weapon_LC`.
+
+> **Retail run 2026-11-09 (r1 t01, run 20261108-235419, `R1_T01_HARDPOINT_RUN.md`) contradicts two points above.**
+> (1) Answer 4 / SD `Weapon_FL` example: when `HP_Star_Destroyer_Shield_Generator` died, its attached dome
+> (`EV_StarDestroyer_HP00_M-C`) disappeared from the tower while its breakoff prop flew off. So `Model_To_Attach` is
+> not left as is, at least for a hardpoint with a `Death_Breakoff_Prop` [M: one hardpoint, top view; the path that
+> removes it is not found yet; found 2026-11-17: step (f) 0x3a5700, answer 4]. (2) SD `Engines` example: the engine glow `pe_stardestroyerengines` **goes out** when
+> the engine hardpoint dies [H visual], so a path outside this rule turns it off (candidate: ENGINE offline →
+> `Locomotor_Set_Engines` 0x5545a0, TACTICAL_COMBAT §5.1). Decal and fire at the kill, sticky, no repair: confirmed.
 
 **Tags the renderer/sim needs to parse for this rule:** `Type`, `Is_Destroyable`, `Health`, `Model_To_Attach`,
 `Attachment_Bone`, `Damage_Decal`, `Damage_Particles`, `Engine_Particles`,

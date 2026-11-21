@@ -2,6 +2,7 @@
 
 #include <algorithm>
 
+#include "alamo/core/ascii.hpp"
 #include "alamo/core/dmath.hpp"
 #include "alamo/core/sim_crc.hpp"
 #include "alamo/objects/game_object_types.hpp"
@@ -10,13 +11,6 @@
 namespace alamo::sim {
 
 namespace {
-
-std::string upper_key(std::string_view s) {
-    std::string out(s);
-    for (char& c : out)
-        if (c >= 'a' && c <= 'z') c = static_cast<char>(c - 'a' + 'A');
-    return out;
-}
 
 anim::FlinchParams flinch_of(const anim::TypeAnimParams& p) {
     anim::FlinchParams f;
@@ -62,6 +56,14 @@ anim::Mat34 object_matrix(const float p[3], const float f[3], float s) {
 SimAnimation::SimAnimation(const objects::GameObjectTypes& types, const FileProvider& files, anim::AnimTunables tunables)
     : types_(&types), files_(&files), tunables_(tunables) {}
 
+void SimAnimation::set_tunables(const anim::AnimTunables& t) {
+    tunables_ = t;
+    for (ModeWorld& mw : worlds_) {
+        if (mw.world) mw.world->set_tunables(t);
+        if (mw.secondary) mw.secondary->set_tunables(t);
+    }
+}
+
 void SimAnimation::attach(SimHost& host, bool crc) {
     host.set_object_animation_hook([this](SimHost& h) { service(h); });
     if (crc) host.crc_registry().add("anim", [this, &host](StateHasher& h) { hash(host, h); });
@@ -77,6 +79,7 @@ void SimAnimation::attach(SimHost& host, bool crc) {
 // ------------------------------------------------------------------------------------ N1 save / load
 namespace {
 constexpr uint32_t kAnimChunkVersion = 3;  // 2: refix t01 pending clone death kinds; 3: refixf t04 pending clone plans
+// limit: guard save decode: counts, refuses
 constexpr uint32_t kMaxAnimCount = 1u << 24;
 
 void write_id_list(ByteWriter& w, const std::vector<ObjectId>& ids) {
@@ -102,8 +105,8 @@ void SimAnimation::write(const SimHost& host, ByteWriter& w) const {
         const ModeWorld* mw = find_mode_world(modes.at(i));
         w.boolean(mw != nullptr);
         if (!mw) continue;
-        write_section(w, [mw](ByteWriter& sub) { mw->behaviors->write(sub); });
-        write_section(w, [mw](ByteWriter& sub) { mw->world->write(sub); });
+        put_section(w, [mw](ByteWriter& sub) { mw->behaviors->write(sub); });
+        put_section(w, [mw](ByteWriter& sub) { mw->world->write(sub); });
         w.i32(mw->max_seen);
         w.u32(static_cast<uint32_t>(mw->pending_clones.size()));
         for (const ModeWorld::PendingClone& pc : mw->pending_clones)
@@ -291,7 +294,7 @@ const anim::AnimModel* SimAnimation::model_for(objects::TypeIndex type, objects:
     TypeEntry e;
     if (type < types_->size()) e.params = anim::type_anim_params(*types_, type, mode);
     if (!e.params.model.empty()) {
-        const std::string mk = upper_key(e.params.model) + "|" + upper_key(e.params.anim_override);
+        const std::string mk = ascii_upper(e.params.model) + "|" + ascii_upper(e.params.anim_override);
         auto& slot = models_[mk];
         if (!slot) {
             slot = std::make_unique<anim::AnimModel>();
@@ -318,7 +321,7 @@ void SimAnimation::prune(const SimHost& host) {
                   worlds_.end());
 }
 
-anim::IdleParams SimAnimation::idle_params(const GameMode& mode, ObjectId id, objects::TypeIndex t, const anim::AnimModel* m) {
+anim::IdleParams SimAnimation::idle_params(const GameMode& mode, objects::TypeIndex t, const anim::AnimModel* m) {
     const anim::TypeAnimParams& p = params_for(t, mode.kind());
     anim::IdleParams i;
     i.idle_type = anim::kAnimIdle;
@@ -328,11 +331,6 @@ anim::IdleParams SimAnimation::idle_params(const GameMode& mode, ObjectId id, ob
     // with SPACE_IDLE clips idles on Space Idle.
     if (mode.kind() == objects::ModeKind::Space && m && m->variant_count(anim::kAnimIdle) == 0 && m->variant_count(anim::kAnimSpaceIdle) > 0)
         i.idle_type = anim::kAnimSpaceIdle;
-    // Garrison container mapping (0x395920) through the hook (S4 garrison system).
-    if (idle_hook_) {
-        const int32_t g = idle_hook_(mode, id);
-        if (g != anim::kNoAnimType && m && m->variant_count(g) > 0) i.idle_type = g;
-    }
     return i;
 }
 
@@ -346,7 +344,7 @@ bool SimAnimation::hit(const GameMode& mode, ObjectId victim, Vec3 facing, Vec3 
     if (!store.alive(h)) return false;
     const objects::TypeIndex t = store.type(h);
     const anim::TypeAnimParams& p = params_for(t, mode.kind());
-    const bool played = mw.behaviors->on_hit(*mw.world, victim, flinch_of(p), idle_params(mode, victim, t, mw.world->model(victim)), facing.x,
+    const bool played = mw.behaviors->on_hit(*mw.world, victim, flinch_of(p), idle_params(mode, t, mw.world->model(victim)), facing.x,
                                              facing.y, travel.x, travel.y, rng, frame);
     if (played) ++stats_.flinches;
     return played;
@@ -369,9 +367,8 @@ bool SimAnimation::service_idle(const GameMode& mode, ObjectId id, bool gated, a
         mw.behaviors->idle_gated(id);
         return false;
     }
-    if (target_hook_) target = target_hook_(mode, id);
-    anim::IdleParams ip = idle_params(mode, id, store.type(h), mw.world->model(id));
-    if (!(idle_hook_ && idle_hook_(mode, id) != anim::kNoAnimType)) ip.presence = presence;  // after a garrison override
+    anim::IdleParams ip = idle_params(mode, store.type(h), mw.world->model(id));
+    ip.presence = presence;
     return mw.behaviors->service_idle(*mw.world, id, ip, target, rng, frame);
 }
 
@@ -389,11 +386,9 @@ uint32_t SimAnimation::service_locomotor(const GameMode& mode, ObjectId id, anim
     lp.deployed_walk_anim_speed = tp.deployed_walk_anim_speed;
     lp.walk_speed_ratio = walk_ratio;
     lp.min_move_ratio = min_ratio;
-    lp.idle = idle_params(mode, id, t, mw.world->model(id));
-    lp.idle.presence = presence;  // s78l t03 (service_locomotor drops it while crouched / with a garrison override)
-    if (idle_hook_ && in.idle_type == anim::kNoAnimType) in.idle_type = idle_hook_(mode, id);
-    // s78k t02: the IDLE service's TARGETING lookup (suspension ignored) and Allow_Idle_When_Moving.
-    if (target_hook_) in.target = target_hook_(mode, id);
+    lp.idle = idle_params(mode, t, mw.world->model(id));
+    lp.idle.presence = presence;  // s78l t03 (service_locomotor drops it while crouched)
+    // s78k t02: Allow_Idle_When_Moving (the TARGETING lookup is the caller's in.target).
     in.has_idle = store.has_behavior(h, objects::beh::Idle);  // s78l t03 (b): no IDLE, no idle service
     in.allow_idle_when_moving = tp.allow_idle_when_moving;
     const uint32_t n = mw.behaviors->service_locomotor(*mw.world, id, lp, in, rng, frame);
@@ -408,9 +403,8 @@ bool SimAnimation::play_default_idle(const GameMode& mode, ObjectId id, uint64_t
     if (!mw.world->contains(id) || !store.exists(h) || mw.behaviors->is_corpse(id)) return false;
     if (anim::is_idle_like(mw.world->current_type(id))) return false;
     const anim::AnimModel* m = mw.world->model(id);
-    anim::IdleParams ip = idle_params(mode, id, store.type(h), m);
-    const int32_t g = idle_hook_ ? idle_hook_(mode, id) : anim::kNoAnimType;
-    if (g == anim::kNoAnimType) ip.presence = presence;
+    anim::IdleParams ip = idle_params(mode, store.type(h), m);
+    ip.presence = presence;
     anim::PlayRequest r;
     r.type = anim::presence_idle_type(m, id, ip, mw.behaviors->idle_records(id));
     r.index = 0;
@@ -426,6 +420,14 @@ bool SimAnimation::deploy(const GameMode& mode, ObjectId id, bool undeploy, SimR
     const ObjectHandle h = store.find(id);
     if (!mw.world->contains(id) || !store.exists(h)) return false;
     const bool played = mw.behaviors->deploy(*mw.world, id, undeploy, params_for(store.type(h), mode.kind()).deployment_anim_rate, rng, frame);
+    if (played) ++stats_.deploys;
+    return played;
+}
+
+bool SimAnimation::deploy_at_end(const GameMode& mode, ObjectId id, uint64_t frame) {
+    ModeWorld& mw = mode_world(mode);
+    if (!mw.world->contains(id)) return false;
+    const bool played = mw.behaviors->deploy_at_end(*mw.world, id, frame);
     if (played) ++stats_.deploys;
     return played;
 }
@@ -458,7 +460,8 @@ void SimAnimation::muzzle_flash(const GameMode& mode, ObjectId id, int32_t hardp
 }
 
 anim::DeathResult SimAnimation::start_death(ModeWorld& mw, const GameMode& mode, ObjectId id, SimRng& rng, uint64_t frame, uint8_t damage_kind,
-                                            objects::TypeIndex type_override, const anim::DeathPlan* plan) {
+                                            objects::TypeIndex type_override, const anim::DeathPlan* plan,
+                                            const float* persistence_override) {
     const objects::ObjectStore& store = mode.primary();
     const ObjectHandle h = store.find(id);
     const objects::TypeIndex t = type_override != objects::kNone ? type_override : store.type(h);
@@ -473,8 +476,10 @@ anim::DeathResult SimAnimation::start_death(ModeWorld& mw, const GameMode& mode,
     info.facing[1] = f.y;
     info.facing[2] = f.z;
     const anim::TypeAnimParams& tp = params_for(t, mode.kind());
-    const anim::DeathResult r = plan ? mw.behaviors->begin_death(*mw.world, id, anim::death_params(tp), *plan, info, frame, damage_kind)
-                                     : mw.behaviors->begin_death(*mw.world, id, anim::death_params(tp), info, rng, frame, damage_kind);
+    anim::DeathParams dp = anim::death_params(tp);
+    if (persistence_override) dp.persistence_seconds = *persistence_override;  // mcx4 tac2: 0x29f270 Infantry override
+    const anim::DeathResult r = plan ? mw.behaviors->begin_death(*mw.world, id, dp, *plan, info, frame, damage_kind)
+                                     : mw.behaviors->begin_death(*mw.world, id, dp, info, rng, frame, damage_kind);
     ++stats_.deaths;
     if (r == anim::DeathResult::RemoveNow) {
         ++stats_.removed_at_death;
@@ -501,13 +506,16 @@ void SimAnimation::death_clone_spawned(const GameMode& mode, ObjectId clone, uin
     mode_world(mode).pending_clones.push_back(pc);
 }
 
-anim::DeathPlan SimAnimation::plan_clone_death(objects::TypeIndex type, objects::ModeKind mode, uint8_t damage_kind, SimRng& rng) {
+anim::DeathPlan SimAnimation::plan_clone_death(objects::TypeIndex type, objects::ModeKind mode, uint8_t damage_kind, SimRng& rng,
+                                               const float* persistence_override) {
     const anim::AnimModel* m = model_for(type, mode);
-    return anim::plan_death(m, anim::death_params(params_for(type, mode)), damage_kind, rng);
+    anim::DeathParams dp = anim::death_params(params_for(type, mode));
+    if (persistence_override) dp.persistence_seconds = *persistence_override;  // mcx4 tac2: 0x29f270 Infantry override
+    return anim::plan_death(m, dp, damage_kind, rng);
 }
 
 anim::DeathResult SimAnimation::corpse_clone(const GameMode& mode, ObjectId dying, objects::TypeIndex clone_type, SimRng& rng,
-                                             uint64_t frame, uint8_t damage_kind) {
+                                             uint64_t frame, uint8_t damage_kind, const float* persistence_override) {
     const objects::ObjectStore& store = mode.primary();
     if (!store.exists(store.find(dying))) return anim::DeathResult::NoRow;
     ModeWorld& mw = mode_world(mode);
@@ -525,7 +533,7 @@ anim::DeathResult SimAnimation::corpse_clone(const GameMode& mode, ObjectId dyin
             if (it == mw.event_rows.end() || *it != dying) mw.event_rows.insert(it, dying);
         }
     }
-    const anim::DeathResult r = start_death(mw, mode, dying, rng, frame, damage_kind, clone_type);
+    const anim::DeathResult r = start_death(mw, mode, dying, rng, frame, damage_kind, clone_type, nullptr, persistence_override);
     ++stats_.clone_deaths;
     return r;
 }
@@ -664,9 +672,9 @@ void SimAnimation::sync(const GameMode& mode, SimRng& rng, uint64_t frame) {
         const objects::TypeIndex t = store.type(h);
         const anim::AnimModel* m = model_for(t, mode.kind());
         if (!m) continue;
-        const anim::IdleParams ip = idle_params(mode, id, t, m);
+        const anim::IdleParams ip = idle_params(mode, t, m);
         anim::AnimCreateParams cp;
-        cp.idle_type = ip.idle_type;  // default idle (Space Idle / garrison mapping above; crouch: not at creation)
+        cp.idle_type = ip.idle_type;  // default idle (Space Idle above; crouch: not at creation)
         cp.loop_idle = ip.loop_idle;
         cp.idle_rate = ip.idle_rate;
         w.create(id, m, cp, &rng, frame);

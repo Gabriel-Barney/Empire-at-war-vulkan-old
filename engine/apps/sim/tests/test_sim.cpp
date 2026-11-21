@@ -6,15 +6,16 @@
 //   * per-tick step order (T1..T13 and the tactical / common sub-steps)
 //   * command handlers: select / move / attack / stop validation, wire id mapping, execute_direct
 //   * synthetic space map (no game data): record a 600-tick run with live orders + AI stand-ins,
-//     replay it at 0/1/4/N workers -> identical CRC logs, = the record run, = the checked-in golden
-//     (testdata/synthetic_golden.crc; stream testdata/synthetic_stream.acmd must regenerate
-//     byte-identically). Real time pacing gives the same CRCs as the fast runner.
+//     save the stream (it must reload byte for byte), replay it at 0/1/4/N workers -> identical CRC logs, = the record
+//     run. Real time pacing gives the same CRCs as the fast runner. No stored golden (wr1 t07): --golden-out DIR
+//     writes the stream and CRC log for the scenario sim_tests (tools/goldens/scenarios.json), which diffs them
+//     against the parent commit's.
 //   * real data (ALAMO_FOC_DATA set; skipped otherwise): FoC space map _SPACE_PLANET_CORELLIA_PIRACY
 //     and land map _LAND_PLANET_BYSS_KIDNAPPING: spawn with real stats, spatial queries = brute
-//     force, 600 ticks replayed from testdata/<map>.acmd at 0/1/4/N workers = golden.
+//     force, the same record / replay at 0/1/4/N workers.
 //   * S4 story (built with engine/lua): synthetic plot + Lua script over a synthetic galactic campaign,
-//     fired-event log identical for 0/1/4/N workers = testdata/story_synthetic_golden.txt; with
-//     ALAMO_FOC_DATA the opening of Full_Story_Campaign_Underworld = testdata/story_underworld_golden.txt.
+//     fired-event log identical for 0/1/4/N workers; with ALAMO_FOC_DATA the opening of
+//     Full_Story_Campaign_Underworld (the logs across commits: scenario sim_tests).
 //   * q6 game-object Lua scripts (SimConfig::object_scripts): attach order, the service gate and its first-pump
 //     draw, ScriptExit / binding-error / runtime-error / death release, proximity order, a mini company spawner, the
 //     save refusal, identical CRCs for 0/1/4 workers.
@@ -35,7 +36,9 @@
 #include <vector>
 
 #include "alamo/commands/recording.hpp"
+#include "alamo/core/sim_crc.hpp"
 #include "alamo/core/file_provider.hpp"
+#include "alamo/core/host_fs.hpp"
 #include "alamo/core/hash.hpp"
 #include "alamo/core/log.hpp"
 #include "alamo/data/game_database.hpp"
@@ -47,8 +50,10 @@
 #include "alamo/sim/scenario.hpp"
 #include "alamo/terrain/ted.hpp"
 #include "alamo/vfs/vfs.hpp"
+#include "alamo/test/support.hpp"
 #ifdef ALAMO_SIM_HAVE_STORY
 #include "alamo/lua/story_model.hpp"  // dialog_log (L1/S4 wave 1 test)
+#include "alamo/lua/presentation.hpp"  // tst2 t02: the movie state of the Esc test
 #include "alamo/galactic/conflicts.hpp"  // BattleRequest (L1/S4 wave 2a test)
 #include "alamo/lua/script_remaining.hpp"  // GlobalValueStore (q6 object-script test)
 #endif
@@ -58,33 +63,17 @@ using namespace alamo::sim;
 namespace fs = std::filesystem;
 namespace cmd = alamo::commands;
 
-static int g_fail = 0;
+using ::alamo::test::g_fail;
 static bool g_regen = false;
-#define CHECK(c)                                                     \
-    do {                                                             \
-        if (!(c)) {                                                  \
-            std::printf("FAIL %s:%d: %s\n", __FILE__, __LINE__, #c); \
-            ++g_fail;                                                \
-        }                                                            \
-    } while (0)
 
-static std::string env_or_empty(const char* name) {
-#ifdef _MSC_VER
-    char* v = nullptr;
-    size_t len = 0;
-    std::string out;
-    if (_dupenv_s(&v, &len, name) == 0 && v) {
-        out = v;
-        std::free(v);
-    }
-    return out;
-#else
-    const char* v = std::getenv(name);
-    return v ? std::string(v) : std::string();
-#endif
+using ::alamo::test::env_or_empty;
+
+// wr1 t05: --golden-out DIR regenerates into DIR instead of over the tracked testdata (the scenario-result run of
+// tools/goldens/scenarios.json). Only golden and recorded-stream paths go through here.
+static std::string g_golden_out;
+static std::string testdata(const std::string& name) {
+    return (g_golden_out.empty() ? std::string(ALAMO_SIM_TESTDATA) : g_golden_out) + "/" + name;
 }
-
-static std::string testdata(const std::string& name) { return std::string(ALAMO_SIM_TESTDATA) + "/" + name; }
 
 // ------------------------------------------------------------------------------------------ pacing
 static void test_pacing() {
@@ -131,10 +120,7 @@ struct World {
     objects::GameObjectTypes types;
 };
 
-static void write_file(const fs::path& p, const std::string& s) {
-    fs::create_directories(p.parent_path());
-    std::ofstream(p, std::ios::binary) << s;
-}
+using ::alamo::test::write_file;
 
 static std::unique_ptr<World> make_world() {
     const fs::path root = fs::temp_directory_path() / "alamo_sim_tests_types";
@@ -261,6 +247,58 @@ static void test_tick_order(const World& w) {
     CHECK(trace.size() > 5 && trace[3] == "gmm.scoring" && trace[4] == "galactic.begin" && trace[5] == "common.begin");
 }
 
+// SIMP sp2: CRC capture cadence. Checkpoint ticks + the initial state + on-demand captures, a v2 (checkpoint) log that
+// compares clean against the full log of the same run; the ring keeps the newest records.
+static void test_crc_cadence(const World& w) {
+    auto run = [&](uint32_t every, size_t ring, uint64_t ticks) {
+        jobs::JobSystem js(jobs::JobSystemConfig{0});
+        SimHost host(w.types, js);
+        host.set_crc_cadence(every, ring);
+        host.start_game(ModeKind::Land);
+        for (uint64_t t = 0; t < ticks; ++t) host.tick_once();
+        host.capture_crc_now();
+        host.capture_crc_now();  // twice: no duplicate record
+        return host.crc_log();
+    };
+    const CrcLog full = run(1, 0, 200);
+    const CrcLog sparse = run(64, 0, 200);
+    CHECK(full.records.size() == 201 && full.checkpoint == 0);
+    CHECK(sparse.checkpoint == 64 && sparse.records.size() == 5);  // 0, 64, 128, 192, 200
+    if (sparse.records.size() == 5) {
+        CHECK(sparse.records[0].tick == 0 && sparse.records[1].tick == 64 && sparse.records[3].tick == 192 && sparse.records[4].tick == 200);
+        CHECK(sparse.records[2] == full.records[128]);
+    }
+    CHECK(!first_divergence(full, sparse).diverged);
+    CHECK(!first_divergence(sparse, full).diverged);
+    const CrcLog ringed = run(4, 3, 200);  // 51 checkpoint records + 1; trimmed to 3 whenever more than 6 are held
+    CHECK(ringed.records.size() >= 3 && ringed.records.size() <= 6 && ringed.records.back().tick == 200);
+    // An on-demand record between checkpoints goes on the keep line, so the saved v2 log parses again.
+    {
+        jobs::JobSystem js(jobs::JobSystemConfig{0});
+        SimHost host(w.types, js);
+        host.set_crc_cadence(64);
+        host.start_game(ModeKind::Land);
+        for (int t = 0; t < 100; ++t) host.tick_once();
+        host.capture_crc_now();  // tick 100: off the grid
+        for (int t = 0; t < 40; ++t) host.tick_once();
+        host.capture_crc_now();  // tick 140: the last record
+        CrcLog back;
+        std::string err;
+        CHECK(host.crc_log().keep.size() == 2 && CrcLog::parse(host.crc_log().to_text(), back, &err));
+        CHECK(back.records.size() == host.crc_log().records.size());
+    }
+    // The process default reaches a new host; set back for the other tests even if a check throws.
+    struct Restore {
+        ~Restore() { SimHost::set_default_crc_cadence(1); }
+    } restore;
+    SimHost::set_default_crc_cadence(16);
+    {
+        jobs::JobSystem js(jobs::JobSystemConfig{0});
+        SimHost host(w.types, js);
+        CHECK(host.crc_cadence() == 16 && host.crc_log().checkpoint == 16);
+    }
+}
+
 // --------------------------------------------------------------------------------------- commands
 static void check_spatial(const TacticalMode& tm);
 
@@ -318,6 +356,63 @@ static void test_commands(const World& w) {
     CHECK(tm.order(3) == nullptr && tm.trees().size() == 55 && !host.resolve(15));
 }
 
+// bkc1 t04 (backlog b0012; COMMANDS §2.4.1, q6 t15 probe 6): SelectAll keeps the issuer's SELECTABLE units and leaves out
+// base structures (DUMMY_GROUND_STRUCTURE: barracks, factories), star bases (DUMMY_STAR_BASE: the own space station),
+// orbital structures and mines, plus anything not SELECTABLE (build pads have no SELECTABLE in the shipped data: the
+// FoC check in alamo_objects_tests); other players' units are never selected; the selection is replaced.
+static void test_select_all() {
+    const fs::path root = fs::temp_directory_path() / "alamo_sim_tests_select_all";
+    std::error_code ec;
+    remove_all_long(root, ec);
+    write_file(root / "Data/XML/GameObjectFiles.xml", "<GameObjectFiles><File>SelTest.xml</File></GameObjectFiles>\n");
+    write_file(root / "Data/XML/SelTest.xml",
+               "<SelTest>\n"
+               " <SpaceUnit Name=\"Sel_Ship\"><Tactical_Health>100</Tactical_Health><Max_Speed>4.0</Max_Speed>\n"
+               "  <Behavior>SELECTABLE</Behavior></SpaceUnit>\n"
+               " <SpaceUnit Name=\"Sel_Station\"><Tactical_Health>100</Tactical_Health><Behavior>SELECTABLE, DUMMY_STAR_BASE</Behavior></SpaceUnit>\n"
+               " <SpaceUnit Name=\"Sel_Barracks\"><Tactical_Health>100</Tactical_Health><Behavior>SELECTABLE, DUMMY_GROUND_STRUCTURE</Behavior></SpaceUnit>\n"
+               " <SpaceUnit Name=\"Sel_Orbital\"><Tactical_Health>100</Tactical_Health><Behavior>SELECTABLE, DUMMY_ORBITAL_STRUCTURE</Behavior></SpaceUnit>\n"
+               " <SpaceUnit Name=\"Sel_Mine\"><Tactical_Health>100</Tactical_Health><Behavior>SELECTABLE, PROXIMITY_MINE</Behavior></SpaceUnit>\n"
+               " <SpaceUnit Name=\"Sel_Pad\"><Tactical_Health>100</Tactical_Health><Behavior>REVEAL</Behavior></SpaceUnit>\n"
+               "</SelTest>\n");
+    DirectoryProvider files(path_to_utf8(root));
+    objects::ObjectTypeDatabase db;
+    objects::GameObjectTypes types;
+    CHECK(db.load(files));
+    CHECK(types.build(db));
+    jobs::JobSystem js(jobs::JobSystemConfig{0});
+    SimHost host(types, js);
+    host.start_game(ModeKind::Space);
+    auto put = [&](const char* type, int32_t owner, float x) {
+        objects::SpawnParams sp;
+        sp.type = static_cast<objects::TypeIndex>(db.find(type));
+        sp.owner = owner;
+        sp.position = {x, 0.0f, 0.0f};
+        sp.facing = {1.0f, 0.0f, 0.0f};
+        const ObjectHandle h = host.tactical()->spawn(sp);
+        CHECK(host.tactical()->primary().alive(h));
+        return host.tactical()->primary().id(h);
+    };
+    const ObjectId ship_a = put("Sel_Ship", 0, 0.0f);
+    put("Sel_Station", 0, 100.0f);
+    put("Sel_Barracks", 0, 200.0f);
+    put("Sel_Orbital", 0, 300.0f);
+    put("Sel_Mine", 0, 400.0f);
+    put("Sel_Pad", 0, 500.0f);
+    const ObjectId ship_b = put("Sel_Ship", 0, 600.0f);
+    const ObjectId enemy = put("Sel_Ship", 1, 700.0f);
+    CHECK(host.submit(0, cmd::ev::select({static_cast<cmd::ObjectId>(enemy)})).ok());
+    CHECK(host.submit(0, cmd::ev::select_all()).ok());
+    host.tick_once();
+    host.tick_once();
+    CHECK(host.selection(0) == (std::vector<ObjectId>{ship_a, ship_b}));
+    CHECK(host.submit(1, cmd::ev::select_all()).ok());
+    host.tick_once();
+    host.tick_once();
+    CHECK(host.selection(1) == std::vector<ObjectId>{enemy});
+    remove_all_long(root, ec);
+}
+
 // Spatial: right after the map load the trees answer = brute force over the store.
 static void check_spatial(const TacticalMode& tm) {
     const objects::ObjectStore& st = tm.primary();
@@ -331,14 +426,9 @@ static void check_spatial(const TacticalMode& tm) {
     CHECK(std::vector<tactical::EntityHandle>(got.begin(), got.end()) == brute && brute.size() > 5);
 }
 
-// --------------------------------------------------------------------------- determinism + golden
-static bool same_file(const std::string& path, const std::vector<uint8_t>& bytes) {
-    std::vector<uint8_t> have;
-    return read_host_file(path, have) && have == bytes;
-}
-
-// Records a live run of `map`, replays it at every worker count; compares with the stored stream
-// and golden (or rewrites them with --regen).
+// --------------------------------------------------------------------------- determinism
+// Records a live run of `map`, saves and reloads the stream, replays it at every worker count (each = the live run);
+// with --regen / --golden-out also writes the stream and the first replay's CRC log (the scenario sim_tests).
 static void determinism(const objects::GameObjectTypes& types, const terrain::MapData& map,
                         const std::string& stem, uint64_t ticks) {
     const TypeCrcIndex index(types);
@@ -357,21 +447,21 @@ static void determinism(const objects::GameObjectTypes& types, const terrain::Ma
                 live.log.records.back().parity);
     CHECK(live.ticks == ticks && live.log.records.size() == ticks + 1 && rec.command_count() > 50);
     CHECK(live.applied > 20 && live.rejected > 5);
-    const std::string stream_path = testdata(stem + ".acmd"), golden_path = testdata(stem + "_golden.crc");
+    // wr1 t07: always record -> save -> reload -> replay. With --regen / --golden-out the stream is a result (testdata()),
+    // otherwise a temp file (no stored stream to compare with).
+    const std::string stream_path =
+        g_regen ? testdata(stem + ".acmd") : (fs::temp_directory_path() / ("alamo_sim_tests_" + stem + ".acmd")).string();
+    const std::string golden_path = testdata(stem + "_golden.crc");
     const std::vector<uint8_t> bytes = rec.to_bytes();
-    if (g_regen) {
-        std::string err;
-        CHECK(rec.save(stream_path, &err));
-    } else {
-        CHECK(same_file(stream_path, bytes));  // the record path regenerates the stream byte for byte
-    }
-    cmd::CommandRecording stored;
     std::string err;
+    CHECK(rec.save(stream_path, &err));
+    cmd::CommandRecording stored;
     if (!cmd::CommandRecording::load(stream_path, stored, &err)) {
         std::printf("FAIL %s: %s\n", stream_path.c_str(), err.c_str());
         ++g_fail;
         return;
     }
+    CHECK(stored.to_bytes() == bytes);  // the saved stream reloads byte for byte
     CrcLog first;
     for (int32_t workers : jobs::determinism_worker_counts()) {
         MapRunSpec r;
@@ -387,17 +477,10 @@ static void determinism(const objects::GameObjectTypes& types, const terrain::Ma
     first.comments = {"G0 " + stem + " replay, seed 4242, " + std::to_string(ticks) + " ticks"};
     if (g_regen) {
         CHECK(first.save(golden_path, &err));
-        std::printf("  regenerated %s and %s\n", stream_path.c_str(), golden_path.c_str());
+        std::printf("  wrote %s and %s\n", stream_path.c_str(), golden_path.c_str());
     } else {
-        CrcLog golden;
-        if (!CrcLog::load(golden_path, golden, &err)) {
-            std::printf("FAIL golden %s: %s\n", golden_path.c_str(), err.c_str());
-            ++g_fail;
-        } else {
-            const auto d = first_divergence(golden, first);
-            std::printf("  golden %s: %s\n", (stem + "_golden.crc").c_str(), d.message.c_str());
-            CHECK(!d.diverged);
-        }
+        std::error_code ec;
+        fs::remove(path_from_utf8(stream_path), ec);
     }
 }
 
@@ -424,6 +507,21 @@ static void test_save_session(const World& w) {
     ByteReader dr(dw.bytes());
     CHECK(e.read(dr) && dr.done());
     CHECK(SessionDescriptor::mismatch(d, e).empty() && e.option("a") == "1" && e.option("zz", "x") == "x");
+    {
+        // mcx5 t01: a version-1 descriptor (written before the 64-slot cap went: u8 scheduler max_players) still reads.
+        // Layout: u32 version | 3 str | u32 n + str data_args | u32 seed | u32 players | u32 delay | max_players | ...
+        std::vector<uint8_t> v1(dw.bytes().begin(), dw.bytes().end());
+        size_t at = 4;
+        for (int i = 0; i < 3; ++i) at += 4 + v1[at];  // kind, campaign, data_root (short strings)
+        at += 4 + 4 + v1[at + 4];                       // data_args: count 1 + one string
+        at += 4 + 4 + 4;                                // seed, players, delay
+        CHECK(v1[0] == SessionDescriptor::kVersion && v1[at] == 8 && v1[at + 1] == 0);
+        v1[0] = 1;
+        v1.erase(v1.begin() + static_cast<std::ptrdiff_t>(at) + 1);
+        SessionDescriptor old;
+        ByteReader vr(v1);
+        CHECK(old.read(vr) && vr.done() && SessionDescriptor::mismatch(d, old).empty() && old.scheduler == d.scheduler);
+    }
     SessionDescriptor f = e;
     f.data_root = "D:/elsewhere";
     f.writer = "other";
@@ -441,6 +539,52 @@ static void test_save_session(const World& w) {
     f = e;
     f.set_option("a", "2");
     CHECK(!SessionDescriptor::mismatch(d, f).empty());
+    CHECK(!SessionDescriptor::only_data_differs(d, f));  // an option is not data
+    // mcx3 t05: the stack. Without mods the bytes are the version 1 layout; with mods a trailing block round-trips.
+    {
+        SessionDescriptor m = d;
+        m.mods = {{"StackSub", "Stack Sub", "1.0", 0x10}, {"StackParent", "Stack Parent", "2.0", 0x20}};
+        ByteWriter mw;
+        m.write(mw);
+        CHECK(mw.size() > dw.size() && std::equal(dw.bytes().begin(), dw.bytes().end(), mw.bytes().begin()));
+        SessionDescriptor back;
+        ByteReader mr(mw.bytes());
+        CHECK(back.read(mr) && back.mods == m.mods);
+        // Only the data differs: the mods and both versions are named; the stack is never compared by itself.
+        SessionDescriptor now = back;
+        now.data_fingerprint = 0x5678;
+        now.mods[0].version = "1.1";
+        now.mods[1].content_hash = 0x21;
+        now.mods.push_back({"Extra", "Extra Mod", "", 0x30});
+        CHECK(SessionDescriptor::only_data_differs(m, now));
+        CHECK(SessionDescriptor::mismatch(m, now) ==
+              "Stack Sub updated since this save (version 1.0 -> 1.1); Stack Parent changed since this save (version 2.0); "
+              "Extra Mod is loaded now and was not in this save");
+        now = back;
+        now.mods.clear();
+        CHECK(SessionDescriptor::mismatch(m, now).empty());  // equal fingerprint: the stack alone never refuses
+        now.data_args = {};
+        CHECK(SessionDescriptor::mismatch(m, now) ==
+              "Stack Sub was in this save and is not loaded now; Stack Parent was in this save and is not loaded now");
+        CHECK(SessionDescriptor::only_data_differs(m, now));
+        now.seed = 9;
+        CHECK(!SessionDescriptor::only_data_differs(m, now));
+        CHECK(!SessionDescriptor::only_data_differs(m, m));  // equal: nothing to load anyway
+        // A save from before mcx3: mod arguments, no mods block. The mods are unknown, not "none".
+        SessionDescriptor old = d;  // data_args {MODPATH=Mods/X}, no mods
+        SessionDescriptor cur = d;
+        cur.data_fingerprint = 0x777;
+        cur.mods = {{"X", "Mod X", "1.1", 0x40}};
+        CHECK(SessionDescriptor::mismatch(old, cur).find("game data differs (fingerprint") == 0);
+        CHECK(SessionDescriptor::mod_changes(old, cur).empty());
+        // A mod named like the generic text still gets its own line.
+        SessionDescriptor fm = m;
+        fm.mods[0].name = "Fingerprint Overhaul";
+        SessionDescriptor fc = fm;
+        fc.data_args = {"MODPATH=Mods/Y"};
+        fc.mods.erase(fc.mods.begin());
+        CHECK(SessionDescriptor::mismatch(fm, fc) == "Fingerprint Overhaul was in this save and is not loaded now");
+    }
     SessionDescriptor g;
     g.kind = "keep";
     ByteReader shortr(std::span<const uint8_t>(dw.bytes()).first(dw.size() - 3));
@@ -631,32 +775,13 @@ static void test_realtime_equals_fast(const World& w) {
 static bool g_regen_story = false;
 static bool g_story_only = false;
 
-static std::string read_text(const std::string& path) {
-    std::vector<uint8_t> b;
-    if (!read_host_file(path, b)) return {};
-    std::string s(b.begin(), b.end());
-    s.erase(std::remove(s.begin(), s.end(), '\r'), s.end());
-    return s;
-}
-
-// Compares `text` with testdata/<name> (or rewrites it with --regen / --regen-story).
+// Writes `text` to testdata/<name> with --regen / --regen-story / --golden-out (the scenario sim_tests); no stored copy
+// is compared (wr1 t07: the scenario diffs the log against the parent commit's).
 static void check_text_golden(const std::string& name, const std::string& text) {
+    if (!g_regen_story) return;
     const std::string path = testdata(name);
-    if (g_regen_story) {
-        std::ofstream(path_from_utf8(path), std::ios::binary) << text;
-        std::printf("  regenerated %s\n", name.c_str());
-        return;
-    }
-    const std::string want = read_text(path);
-    if (want == text) {
-        std::printf("  golden %s: MATCH (%zu bytes)\n", name.c_str(), text.size());
-        return;
-    }
-    size_t i = 0;
-    while (i < want.size() && i < text.size() && want[i] == text[i]) ++i;
-    const size_t line = static_cast<size_t>(std::count(text.begin(), text.begin() + static_cast<std::ptrdiff_t>(i), '\n')) + 1;
-    std::printf("FAIL golden %s differs at line %zu\n", name.c_str(), line);
-    ++g_fail;
+    std::ofstream(path_from_utf8(path), std::ios::binary) << text;
+    std::printf("  wrote %s\n", path.c_str());
 }
 
 #ifdef ALAMO_SIM_HAVE_STORY
@@ -670,9 +795,11 @@ static GalacticRules rules() {
     GalacticRules r;
     FactionRules emp;
     emp.name = "Empire";
+    emp.basic_ai = "BasicEmpire";
     emp.can_control_planets = emp.is_playable = true;
     FactionRules und;
     und.name = "Underworld";
+    und.basic_ai = "AI_Player_Underworld";
     und.can_control_planets = und.is_playable = und.benefits_from_corruption = true;
     FactionRules neu;
     neu.name = "Neutral";
@@ -862,7 +989,7 @@ static Run run(const World& w, const FileProvider& files, int32_t workers, uint6
 // size (those players would get no controller), starts it sized with session_players, and every player has a controller
 // slot; <Story_Name> "Faction, file" pairs give plot sets to factions without a <Faction>_Story_Name.
 static void test_many_players(const World& w) {
-    CHECK(session_players(3) == 8 && session_players(22) == 22 && session_players(100) == kMaxPlayers);
+    CHECK(session_players(3) == 8 && session_players(22) == 22 && session_players(100) == 100 && session_players(300) == kMaxPlayers);  // mcx5 t01: no 64 cap
     GalacticRules r = rules();
     GalacticSetup s = setup();
     for (uint32_t i = 0; i < 17; ++i) {  // 3 + 17 = 20 players: Mod_0..Mod_16 (planet-less AI factions)
@@ -893,6 +1020,30 @@ static void test_many_players(const World& w) {
     host.set_controller(19, [&last_frame](SimHost&, uint8_t, uint64_t frame) { last_frame = frame; });
     host.run_fast(5);
     CHECK(last_frame > 0);  // the last player's controller runs
+    {
+        // mcx5 t01: no 64-player cap (retail keeps a vector): 100 players start, the last one's controller runs.
+        GalacticRules r100 = r;
+        GalacticSetup s100 = s;
+        for (uint32_t i = 17; i < 97; ++i) {
+            FactionRules f;
+            f.name = "Mod_" + std::to_string(i);
+            f.can_control_planets = f.is_playable = true;
+            r100.factions.push_back(f);
+            PlayerSetup p;
+            p.faction = static_cast<uint32_t>(r100.factions.size() - 1);
+            p.ai = true;
+            s100.players.push_back(p);
+        }
+        SimConfig c100;
+        c100.players = session_players(s100.players.size());
+        SimHost h100(w.types, js, c100);
+        CHECK(h100.start_galactic(r100, s100) != nullptr && h100.players() == 100);
+        uint64_t last100 = 0;
+        h100.set_controller(99, [&last100](SimHost&, uint8_t, uint64_t frame) { last100 = frame; });
+        CHECK(h100.submit(99, commands::EventData(commands::EventType::StopMovement)).ok());
+        h100.run_fast(3);
+        CHECK(last100 > 0);
+    }
 
     data::CampaignDef c;
     c.raw = {{"Empire_Story_Name", "Story_Plots_E.xml"},
@@ -1045,6 +1196,14 @@ static void test_scoring_service(const World& w) {
            "function Game_Mode_Starting_Event(mode, map) local p = Find_Player(\"Empire\") Log(\"N:\" .. p.Get_Name()) end\n"
            "function main() while true do n = n + 1 if n <= 2 then Log(\"F:\" .. Find_Player(\"Underworld\").Get_Faction_Name()) end "
            "coroutine.yield(true) end end\n");
+    // mcx6 t07 (GAME_SCORING.md §9.1): a skirmish - Base_Definitions runs while the session has no players, every later
+    // call sees them, and the map battle's scaffold galaxy never reaches the script (no Galactic start / end / events).
+    script("Scoring_Skirmish",
+           "function Base_Definitions() ServiceRate = 0 Log(\"B:\" .. tostring(Find_Player(\"Empire\") == nil)) end\n"
+           "function Game_Mode_Starting_Event(mode, map) Log(\"S:\" .. mode .. \":\" .. tostring(map) .. \":\" .. "
+           "tostring(Find_Player(\"Empire\") ~= nil)) end\n"
+           "function Galactic_Unit_Destroyed_Event(object, killer) Log(\"UD\") end\n"
+           "function main() while true do coroutine.yield(true) end end\n");
     DirectoryProvider files(path_to_utf8(root));
     jobs::JobSystem js(jobs::JobSystemConfig{0});
     const GalacticRules r = rules();
@@ -1131,6 +1290,29 @@ static void test_scoring_service(const World& w) {
         CHECK(s.host->scoring_vm() != nullptr && s.host->scoring_releases() == 0);
         CHECK(s.host->end_game_mode() && s.host->scoring_vm() == nullptr);
     }
+    {  // mcx6 t07: a skirmish map battle (CampaignBattles::start_map_battle -> SimHost::scoring_map_battle) over its galaxy.
+        Session s = start("Scoring_Skirmish");
+        CHECK(s.log() == "B:true;" && !s.host->scoring_scaffold());
+        s.host->scoring_map_battle();
+        CHECK(s.host->scoring_scaffold());
+        GalacticSim* gs = s.host->galactic_mode() ? s.host->galactic_mode()->sim() : nullptr;
+        CHECK(gs != nullptr);
+        if (gs && !gs->planets()[rD].surface.empty()) CHECK(gs->destroy_object(gs->planets()[rD].surface[0]));
+        s.host->run_fast(2);
+        s.host->start_game(ModeKind::Land);
+        s.host->scoring_mode_started(ModeKind::Land, "Skirmish_Map");
+        s.host->run_fast(3);
+        CHECK(s.host->end_game_mode());  // the battle
+        CHECK(s.host->end_game_mode());  // the scaffold galaxy: no Game_Mode_Ending_Event
+        dump(s);
+        CHECK(s.log() == "B:true;S:Land:Skirmish_Map:true;E:Land;");
+        CHECK(s.host->scoring_releases() == 0);
+        // the next session is not a skirmish until it says so
+        CHECK(s.host->start_galactic(r, su) != nullptr && !s.host->scoring_scaffold());
+        s.host->run_fast(1);
+        CHECK(s.log().find("S:Galactic:Scoring_Campaign:true;") != std::string::npos);
+        CHECK(s.host->end_game_mode());
+    }
 #endif
     {  // GameRandom.Free_Random (ranged) draws from the free stream: the synced RNG and the frame CRCs are unchanged.
         Session a = start("Scoring_Free");
@@ -1153,7 +1335,11 @@ static const char* kScoringStory =
     "function Galactic_Production_Canceled_Event(planet, t) Log(\"PC\") end\n"
     "function Galactic_Production_End_Event(planet, o) Log(\"PE:\" .. tostring(planet ~= nil) .. tostring(o ~= nil)) end\n"
     "function Galactic_Planet_Faction_Change(planet, n, o) Log(\"FC:\" .. tostring(planet ~= nil and n ~= nil and o ~= nil)) end\n"
-    "function Galactic_Unit_Destroyed_Event(object, killer) Log(\"UD\") end\n";
+    "function Galactic_Unit_Destroyed_Event(object, killer) Log(\"UD:\" .. tostring(object ~= nil) .. tostring(killer ~= nil)) end\n"
+    // storyb t14: tactical deaths (the object of the battle's store, as a parent-store wrapper) and starbase levels.
+    "function Tactical_Unit_Destroyed_Event(object, killer) Log(\"TD:\" .. tostring(object ~= nil and object.Is_Valid())"
+    " .. tostring(killer ~= nil)) end\n"
+    "function Galactic_Starbase_Level_Change(planet, old_type, new_type) Log(\"SB:\" .. tostring(planet ~= nil)) end\n";
 
 static void test_scoring_story(const World& w) {
     const fs::path root = fs::temp_directory_path() / "alamo_sim_scoring_story";
@@ -1205,6 +1391,50 @@ static void test_scoring_story(const World& w) {
                     b.scoring_log == a.scoring_log ? "identical" : "DIFFERS");
         CHECK(!d.diverged && b.scoring_log == a.scoring_log && b.log == a.log);
     }
+}
+
+// storyb t14 (GAME_SCORING.md §3): the death signals reach the scoring script while the objects are alive, in a galactic
+// session without a story: GalacticSim::destroy_object -> Galactic_Unit_Destroyed_Event(object, neutral player); a
+// battle death (SimHost::scoring_tactical_death, as TacticalBattle::process_death calls it) -> Tactical_Unit_Destroyed_Event
+// with the tactical object as a wrapper the galactic-store VM can use (Is_Valid runs on the battle store), the killer's
+// player or the neutral player; the object of the store the VM runs on is passed as a plain wrapper.
+static void test_scoring_deaths(const World& w) {
+    const fs::path root = fs::temp_directory_path() / "alamo_sim_scoring_deaths";
+    std::error_code ec;
+    remove_all_long(root, ec);
+    write_file(root / "Data/Scripts/Miscellaneous/GameScoring.lua", std::string(kScoringCommon) + kScoringStory);
+    DirectoryProvider files(path_to_utf8(root));
+    jobs::JobSystem js(jobs::JobSystemConfig{0});
+    SimConfig cfg;
+    cfg.seed = 7;
+    SimHost host(w.types, js, cfg);
+    host.set_scoring_script(&files, "GameScoring");
+    const GalacticRules r = rules();  // the sim keeps a pointer to the rules
+    GalacticSim* gs = host.start_galactic(r, setup());
+    CHECK(gs != nullptr && host.scoring_vm() != nullptr);
+    if (!gs) return;
+    host.tick_once();
+    auto log = [&host] { return host.global_values()->get("Scoring_Log").text; };
+    const bool neutral = gs->neutral_player() >= 0;
+    const ObjectHandle inf = gs->planets()[rD].surface[0];
+    CHECK(gs->destroy_object(inf) && !gs->store().alive(inf));
+    CHECK(log().find(neutral ? "UD:truetrue;" : "UD:truefalse;") != std::string::npos);
+    host.start_game(ModeKind::Space);
+    objects::SpawnParams sp;
+    sp.type = w.types.resolve_name("Sim_Frigate");
+    sp.parent_mode_id = 1;
+    const ObjectHandle ship = host.tactical()->spawn(sp);
+    const ObjectHandle ship2 = host.tactical()->spawn(sp);
+    host.scoring_tactical_death(host.tactical()->primary(), ship, pEmpire);
+    host.scoring_tactical_death(host.tactical()->primary(), ship2, -1);
+    const std::string l = log();
+    std::printf("scoring deaths: %s (%" PRIu64 " calls, releases %" PRIu64 ")\n", l.c_str(), host.scoring_calls(),
+                host.scoring_releases());
+    for (const std::string& m : host.scoring_messages()) std::printf("  scoring: %s\n", m.c_str());
+    CHECK(l.find("TD:truetrue;") != std::string::npos);  // the Empire killed it: object valid on the battle store
+    CHECK(l.find(neutral ? "TD:truetrue;TD:truetrue;" : "TD:truetrue;TD:truefalse;") != std::string::npos);
+    CHECK(host.scoring_releases() == 0);
+    host.end_game_mode();
 }
 
 // q6 (Thrawn's Revenge story chain): (1) a tick-2 event (ELAPSED 0, A2i t01) reaches a PGStoryMode-style script whose
@@ -1346,6 +1576,128 @@ static void test_q6_story_chain(const World& w) {
             CHECK(log == first_log && sw_text == first_switch);
         }
     }
+    remove_all_long(root, ec);
+}
+
+// bkc1 t01 (docs/re/BKC1_RE_ANSWERS.md Q1 [H]): Story_Handle_Esc. The key goes to the story only while the cinematic
+// camera is on (Start_Cinematic_Camera, the controller's state 4); handle_esc() offers the call to every ACTIVE plot of
+// the current mode in plot-table order, calling the plot script's global only when it is a function (no arguments); a
+// suspended plot (D) is skipped, a plot without a script (B) or without the function is no error. A thread the handler
+// creates first runs at the next T9.
+static void test_story_handle_esc(const World& w) {
+    const fs::path root = fs::temp_directory_path() / "alamo_sim_story_handle_esc";
+    std::error_code ec;
+    remove_all_long(root, ec);
+    write_file(root / "Data/XML/Story_Plots_Esc.xml",
+               "<Story_Mode_Plots><Lua_Script>Story_EscA</Lua_Script><Active_Plot>Story_EscA.xml</Active_Plot>"
+               "<Active_Plot>Story_EscB.xml</Active_Plot>"
+               "<Lua_Script>Story_EscC</Lua_Script><Active_Plot>Story_EscC.xml</Active_Plot>"
+               "<Lua_Script>Story_EscD</Lua_Script><Suspended_Plot>Story_EscD.xml</Suspended_Plot>"
+               "<Lua_Script>Story_EscE</Lua_Script><Active_Plot>Story_EscE.xml</Active_Plot></Story_Mode_Plots>\n");
+    const char* kEmpty = "<Story><Event Name=\"Idle\"><Event_Type>STORY_AI_NOTIFICATION</Event_Type><Event_Param2>NEVER</Event_Param2></Event></Story>\n";
+    write_file(root / "Data/XML/Story_EscA.xml", kEmpty);
+    write_file(root / "Data/XML/Story_EscC.xml", kEmpty);
+    write_file(root / "Data/XML/Story_EscD.xml", kEmpty);
+    write_file(root / "Data/XML/Story_EscE.xml", kEmpty);
+    write_file(root / "Data/XML/Story_EscB.xml",
+               "<Story>\n"
+               " <Event Name=\"Seen_A\"><Event_Type>STORY_AI_NOTIFICATION</Event_Type><Event_Param2>ESC_A</Event_Param2><Perpetual>Yes</Perpetual></Event>\n"
+               " <Event Name=\"Seen_C\"><Event_Type>STORY_AI_NOTIFICATION</Event_Type><Event_Param2>ESC_C</Event_Param2><Perpetual>Yes</Perpetual></Event>\n"
+               " <Event Name=\"Seen_D\"><Event_Type>STORY_AI_NOTIFICATION</Event_Type><Event_Param2>ESC_D</Event_Param2></Event>\n"
+               " <Event Name=\"After_A\"><Event_Type>STORY_AI_NOTIFICATION</Event_Type><Event_Param2>AFTER_A</Event_Param2></Event>\n"
+               "</Story>\n");
+    write_file(root / "Data/Scripts/Story/Story_EscA.lua",
+               "function Base_Definitions() ServiceRate = 0.01 end\n"
+               "function main() Start_Cinematic_Camera() end\n"
+               "function After() Story_Event(\"AFTER_A\") end\n"
+               "function Story_Handle_Esc() Story_Event(\"ESC_A\") Create_Thread(\"After\") End_Cinematic_Camera() end\n");
+    write_file(root / "Data/Scripts/Story/Story_EscC.lua",
+               "function Base_Definitions() ServiceRate = 0.01 end\nfunction main() end\n"
+               "function Story_Handle_Esc(a) if a == nil then Story_Event(\"ESC_C\") end end\n");
+    write_file(root / "Data/Scripts/Story/Story_EscD.lua",
+               "function Base_Definitions() end\nfunction main() end\nfunction Story_Handle_Esc() Story_Event(\"ESC_D\") end\n");
+    write_file(root / "Data/Scripts/Story/Story_EscE.lua",
+               "function Base_Definitions() end\nfunction main() end\nStory_Handle_Esc = 5\n");  // not a function: skipped
+    DirectoryProvider files(path_to_utf8(root));
+    jobs::JobSystem js(jobs::JobSystemConfig{0});
+    SimConfig cfg;
+    cfg.seed = 3;
+    SimHost host(w.types, js, cfg);
+    const GalacticRules r = rules();
+    GalacticSim* gs = host.start_galactic(r, setup());
+    CHECK(gs != nullptr);
+    if (!gs) return;
+    StoryStart st;
+    st.files = &files;
+    st.plot_sets = {{pEmpire, "Story_Plots_Esc.xml"}};
+    std::vector<std::string> diag;
+    CHECK(host.start_story(st, &diag) && host.story());
+    if (!host.story()) return;
+    StorySession& story = *host.story();
+    for (int t = 0; t < 5; ++t) host.tick_once();
+    CHECK(story.esc_goes_to_story());  // A's main (first resumed at story start) ran Start_Cinematic_Camera
+    auto fired = [&story]() {
+        std::string out;
+        for (const StoryLogEntry& e : story.log())
+            if (e.event.rfind("Seen_", 0) == 0 || e.event == "After_A") out += e.event + ",";
+        return out;
+    };
+    CHECK(fired().empty());
+    CHECK(story.handle_esc() == 2);  // A then C, in plot-table order; D suspended, B no script, E not a function
+    CHECK(fired() == "Seen_A,Seen_C,");
+    CHECK(!story.esc_goes_to_story());  // A's handler ended the cinematic camera: Esc opens the host's pause menu again
+    const uint64_t esc_frame = host.frame();
+    host.tick_once();
+    CHECK(fired() == "Seen_A,Seen_C,After_A,");  // the thread created by the handler ran at the next tick's T9
+    uint64_t after = 0;
+    for (const StoryLogEntry& e : story.log())
+        if (e.event == "After_A") after = e.frame;
+    CHECK(after == esc_frame + 1);
+    for (const std::string& m : story.lua_messages()) std::printf("  story esc lua: %s\n", m.c_str());
+    CHECK(story.lua_messages().empty());
+    std::printf("  story handle esc: 2 plots called, After_A at frame %" PRIu64 " (Esc after frame %" PRIu64 ")\n", after,
+                esc_frame);
+    remove_all_long(root, ec);
+}
+
+// tst2 t02: a Lua Bink movie takes the Esc only while it plays. Play_Bink_Movie leaves the movie's name in the presentation
+// state after its block has run out (no Stop_Bink_Movie), as the Kessel UM01 intro does (BlockOnCommand on its Binks, then
+// the cinematic camera): from then on the cinematic camera hands the key to the story again.
+static void test_story_esc_after_movie(const World& w) {
+    const fs::path root = fs::temp_directory_path() / "alamo_sim_story_esc_movie";
+    std::error_code ec;
+    remove_all_long(root, ec);
+    write_file(root / "Data/XML/Story_Plots_EscM.xml",
+               "<Story_Mode_Plots><Lua_Script>Story_EscM</Lua_Script><Active_Plot>Story_EscM.xml</Active_Plot></Story_Mode_Plots>\n");
+    write_file(root / "Data/XML/Story_EscM.xml",
+               "<Story><Event Name=\"Idle\"><Event_Type>STORY_AI_NOTIFICATION</Event_Type><Event_Param2>NEVER</Event_Param2></Event></Story>\n");
+    write_file(root / "Data/Scripts/Story/Story_EscM.lua",
+               "function Base_Definitions() ServiceRate = 0.01 end\n"
+               "function main() Start_Cinematic_Camera() Play_Bink_Movie(\"Intro\") end\n"
+               "function Story_Handle_Esc() end\n");
+    DirectoryProvider files(path_to_utf8(root));
+    jobs::JobSystem js(jobs::JobSystemConfig{0});
+    SimConfig cfg;
+    cfg.seed = 3;
+    SimHost host(w.types, js, cfg);
+    const GalacticRules r = rules();
+    GalacticSim* gs = host.start_galactic(r, setup());
+    CHECK(gs != nullptr);
+    if (!gs) return;
+    StoryStart st;
+    st.files = &files;
+    st.plot_sets = {{pEmpire, "Story_Plots_EscM.xml"}};
+    std::vector<std::string> diag;
+    CHECK(host.start_story(st, &diag) && host.story());
+    if (!host.story()) return;
+    StorySession& story = *host.story();
+    CHECK(!story.esc_goes_to_story());  // main ran at load: the movie's block (1 frame headless) has not run out yet
+    for (int t = 0; t < 5; ++t) host.tick_once();
+    const lua::PresentationLog* pl = story.presentation();
+    CHECK(pl && pl->state().movie == "Intro");  // the name stays: no Stop_Bink_Movie
+    CHECK(story.esc_goes_to_story());           // but the movie has ended, so the cinematic camera takes the key
+    CHECK(story.handle_esc() == 1);
+    CHECK(story.lua_messages().empty());
     remove_all_long(root, ec);
 }
 }  // namespace story_test
@@ -1936,6 +2288,8 @@ static void test_story_rewards_oi(const World& w) {
                "<Reward_Param1>C</Reward_Param1><Prereq>Begin</Prereq></Event>\n"
                " <Event Name=\"Clean_Bad\"><Event_Type>STORY_TRIGGER</Event_Type><Reward_Type>REMOVE_CORRUPTION</Reward_Type>"
                "<Reward_Param1>Nowhere</Reward_Param1><Prereq>Begin</Prereq></Event>\n"
+               // STY1 t08: the timed removal's start raises STORY_GENERIC "decrease_corruption" (wrapper 0x3f6770)
+               " <Event Name=\"Relock_Seen\"><Event_Type>STORY_GENERIC</Event_Type><Event_Param1>decrease_corruption</Event_Param1></Event>\n"
                " <Event Name=\"Lock_F\"><Event_Type>STORY_TRIGGER</Event_Type><Reward_Type>LOCK_UNIT</Reward_Type>"
                "<Reward_Param1>Fighters</Reward_Param1><Prereq>Begin</Prereq></Event>\n"
                " <Event Name=\"Unlock_F\"><Event_Type>STORY_TRIGGER</Event_Type><Reward_Type>BUILDABLE_UNIT</Reward_Type>"
@@ -2082,6 +2436,7 @@ static void test_story_rewards_oi(const World& w) {
         const std::string log = host.story()->log_text("oi rewards");
         if (first_log.empty()) first_log = log;
         CHECK(log == first_log && log.find("reward=LOCK_UNIT[Corvette]") != std::string::npos);
+        CHECK(log.find(" Relock_Seen ") != std::string::npos);  // STY1 t08
     }
     remove_all_long(root, ec);
 }
@@ -2324,10 +2679,13 @@ static void test_story_load_pass(const World& w) {
 }
 
 // a2j t05 (A2J_T05_STORY_LOAD.md): the load pass's CONSTRUCT side and its galactic stream. Before the tech pass every
-// starting-force object raises STORY_CONSTRUCT (+ CONSTRUCT_LEVEL for the starbase / ground structure) to every plot set
-// ("via=load:construct"): the Empire's SB1 (CONSTRUCT, starbase level 1) and Barracks (ground level 1, not 2) at A, the
-// Underworld's Corvette at D (FILTER_ENEMY_ONLY for the Empire). In the tech pass the UNIQUE_UNIT reward's Corvette raises
-// CONSTRUCT inside the reward call, so Own_Corvette fires between Tech_1 and Tech_1's STORY_TRIGGER dependant; that
+// starting-force object raises STORY_CONSTRUCT (+ CONSTRUCT_LEVEL for a starbase) to every plot set ("via=load:construct").
+// a2k t12 (A2K_T07_STORY_LOAD_RE.md): at L8 the planets are still neutral, so only neutral-accepting filters fire
+// (SB_Built with FILTER_NEUTRAL_ONLY, not SB_Friendly with the default FRIENDLY_ONLY, not Enemy_Corvette); CONSTRUCT_LEVEL
+// compares Param2 with SB1's Base_Level 1 under Param3 SPACE (A_Star_1, not A_Star_2), the Barracks raises none
+// (A_Ground_1); the walk is planet by planet in <Locations> order, so the Fighters appended last at A come before the
+// Corvette at D. In the tech pass the UNIQUE_UNIT reward's Corvette raises CONSTRUCT inside the reward call (spawn hook,
+// judged by the Empire-owned planet), so Own_Corvette fires between Tech_1 and Tech_1's STORY_TRIGGER dependant; that
 // dependant's SET_TECH_LEVEL raises TechLevelChanged, routed at load ("T 0 0 ..."), not at T9 of tick 1.
 static void test_story_load_construct(const World& w) {
     using namespace story_test;
@@ -2338,13 +2696,19 @@ static void test_story_load_construct(const World& w) {
                "<Story_Mode_Plots><Active_Plot>Story_Load_C.xml</Active_Plot><Suspended_Plot /></Story_Mode_Plots>\n");
     write_file(root / "Data/XML/Story_Load_C.xml",
                "<Story>\n"
-               " <Event Name=\"SB_Built\"><Event_Type>STORY_CONSTRUCT</Event_Type><Event_Param1>SB1</Event_Param1></Event>\n"
+               " <Event Name=\"SB_Built\"><Event_Type>STORY_CONSTRUCT</Event_Type><Event_Param1>SB1</Event_Param1>"
+               "<Event_Param3>FILTER_NEUTRAL_ONLY</Event_Param3></Event>\n"
+               " <Event Name=\"SB_Friendly\"><Event_Type>STORY_CONSTRUCT</Event_Type><Event_Param1>SB1</Event_Param1></Event>\n"
                " <Event Name=\"A_Star_1\"><Event_Type>STORY_CONSTRUCT_LEVEL</Event_Type><Event_Param1>PlanetA</Event_Param1>"
-               "<Event_Param2>1</Event_Param2><Event_Param3>0</Event_Param3></Event>\n"
+               "<Event_Param2>1</Event_Param2><Event_Param3>SPACE</Event_Param3><Event_Param4>EMPIRE</Event_Param4></Event>\n"
+               " <Event Name=\"A_Star_2\"><Event_Type>STORY_CONSTRUCT_LEVEL</Event_Type><Event_Param1>PlanetA</Event_Param1>"
+               "<Event_Param2>2</Event_Param2><Event_Param3>SPACE</Event_Param3></Event>\n"
                " <Event Name=\"A_Ground_1\"><Event_Type>STORY_CONSTRUCT_LEVEL</Event_Type><Event_Param1>PlanetA</Event_Param1>"
-               "<Event_Param2>1</Event_Param2><Event_Param3>1</Event_Param3></Event>\n"
-               " <Event Name=\"A_Ground_2\"><Event_Type>STORY_CONSTRUCT_LEVEL</Event_Type><Event_Param1>PlanetA</Event_Param1>"
-               "<Event_Param2>2</Event_Param2><Event_Param3>1</Event_Param3></Event>\n"
+               "<Event_Param2>1</Event_Param2><Event_Param3>GROUND</Event_Param3></Event>\n"
+               " <Event Name=\"Fighters_Neutral\"><Event_Type>STORY_CONSTRUCT</Event_Type><Event_Param1>Fighters</Event_Param1>"
+               "<Event_Param3>FILTER_NEUTRAL_ONLY</Event_Param3></Event>\n"
+               " <Event Name=\"Corvette_Neutral\"><Event_Type>STORY_CONSTRUCT</Event_Type><Event_Param1>Corvette</Event_Param1>"
+               "<Event_Param3>FILTER_NEUTRAL_ONLY</Event_Param3></Event>\n"
                " <Event Name=\"Enemy_Corvette\"><Event_Type>STORY_CONSTRUCT</Event_Type><Event_Param1>Corvette</Event_Param1>"
                "<Event_Param3>FILTER_ENEMY_ONLY</Event_Param3></Event>\n"
                " <Event Name=\"Tech_1\"><Event_Type>STORY_TECH_LEVEL</Event_Type><Event_Param1>1</Event_Param1>"
@@ -2365,7 +2729,9 @@ static void test_story_load_construct(const World& w) {
         cfg.story_crc = true;
         SimHost host(w.types, js, cfg);
         const GalacticRules r = rules();
-        GalacticSim* gs = host.start_galactic(r, setup());
+        GalacticSetup su = setup();
+        su.forces.push_back({pEmpire, rA, tFighters});  // last entry, first planet: walked before D's Corvette
+        GalacticSim* gs = host.start_galactic(r, su);
         CHECK(gs != nullptr);
         if (!gs) return {};
         StoryStart st;
@@ -2385,15 +2751,17 @@ static void test_story_load_construct(const World& w) {
             for (const StoryLogEntry& e : story.log()) std::printf("  load: %s\n", e.text().c_str());
             const StoryLogEntry* sb = entry("SB_Built");
             const StoryLogEntry* a1 = entry("A_Star_1");
-            const StoryLogEntry* g1 = entry("A_Ground_1");
-            const StoryLogEntry* ec_ = entry("Enemy_Corvette");
+            const StoryLogEntry* fn = entry("Fighters_Neutral");
+            const StoryLogEntry* cn = entry("Corvette_Neutral");
             const StoryLogEntry* t1 = entry("Tech_1");
             const StoryLogEntry* oc = entry("Own_Corvette");
             const StoryLogEntry* tr = entry("Tech_1_Raise");
-            CHECK(host.frame() == 0 && story.log().size() == 7 && entry("A_Ground_2") == nullptr);
-            CHECK(sb && a1 && g1 && ec_ && t1 && oc && tr);
-            if (sb && a1 && g1 && ec_ && t1 && oc && tr) {
-                for (const StoryLogEntry* e : {sb, a1, g1, ec_}) CHECK(e->frame == 0 && e->via == "load:construct" && e->sequence < t1->sequence);
+            CHECK(host.frame() == 0 && story.log().size() == 7);
+            CHECK(!entry("SB_Friendly") && !entry("A_Star_2") && !entry("A_Ground_1") && !entry("Enemy_Corvette"));
+            CHECK(sb && a1 && fn && cn && t1 && oc && tr);
+            if (sb && a1 && fn && cn && t1 && oc && tr) {
+                for (const StoryLogEntry* e : {sb, a1, fn, cn}) CHECK(e->frame == 0 && e->via == "load:construct" && e->sequence < t1->sequence);
+                CHECK(sb->sequence < fn->sequence && fn->sequence < cn->sequence);  // planet A before planet D
                 CHECK(t1->via == "load" && oc->via == "load" && tr->via == "load");
                 CHECK(t1->sequence < oc->sequence && oc->sequence < tr->sequence);  // CONSTRUCT inside the reward call
             }
@@ -2714,11 +3082,11 @@ static const char* kGalactic =
     "<Event_Param1>Story_Plots_Wave2a_Tac.xml</Event_Param1><Event_Param2>PlanetC</Event_Param2></Event>\n"
     " <Event Name=\"Go_Land_Never\"><Event_Type>STORY_LAND_TACTICAL</Event_Type><Event_Param1>X.xml</Event_Param1></Event>\n"
     " <Event Name=\"Won_Space\"><Event_Type>STORY_WIN_BATTLES</Event_Type><Event_Param1>1</Event_Param1>"
-    "<Event_Param2>SPACE</Event_Param2><Event_Param3>FRIENDLY_CONTAINS CLASS_Corvette</Event_Param3></Event>\n"
+    "<Event_Param2>SPACE</Event_Param2><Event_Param3>FRIENDLY_CONTAINS CLASS_CORVETTE</Event_Param3></Event>\n"
     " <Event Name=\"Won_Land_Never\"><Event_Type>STORY_WIN_BATTLES</Event_Type><Event_Param1>1</Event_Param1>"
     "<Event_Param2>Land</Event_Param2></Event>\n"
     " <Event Name=\"Won_Fighters_Never\"><Event_Type>STORY_WIN_BATTLES</Event_Type><Event_Param1>1</Event_Param1>"
-    "<Event_Param3>FRIENDLY_CONTAINS CLASS_Fighter</Event_Param3></Event>\n"
+    "<Event_Param3>FRIENDLY_CONTAINS CLASS_FIGHTER</Event_Param3></Event>\n"
     " <Event Name=\"Bounced_D\"><Event_Type>STORY_INVASION_BOUNCED</Event_Type><Event_Param1>PlanetD</Event_Param1></Event>\n"
     // wave 2b: a pending corruption mission ends with the battle (SCRIPT_GAPS.md §4.7)
     " <Event Name=\"Corrupt_C\"><Event_Type>STORY_CORRUPTION_TACTICAL_COMPLETE</Event_Type><Event_Param1>PlanetC</Event_Param1>"
@@ -2769,6 +3137,7 @@ static const char* kTactical =
     " <Event Name=\"Tac_Select_Hero_Never\"><Event_Type>STORY_SELECT_UNIT</Event_Type><Event_Param1>Hero_Ship</Event_Param1></Event>\n"
     " <Event Name=\"Tac_Click\"><Event_Type>STORY_CLICK_GUI</Event_Type><Event_Param1>b_reinforcement</Event_Param1></Event>\n"
     " <Event Name=\"Tac_Click_Never\"><Event_Type>STORY_CLICK_GUI</Event_Type><Event_Param1>b_special_weapon</Event_Param1></Event>\n"
+    " <Event Name=\"Tac_Generic\"><Event_Type>STORY_GENERIC</Event_Type><Event_Param1>start_hyperspace</Event_Param1></Event>\n"
     " <Event Name=\"Tac_Speech\"><Event_Type>STORY_SPEECH_DONE</Event_Type><Event_Param1>TAC_SPEECH_01</Event_Param1></Event>\n"
     "</Story>\n";
 // The tactical script sees the tactical store (the Empire corvette, its hull) and reports once.
@@ -2795,7 +3164,7 @@ static std::unique_ptr<Types> make_types(const fs::path& root) {
                " <StarBase Name=\"SB1\"><Victory_Relevant>Yes</Victory_Relevant><Tactical_Health>500</Tactical_Health><CategoryMask>Structure</CategoryMask></StarBase>\n"
                // wave 2b: SELECTABLE (CHECK_DESTROYED counts live SELECTABLE objects, SCRIPT_GAPS.md §4.8)
                " <SpaceUnit Name=\"Corvette\"><Victory_Relevant>Yes</Victory_Relevant><Behavior>SELECTABLE</Behavior><Tactical_Health>100</Tactical_Health>"
-               "<CategoryMask>Corvette</CategoryMask></SpaceUnit>\n"
+               "<CategoryMask>Corvette</CategoryMask><Ship_Class>Corvette</Ship_Class></SpaceUnit>\n"
                " <GroundInfantry Name=\"Infantry\"><Victory_Relevant>Yes</Victory_Relevant><Tactical_Health>10</Tactical_Health><CategoryMask>Infantry</CategoryMask></GroundInfantry>\n"
                " <GroundStructure Name=\"Barracks\"><Victory_Relevant>Yes</Victory_Relevant><Tactical_Health>200</Tactical_Health><CategoryMask>Structure</CategoryMask></GroundStructure>\n"
                " <SpaceUnit Name=\"Fighters\"><Victory_Relevant>Yes</Victory_Relevant><CategoryMask>Fighter</CategoryMask></SpaceUnit>\n"
@@ -2904,6 +3273,7 @@ static Result run(const objects::GameObjectTypes& types, const FileProvider& fil
             story.notify_ui({StoryUiEvent::ClickGui, pEmpire, 0, "b_reinforcement", true});
             story.notify_ui({StoryUiEvent::ClickGui, pUnder, 0, "b_special_weapon", true});  // not the tactical plot owner
             story.notify_ui({StoryUiEvent::SpeechDone, pEmpire, 0, "TAC_SPEECH_01", true});
+            story.notify_ui({StoryUiEvent::Generic, pEmpire, 0, "start_hyperspace", true});  // STY1 t03: the battle plot hears it
         }
         host.tick_once();
     }
@@ -2914,8 +3284,11 @@ static Result run(const objects::GameObjectTypes& types, const FileProvider& fil
     story.notify_ui({StoryUiEvent::SelectUnit, pEmpire, static_cast<int32_t>(ts.id(mine)), "", true});  // no battle: dropped
     story.notify_ui({StoryUiEvent::ClickGui, pEmpire, 0, "b_reinforcement", true});
     CHECK(host.end_game_mode());
-    // S10 results: the Empire won the space battle at C (snapshot: its corvette), then lost a land battle at D,
-    // which Underworld owns (an invasion that bounced; no snapshot of that battle).
+    // S10 results: the Empire won the space battle at C, then lost a land battle at D, which Underworld owns (an invasion
+    // that bounced; no snapshot of that battle). mcx6 t03: the composition is the story manager's orbit record (the battle
+    // host's space decide state; here made by hand at A, where the Empire's corvette orbits): local [corvette 3].
+    story.record_battle_composition(story_test::rA);
+    CHECK(story.battle_composition(true) == std::vector<int32_t>{3} && story.battle_composition(false).empty());
     auto battle = [gs](GalacticEventKind k, int32_t player, int32_t other, PlanetIndex planet, int32_t value) {
         GalacticEvent e;
         e.kind = k;
@@ -2964,7 +3337,7 @@ static void test_story_wave2a() {
           std::count(a.fow_rewards.begin(), a.fow_rewards.end(), std::make_pair(true, int32_t{0})) == 1);
     for (const char* ev : {"Go_Space", "Won_Space", "Bounced_D", "Victory_Empire", "Enemy_Gone", "Near_Zone", "Gun_Down", "Moved",
                            "Corvette_Killed", "Hero_Dies", "Tac_Elapsed", "Script_Saw", "Corrupt_C", "Guarded", "Zone_Seen", "Point_Seen",
-                           "Tac_Select", "Tac_Click", "Tac_Speech", "Gal_Speech"})
+                           "Tac_Select", "Tac_Click", "Tac_Speech", "Tac_Generic", "Gal_Speech"})
         if (a.log.find(std::string(" ") + ev + " ") == std::string::npos) {
             std::printf("FAIL wave2a story event %s did not fire\n", ev);
             ++g_fail;
@@ -3102,16 +3475,10 @@ static void test_real_data() {
         CHECK(!first_divergence(a, b).diverged && a.records.size() == 2791);
         const std::string golden = testdata("galactic_hotm_golden.crc");
         std::string gerr;
-        if (g_regen) {
+        if (g_regen) {  // wr1 t07: a result of the scenario sim_tests, no stored copy
             CrcLog g = a;
             g.comments = {"G0 + S3: Sandbox_Heart_Of_The_Maw_Underworld, seed 99, 1500 + 30 paused + 60 space + 1200 ticks"};
             CHECK(g.save(golden, &gerr));
-        } else {
-            CrcLog g;
-            CHECK(CrcLog::load(golden, g, &gerr));
-            const auto d = first_divergence(g, a);
-            std::printf("  golden galactic_hotm_golden.crc: %s\n", d.message.c_str());
-            CHECK(!d.diverged);
         }
     }
 #ifdef ALAMO_SIM_HAVE_STORY
@@ -3170,8 +3537,15 @@ int main(int argc, char** argv) {
     log::set_min_level(log::Level::Error);
     for (int i = 1; i < argc; ++i)
         if (std::strcmp(argv[i], "--regen") == 0) g_regen = g_regen_story = true;
-        else if (std::strcmp(argv[i], "--regen-story") == 0) g_regen_story = true;
+        else if (std::strcmp(argv[i], "--golden-out") == 0 && i + 1 < argc) {
+            g_regen = g_regen_story = true;
+            g_golden_out = argv[++i];
+        } else if (std::strcmp(argv[i], "--regen-story") == 0) g_regen_story = true;
         else if (std::strcmp(argv[i], "--story-only") == 0) g_story_only = true;
+    if ((g_regen || g_regen_story) && g_golden_out.empty()) {
+        std::printf("%s: --regen / --write-golden needs --golden-out DIR (wr1 t07: no stored goldens in the source tree)\n", "alamo_sim_tests");
+        return 2;
+    }
     test_pacing();
     const auto world = make_world();
 #ifdef ALAMO_SIM_HAVE_STORY
@@ -3186,6 +3560,9 @@ int main(int argc, char** argv) {
     story_test::test_scoring_script(*world);  // q6 t06
     story_test::test_scoring_service(*world);  // q6 t09
     story_test::test_scoring_story(*world);    // q6 t09
+    story_test::test_scoring_deaths(*world);   // storyb t14
+    story_test::test_story_handle_esc(*world);  // bkc1 t01
+    story_test::test_story_esc_after_movie(*world);  // tst2 t02
     story_test::test_q6_story_chain(*world);   // q6: load-time resume, Perpetual ELAPSED, SWITCH_CONTROL hook
     object_script_test::test_object_scripts();  // q6: game-object Lua scripts
 #else
@@ -3197,7 +3574,9 @@ int main(int argc, char** argv) {
     }
     test_mode_stack(*world);
     test_tick_order(*world);
+    test_crc_cadence(*world);
     test_commands(*world);
+    test_select_all();  // bkc1 t04
     test_realtime_equals_fast(*world);
     test_save_session(*world);  // N1
     determinism(world->types, make_synthetic_map(), "synthetic", 600);

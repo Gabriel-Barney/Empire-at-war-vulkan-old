@@ -22,6 +22,7 @@
 #include "alamo/core/hash.hpp"
 #include "alamo/core/log.hpp"
 #include "alamo/terrain/terrain.hpp"
+#include "alamo/test/support.hpp"
 
 #if defined(ALAMO_TERRAIN_HAVE_DATA)
 #include "alamo/data/game_database.hpp"
@@ -32,14 +33,7 @@
 
 using namespace alamo::terrain;
 
-static int g_fail = 0;
-#define CHECK(x)                                                                    \
-    do {                                                                            \
-        if (!(x)) {                                                                 \
-            std::printf("FAIL %s:%d: %s\n", __FILE__, __LINE__, #x);                \
-            ++g_fail;                                                               \
-        }                                                                           \
-    } while (0)
+using ::alamo::test::g_fail;
 
 namespace {
 
@@ -237,7 +231,17 @@ void test_chunks() {
 }
 
 void test_round_trip() {
-    const MapData m = make_map(2, 1);
+    MapData m = make_map(2, 1);
+    if (m.objects.size() > 1) m.objects[1].hint = "falcongear1";  // q6 t28: 0x482 hint name
+    if (m.objects.size() > 1) {  // map1 t04: 0x46E marker name (empty but present on object 0) and 0x4B7 extra behaviours
+        m.objects[0].has_marker_name = true;
+        m.objects[1].has_marker_name = true;
+        m.objects[1].marker_name = "inf4";
+        ObjectPlacement::ExtraBehavior e;
+        e.name_crc = alamo::name_crc("HINT");
+        e.raw = {mk_u32(0x01, 0), mk_u32(0x02, 0), mk_u32(0x03, 0x062E8B5Cu)};
+        m.objects[1].extra_behaviors.push_back(e);
+    }
     const std::vector<uint8_t> bytes = write_ted(m);
     MapData r;
     std::string err;
@@ -275,7 +279,16 @@ void test_round_trip() {
         CHECK(std::equal(p.position, p.position + 3, q.position) && std::equal(p.rotation_deg, p.rotation_deg + 3, q.rotation_deg));
         CHECK(p.has_secondary == q.has_secondary && p.attachments == q.attachments && p.attachment_slots == q.attachment_slots);
         CHECK(p.owner_raw == q.owner_raw);
+        CHECK(p.hint == q.hint);
+        CHECK(p.has_marker_name == q.has_marker_name && p.marker_name == q.marker_name);
+        CHECK(p.extra_behaviors.size() == q.extra_behaviors.size());
+        for (size_t k = 0; k < std::min(p.extra_behaviors.size(), q.extra_behaviors.size()); ++k)
+            CHECK(p.extra_behaviors[k].name_crc == q.extra_behaviors[k].name_crc && q.extra_behaviors[k].raw.size() == 4);
     }
+    CHECK(r.objects.size() > 1 && r.objects[0].hint.empty() && r.objects[1].hint == "falcongear1");
+    CHECK(r.objects.size() > 1 && r.objects[0].has_marker_name && r.objects[0].marker_name.empty() && r.objects[1].marker_name == "inf4" &&
+          r.objects[0].extra_behaviors.empty() && r.objects[1].extra_behaviors.size() == 1 &&
+          r.objects[1].extra_behaviors[0].name_crc == 0x0253EEE7u);  // name_crc("HINT"), the shipped id
     CHECK(r.playable.has_box && r.playable.box_min[0] == 300.0f && r.playable.box_max[0] == 1000.0f);
     CHECK(r.zones.size() == 1 && r.zones[0].name == "New Zone 1" && r.zones[0].id == 77 && r.zones[0].cells.size() == 2 &&
           r.zones[0].cells[0].x == 38 && r.zones[0].cells[0].y == 59 && r.zones[0].links.size() == 1);
@@ -321,6 +334,72 @@ Terrain tiny_terrain() {
     t.material.assign(32 * 32, 0);
     t.brightness.assign(32 * 32, 0xFF);
     return t;
+}
+
+// mov3 t08 (MOVEMENT §3.6 "Terrain height 0x135140", MOV2_RE_QUESTIONS Q6 [H]): the gameplay height is bilinear. On a warped
+// cell (h00 = h11 = 0, h10 = h01 = 8 x the height scale) the cell centre is the mean of the corners (4 units), where the
+// render mesh's triangle-linear sample reads the diagonal (0); a corner is exact; outside the map the edge height. The
+// 0.5 under-water test reads the bilinear height: a plane at 4.4 is under at the centre (4 < 3.9 fails), at 4.6 it is.
+void test_bilinear_height() {
+    Terrain t = tiny_terrain();
+    const auto raw = [&](int64_t x, int64_t y, int16_t h) { t.heights[static_cast<size_t>(y) * 32 + static_cast<size_t>(x)] = h; };
+    const int16_t r8 = static_cast<int16_t>(8.0f / kHeightScale);  // 8 world units
+    raw(3, 2, r8);  // (i + 1, j)
+    raw(2, 3, r8);  // (i, j + 1)
+    const float h8 = static_cast<float>(r8) * kHeightScale;
+    const auto close = [](float a, float b) { return std::fabs(a - b) < 1.0e-4f; };  // x / 20 by the reciprocal 0.05f
+    CHECK(close(t.sample_height_bilinear(50.0f, 50.0f), 0.5f * h8));  // cell (2, 2) centre: (0 + 8 + 8 + 0) / 4
+    CHECK(t.sample_height(50.0f, 50.0f) == 0.0f);                // the mesh diagonal (0, 0)-(1, 1)
+    CHECK(close(t.sample_height_bilinear(60.0f, 40.0f), h8));         // vertex (3, 2)
+    CHECK(close(t.sample_height_bilinear(45.0f, 40.0f), 0.25f * h8));  // along x on row j: a quarter of the way
+    CHECK(t.sample_height_bilinear(-500.0f, 40.0f) == 0.0f && t.sample_height_bilinear(1.0e7f, 1.0e7f) == 0.0f);
+    t.header.water_type = WaterType::Water;
+    t.header.water_height = 0.5f * h8 + 0.4f;
+    CHECK(!t.under_water(50.0f, 50.0f));
+    t.header.water_height = 0.5f * h8 + 0.6f;
+    CHECK(t.under_water(50.0f, 50.0f));
+}
+
+// trn1 (docs/re/TRN1_TERRAIN_GAMEPLAY.md §1, §2.1): the gameplay surface type of a world point - the nearest vertex's
+// material (floor(w / 20 + 0.5), clamped), the water types under the plane (more than 0.5 below it).
+void test_surface_types() {
+    Terrain t = tiny_terrain();
+    t.materials[0].surface_type = 1;   // grass
+    t.materials[5].surface_type = 10;  // cover
+    t.material[3 * 32 + 2] = 5;        // vertex (2, 3) = world (40, 60)
+    CHECK(t.cell_surface_type(40.0f, 60.0f) == 10);
+    CHECK(t.cell_surface_type(49.9f, 69.9f) == 10);  // rounds to vertex (2, 3)
+    CHECK(t.cell_surface_type(50.0f, 60.0f) == 1);   // 50 / 20 + 0.5 = 3 -> vertex (3, 3)
+    CHECK(t.cell_surface_type(30.0f, 50.0f) == 10);  // 2.0 / 3.0 exactly
+    CHECK(t.cell_surface_type(29.9f, 60.0f) == 1);
+    CHECK(t.cell_surface_type(-100.0f, 1.0e6f) == 1);  // clamped to the grid
+    CHECK(t.surface_type_at(40.0f, 60.0f) == 10);      // no water plane
+    CHECK(!t.under_water(40.0f, 60.0f) && t.water_surface_type() == 0);
+    // flat ground at 0: a plane at 0.5 is not "under" (0 < 0.5 - 0.5 fails); at 0.6 it is
+    t.header.water_type = WaterType::Lava;
+    t.header.water_height = 0.5f;
+    CHECK(!t.under_water(40.0f, 60.0f) && t.surface_type_at(40.0f, 60.0f) == 10);
+    t.header.water_height = 0.6f;
+    CHECK(t.under_water(40.0f, 60.0f) && t.surface_type_at(40.0f, 60.0f) == 8);
+    CHECK(t.cell_surface_type(40.0f, 60.0f) == 10);  // the cover cell test ignores the water
+    t.header.water_type = WaterType::Water;
+    CHECK(t.surface_type_at(40.0f, 60.0f) == 4);
+    t.header.water_type = WaterType::Ice;
+    CHECK(t.surface_type_at(40.0f, 60.0f) == 7);
+    // mcx5 t03 (MCX5_RE_ANSWERS Q2.3): material ids past slot 63 read the extra records (retail's table holds every
+    // record), and the .ted round trip keeps them; an id past the table reads 0.
+    t.header.water_type = WaterType::None;
+    t.extra_materials.resize(3);
+    t.extra_materials[2].surface_type = 9;  // id 66
+    t.material[3 * 32 + 2] = 66;
+    CHECK(t.cell_surface_type(40.0f, 60.0f) == 9);
+    t.material[3 * 32 + 2] = 70;
+    CHECK(t.cell_surface_type(40.0f, 60.0f) == 0 && t.material_record(70) == nullptr);
+    MapData md = make_map(1, 2);
+    md.terrain.extra_materials = t.extra_materials;
+    MapData back;
+    CHECK(parse_ted(write_ted(md), back) && back.terrain.extra_materials.size() == 3 &&
+          back.terrain.extra_materials[2].surface_type == 9);
 }
 
 void test_mesh_blend_rules() {
@@ -652,6 +731,14 @@ void test_hardening() {
     std::string err;
     CHECK(!parse_ted(b, r, &err) && r.terrain.heights.empty() && r.passability.empty());
     std::printf("48-byte 1985^2 map rejected: %s\n", err.c_str());
+    // mcx5 t03: a side above the kMaxGridVerts guard is refused by the header check (retail bounds neither side,
+    // MCX5_RE_ANSWERS Q2.1; the guard keeps size products in 32 bits).
+    for (size_t i = 0; i < 2; ++i) {
+        const size_t at = 24 + 6 * i + 2;  // mini 00 / 01 values
+        const uint32_t v = kMaxGridVerts + 1;
+        for (size_t k = 0; k < 4; ++k) b[at + k] = static_cast<uint8_t>(v >> (8 * k));
+    }
+    CHECK(!parse_ted(b, r, &err) && err.find("kMaxGridVerts") != std::string::npos);
 
     // Truncated vertex data and short passability are rejected.
     const MapData m = make_map(1, 11);
@@ -769,15 +856,15 @@ void test_fuzz() {
         for (auto& x : b) x = static_cast<uint8_t>(rng.next());
         fuzz_one(b, parsed);
     }
-    // Malformed headers that must fail cleanly.
+    // A grid above the pre-mcx5 cap loads; an empty file fails cleanly (the kMaxGridVerts guard: test_hardening).
     MapData big = make_map(1, 2);
-    big.terrain.width = big.terrain.height = 2101;  // > kMaxGridVerts
+    big.terrain.width = big.terrain.height = 2101;  // above the pre-mcx5 cap 1985: loads now (retail has none, Q2.1)
     big.passability_present = false;
     big.terrain.heights.clear();
     big.terrain.material.clear();
     big.terrain.brightness.clear();
     MapData r;
-    CHECK(!parse_ted(write_ted(big), r));
+    CHECK(parse_ted(write_ted(big), r) && r.terrain.width >= 2101);
     CHECK(!parse_ted({}, r));
     std::printf("fuzz: %u inputs, %u parsed without error, no crash\n", iters + 2000, parsed);
 }
@@ -1707,7 +1794,7 @@ void test_real_data() {
 
     // 1. Every map in the VFS parses and (land) builds.
     const auto maps = vfs->list("Data\\Art\\Maps\\*.ted");
-    uint32_t ok = 0, land = 0, space = 0, legacy = 0;
+    uint32_t ok = 0, land = 0, space = 0, legacy = 0, hints = 0, hint_maps = 0, extra = 0, extra_maps = 0, marker_names = 0;
     std::map<uint32_t, uint32_t> unknown_ids;
     const auto t_all = std::chrono::steady_clock::now();
     for (const std::string& path : maps) {
@@ -1720,6 +1807,20 @@ void test_real_data() {
             continue;
         }
         ++ok;
+        {  // q6 t28: 0x482 hint names (TERRAIN_WATER_POST 1.6)
+            uint32_t n = 0;
+            for (const ObjectPlacement& o : m.objects) n += o.hint.empty() ? 0u : 1u;
+            hints += n;
+            hint_maps += n ? 1u : 0u;
+            uint32_t x = 0;  // map1 t04: 0x4B7 extra behaviours (every shipped one is HINT), 0x46E marker names
+            for (const ObjectPlacement& o : m.objects) {
+                x += static_cast<uint32_t>(o.extra_behaviors.size());
+                marker_names += o.has_marker_name ? 1u : 0u;
+                for (const ObjectPlacement::ExtraBehavior& e : o.extra_behaviors) CHECK(e.name_crc == alamo::name_crc("HINT"));
+            }
+            extra += x;
+            extra_maps += x ? 1u : 0u;
+        }
         {
             ParseOptions eo;
             eo.environments_only = true;
@@ -1751,6 +1852,23 @@ void test_real_data() {
                 land, space, legacy, all_s);
     for (const auto& [id, n] : unknown_ids) std::printf("  unhandled world chunk 0x%X in %u maps\n", id, n);
     CHECK(ok == maps.size() && ok > 0);
+    std::printf("map hints (0x482): %u in %u maps\n", hints, hint_maps);
+    CHECK(hints > 2000 && hint_maps > 50);  // TERRAIN_WATER_POST 1.6 counts maps.meg alone (2741 in 155 maps)
+    // map1 t04: FoC + EaW maps.meg hold 3954 HINT entries in 182 maps and 6820 0x46E chunks (scan 2026-11-17); the VFS serves
+    // the patched copies, so the counts are bounds.
+    std::printf("map extra behaviours (0x4B7): %u in %u maps; marker names (0x46E): %u\n", extra, extra_maps, marker_names);
+    CHECK(extra > 1500 && extra_maps > 50 && marker_names > 2000);
+    {  // UM01 (Underworld act I mission 1): 154 hints in maps.meg (the patched copy the VFS serves: 152); Find_Hint("UMP_SMALL_GEAR", "falcongear1") needs this one.
+        MapData um;
+        CHECK(load_map(*vfs, "UM01_A_Crimelord_Unleashed", um));
+        uint32_t n = 0, gear = 0;
+        for (const ObjectPlacement& o : um.objects) {
+            n += o.hint.empty() ? 0u : 1u;
+            gear += o.hint == "falcongear1" && o.type_crc == alamo::name_crc("UMP_SMALL_GEAR") ? 1u : 0u;
+        }
+        std::printf("UM01_A_Crimelord_Unleashed: %u hints, falcongear1 on UMP_SMALL_GEAR x%u\n", n, gear);
+        CHECK(n > 150 && gear == 1);
+    }
 
     // 2. The doc table (TERRAIN_WATER_POST 1.9).
     std::printf("\n| map | grid | patches | raw h min..max | mats | layers avg/max | water | env | objects | vs doc |\n");
@@ -1990,6 +2108,7 @@ void test_real_data() {
 
 int main() {
     test_chunks();
+    test_bilinear_height();
     test_round_trip();
     test_mesh_blend_rules();
     test_mesh_geometry();
@@ -2009,6 +2128,7 @@ int main() {
     test_dynamic_track();
     test_fow();
 #if defined(ALAMO_TERRAIN_HAVE_DATA)
+    test_surface_types();  // trn1
     test_real_data();
 #else
     std::printf("real data: built without vfs/data/jobs, skipped\n");

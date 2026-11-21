@@ -36,6 +36,7 @@
 
 #include "alamo/ui/hud_components.hpp"
 #include "alamo/ui/hud_draw.hpp"
+#include "alamo/ui/hud_font.hpp"
 #include "alamo/ui/hud_input.hpp"
 
 namespace alamo::ui {
@@ -51,6 +52,8 @@ struct ButtonRuntime {
     double blink_start = -1.0;     // < 0: not blinking (Lua Blink / host): started at this time
     int32_t alt = -1;              // alternate texture index (-1: the HUD's faction index)
     int32_t tooltip_index = 0;     // Tooltip_Text entry (< 0: no tooltip)
+    std::string tooltip_key;       // ui3 t07: replaces the Tooltip_Text entry (ability / unit text); "" = data
+    std::u32string tooltip_text;   // [port] literal tooltip text (a player-given fleet / ship name), shown after the key text
     std::string icon_override;     // replaces the icon texture ("" = data)
     std::u32string text;           // drawn with the component's font ("" = none)
     std::u32string text2;          // second text (Text_Offset2)
@@ -88,6 +91,9 @@ public:
     ButtonRuntime& state(uint32_t component);
     const ButtonRuntime* find_state(uint32_t component) const;
     void set_sfx_hook(HudSfxHook hook) { sfx_ = std::move(hook); }
+    void play_sfx(std::string_view event, int32_t component) const {  // a HUD's own sound (UI5 t06: GUI_Cancel_SFX)
+        if (sfx_) sfx_(event, component);
+    }
     // Can_Animate frame animation (anim_frame): start (restarts when already playing) / stop.
     void play_anim(uint32_t component, double now, bool loop = false, std::string name = "play");
     void stop_anim(uint32_t component);
@@ -135,11 +141,49 @@ struct TooltipConfig {
     bool delay_tooltips = false;
     float encyclopedia_fade_rate = 4.0f;       // Encyclopedia_Fade_Rate: alpha per second, in and out
     double encyclopedia_min_display = 1.0;     // Encyclopedia_Min_Display_Time (s): shown at least this long
+    // mcx4 t14 (HUD_GAPS §2.2): the pop-up layout, canvas units from the panel's top-left corner: GameConstants
+    // Encyclopedia_Population_Offset / _Name_Offset / _Cost_Offset (x of the band's columns), _Icon_X_Offset /
+    // _Icon_Y_Offset (the icon, +y up) and _Class_Y_Offset (the class line below the band). FoC 11 / 68 / 258 / 39 / -12 / 5.
+    float enc_population_x = 11.0f, enc_name_x = 68.0f, enc_cost_x = 258.0f, enc_icon_x = 39.0f, enc_icon_y = -12.0f,
+          enc_class_y = 5.0f;
     double encyclopedia_wait() const { return delay_tooltips ? long_encyclopedia_delay : encyclopedia_delay; }
 };
 // GameConstants Tooltip_Delay / Encyclopedia_Delay / Long_Encyclopedia_Delay (ms), Encyclopedia_Fade_Rate (/s) and
 // Encyclopedia_Min_Display_Time (s) from a parsed GameConstants root.
 TooltipConfig tooltip_config_from(const data::XmlNode& game_constants_root);
+
+// mcx4 t14 / t15: HUD values the host copies into the frames (GameConstants; defaults = FoC's values).
+struct HudConstants {
+    float health_bar_spacing = 2.0f;               // Health_Bar_Spacing (pixels between stacked bars, UI.md §1.2)
+    bool radar_colorize_selected = true;           // Radar_Colorize_Selected_Units (UI.md §1.7)
+    Rgba8 radar_selected_color{209, 255, 209, 255};  // Radar_Selected_Units_Color
+    Rgba8 battle_pending_color{255, 32, 32, 240};  // Battle_Pending_Message_Color (GALACTIC_DIALOGS §1.3)
+    // mcx4 t14 (P4_SIM_SYSTEMS §2.7.2): the Droid Log's "Day N" and separator rows.
+    Rgba8 droid_date_color{255, 0, 0, 255};         // Droid_Date_Color
+    Rgba8 droid_separator_color{128, 128, 128, 255};  // Droid_Seperator_Color (retail spelling)
+    // mcx4 t14 / t15 (MCX4_T14_RE_ANSWERS "GameConstants.Win_Lose_Message_Font", banner 0x365150): the tactical win / lose
+    // banner's font (the last occurrence of each tag wins: FoC lists the size twice, 36 then 24) and colours.
+    std::string win_lose_font = "EmpireAtWar-Bold";   // Win_Lose_Message_Font
+    float win_lose_font_size = 24.0f;                 // Win_Lose_Message_Font_Size
+    Rgba8 win_message_color{223, 243, 255, 255};      // Win_Message_Color
+    Rgba8 lose_message_color{255, 244, 223, 255};     // Lose_Message_Color
+    int32_t cb_flash_count = 4;                       // mcx4 t14: CB_Flash_Count (b_reinforcement flashes on a pool add)
+    DefaultFonts fonts;                               // mcx4 t14: the GameConstants default fonts (FontCache::set_defaults)
+    float text_reveal_rate = 120.0f;                  // mcx4 t14: Text_Reveal_Rate (story text typewriter, chars / s)
+    // mcx4 t14 (MCX4_PRES_RE_ANSWERS_3 Q2): Num_Structures_For_Medium_Planet_Name / _Large_ (planet_label_class)
+    int32_t medium_planet_structures = 3, large_planet_structures = 5;
+    // mcx4 t14 (MCX4_PRES_RE_ANSWERS_2 Q1): the countdown timer column. One font for every timer (empty name: Arial; FoC
+    // writes Countdowns_Font_Name / _Size, tags the exe does not know, so the defaults stay); the top-left corner of the
+    // column as screen fractions (tactical: the retreat timer; strategic: the build timers, Spacing apart).
+    std::string countdown_font;                       // Game_Play_UI_Countdown_Font_Name
+    float countdown_font_size = 12.0f;                // Game_Play_UI_Countdown_Font_Size
+    float tactical_countdown_x = 0.005f, tactical_countdown_y = 0.10f;    // GUI_Tactical_Countdown_Timers_Screen_X / _Y
+    float strategic_countdown_x = 0.005f, strategic_countdown_y = 0.02f;  // GUI_Strategic_Countdown_Timers_Screen_X / _Y
+    float strategic_countdown_spacing = 0.05f;        // GUI_Strategic_Countdown_Timers_Screen_Spacing
+};
+HudConstants hud_constants_from(const data::XmlNode& game_constants_root);
+// "r g b [a]" / "r, g, b[, a]" bytes (alpha 255 when absent); false (out unchanged) with fewer than three numbers.
+bool parse_rgba8(std::string_view text, Rgba8& out);
 
 class TooltipState {
 public:

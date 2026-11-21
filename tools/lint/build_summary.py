@@ -3,13 +3,26 @@
 Prints the step exits, the number of unique warnings and errors (first few lines), the ctest result with the names of failed
 tests and the tail of their output, and the skips line. Meant for agents: read this instead of the whole log.
 Exits 1 when a step failed, a warning or error was logged, a test failed, or the run did not finish.
-Usage: build_summary.py <log> [<log> ...]
+Every failed test is a real failure: since wr1 t07 (2026-11-21) no test compares a stored derived golden, so the
+golden-drift split of 2026-11-13 is gone (a behaviour change is judged by tools/goldens/behaviour_check.py against the
+commit's Behaviour: trailer, not by a failing test). `golden_drift` stays in the outcome as an empty list for old readers.
+Usage: build_summary.py [--state <tree>/build_state.json] <log> [<log> ...]
+  --state  adds the outcome (rc, failure_kind, golden_drift, real_failures, summary) to the file tools/lint/build_state.py
+           wrote: roadmap_store.py record-build copies it into the build record, and the next run's repeat check reads it.
+failure_kind: configure, compile, warnings, test (a failed test), unfinished, other; null on a pass.
+Selftest: build_summary.py --selftest
 """
+import io
 import json
 import re
 import subprocess
 import sys
+import tempfile
+from contextlib import redirect_stdout
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import build_trees  # noqa: E402
 
 MAX_DIAG = 12      # warning / error lines shown
 MAX_FAIL_LINES = 25  # output lines shown per failed test
@@ -19,6 +32,11 @@ DONE_MARKERS = ('BUILD_DONE', 'AGENT_DONE', 'MODULE_DONE')
 WARN = re.compile(r'\bwarning( [A-Z]+\d+)?:|: warning\b')
 ERR = re.compile(r'\berror( [A-Z]+\d+)?:|^FAILED: |fatal error|LNK\d+')
 TEST_HEADER = re.compile(r'^\s*\d+/\d+ Test\s+#\d+: (\S+) \.+\s*(.*)$')
+# Shared with gate_summary.py: the build scripts' step exit lines, ctest's total line and the skips line.
+STEP_EXIT = re.compile(r'^(configure|build|ctest) exit (-?\d+)\s*$', re.M)
+# ctest prints "100% tests passed out of N" when all pass, "N% tests passed, F tests failed out of M" otherwise.
+TESTS_TOTAL = re.compile(r'\d+% tests passed(?:, (\d+) tests failed)? out of (\d+)')
+SKIPS = re.compile(r'^skips: .*$', re.M)
 
 
 def unique(lines):
@@ -65,14 +83,17 @@ def cache_stats():
         return None
 
 
-def main(paths):
+def summarize(paths, tree_name='<tree>', with_cache=True):
+    """Prints the summary; returns (exit code, outcome fields for build_state.json)."""
+    info = {'failure_kind': None, 'golden_drift': [], 'real_failures': []}
     parts = []
     for p in paths:
         try:
             parts.append(Path(p).read_text(encoding='utf8', errors='replace'))
         except OSError:
             print(f'missing log: {p}')
-            return 1
+            info['failure_kind'] = 'unfinished'
+            return 1, info
     text = '\n'.join(parts)
     lines = text.splitlines()
     bad = False
@@ -81,9 +102,12 @@ def main(paths):
     if not done:
         print('NOT FINISHED (no BUILD_DONE / AGENT_DONE / MODULE_DONE in the logs)')
         bad = True
-    exits = re.findall(r'^(configure|build|ctest) exit (-?\d+)\s*$', text, re.M)
+    exits = STEP_EXIT.findall(text)
     print('exits: ' + (' '.join(f'{k}={v}' for k, v in exits) or 'none found'))
     bad |= any(v != '0' for _, v in exits)
+    ex = dict(exits)
+    kind = ('unfinished' if not done else 'configure' if ex.get('configure', '0') != '0'
+            else 'compile' if ex.get('build', '0') != '0' else None)
 
     warns = unique(l for l in lines if WARN.search(l) and not ERR.search(l))
     errs = unique(l for l in lines if ERR.search(l))
@@ -94,33 +118,137 @@ def main(paths):
         print(f'  ... {len(errs) + len(warns) - MAX_DIAG} more in the log')
     bad |= bool(warns or errs)
 
-    # ctest prints "100% tests passed out of N" when all pass, "N% tests passed, F tests failed out of M" otherwise.
-    m = re.search(r'\d+% tests passed(?:, (\d+) tests failed)? out of (\d+)', text)
+    m = None
+    for m in TESTS_TOTAL.finditer(text):  # the last block: flaky_retry.py prints one after its retry
+        pass
     if m:
         nfail = int(m.group(1) or 0)
         print(f'tests: {int(m.group(2)) - nfail}/{m.group(2)} passed' + (f', {nfail} FAILED' if nfail else ''))
         if nfail:
             bad = True
-            names = re.findall(r'^\s+\d+ - (\S+) \(([^)]*)\)', text, re.M)
+            names = re.findall(r'^\s+\d+ - (\S+) \(([^)]*)\)', text.rsplit('The following tests FAILED:', 1)[-1], re.M)
             print('FAILED: ' + ', '.join(f'{n} ({r})' for n, r in names))
-            for n, out in list(failed_test_output(lines).items())[:MAX_FAILED]:
+            outs = failed_test_output(lines)
+            real = [n for n, _ in names]
+            info['real_failures'] = real
+            for n in real[:MAX_FAILED]:
                 print(f'--- {n}')
-                for l in out[-MAX_FAIL_LINES:]:
+                for l in outs.get(n, [])[-MAX_FAIL_LINES:]:
                     print('  ' + l[:200])
+            if kind is None:
+                kind = 'test'
     else:
         print('tests: no ctest result found')
-    cache = cache_stats()
+    cache = cache_stats() if with_cache else None
     if cache:
         print(cache)
-    skips = re.search(r'^skips: .*$', text, re.M)
+    flaky = re.findall(r'^flaky: (\S+) failed, then passed', text, re.M)
+    if flaky:
+        print('flaky (failed, passed on one retry; recorded in logs\\flaky_tests.jsonl): ' + ', '.join(flaky))
+    skips = SKIPS.search(text)
     if skips:
         print(skips.group(0))
+    if kind is None and errs:
+        kind = 'compile'
+    if kind is None and warns:
+        kind = 'warnings'
+    if bad and kind is None:
+        kind = 'test' if ex.get('ctest', '0') != '0' else 'other'
+    info['failure_kind'] = kind if bad else None
     print('SUMMARY ' + ('FAIL' if bad else 'PASS'))
+    return (1 if bad else 0), info
+
+
+def main(argv):
+    state = None
+    if len(argv) >= 2 and argv[0] == '--state':
+        state, argv = Path(argv[1]), argv[2:]
+    if not argv:
+        print(__doc__)
+        return 2
+    buf = io.StringIO()
+    with redirect_stdout(buf):
+        rc, info = summarize(argv, state.parent.name if state is not None else '<tree>')
+    out = buf.getvalue()
+    sys.stdout.write(out)
+    if state is not None:
+        try:
+            st = json.loads(state.read_text(encoding='utf-8-sig')) if state.is_file() else {}
+            st.update(info, rc=rc, summary=out[-6000:])
+            state.parent.mkdir(parents=True, exist_ok=True)
+            state.write_text(json.dumps(st, indent=1) + '\n', encoding='utf8')
+        except (OSError, ValueError) as e:
+            print(f'build_summary: could not update {state}: {e!r}')
+    return rc
+
+
+SAMPLE = r'''configure exit 0
+build exit 0
+      Start  1: alamo_headless_skirmish_ai_foc_land
+  1/5 Test  #1: alamo_headless_skirmish_ai_foc_land ...........***Failed    3.10 sec
+skirmish: 600 ticks
+golden skirmish_ai_foc_land_golden.crc: checkpoint tick 64: system 'ai.goals' expected 1, got 2 (first bad checkpoint, every 64 ticks; columns that differ: ai.goals)
+  2/5 Test  #2: alamo_ai_galactic_tests .......................***Failed    9.00 sec
+  golden E:/x/engine/ai/tests/golden/ai_galactic_synthetic_crc.txt: DIFFERS
+FAILED E:\x y\engine\ai\tests\test_ai_galactic.cpp:1324: same
+  3/5 Test  #3: alamo_tactical_movement_tests .................***Failed    1.00 sec
+FAIL E:\x y\engine\tactical\movement\tests\test_movement.cpp:88: d < 1.0f
+  4/5 Test  #4: alamo_headless_bench_space_battle_w4 ..........***Failed    2.00 sec
+bench: run 1 differs from run 0 (non-deterministic): golden checkpoint tick 64 differs
+  5/5 Test  #5: alamo_game_smoke_land_golden ..................***Exception: SegFault  0.10 sec
+CRC log differs from E:/x/game_smoke_land.crc
+
+20% tests passed, 4 tests failed out of 5
+
+The following tests FAILED:
+	  1 - alamo_headless_skirmish_ai_foc_land (Failed)
+	  2 - alamo_ai_galactic_tests (Failed)
+	  3 - alamo_tactical_movement_tests (Failed)
+	  4 - alamo_headless_bench_space_battle_w4 (Failed)
+	  5 - alamo_game_smoke_land_golden (SEGFAULT)
+ctest exit 8
+AGENT_DONE
+'''
+
+
+def selftest() -> int:
+    bad = []
+    with tempfile.TemporaryDirectory() as td:
+        log = Path(td) / 'log.txt'
+        log.write_text(SAMPLE, encoding='utf8')
+        with redirect_stdout(io.StringIO()):
+            rc, info = summarize([str(log)], with_cache=False)
+        if rc != 1:
+            bad.append(f'rc {rc}')
+        if info['golden_drift'] != []:
+            bad.append(f"drift {info['golden_drift']} (no golden drift since wr1 t07)")
+        if info['real_failures'] != ['alamo_headless_skirmish_ai_foc_land', 'alamo_ai_galactic_tests',
+                                     'alamo_tactical_movement_tests', 'alamo_headless_bench_space_battle_w4',
+                                     'alamo_game_smoke_land_golden']:
+            bad.append(f"real {info['real_failures']}")
+        if info['failure_kind'] != 'test':
+            bad.append(f"kind {info['failure_kind']}")
+        log.write_text('configure exit 0\nbuild exit 1\nx.cpp(3): error C2001: newline in constant\nAGENT_DONE\n', encoding='utf8')
+        with redirect_stdout(io.StringIO()):
+            rc, info = summarize([str(log)], with_cache=False)
+        if info['failure_kind'] != 'compile':
+            bad.append(f"compile kind {info['failure_kind']}")
+        log.write_text('configure exit 0\nbuild exit 0\n100% tests passed out of 3\nctest exit 0\nAGENT_DONE\n', encoding='utf8')
+        state = Path(td) / build_trees.WARM_TREE / 'build_state.json'
+        state.parent.mkdir()
+        state.write_text('{"commit": "abc"}', encoding='utf8')
+        with redirect_stdout(io.StringIO()):
+            rc = main(['--state', str(state), str(log)])
+        st = json.loads(state.read_text(encoding='utf8'))
+        if rc != 0 or st.get('rc') != 0 or st.get('commit') != 'abc' or st.get('failure_kind') is not None:
+            bad.append(f'state {st}')
+    for b in bad:
+        print('FAIL: ' + b)
+    print('build_summary selftest: ' + ('FAILED' if bad else 'ok'))
     return 1 if bad else 0
 
 
 if __name__ == '__main__':
-    if len(sys.argv) < 2:
-        print(__doc__)
-        sys.exit(2)
+    if sys.argv[1:] == ['--selftest']:
+        sys.exit(selftest())
     sys.exit(main(sys.argv[1:]))

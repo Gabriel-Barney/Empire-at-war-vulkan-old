@@ -25,6 +25,7 @@
 #include "alamo/sim/bench_scenario.hpp"
 #include "alamo/sim/bench_stats.hpp"
 #include "crc_out.hpp"
+#include "alamo/jobs/topology.hpp"
 
 #ifdef _WIN32
 #ifndef WIN32_LEAN_AND_MEAN
@@ -52,7 +53,7 @@ namespace fs = std::filesystem;
 using Clock = std::chrono::steady_clock;
 
 constexpr int kExitNotComparable = 3;
-constexpr uint32_t kTopZones = 24;
+constexpr uint32_t kTopZones = 192;  // sp0: every active zone (the step zones are small), was the top 24
 
 double ms_between(Clock::time_point a, Clock::time_point b) {
     return std::chrono::duration<double, std::milli>(b - a).count();
@@ -266,7 +267,8 @@ void print_stats(const char* label, const bench::TickStats& s, uint64_t first_ti
 
 int not_comparable(const BenchOptions& opt, const std::string& why) {
     std::printf("bench: scenario changed, not comparable: %s\n", why.c_str());
-    std::printf("bench: regenerate it with tools\\benchmark\\regen_scenario.cmd (alamo_headless --bench-regen %s)\n", opt.scenario.c_str());
+    std::printf("bench: the scenario is stale for this build; tools/goldens/bench_scenarios.py materialize remakes it "
+                "(alamo_headless --bench-regen %s)\n", opt.scenario.c_str());
     return opt.allow_changed ? 0 : kExitNotComparable;
 }
 
@@ -274,6 +276,7 @@ int not_comparable(const BenchOptions& opt, const std::string& why) {
 
 // ================================================================================================= --bench
 int bench_run(const BenchOptions& opt) {
+    (void)alamo::jobs::raise_current_thread_priority();  // SIMP sp1: the sim thread one step up (wall clock only)
     std::string err;
     bench::Scenario sc;
     if (!bench::Scenario::load(opt.scenario, sc, &err)) {
@@ -281,11 +284,14 @@ int bench_run(const BenchOptions& opt) {
         return 1;
     }
     std::printf("bench: scenario %s version %u: %s\n", sc.name.c_str(), sc.version, sc.description.c_str());
-    if (sc.host == bench::Host::Game) {  // BM2: an alamo_game save (game.campaign / game.skirmish), not a headless harness
-        std::fprintf(stderr, "bench: %s was made by alamo_game (host game): run it with alamo_game --bench-scenario %s\n", sc.name.c_str(),
-                     opt.scenario.c_str());
+    const bool game_host = sc.host == bench::Host::Game;  // BM2: an alamo_game save (game.campaign / game.skirmish)
+#ifndef ALAMO_HEADLESS_HAVE_GAME_CORE
+    if (game_host) {  // bm2c t02: timed sim-only through alamo_game_core (bench_game.cpp), not built into this exe
+        std::fprintf(stderr, "bench: %s was made by alamo_game (host game) and this alamo_headless has no alamo_game_core: run it with "
+                     "alamo_game --bench-scenario %s\n", sc.name.c_str(), opt.scenario.c_str());
         return 2;
     }
+#endif
     if (!bench::verify_files(sc, &err)) return not_comparable(opt, err);
     CrcLog fingerprint;
     if (!CrcLog::load(sc.resolve(sc.fingerprint), fingerprint, &err) || fingerprint.records.empty()) {
@@ -299,7 +305,12 @@ int bench_run(const BenchOptions& opt) {
         return 1;
     }
     std::unique_ptr<SaveSessionSource> src;
+#ifdef ALAMO_HEADLESS_HAVE_GAME_CORE
+    const int opened = game_host ? open_game_save_source(sc.resolve(sc.save), opt.game_dir, opt.game_args, src, err)
+                                 : open_save_source(sc.resolve(sc.save), opt.game_dir, opt.game_args, src, err);
+#else
     const int opened = open_save_source(sc.resolve(sc.save), opt.game_dir, opt.game_args, src, err);
+#endif
     if (opened == 0) {
         std::printf("bench: %s: %s: skipped\n", sc.name.c_str(), err.c_str());
         return 0;
@@ -319,11 +330,7 @@ int bench_run(const BenchOptions& opt) {
         std::fprintf(stderr, "bench: the fingerprint has no record in ticks %" PRIu64 "..%" PRIu64 "\n", sc.start_tick, end_tick);
         return 1;
     }
-    CrcLog golden;
-    if (!opt.golden.empty() && !CrcLog::load(opt.golden, golden, &err)) {
-        std::fprintf(stderr, "bench: golden: %s\n", err.c_str());
-        return 1;
-    }
+    CrcLog golden;  // --golden: read once run 0's save has loaded (below)
     std::printf("bench: %s, save tick %" PRIu64 ", %" PRIu64 " ticks, %u warm-up + %u timed run(s), workers %s\n", src->describe().c_str(),
                 sc.start_tick, ticks, opt.warmup, opt.runs, workers < 0 ? "auto" : std::to_string(workers).c_str());
 
@@ -345,7 +352,14 @@ int bench_run(const BenchOptions& opt) {
             std::fprintf(stderr, "bench: run %u: %s\n", run, err.c_str());
             return 1;
         }
+        // tst1: the golden is the 0-worker run's --crc-out (alamo_add_worker_count_check). A save that no longer loads makes
+        // that run "not comparable" without writing it, so the other worker counts read it only after their own load, and
+        // report the same "not comparable" instead of a missing file. Read after load_ms, so the timing leaves it out.
         const double load_ms = ms_between(l0, Clock::now());
+        if (run == 0 && !opt.golden.empty() && !CrcLog::load(opt.golden, golden, &err)) {
+            std::fprintf(stderr, "bench: golden: %s\n", err.c_str());
+            return 1;
+        }
         actual_workers = s->worker_count();
         std::vector<double> ms;
         ms.reserve(static_cast<size_t>(ticks));
@@ -436,6 +450,7 @@ int bench_run(const BenchOptions& opt) {
     bench::Json zones = bench::Json::array();
     for (size_t i = 0; i < rep.zones.size() && i < kTopZones; ++i) {
         const profile::ZoneStat& z = rep.zones[i];
+        if (z.active_ticks == 0) continue;
         bench::Json zj = bench::Json::object();
         zj.set("name", bench::Json::string(z.name));
         zj.set("share", bench::Json::number(z.share));
@@ -659,7 +674,7 @@ int bench_make(const BenchOptions& opt) {
     sc.final_crc = replayed.records.empty() ? 0 : replayed.records.back().combined;
     sc.dir = dir.string();
     bench::Scenario old;
-    const bool had_old = bench::Scenario::load(opt.scenario, old, nullptr);
+    const bool had_old = bench::Scenario::load_recipe(opt.scenario, old, nullptr);  // wr1 t06: a recipe keeps its settings too
     sc.description = !opt.description.empty() ? opt.description : had_old ? old.description : std::string();
     if (had_old) {  // BM2 format-2 keys (the rendered run's settings and camera) stay with the scenario
         sc.copy_run_settings(old);

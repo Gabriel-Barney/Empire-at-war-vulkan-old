@@ -5,6 +5,9 @@
 //     Blob_Color carried over, ascending jammer id, missing objects skipped
 //   * jam_blob_model / jam_blob_instance: unit quad with the MeshAlpha effect, BaseTexture + Diffuse, scale r, lift in z
 //   * snapshot plumbing: SnapshotJamming::is_jammed, digest sensitivity (and unchanged when empty), interpolate() copies it
+//   * vis1 t06 AbilityFxTracker (ability_fx.hpp): state effects once per (target, percent), one-shots with their own
+//     fx_seq until Particle_Lifetime_Frames pass or the target leaves, missing targets skipped
+//   * vis1 t08 heal_range_blobs (selected local-player owners only) and the snapshot's heal blobs / world effects
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
@@ -14,19 +17,14 @@
 #include <vector>
 
 #include "alamo/core/log.hpp"
+#include "alamo/render/ability_fx.hpp"
 #include "alamo/render/jam_fx.hpp"
 #include "alamo/render/sim_snapshot.hpp"
+#include "alamo/test/support.hpp"
 
 using namespace alamo;
 
-static int g_fail = 0;
-#define CHECK(c)                                                     \
-    do {                                                             \
-        if (!(c)) {                                                  \
-            std::printf("FAIL %s:%d: %s\n", __FILE__, __LINE__, #c); \
-            ++g_fail;                                                \
-        }                                                            \
-    } while (0)
+using ::alamo::test::g_fail;
 
 static render::SnapshotObject object(objects::ObjectId id, int32_t owner, float x, float y, float z, uint8_t flags = 0, float fade = 1.0f) {
     render::SnapshotObject o;
@@ -184,6 +182,104 @@ static void test_snapshot() {
     static_assert(render::kEffectJamming != render::kEffectLua && render::kEffectJamming >= render::kEffectAbilityBase + 76);
 }
 
+// vis1 t06 (ABILITY_PARTICLES §10): the ability particle tracker over plain inputs.
+static void test_ability_fx() {
+    auto snap_with = [](std::initializer_list<objects::ObjectId> ids) {
+        render::SimSnapshot s;
+        for (objects::ObjectId id : ids) s.objects.push_back(object(id, 0, 0, 0, 0));
+        return s;
+    };
+    render::AbilityFxTracker t;
+    // frame 10: Earthquake dust on 2 from two appliers (one system), infection on 3, a heal spark on 2 (30 frames) and a
+    // stun particle on missing 9 (skipped)
+    render::AbilityFxInput in;
+    in.frame = 10;
+    in.states.push_back({2, render::kEffectTargetState, "Earthquake_Dust_Particles", ""});
+    in.states.push_back({2, render::kEffectTargetState, "Earthquake_Dust_Particles", ""});
+    in.states.push_back({3, render::kEffectInfection, "Infection_Particle_Effect", "B_HEAD, ROOT"});
+    in.shots.push_back({10, 2, "Shield_Sparks_Medium", "B_TURRET, TURRET_00", 30});
+    in.shots.push_back({10, 9, "Stunned_Infantry", "B_HEAD", 300});
+    render::SimSnapshot s = snap_with({1, 2, 3});
+    t.apply(in, s, nullptr);
+    CHECK(s.effects.size() == 3 && t.live() == 1);
+    auto count = [](const render::SimSnapshot& snap, auto pred) {
+        return std::count_if(snap.effects.begin(), snap.effects.end(), pred);
+    };
+    CHECK(count(s, [](const render::SnapshotEffect& e) { return e.id == 2 && e.percent == render::kEffectTargetState && e.fx_seq == 0; }) == 1);
+    CHECK(count(s, [](const render::SnapshotEffect& e) {
+              return e.id == 3 && e.percent == render::kEffectInfection && e.bone == "B_HEAD, ROOT" && e.asset == "Infection_Particle_Effect";
+          }) == 1);
+    CHECK(count(s, [](const render::SnapshotEffect& e) { return e.id == 2 && e.fx_seq == 1 && e.asset == "Shield_Sparks_Medium" && e.frame == 10; }) == 1);
+    // frame 39: the spark still listed (no new input); a second spark on 3 gets its own sequence number
+    render::AbilityFxInput in2;
+    in2.frame = 39;
+    in2.shots.push_back({39, 3, "Shield_Sparks_Medium", "", 30});
+    s = snap_with({1, 2, 3});
+    t.apply(in2, s, nullptr);
+    CHECK(s.effects.size() == 2 && count(s, [](const render::SnapshotEffect& e) { return e.fx_seq == 1; }) == 1 &&
+          count(s, [](const render::SnapshotEffect& e) { return e.id == 3 && e.fx_seq == 2; }) == 1);
+    // frame 40: the first spark's lifetime is over (10 + 30); a no-lifetime shot on 1 lasts until 1 leaves
+    render::AbilityFxInput in3;
+    in3.frame = 40;
+    in3.shots.push_back({40, 1, "Corrupt_Systems_Effect", "", 0});
+    s = snap_with({1, 2, 3});
+    t.apply(in3, s, nullptr);
+    CHECK(s.effects.size() == 2 && count(s, [](const render::SnapshotEffect& e) { return e.fx_seq == 1; }) == 0);
+    render::AbilityFxInput later;
+    later.frame = 5000;
+    s = snap_with({1, 2});
+    t.apply(later, s, nullptr);
+    CHECK(s.effects.size() == 1 && s.effects[0].id == 1 && s.effects[0].fx_seq == 3 && t.live() == 1);
+    s = snap_with({2});
+    t.apply(later, s, nullptr);
+    CHECK(s.effects.empty() && t.live() == 0);
+    t.reset();
+    CHECK(t.live() == 0 && t.visual_serial == 0);
+    // a no-lifetime one-shot is kept once per target and asset (no pile-up from a repeated trigger)
+    render::AbilityFxInput rep;
+    rep.frame = 6000;
+    rep.shots.push_back({6000, 1, "Corrupt_Systems_Effect", "", 0});
+    rep.shots.push_back({6000, 1, "Corrupt_Systems_Effect", "", 0});
+    rep.shots.push_back({6000, 1, "Other_Effect", "", 0});
+    s = snap_with({1});
+    t.apply(rep, s, nullptr);
+    t.apply(rep, s, nullptr);
+    CHECK(t.live() == 2);
+}
+
+// vis1 t08: Force_Healing range blobs (§8) only under a selected, drawable owner of the local player, colour alpha 1; the
+// snapshot's heal blobs and world effects reach the digest and the interpolated frame.
+static void test_heal_blobs_and_world_effects() {
+    render::InterpolatedFrame f;
+    f.objects = {object(1, 0, 10, 20, 0), object(2, 1, 50, 0, 0), object(3, 0, 90, 0, 0, render::kSnapDying), object(4, 0, 0, 0, 0)};
+    render::SnapshotJammer h = jammer(1, 0, 5.0f, true);
+    h.blob_material = "Reinforcement_Point_Radius_Overlay";
+    f.jamming.heal_blobs = {h, jammer(2, 1, 5.0f, false), jammer(3, 0, 5.0f, true), jammer(4, 0, 5.0f, true)};
+    const uint32_t sel[] = {1, 2, 3};  // 4 is not selected, 2 is not ours, 3 is dying
+    std::vector<render::JamBlob> b = render::heal_range_blobs(f, sel, 0);
+    CHECK(b.size() == 1);
+    if (b.size() == 1) {
+        CHECK(b[0].jammer == 1 && b[0].center.x == 10.0f && b[0].center.y == 20.0f && b[0].half_size == 5.0f);
+        CHECK(b[0].material == "Reinforcement_Point_Radius_Overlay" && b[0].color[0] == 200.0f / 255.0f && b[0].color[3] == 1.0f);
+    }
+    CHECK(render::heal_range_blobs(f, {}, 0).empty() && render::heal_range_blobs(f, sel, 1).size() == 1);
+    render::SimSnapshot s;
+    s.objects = f.objects;
+    const uint64_t d0 = s.digest();
+    s.jamming.heal_blobs = {h};
+    const uint64_t d1 = s.digest();
+    render::SimWorldEffect w;
+    w.key = render::shield_penetration_key(4);
+    w.asset = "p_Shield_Penetration_Generic.alo";
+    w.position = {500, 0, 3};
+    s.world_effects = {w};
+    const uint64_t d2 = s.digest();
+    CHECK(d0 != d1 && d1 != d2);
+    render::InterpolatedFrame out;
+    render::interpolate(nullptr, s, 1.0f, render::InterpMode::Original, out);
+    CHECK(out.world_effects.size() == 1 && out.world_effects[0].key == ((4ull << 8) | 2u) && out.jamming.heal_blobs.size() == 1);
+}
+
 int main() {
     std::setvbuf(stdout, nullptr, _IONBF, 0);
     log::set_min_level(log::Level::Error);
@@ -191,6 +287,8 @@ int main() {
     test_blobs();
     test_model();
     test_snapshot();
+    test_ability_fx();
+    test_heal_blobs_and_world_effects();  // vis1 t08
     if (g_fail) {
         std::printf("alamo_render_jam_tests: %d FAILED\n", g_fail);
         return 1;

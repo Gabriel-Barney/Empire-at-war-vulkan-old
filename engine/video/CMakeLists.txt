@@ -25,6 +25,7 @@ target_compile_definitions(alamo_ffmpeg_headers INTERFACE __STDC_CONSTANT_MACROS
 add_library(alamo_video STATIC
   src/ffmpeg_api.cpp
   src/bink_decoder.cpp
+  src/bink_header.cpp
   src/yuv.cpp
   src/movie_player.cpp
 )

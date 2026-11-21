@@ -1,0 +1,62 @@
+{
+  "_comment": [
+    "Corpus settings for run_corpus.py (mcx7). Setups are found by alamo_mod_check --list-mods; this file only names",
+    "display names, the map / campaign picks of the reference set (docs/MODS.md 10.3 and 10.4) and accepted blockers.",
+    "An entry applies to every setup whose resolved stack contains that mod (a parent's settings reach its submods);",
+    "the setup's own entry wins. Keys: name, reference, space_map, land_map, campaign, skirmish_args (extra",
+    "alamo_headless arguments of the skirmish runs), galactic_args, smoke_env ({VAR: value} for the smokes), accept",
+    "([{blocker: regex, why, ref}]: an explained, retail-equivalent or by-design blocker that does not lower the grade)."
+  ],
+  "mods": {
+    "1125571106": {
+      "name": "Thrawn's Revenge",
+      "reference": true,
+      "space_map": "_MP_SPACE_FIERY",
+      "land_map": "_MP_LAND_BLOOD_GULCH",
+      "campaign": "Thrawn_Empire"
+    },
+    "1976399102": {
+      "name": "Fall of the Republic",
+      "reference": true,
+      "space_map": "_MP_SPACE_TRANSITORY_TWISTS",
+      "land_map": "_MP_LAND_HOTH_ECHO_BASE",
+      "campaign": "Sandbox_Rimward_Republic",
+      "skirmish_args": ["--human", "Rebel"],
+      "smoke_env": {"ALAMO_SMOKE_CAMPAIGN_SET": "Sandbox_Rimward_Republic"},
+      "accept": [
+        {"blocker": "^galactic: no AI orders$",
+         "why": "the sandbox starts every player at AI_Player_Control None; the GC master script switches the AI on only after the human answers its HISTORICAL_GC_CHOICE popup, which a headless AI-only run never does",
+         "ref": "docs/MODS.md 10.4, modc t45"}
+      ]
+    },
+    "1770851727": {
+      "name": "EAW-Remake",
+      "reference": true,
+      "space_map": "_MP_SPACE_GEONOSIS",
+      "land_map": "_MP_LAND_UTAPAU",
+      "campaign": "GC_Mini_Web_Way_Imperial"
+    },
+    "2858787558": {
+      "name": "Star Wars: Age of Legends",
+      "reference": true,
+      "space_map": "_MP_SPACE_GEONOSIS",
+      "land_map": "_MP_LAND_UTAPAU",
+      "campaign": "Sandbox_Balance_New_Republic",
+      "accept": [
+        {"blocker": "^land: 9 Lua error\\(s\\)$",
+         "why": "the mod's own Data/Scripts/Library/PGCommands.lua shadows FoC's and defines only Try_Weapon_Switch_Ground, while its BusyTacticalFreeStore.lua and PGEvents.lua still call Try_Weapon_Switch: retail resolves require('pgcommands') to the same mod file and raises the same nil-call error",
+         "ref": "docs/MODS.md 10.4, mcx8 t01"}
+      ]
+    },
+    "1397421866": {"name": "AotR 2.11 (patch notes in the item)"},
+    "3387971722": {"name": "AotCW 1.2.1 (patch notes in the item)"}
+  },
+  "accept_all": [],
+  "not_installed": {
+    "_comment": "Corpus mods not installed now (DECISIONS 'Corpus graded on installed mods only', Gabriel 2026-11-18): listed under the matrix, not graded; an entry whose mod is installed again is ignored (the runner says so).",
+    "3622043265": {"name": "Thrawn's Revenge (second copy)", "why": "not installed (2026-11-18); mcx8 t06 dropped, reopen on reinstall"},
+    "Thrawns_Legacy_HD": {"name": "Thrawn's Legacy HD (local submod of 1125571106)", "why": "not installed: corruption\\Mods is empty (2026-11-18)"},
+    "Legeds_ships_transfer": {"name": "Legends ships transfer (local submod of 1125571106)", "why": "not installed: corruption\\Mods is empty (2026-11-18)"},
+    "AOW_Thrawns_Legacy_Compatibility": {"name": "AOW Thrawn's Legacy compatibility (local submod stack on Thrawns_Legacy_HD)", "why": "not installed: corruption\\Mods is empty (2026-11-18)"}
+  }
+}

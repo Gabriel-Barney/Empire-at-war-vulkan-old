@@ -248,12 +248,104 @@ void test_emitter_desc() {
     CHECK(particle::emitter_field(0x3D) && std::string(particle::emitter_field(0x3D)->name) == "is_weather_particle");
 }
 
+// mcx2 t03: ALA salvage replays retail's read (frame * declared block + index) into a valid animation.
+std::vector<std::uint8_t> salvage_ala(std::uint32_t frames, std::uint32_t rot_block, std::uint16_t rot_index,
+                                      const std::vector<std::int16_t>& rot, bool with_rot_chunk) {
+    auto info = chunk(0x1001, cat({mini(1, bytes_of(frames)), mini(2, bytes_of(30.f)), mini(3, bytes_of(1u)),
+                                   mini(0xB, bytes_of(rot_block)), mini(0xC, bytes_of(0u)), mini(0xD, bytes_of(0u))}),
+                      false);
+    W zero;
+    zero.put(0.f).put(0.f).put(0.f);
+    auto binfo = chunk(0x1003, cat({mini(4, W().str("Bone").b), mini(5, bytes_of(1u)), mini(6, zero.b), mini(7, zero.b),
+                                    mini(8, zero.b), mini(9, zero.b), mini(0xE, bytes_of(std::uint16_t(0xFFFF))),
+                                    mini(0xF, bytes_of(std::uint16_t(0xFFFF))), mini(0x10, bytes_of(rot_index)),
+                                    mini(0x11, std::vector<std::uint8_t>{0, 0, 0, 0, 0, 0, 0xFF, 0x7F})}),
+                       false);
+    W r;
+    for (auto v : rot) r.put(v);
+    auto body = cat({info, chunk(0x1002, binfo, true)});
+    if (with_rot_chunk) body = cat({body, chunk(0x1009, r.b, false)});
+    return chunk(0x1000, body, true);
+}
+
+void test_anim_salvage() {
+    std::vector<SalvageNote> notes;
+    const ParseOptions salvage{true, &notes};
+    // Venator shape: block 0 declared, rotation data holds 3 frames x 4: every frame reads the first frame's quaternion.
+    const std::vector<std::int16_t> rot = {0, 0, 32767, 0, 32767, 0, 0, 0, 0, 32767, 0, 0};
+    auto v = salvage_ala(3, 0, 0, rot, true);
+    bool threw = false;
+    try {
+        (void)ala::parse(v);
+    } catch (const FormatError&) {
+        threw = true;
+    }
+    CHECK(threw);
+    auto a = ala::parse(v, salvage);
+    CHECK(a.rotation_block == 4 && a.rotation_data.size() == 12 && notes.size() == 1 && notes[0].rule == "ala_block_stride");
+    CHECK(std::fabs(a.rotation(0, 2).z - 1.f) < 1e-6 && std::fabs(a.rotation(0, 0).z - 1.f) < 1e-6);
+    // Short data: block 4 x 3 frames declared, 2 frames stored: frame 2 repeats frame 1.
+    notes.clear();
+    a = ala::parse(salvage_ala(3, 4, 0, {0, 0, 32767, 0, 32767, 0, 0, 0}, true), salvage);
+    CHECK(std::fabs(a.rotation(0, 1).x - 1.f) < 1e-6 && std::fabs(a.rotation(0, 2).x - 1.f) < 1e-6 && notes.size() == 1);
+    // RobedVibroFighter shape: garbage block sizes, no block data, no bone track: ignored, the bone keeps its default.
+    notes.clear();
+    a = ala::parse(salvage_ala(5, 0xA79080E0u, 0xFFFF, {}, false), salvage);
+    CHECK(a.rotation_block == 0 && std::fabs(a.rotation(0, 3).w - 1.f) < 1e-6);
+    // An index with no value inside the data: the track is dropped to the default.
+    notes.clear();
+    a = ala::parse(salvage_ala(2, 4, 40, {0, 0, 32767, 0, 0, 0, 32767, 0}, true), salvage);
+    CHECK(a.bones[0].rotation_index == 0xFFFF && std::fabs(a.rotation(0, 1).w - 1.f) < 1e-6);
+    // A valid file is untouched and notes nothing.
+    notes.clear();
+    a = ala::parse(salvage_ala(2, 4, 0, {0, 0, 32767, 0, 0, 0, 32767, 0}, true), salvage);
+    CHECK(notes.empty() && a.rotation_block == 4);
+}
+
+// mcx2 t03: ALO salvage (alo.hpp) for the defects retail draws (compat_assets run 3).
+void test_alo_salvage() {
+    std::vector<SalvageNote> notes;
+    const ParseOptions salvage{true, &notes};
+    // Skin influence outside the bone map: strict error, salvage clamps it to entry 0.
+    const auto skin = vertex_model(0x10007, 144, "alD3dVertB4I4NU2", true, {0, 0});
+    CHECK(!parses(skin));
+    auto f = alo::parse(skin, salvage);
+    CHECK(f.model.meshes[0].submeshes[0].vertices.bone_index[2][0] == 0);
+    CHECK(!notes.empty() && notes[0].rule == "alo_skin_index_clamped");
+    // Defiler shape: empty chunks and one chunk claiming more bytes than the file holds, after a complete model.
+    notes.clear();
+    auto trail = vertex_model(0x10007, 144, "alD3dVertNU2", false, {});
+    for (int i = 0; i < 3; ++i) trail = cat({trail, chunk(0, {}, false)});
+    auto big = chunk(0x1000000, std::vector<std::uint8_t>(16, 7), false);
+    big[4] = 0xFF;  // size field: far past the end
+    big[5] = 0xFF;
+    trail = cat({trail, big});
+    CHECK(!parses(trail));
+    f = alo::parse(trail, salvage);
+    CHECK(f.model.meshes.size() == 1 && notes.size() == 1 && notes[0].rule == "alo_trailing_junk");
+    // Junk before the connections chunk is still an error (retail: no connections = not drawn).
+    notes.clear();
+    bool threw = false;
+    try {
+        (void)alo::parse(cat({big}), salvage);
+    } catch (const FormatError&) {
+        threw = true;
+    }
+    CHECK(threw);
+    // A valid model notes nothing.
+    notes.clear();
+    (void)alo::parse(vertex_model(0x10007, 144, "alD3dVertNU2", false, {}), salvage);
+    CHECK(notes.empty());
+}
+
 int main() {
     test_emitter_desc();
     test_chunks();
     test_model();
     test_vertex_layouts();
     test_anim();
+    test_anim_salvage();
+    test_alo_salvage();
     test_text();
     if (g_fail) { std::printf("%d failures\n", g_fail); return 1; }
     std::printf("all tests passed\n");

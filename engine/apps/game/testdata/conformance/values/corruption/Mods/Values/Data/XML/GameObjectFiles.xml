@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<GameObjectFiles>
+  <File>BaseObjects.xml</File>
+  <File>ValuesObjects.xml</File>
+  <File>ValuesTwoRoots.xml</File>
+  <File>ValuesUtf16.xml</File>
+</GameObjectFiles>

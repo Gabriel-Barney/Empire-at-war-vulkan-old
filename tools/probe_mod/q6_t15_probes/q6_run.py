@@ -15,7 +15,7 @@ Ctrl+C).
   --report-only      rebuild report.txt from an earlier run's records.log (no game, no install)
 
 Records: the probe Lua keeps strings "Q6P|<KIND>|p=<probe>|...|END" alive in global tables; this script finds them with
-a read-only scan of the game's committed private memory every --scan-sec seconds (../a1_tactical/a1mem.py; retail
+a read-only scan of the game's committed private memory every --scan-sec seconds (../common/a1mem.py; retail
 _CustomScriptMessage / _MessagePopup show nothing). It never writes the game's memory.
 Output: tools\\probe_mod\\q6_t15_probes\\out\\<yyyymmdd-hhmmss>-<session>\\ with records.log, report.txt, run.json,
 run_status.txt (state=installing / waiting_for_game_start / game_running / collecting / done), cleanup.log;
@@ -35,12 +35,14 @@ import time
 sys.dont_write_bytecode = True
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
-sys.path.insert(0, os.path.join(os.path.dirname(HERE), 'a1_tactical'))
+sys.path.insert(0, os.path.join(os.path.dirname(HERE), 'common'))
+from probe_run import say, running, set_state, scan_once  # noqa: E402
 import build_q6_mod  # noqa: E402
 import q6_cleanup  # noqa: E402
 import q6_parse  # noqa: E402
 
-WINDOWED = ['WINDOWED', 'SCREENWIDTH=1920', 'SCREENHEIGHT=1080']
+import launch_foc as foc  # noqa: E402  (common/launch_foc.py: the one place a kit starts StarWarsG.exe)
+WINDOWED = foc.WINDOWED
 NEEDLE = b'Q6P|'
 RECORD_RE = re.compile(rb'Q6P\|[A-Z0-9_]+\|[ -~]{0,380}?\|END')
 
@@ -53,7 +55,8 @@ STEPS = {
  B) Galactic Conquest > "Q6 PROBE: ELIM A (OWN NOTHING)" > EMPIRE > Start. Click nothing for 3 minutes (until "170 s
     passed" or the campaign ends by itself). Note what happened and when (screenshot of any end screen). Quit.
  C) Same for "Q6 PROBE: ELIM B (OWN, THEN LOSE)" (Abregado Rae is yours from 20 s to 50 s) and
-    "Q6 PROBE: ELIM C (CONTROL)" (expected to end at once).
+    "Q6 PROBE: ELIM C (CONTROL)" (expected to end at once). Optional (q6 t25): "Q6 PROBE: ELIM D (AI GAINS A PLANET)"
+    and "Q6 PROBE: ELIM E (FLEET, NO PLANET)", the same way.
  D) Skirmish > LAND, map Geonosis: slot 1 you EMPIRE team 1, slot 2 AI REBEL team 2, all other slots closed. Start.
     No orders. About 5 s in: "selection test set (land) is next to your units". Press Ctrl+A, take a screenshot of the
     whole screen (selection brackets + the selected-units panel). After "tactical part done" (2 min) press Ctrl+A again,
@@ -74,22 +77,6 @@ STEPS = {
 }
 
 
-def say(*a):
-    print(*a, flush=True)
-
-
-def running(name):
-    r = subprocess.run(['tasklist', '/FI', 'IMAGENAME eq %s' % name, '/NH'], capture_output=True, text=True)
-    return name.lower() in r.stdout.lower()
-
-
-def set_state(where, **kv):
-    with open(os.path.join(where, 'run_status.txt'), 'w') as f:
-        for k, v in kv.items():
-            f.write('%s=%s\n' % (k, v))
-        f.write('time=%s\n' % time.strftime('%Y-%m-%d %H:%M:%S'))
-
-
 def modpath_args(session, corr, tr, steammod=False):
     """Mod arguments. TR: the overlay first (MODPATH / STEAMMOD items are searched in command-line order, earlier wins,
     docs/PHASE2.md "file resolution order"), then TR by a relative MODPATH (default) or by STEAMMOD=1125571106."""
@@ -102,23 +89,6 @@ def modpath_args(session, corr, tr, steammod=False):
     except ValueError:  # another drive
         rel = tr
     return ['MODPATH=Mods\\' + build_q6_mod.TR_MOD_NAME, 'MODPATH=' + rel]
-
-
-def scan_once(proc, seen, log):
-    hits, stats = proc.scan([NEEDLE])
-    new = 0
-    for _, tail in hits[NEEDLE]:
-        m = RECORD_RE.match(tail)
-        if not m:
-            continue
-        text = m.group(0).decode('ascii')
-        if text in seen:
-            continue
-        seen.add(text)
-        log.write(text + '\n')
-        new += 1
-    log.flush()
-    return new, stats
 
 
 def main():
@@ -141,8 +111,8 @@ def main():
         say(text)
         return 0 if recs else 10
     import a1mem  # noqa: E402 - Windows-only ctypes; not needed for --report-only
-    corr = os.path.join(a.game, 'corruption')
-    exe = os.path.join(corr, 'StarWarsG.exe')
+    corr = foc.corruption_dir(a.game)
+    exe = foc.game_exe(a.game)
     if not os.path.isfile(exe):
         say('StarWarsG.exe not found under', corr)
         say('Q6_RUN_DONE exit=20')
@@ -177,7 +147,7 @@ def main():
         cmdline = ' '.join(['StarWarsG.exe'] + (WINDOWED if a.windowed else []) + mods)
         t0 = time.time()
         if not a.no_launch:
-            subprocess.Popen([exe] + (WINDOWED if a.windowed else []) + mods, cwd=corr)
+            foc.start(a.game, mods, windowed=a.windowed)
             say('Game launched: ' + cmdline)
         else:
             say('Start the game yourself, in %s:\n  %s' % (corr, cmdline))
@@ -196,7 +166,7 @@ def main():
         seen = set()
         with open(records_log, 'w') as log:
             while proc.alive():
-                new, st = scan_once(proc, seen, log)
+                new, st = scan_once(proc, NEEDLE, RECORD_RE, seen, log)
                 info['scans'] += 1
                 if new:
                     say('  +%d records (%d total, %.0f MB scanned)' % (new, len(seen), st['bytes'] / 1e6))

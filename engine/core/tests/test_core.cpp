@@ -1,4 +1,5 @@
 // alamo_core unit tests (no framework; returns non-zero on failure).
+#include <cctype>
 #include <chrono>
 #include <cstdio>
 #include <cstring>
@@ -6,12 +7,17 @@
 #include <filesystem>
 #include <fstream>
 #include <random>
+#include <span>
 #include <string>
 
 #include "alamo/core/file_provider.hpp"
+#include "alamo/core/host_fs.hpp"
 #include "alamo/core/galaxy.hpp"
 #include "alamo/core/hash.hpp"
 #include "alamo/core/parallel.hpp"
+#include "alamo/test/support.hpp"
+#include "alamo/core/x86_int.hpp"
+#include "alamo/core/frames.hpp"
 
 #ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN
@@ -22,14 +28,7 @@
 #include <windows.h>
 #include <winioctl.h>
 
-static int g_fail = 0;
-#define CHECK(c)                                                       \
-    do {                                                               \
-        if (!(c)) {                                                    \
-            std::printf("FAIL %s:%d: %s\n", __FILE__, __LINE__, #c);   \
-            ++g_fail;                                                  \
-        }                                                              \
-    } while (0)
+using ::alamo::test::g_fail;
 
 // Turns the empty directory `link` into a junction (IO_REPARSE_TAG_MOUNT_POINT) to `target` with
 // FSCTL_SET_REPARSE_POINT. Junctions need no privilege (unlike symlinks).
@@ -138,13 +137,124 @@ static void test_remove_all_long_safety(const std::filesystem::path& tmp) {
     CHECK(alamo::remove_all_long(outside, ec) == 4 && !ec);  // outside, inner, keep.txt, keep2.txt
 }
 
+// mcx8 t11 (docs/MOD_COMPAT_DESIGN.md §13.3): the x86 conversion / decrement results, identical on MSVC and clang.
+// volatile inputs keep the checks at run time (the compiler cannot fold an out-of-range cast it might treat as UB).
+void test_x86_int() {
+    static_assert(alamo::trunc_i32(2.9f) == 2 && alamo::trunc_i32(-2.9f) == -2);
+    static_assert(alamo::trunc_i32(99999999999.0f) == INT32_MIN && alamo::dec_wrap(INT32_MIN) == INT32_MAX);
+    volatile float big = 99999999999.0f, neg = -3.0e10f, edge = 2147483648.0f, low = -2147483648.0f, zero = 0.0f;
+    const float q = zero;
+    volatile float nanv = q / q;
+    CHECK(alamo::trunc_i32(big * 30.0f) == INT32_MIN);  // Age of Legends' Defense_Duration_In_Secs x FPS
+    CHECK(alamo::trunc_i32(neg) == INT32_MIN);
+    CHECK(alamo::trunc_i32(edge) == INT32_MIN);          // 2^31 is out of range
+    CHECK(alamo::trunc_i32(low) == INT32_MIN);           // -2^31 is in range
+    CHECK(alamo::trunc_i32(nanv) == INT32_MIN);
+    CHECK(alamo::trunc_i32(2147483520.0f) == 2147483520);  // the largest float below 2^31
+    volatile double bigd = 1.0e12;
+    CHECK(alamo::trunc_i32(bigd) == INT32_MIN && alamo::trunc_i32(-7.9) == -7);
+    volatile int32_t m = INT32_MIN;
+    CHECK(alamo::dec_wrap(m) == INT32_MAX && alamo::dec_wrap(0) == -1);
+    CHECK(alamo::add_wrap(INT32_MAX, 1) == INT32_MIN);
+}
+
+// ref4 t03: data-driven seconds -> frames, one function per rounding form, with the x86 range behaviour on both compilers
+// (negative, NaN, 2^32 and in-range values; float and double). In range each is the plain cast of its rounding.
+void test_frames() {
+    using alamo::frames_ceil;
+    using alamo::frames_round;
+    using alamo::frames_trunc;
+    static_assert(frames_trunc(30.0f * 2.5f) == 75 && frames_trunc(30.0 * 0.1) == 3);
+    volatile float zero = 0.0f, secs = 0.25f, big = 99999999999.0f, two32 = 4294967296.0f, neg = -2.5f, negbig = -3.0e10f;
+    const float q = zero;
+    volatile float nanv = q / q;
+    // In range: the plain truncation / rounding / ceiling (0.25 s = 7.5 frames).
+    CHECK(frames_trunc(30.0f * secs) == 7 && frames_round(30.0f * secs) == 8 && frames_ceil(30.0f * secs) == 8);
+    CHECK(frames_trunc(30.0f * secs + 0.5f) == 8);  // the original's (int)(x + 0.5)
+    CHECK(frames_trunc(30.0f * 2.0f) == 60 && frames_round(60.0f) == 60 && frames_ceil(60.0f) == 60);
+    CHECK(frames_trunc(zero) == 0 && frames_round(zero) == 0 && frames_ceil(zero) == 0);
+    // Negative: toward zero / half away from zero / up, still in range.
+    CHECK(frames_trunc(neg) == -2 && frames_round(neg) == -3 && frames_ceil(neg) == -2);
+    CHECK(static_cast<uint32_t>(frames_trunc(neg)) == 0xfffffffeu);  // what an unsigned frame field holds
+    // NaN, 2^32, a huge mod value and a huge negative one: integer indefinite (INT32_MIN) for every form.
+    for (const float v : {static_cast<float>(nanv), static_cast<float>(two32), big * 30.0f, static_cast<float>(negbig)}) {
+        CHECK(frames_trunc(v) == INT32_MIN);
+        CHECK(frames_round(v) == INT32_MIN);
+        CHECK(frames_ceil(v) == INT32_MIN);
+    }
+    CHECK(frames_round(2147483520.0f) == 2147483520 && frames_ceil(2147483520.0f) == 2147483520);
+    volatile double dsecs = 0.1, dbig = 1.0e12, dtwo32 = 4294967296.0, dneg = -0.5;
+    const double dq = static_cast<double>(zero);
+    volatile double dnan = dq / dq;
+    CHECK(frames_trunc(30.0 * dsecs) == 3 && frames_round(30.0 * 1.25) == 38 && frames_ceil(30.0 * dsecs) == 3);  // 30 x 0.1 is 3.0 in double
+    CHECK(frames_trunc(30.0 * 0.11) == 3 && frames_ceil(30.0 * 0.11) == 4);
+    CHECK(frames_round(dneg) == -1 && frames_ceil(dneg) == 0 && frames_trunc(dneg) == 0);
+    for (const double v : {static_cast<double>(dnan), static_cast<double>(dtwo32), static_cast<double>(dbig), -static_cast<double>(dbig)}) {
+        CHECK(frames_trunc(v) == INT32_MIN);
+        CHECK(frames_round(v) == INT32_MIN);
+        CHECK(frames_ceil(v) == INT32_MIN);
+    }
+    CHECK(frames_ceil(2147483647.5) == INT32_MIN && frames_trunc(2147483647.5) == INT32_MAX);  // ceil leaves the range
+}
+
 int main() {
+    test_x86_int();
+    test_frames();
     // CRC-32/IEEE check value.
     CHECK(alamo::crc32("123456789", 9) == 0xCBF43926u);
     CHECK(alamo::name_crc("data/xml/planets.xml") == alamo::name_crc("DATA\\XML\\PLANETS.XML"));
     CHECK(alamo::iequals("Data/Xml", "DATA\\XML"));
     CHECK(!alamo::iequals("abc", "abd"));
+    // CU2: one CRC-32 table: crc32 == ~crc32_raw(~seed), including a chained seed.
+    CHECK(alamo::crc32("123456789", 9, alamo::crc32("abc", 3)) == alamo::crc32("abc123456789", 12));
+    CHECK(alamo::crc32("", 0) == 0u);
+    // CU2: exact ASCII helpers ('/' != '\\', non-ASCII bytes unchanged, whitespace = space/tab/CR/LF).
+    static_assert(alamo::ascii_iequals("Data\\Xml", "DATA\\XML"));
+    static_assert(!alamo::ascii_iequals("Data/Xml", "DATA\\XML"));
+    static_assert(!alamo::ascii_iequals("ab", "abc"));
+    static_assert(alamo::ascii_to_upper('z') == 'Z' && alamo::ascii_to_upper('{') == '{' && alamo::ascii_to_upper('/') == '/');
+    static_assert(alamo::ascii_to_lower('A') == 'a' && alamo::ascii_to_lower('@') == '@' && alamo::ascii_to_lower('[') == '[');
+    static_assert(alamo::ascii_trim(" \t\r\nab c\n ") == "ab c");
+    static_assert(alamo::ascii_trim("\v x \f") == "\v x \f");  // \v / \f are not stripped (data::trim does)
+    static_assert(alamo::ascii_trim(" \t ").empty());
+    static_assert(alamo::ascii_istarts_with("Data\\Art", "DATA") && !alamo::ascii_istarts_with("Da", "DATA"));
+    static_assert(alamo::ascii_iends_with("x.ALO", ".alo") && !alamo::ascii_iends_with("o", ".alo"));
+    static_assert(alamo::ascii_icontains("Rebel_X-Wing", "x-wing") && alamo::ascii_icontains("a", "") &&
+                  !alamo::ascii_icontains("ab", "abc"));
+    static_assert(alamo::ascii_iless("abc", "ABD") && !alamo::ascii_iless("ABC", "abc") && alamo::ascii_iless("ab", "ABC"));
+    static_assert(alamo::valid_chunk_name("GALAXY_1") && !alamo::valid_chunk_name("") && !alamo::valid_chunk_name("a b") &&
+                  !alamo::valid_chunk_name("a\n"));
+    {
+        const std::string hi = "\xC3\xA9tat/Ab";
+        CHECK(alamo::ascii_upper(hi) == "\xC3\xA9TAT/AB");
+        CHECK(alamo::ascii_lower(hi) == "\xC3\xA9tat/ab");
+        std::string s = "mIxEd";
+        alamo::ascii_upper_in_place(s);
+        CHECK(s == "MIXED");
+        alamo::ascii_lower_in_place(s);
+        CHECK(s == "mixed");
+        // Same results as std::toupper / std::tolower in the "C" locale for every byte value.
+        for (int b = 0; b < 256; ++b) {
+            const char c = static_cast<char>(b);
+            CHECK(alamo::ascii_to_upper(c) == static_cast<char>(std::toupper(static_cast<unsigned char>(c))));
+            CHECK(alamo::ascii_to_lower(c) == static_cast<char>(std::tolower(static_cast<unsigned char>(c))));
+        }
+    }
+    // CU2 t09: the constexpr FNV-1a overloads give the same values as the pointer form.
+    static_assert(alamo::fnv1a64(std::string_view()) == alamo::kFnv1a64Offset);
+    static_assert(alamo::fnv1a64(std::string_view("a")) == 0xaf63dc4c8601ec8cull);  // FNV-1a 64 test vector
+    {
+        const std::string t = "The quick brown fox";
+        const std::vector<uint8_t> v(t.begin(), t.end());
+        CHECK(alamo::fnv1a64(t.data(), t.size()) == alamo::fnv1a64(std::string_view(t)));
+        CHECK(alamo::fnv1a64(t.data(), t.size(), 7) == alamo::fnv1a64(std::string_view(t), 7));
+        CHECK(alamo::fnv1a64(std::span<const uint8_t>(v)) == alamo::fnv1a64(std::string_view(t)));
+        CHECK(alamo::fnv1a64(nullptr, 0) == alamo::kFnv1a64Offset);
+    }
     CHECK(alamo::normalize_path(".\\Data//XML\\x.xml") == "DATA\\XML\\X.XML");
+    CHECK(alamo::with_default_dir_ext("ei_trooper", "Data\\Art\\Models\\", ".alo") == "DATA\\ART\\MODELS\\EI_TROOPER.ALO");
+    CHECK(alamo::with_default_dir_ext("Data/Art/Models/x.ALO", "Data\\Art\\Models\\", ".alo") == "DATA\\ART\\MODELS\\X.ALO");
+    CHECK(alamo::with_default_dir_ext("w.v1", "D\\", ".alo") == "D\\W.V1");
 
     // DirectoryProvider: case-insensitive.
     namespace fs = std::filesystem;

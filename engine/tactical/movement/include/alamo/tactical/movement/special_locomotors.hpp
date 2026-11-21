@@ -88,8 +88,12 @@ struct SpecialMotion {
     V2 vel;
     float vel_z = 0.0f;
     uint32_t path_idx = 0;
-    float clock = 0.0f;         // bomber +0x1e8 / timed-path time (frames)
+    float clock = 0.0f;         // bomber / timed-path time (frames) [port: the pass playback time]
     float pass_z = 0.0f;        // bomber pass height
+    // mcx4 t11 (MCX4_T11_T12_RE_ANSWERS §B2 / §B4; save version 36): the LANDBOMBER facing lookahead pack +0x1e8 (frames;
+    // 0 at the pack ctor 0x553f00) and the BIKE sideways speed pack +0x1fc (a fraction of max speed, 0x63abe0).
+    float facing_lookahead = 0.0f;
+    float lateral = 0.0f;
 };
 
 // Type values (raw XML; the system applies the mode multiplier where the getters do).
@@ -104,8 +108,22 @@ struct SpecialParams {
     bool has_pre_turn_anim = false;      // Has_Pre_Turn_Anim (+0x36)
 };
 
-// Land bomber clock (+0x1e8) step per frame: GameConstants 0x140b16c4c (GC +0x144c), value unread [M] -> 1 frame.
+// Land bomber pass clock step per frame [port: the timed path's playback; mcx4 t11 found that pack +0x1e8 and GC +0x144c
+// are the facing lookahead and SpaceLocomotorFacingLookaheadAcc (MCX4_T11_T12_RE_ANSWERS §B2), not this clock].
 inline constexpr float kLandBomberClockStep = 1.0f;
+// mcx4 t11 (MCX4_T11_T12_RE_ANSWERS §B2, LANDBOMBER 0x645370 / facing getter 0x645a70 [H]): the bomber's yaw after its
+// step. `pos` / `heading` = the path pose at `clock` (the unit's new position and the path's own heading); the reserved
+// position n = int(lookahead) frames ahead (`ahead`, `ahead_valid` = still on the path) replaces the heading by the
+// direction pos -> ahead when it differs from pos; otherwise the heading is kept.
+float bomber_facing(V2 pos, float heading, V2 ahead, bool ahead_valid);
+// The lookahead after the step: min(lookahead + SpaceLocomotorFacingLookaheadAcc, MaxFacingLookAheadFrames).
+float bomber_lookahead_step(float lookahead, float acc, float cap);
+// mcx4 t11 (MCX4_T11_T12_RE_ANSWERS §B2, BIKE move step 0x63abe0 [H]): the sideways speed L (pack +0x1fc, a fraction of
+// max speed) after one step. want = the collision steering vector's component along the unit's left (-sin yaw, cos yaw);
+// L moves toward it by at most LateralAcceleration, then is clamped to +-(v / vmax). The travel direction is then
+// normalise((cos yaw, sin yaw) + L (-sin yaw, cos yaw)) (bike_travel_dir).
+float bike_lateral_step(float lateral, float want, float lateral_accel, float v, float vmax);
+V2 bike_travel_dir(float yaw_deg, float lateral);
 // Jetpack landing test window (0x140a44334): last waypoint time - now <= 7 frames.
 inline constexpr float kJetpackLandingFrames = 7.0f;
 inline constexpr float kJetpackRelandRadius = 50.0f;  // re-issued move (0x640880, radius 50)
@@ -136,8 +154,9 @@ TurnAnim arrival_turn_band(float err_deg, float stopped_rate, float threshold, i
 // End clip 0x61d810 of the clip `anim` that ended the turn: {3, 12, 13, 21, 22} -> TURNL_END 13, {4, 14, 15, 23, 24} ->
 // TURNR_END 15, else kAnimNone.
 int32_t arrival_turn_end_clip(int32_t anim);
-// The TURNL / TURNR blend cap of a unit without Has_Pre_Turn_Anim (GameConstants global 0x140b16d28, value not read):
-// [port] 0.2 seconds. Blend = min(|e0| / r x 0.03333, cap).
+// The TURNL / TURNR blend cap of a unit without Has_Pre_Turn_Anim: GameConstants InfantryTurnBlendTime (0x140b16d28 = GC
+// +0x1528; MovementConstants::infantry_turn_blend_time, this is its default and FoC value). Blend = min(D / r x 0.03333,
+// cap), D = e0 wrapped into [0, 360) (mcx4 t11, 0x620190 [M]: a right turn counts 360 - |e0|).
 inline constexpr float kArrivalTurnBlendCapPort = 0.2f;
 
 // Jetpack altitude (0x6404e0). `track(i)` = the unit's position i frames ahead (path playback, or position +
@@ -201,7 +220,8 @@ struct FlyWorld {
 };
 
 // §1.1 / §1.2 helpers: wrap180 (-180, 180], wrap360 [0, 360) (the retail subtract / add loops); angles(A -> B) =
-// (roll 0, pitch, yaw) with yaw in [0, 360) and the "pitch only when z or x differ" quirk.
+// (roll 0, pitch, yaw) with yaw in [0, 360) and the "pitch only when z or x differ" quirk. They forward to
+// fighter_wrap180 / fighter_wrap360 / fighter_vector_angles (fighter.hpp), so +-inf / NaN come back unchanged.
 float fly_wrap180(float a);
 float fly_wrap360(float a);
 FlyOrient fly_angles(FlyVec3 from, FlyVec3 to);
@@ -282,10 +302,12 @@ bool locomotor_airborne_kind(LocomotorKind kind, LocoState state);
 // is in the clearance layer when (layer & kLayerCorvette) != 0 (0x537e60).
 uint32_t object_tracking_layer(bool uses_multiple_locomotors, bool airborne_kind, bool moving, uint32_t space_layer,
                                uint32_t stationary_space_layer);
-// Query half-extents 0x396850: Custom_Hard_XExtent / _YExtent x Scale_Factor, each falling back ([port]: when <= 0) to
-// |model bbox max x / y| x Scale_Factor (0x371be0); 0 without a model.
-V2 clearance_half_extents(float custom_x, float custom_y, float scale_factor, bool has_model, float model_max_x,
-                          float model_max_y);
+// Query half-extents 0x396850 -> 0x371be0 (s78n t10, TACTICAL_COMBAT §5.4.6 item 1): both Custom_Hard extents > 0 ->
+// Scale_Factor x (X, Y), no model read; else no model for the mode -> (0, 0), even with one custom set; else per axis the
+// custom value when > 0, else the |collision-bound half x / y| of the model, x Scale_Factor (the half size, not |max|;
+// the bound's centre offset is ignored).
+V2 clearance_half_extents(float custom_x, float custom_y, float scale_factor, bool has_model, float bound_half_x,
+                          float bound_half_y);
 // One tracking entry (0x6b3b00 [M]): the object's tracked position at the slice start / end, its facing at the slice
 // end, its half-extents, and the slice's frame range.
 struct ClearanceEntry {
@@ -301,7 +323,9 @@ bool clearance_candidate(V2 from, V2 to, float qx, float qy, const ClearanceEntr
 // within R(r) of A = s + (e - s) a, R lerping the two oriented-box radii from the direction toward s (at r = 0) to the
 // direction toward e (at r = 1). Heights are not compared.
 bool clearance_hit(V2 from, V2 to, float qx, float qy, const ClearanceEntry& e, float t);
-// Per-hit value: (bbox.min.z + bbox.max.z) x Scale_Factor + object z (a sum: the scaled top of a box starting at 0).
+// Per-hit value (s78n t10, §5.4.6 side finding): the model box the hit reads is the collision bound as centre and half
+// size, so box_lo_z = its centre z and box_hi_z = its half z, and (c.z + h.z) x Scale_Factor + object z is the scaled top
+// of the collision bound.
 inline float clearance_top(float box_lo_z, float box_hi_z, float scale_factor, float obj_z) {
     return (box_lo_z + box_hi_z) * scale_factor + obj_z;
 }
@@ -310,8 +334,8 @@ struct ClearanceInfo {
     bool uses_multiple_locomotors = false;  // Uses_Multiple_Locomotors (+0x74)
     uint32_t stationary_space_layer = 0;    // Stationary_Space_Layer (+0x16e0); Space_Layer is UnitDesc::space_layer_type
     V2 half;                                // clearance_half_extents (the flyer's (qx, qy); an entry's (ex, ey) [M])
-    bool has_box = false;                   // the land model (type +0x2a0) has a bounding box; no box = no hit value
-    float box_lo_z = 0.0f, box_hi_z = 0.0f; // model space, before Scale_Factor
+    bool has_box = false;                   // the land model (type +0x2a0) is there; no model = no hit value
+    float box_lo_z = 0.0f, box_hi_z = 0.0f; // s78n t10: the collision bound's centre z and half z, before Scale_Factor
     float scale_factor = 1.0f;              // Scale_Factor (+0x658)
 };
 using ClearanceInfoFn = std::function<bool(ObjectId id, ClearanceInfo& out)>;  // false = unknown object (skipped)

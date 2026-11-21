@@ -48,6 +48,7 @@
 #include <string>
 #include <string_view>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 #include "alamo/core/file_provider.hpp"
@@ -118,6 +119,9 @@ struct ExprNode {
     uint32_t param_begin = 0, param_count = 0;  // Token/Function/Script: into Expression::params
     uint32_t ref = 0;         // Function: equation index after link (kUnresolved before / if missing)
     std::string name;         // Function: equation name; Script: script name
+    // Token, sp4a (S7) [port]: the path as one upper-case dotted key ("ENEMYFORCE.SPACETOTALUNNORMALIZED"), built once by the
+    // parser and handed to the resolver as TokenRef::key. Empty for a node not made by the parser.
+    std::string path_key;
 };
 inline constexpr uint32_t kUnresolved = 0xFFFFFFFFu;
 
@@ -136,7 +140,7 @@ struct ParseError {
 // The equation-literal converter registry (the exe's DatabaseUIntConversionClass registry as the port knows it): the
 // objects::EnumRegistry converters (GameObjectCategoryType, GameObjectPropertiesType, MovementClassType, ...), plus
 // AIGoalCategoryType, DifficultyLevelType (Easy 0, Normal 1, Hard 2) and HardPointType (the short names, value = index).
-// Converter-name lookup ASCII case-insensitive [port; L in the original, A2J_T07_LITERALS §3]; entry names trimmed and
+// Converter-name lookup trimmed and case-sensitive (A2K_T06_RE.md §2) [H]; entry names trimmed and
 // case-insensitive [H]. `bitfield` tells how `text` was split; `value` = the converted value; `names` = the trimmed names /
 // tokens (input case).
 struct EnumLiteral {
@@ -203,7 +207,9 @@ public:
     // Adds one equation (tests, the galactic consumer paths). Returns its index, or kUnresolved on
     // a syntax error / duplicate (first wins).
     uint32_t add(std::string_view name, std::string_view text, LoadReport* report = nullptr);
-    // Resolves every Function_ reference to an equation index. Call after the last add.
+    // Resolves every Function_ reference to an equation index. Call after the last add. A2k t12: a reference to a name
+    // that no add() named fails its equation's build (counted as a parse error, removed from the index); a reference to
+    // a named equation that failed to build stays unresolved (unresolved_functions; evaluates as an error).
     void link(LoadReport* report = nullptr);
 
     uint32_t find(std::string_view name) const;  // kUnresolved if absent
@@ -219,6 +225,7 @@ public:
 private:
     std::vector<Equation> eq_;
     std::unordered_map<std::string, uint32_t> index_;  // upper-cased name -> first definition
+    std::unordered_set<std::string> declared_;         // a2k t12: every upper-cased name added (the Function_ tokens)
     TokenTable tokens_;
     std::shared_ptr<const EnumLiteralTable> literals_;
 };
@@ -252,6 +259,9 @@ struct TokenRef {
     std::span<const TokenId> path;
     std::span<const Param> params;
     const TokenTable* tokens = nullptr;
+    // sp4a (S7): ExprNode::path_key when the parser built one (the path's names upper-cased, joined by '.'); empty = the
+    // resolver builds it from `path` if it needs it.
+    std::string_view key;
 };
 
 // Resolves token leaves (the exe's *PerceptualEvaluatorClass family). Must be thread-safe for

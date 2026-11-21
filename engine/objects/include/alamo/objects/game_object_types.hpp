@@ -59,6 +59,7 @@
 #include "alamo/objects/enums.hpp"
 #include "alamo/objects/object_types.hpp"
 #include "alamo/objects/type_fields.hpp"
+#include "alamo/objects/type_tags.hpp"
 
 namespace alamo::objects {
 
@@ -99,9 +100,9 @@ struct TypeLoadStats {
 enum class BehaviorSet : uint8_t { Galactic = 0, Land = 1, Space = 2, Union = 3, Generic = 4 };
 struct BehaviorBits {
     std::array<uint64_t, 2> w{};
-    bool test(BehaviorTypeId id) const { return id < kBehaviorTypeCount && ((w[id >> 6] >> (id & 63)) & 1u) != 0; }
+    bool test(BehaviorTypeId id) const { return id < kBehaviorTypeCount && ((w[static_cast<size_t>(id >> 6)] >> (id & 63)) & 1u) != 0; }
     void set(BehaviorTypeId id) {
-        if (id < kBehaviorTypeCount) w[id >> 6] |= uint64_t{1} << (id & 63);
+        if (id < kBehaviorTypeCount) w[static_cast<size_t>(id >> 6)] |= uint64_t{1} << (id & 63);
     }
     friend bool operator==(const BehaviorBits& a, const BehaviorBits& b) { return a.w == b.w; }
 };
@@ -119,7 +120,10 @@ public:
     bool build(const ObjectTypeDatabase& raw, const FileProvider* provider = nullptr,
                std::vector<std::string>* diagnostics = nullptr, AnimTypeLookup anim_types = nullptr);
 
-    const ObjectTypeDatabase& raw() const { return *raw_; }
+    // Before build() (a default-constructed table, as the synthetic test worlds pass) this is an empty database, so a
+    // type-name lookup answers "none" instead of dereferencing null (tst2 t01, b0137). The per-type reads that take a
+    // TypeIndex still need t < size() (0 here).
+    const ObjectTypeDatabase& raw() const { return raw_ ? *raw_ : empty_raw(); }
     size_t size() const { return state_.size(); }
     const TypeLoadStats& stats() const { return stats_; }
 
@@ -132,7 +136,6 @@ public:
 
     // Field state; nullptr = never set (the default applies).
     const FieldValue* value(TypeIndex t, FieldId f) const;
-    const FieldValue& default_value(FieldId f) const { return defaults_[f]; }
     const FieldValue& effective(TypeIndex t, FieldId f) const;  // value or default
     std::span<const FieldValue> values(TypeIndex t) const { return state_[t]; }  // sorted by field
 
@@ -140,11 +143,44 @@ public:
     bool get_bool(TypeIndex t, std::string_view tag) const;
     int32_t get_int(TypeIndex t, std::string_view tag) const;
     float get_float(TypeIndex t, std::string_view tag) const;
-    double get_double(TypeIndex t, std::string_view tag) const;
     std::string_view get_string(TypeIndex t, std::string_view tag) const;
     std::array<float, 4> get_vec(TypeIndex t, std::string_view tag) const;
     std::span<const std::string_view> get_list(TypeIndex t, std::string_view tag) const;
     std::span<const FieldIndex> get_sub_objects(TypeIndex t, std::string_view tag) const;
+    // ref6 t01: typed reads through the handles of alamo/objects/type_tags.hpp (engine code outside objects uses these;
+    // tools/lint/check_tag_reads.py), the type's name and a sub-object list.
+    float get(TypeIndex t, const FloatTag& k) const { return get_float(t, k.tag); }
+    int32_t get(TypeIndex t, const IntTag& k) const { return get_int(t, k.tag); }
+    bool get(TypeIndex t, const BoolTag& k) const { return get_bool(t, k.tag); }
+    std::string_view get(TypeIndex t, const TextTag& k) const { return get_string(t, k.tag); }
+    std::array<float, 4> get(TypeIndex t, const VecTag& k) const { return get_vec(t, k.tag); }
+    std::span<const std::string_view> get(TypeIndex t, const ListTag& k) const { return get_list(t, k.tag); }
+    TypeIndex get(TypeIndex t, const RefTag& k) const { return get_type_ref(t, k.tag); }
+    uint64_t get(TypeIndex t, const MaskTag& k) const { return get_mask(t, k.tag); }
+    std::span<const FieldIndex> sub_objects(TypeIndex t, const SubObjectsTag& k) const { return get_sub_objects(t, k.tag); }
+    // Whether the type's XML set the tag (an unset tag reads its default).
+    template <class K> requires requires(const K& k) { k.tag; }
+    bool is_set(TypeIndex t, const K& k) const { return value(t, find_type_field(k.tag)) != nullptr; }
+    // Another view of a handle's tag than its kind (the text of a numeric tag, the types a list names, a mask's words):
+    // the same reads as the string forms, with the tag named once.
+    template <class K> requires requires(const K& k) { k.tag; }
+    std::string_view get_string(TypeIndex t, const K& k) const { return get_string(t, k.tag); }
+    template <class K> requires requires(const K& k) { k.tag; }
+    float get_float(TypeIndex t, const K& k) const { return get_float(t, k.tag); }
+    template <class K> requires requires(const K& k) { k.tag; }
+    int32_t get_int(TypeIndex t, const K& k) const { return get_int(t, k.tag); }
+    template <class K> requires requires(const K& k) { k.tag; }
+    bool get_bool(TypeIndex t, const K& k) const { return get_bool(t, k.tag); }
+    template <class K> requires requires(const K& k) { k.tag; }
+    std::span<const std::string_view> get_list(TypeIndex t, const K& k) const { return get_list(t, k.tag); }
+    template <class K> requires requires(const K& k) { k.tag; }
+    std::vector<TypeIndex> get_type_refs(TypeIndex t, const K& k) const { return get_type_refs(t, k.tag); }
+    std::string_view name(TypeIndex t) const { return t < size() ? raw().types().name[t] : std::string_view{}; }
+    // Scale_Factor, 1 when it is not > 0 (the guard every extent / footprint reader applies).
+    float scale_factor(TypeIndex t) const {
+        const float s = get(t, tags::Scale_Factor);
+        return s > 0.0f ? s : 1.0f;
+    }
     // Lazy references (Â§4.5): "None" / unknown -> kNone, else the first definition.
     TypeIndex get_type_ref(TypeIndex t, std::string_view tag) const;
     std::vector<TypeIndex> get_type_refs(TypeIndex t, std::string_view tag) const;
@@ -214,6 +250,7 @@ private:
     void warn(std::string message);
 
     const ObjectTypeDatabase* raw_ = nullptr;
+    static const ObjectTypeDatabase& empty_raw();
     std::vector<State> state_;
     std::vector<FieldValue> defaults_;
     std::vector<uint8_t> resolved_, resolve_pass_, company_member_, squadron_member_, placed_at_markers_;

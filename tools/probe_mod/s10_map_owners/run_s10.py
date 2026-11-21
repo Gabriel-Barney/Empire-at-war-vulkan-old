@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""run_s10.py - one S10 map-owner probe session: build + install the mod, start the memory reader, launch FoC with
+"""run_s10.py - HISTORICAL (S10 is done, see README.md): one S10 map-owner probe session: build + install the mod, start the memory reader, launch FoC with
 the mod, wait for the game to exit, write the tables, clean up (always, also after an error or Ctrl+C).
 
   run_s10.py [--game DIR] [--non-interactive] [--no-launch] [--no-popup] [--wait-start-sec N]
@@ -31,10 +31,12 @@ sys.dont_write_bytecode = True
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 sys.path.insert(0, os.path.dirname(HERE))
+sys.path.insert(0, os.path.join(os.path.dirname(HERE), 'common'))
 import build_mod  # noqa: E402
 import cleanup_s10  # noqa: E402
 import s10_parse  # noqa: E402
 import ted_owners  # noqa: E402
+import launch_foc as foc  # noqa: E402  (common/launch_foc.py: the one place a kit starts StarWarsG.exe)
 
 READER = os.path.join(HERE, 'bin', 's10reader.exe')
 WARN_POPUP = '_warn_message_popup.txt'  # the retail game's own file; maybe where _MessagePopup text goes
@@ -100,8 +102,8 @@ def main():
     ap.add_argument('--wait-start-sec', type=float, default=900)
     ap.add_argument('--source-game', help=argparse.SUPPRESS)  # offline test: read shipped files here, install in --game
     a = ap.parse_args()
-    corr = os.path.join(a.game, 'corruption')
-    exe = os.path.join(corr, 'StarWarsG.exe')
+    corr = foc.corruption_dir(a.game)
+    exe = foc.game_exe(a.game)
     if not os.path.isfile(exe):
         say('StarWarsG.exe not found under', corr)
         return 20
@@ -141,7 +143,7 @@ def main():
             input('Start the game with MODPATH=Mods\\S10MapOwners, play, quit it, then press Enter here... ')
         else:
             if not a.no_launch:
-                subprocess.Popen([exe, 'MODPATH=Mods\\S10MapOwners'], cwd=corr)
+                foc.start(a.game, ['MODPATH=Mods\\S10MapOwners'], windowed=False)
                 say('Game launched.')
             set_state(run_dir, state='waiting_for_game_start', run_dir=run_dir)
             while not running('StarWarsG.exe'):

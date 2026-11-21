@@ -1,4 +1,4 @@
-// alamo_render - output gamma on the GPU [port] (internal; Renderer::apply_gamma). The original sets the device gamma
+// alamo_render - output gamma on the GPU [port] (internal; RendererCore::apply_gamma). The original sets the device gamma
 // ramp from Options > Video > Gamma (TERRAIN_WATER_POST.md 4.6: no shader pass found); the port raises every colour
 // channel of the finished frame (world + HUD) to 1 / gamma in one full-screen pass, so the slider also covers menus.
 // The frame is copied into a scratch image first (the pass reads it while writing the same pixels).

@@ -184,8 +184,7 @@ void GameAudio::enter_tactical(const TacticalSetup& setup) {
     land_ = setup.land;
     environment_ = setup.environment;
     super_weapon_ = setup.super_weapon_present;
-    weather_active_ = false;
-    weather_type_ = "CLEAR";
+    weather_intensity_ = 0.0f;
     base_announced_ = false;
     audio_->set_mode(land_ ? AudioMode::Land : AudioMode::Space);
     audio_->set_3d_scale(1.0f);
@@ -194,12 +193,44 @@ void GameAudio::enter_tactical(const TacticalSetup& setup) {
     audio_->resume_mode_based_music(true);  // [port] forced, see enter_galactic
 }
 
+void GameAudio::set_super_weapon_present(bool present, bool restart_music) {
+    const bool changed = present != super_weapon_;
+    super_weapon_ = present;
+    if (!changed || !restart_music || !tactical_ || battle_over_) return;
+    const uint8_t m = audio_->music_mode();
+    if (m == music_mode::kTacticalAmbient || m == music_mode::kTacticalBattle) {
+        const std::string music = resolve_music(m);
+        if (!music.empty()) audio_->play_music(music, m);
+    }
+}
+
+void GameAudio::tactical_result_music(bool local_is_winner, std::string_view other_faction) {
+    battle_over_ = true;
+    const uint8_t mode = local_is_winner ? music_mode::kTacticalWin : music_mode::kTacticalLose;
+    if (audio_->music_mode() == mode) return;
+    const FactionAudio* f = data_->find_faction(faction_);
+    if (!f) return;
+    // ledger: consumes Faction.Music_Event_Tactical_Win
+    // ledger: consumes Faction.Music_Event_Tactical_Lose
+    const std::string base = local_is_winner ? "Music_Event_Tactical_Win" : "Music_Event_Tactical_Lose";
+    std::string music;
+    if (!other_faction.empty()) {
+        const std::vector<std::string> vs = f->pair_values(base + "_Vs_Faction", other_faction);
+        if (!vs.empty()) music = vs.front();  // the first matching entry (0x33e540 / 0x33e5a0)
+    }
+    if (music.empty()) music = std::string(f->get(base));
+    if (!music.empty()) audio_->play_music(music, mode);
+}
+
 void GameAudio::battle_end(const BattleResult& result) {
+    if (!result.strategic) {
+        tactical_result_music(result.won, result.enemy_faction);
+        return;
+    }
     battle_over_ = true;
     const FactionAudio* f = data_->find_faction(faction_);
     if (!f) return;
-    const std::string base = std::string(result.strategic ? "Music_Event_Strategic_" : "Music_Event_Tactical_") +
-                             (result.won ? "Win" : "Lose");
+    const std::string base = std::string("Music_Event_Strategic_") + (result.won ? "Win" : "Lose");
     std::string music;
     if (!result.enemy_faction.empty()) {
         const std::vector<std::string> vs = f->pair_values(base + "_Vs_Faction", result.enemy_faction);
@@ -235,23 +266,18 @@ void GameAudio::set_camera(const CameraState& camera) {
         listener_from_camera(camera.position, camera.look_at, camera.forward, camera.up, pullback, camera.cinematic));
 }
 
-void GameAudio::set_weather(std::string_view weather, float intensity) {
+void GameAudio::set_weather(std::string_view weather, float intensity, bool local_affected) {
     ambience_.set_weather(weather, intensity);
-    if (!tactical_) return;
-    const bool active = !iequals(weather, "CLEAR") && intensity > 0.0f;
-    const bool changed_type = active && weather_active_ && !iequals(weather, weather_type_);
-    if (active == weather_active_ && !changed_type) return;
-    const FactionAudio* f = data_->find_faction(faction_);
-    if (weather_active_ && f) {
-        const std::vector<std::string> v = f->pair_values("SFXEvent_Weather_End", weather_type_);
+    // aud1 t02 (AUDIO.md §9.3, 0x323340): the faction line plays when the intensity goes from exactly 0 to above 0 (Begin)
+    // or from above 0 to exactly 0 (End), keyed by the current type, never on a type change alone; nothing for CLEAR or
+    // while the local player is not weather-affected (Weatherproof). 2D, unforced.
+    const bool was_on = weather_intensity_ > 0.0f, on = intensity > 0.0f;
+    weather_intensity_ = intensity;
+    if (!tactical_ || was_on == on || iequals(weather, "CLEAR") || !local_affected) return;
+    if (const FactionAudio* f = data_->find_faction(faction_)) {
+        const std::vector<std::string> v = f->pair_values(on ? "SFXEvent_Weather_Begin" : "SFXEvent_Weather_End", weather);
         if (!v.empty()) play_2d(v.front());
     }
-    if (active && f) {
-        const std::vector<std::string> v = f->pair_values("SFXEvent_Weather_Begin", weather);
-        if (!v.empty()) play_2d(v.front());
-    }
-    weather_active_ = active;
-    weather_type_ = active ? std::string(weather) : std::string("CLEAR");
 }
 
 void GameAudio::sim_tick() {
@@ -276,9 +302,10 @@ void GameAudio::update(double wall_dt_seconds) {
 
 // ---------------------------------------------------------------- battle events
 
-uint32_t GameAudio::weapon_fire(uint64_t shooter, std::string_view event, const Vec3& position) {
+uint32_t GameAudio::weapon_fire(uint64_t /*shooter*/, std::string_view event, const Vec3& position) {
+    // AUDIO.md §9.5: 3D at the fixed muzzle / projectile position (0x2d5240), not attached; the fog test applies.
     if (event.empty() || audio_->database().constants().test_disable_weapon_fire_sfx) return 0;
-    return object_sfx(shooter, event, position);
+    return impact(event, position);
 }
 
 uint32_t GameAudio::impact(std::string_view event, const Vec3& position) {
@@ -320,7 +347,9 @@ void GameAudio::stop_object_sfx(uint64_t object, std::string_view event, float f
 
 void GameAudio::combat(const CombatEvent& e) {
     if (!tactical_) return;
-    if (e.local_player_involved && !battle_over_) audio_->notify_combat(true);
+    // AUDIO.md §9.2: mode 16 (battle end) is not excluded from the battle switch, so combat after battle_end still
+    // switches to battle music (notify_combat applies the retail exclusion list).
+    if (e.local_player_involved) audio_->notify_combat(true);
     if (!e.local_base_attacked) return;
     const AudioConstants& c = audio_->database().constants();
     const int32_t delay_s = land_ ? c.delay_between_land_base_attack_announcement_seconds
@@ -487,12 +516,19 @@ uint32_t GameAudio::faction_sfx(std::string_view faction_tag) {
     return f ? play_2d(f->get(faction_tag)) : 0u;
 }
 
-uint32_t GameAudio::enemy_spotted(std::string_view object_type_name) {
+uint32_t GameAudio::unit_type_spotted(std::string_view object_type_name) {
     if (!enemy_sighted_vo_) return 0;
     const FactionAudio* f = data_->find_faction(faction_);
     if (!f) return 0;
     const std::vector<std::string> v = f->pair_values("SFXEvent_Unit_Type_Spotted", object_type_name);
-    return play_2d(v.empty() ? f->get("SFXEvent_Enemy_Spotted") : std::string_view(v.front()));
+    // ledger: consumes Faction.SFXEvent_Generic_Unit_Spotted
+    return play_2d(v.empty() ? f->get("SFXEvent_Generic_Unit_Spotted") : std::string_view(v.front()));
+}
+
+uint32_t GameAudio::enemy_spotted() {
+    if (!enemy_sighted_vo_) return 0;
+    const FactionAudio* f = data_->find_faction(faction_);
+    return f ? play_2d(f->get("SFXEvent_Enemy_Spotted")) : 0u;
 }
 
 }  // namespace alamo::audio

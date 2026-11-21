@@ -34,7 +34,6 @@ struct Rgba8 {
 };
 
 enum class ComponentType : uint8_t { Unknown = 0, Shell, Button, TextButton, Bar, Icon };
-const char* component_type_name(ComponentType t);
 
 // Number of HUD layers (UI.md §0 item 4) and the per-layer sub-lists (§2.5).
 inline constexpr uint32_t kHudLayers = 13;
@@ -138,6 +137,10 @@ std::string atlas_key(std::string_view texture_name);  // upper-case, no directo
 // breaks where the text is wrapped (gui_unescape), not here.
 class TextDatabase {
 public:
+    // A DAT whose string counts do not fit the file (one bad count, a truncated tail) keeps the entries before the first
+    // record that does not fit (mcx2 t06, `text_salvaged`): when the values overrun, the keys are taken from the file's
+    // tail (the key block ends the file); when only the keys overrun, from right after the values. *error then names
+    // what was kept and parse returns true. [port] retail's reader trusts the counts (GALACTIC_DIALOGS 2.7).
     bool parse(std::span<const uint8_t> bytes, std::string* error = nullptr);
     void add(std::string key, std::u16string value);  // tests; keeps the table sorted by (crc, key); marks the table loaded
     // The table's text for `key`; nullptr when the file has no such key. [port] Runtime additions (below) are not returned,
@@ -151,6 +154,8 @@ public:
     std::u16string text(std::string_view key, bool add) const;
     static constexpr std::u16string_view kMissing = u"[MISSING]";
     bool loaded() const { return loaded_; }
+    uint32_t declared() const { return declared_; }                 // the file's record count
+    bool salvaged() const { return loaded_ && keys_.size() < declared_; }  // parse kept only a prefix
     size_t added() const { return added_.size(); }  // ids remembered by add-if-missing lookups
     size_t size() const { return keys_.size(); }
     // [port] dev tool (ALAMO_PSEUDO_LOC=1, game_ui.cpp): every value through pseudo_localize(), so every lookup sees it.
@@ -169,6 +174,7 @@ private:
     // thread-safe (the UI thread owns the table).
     mutable std::map<std::pair<uint32_t, std::string>, std::u16string> added_;
     bool loaded_ = false;
+    uint32_t declared_ = 0;
     bool pseudo_ = false;
 };
 // [port] dev tool, not original behaviour: the string in [brackets] with accents, to catch overflow before a real translation does:
@@ -179,10 +185,15 @@ std::u16string pseudo_localize(std::u16string_view s);
 // Data\Text\MasterTextFile_<LANGUAGE>.DAT, falling back to ENGLISH (UI.md §3.5). False if neither exists.
 bool load_master_text(const FileProvider& files, std::string_view language, TextDatabase& out, std::string* log = nullptr);
 std::string master_text_path(std::string_view language);
+// Retail's text language for a Windows LANGID (docs/re/MCX2_T02_ASSET_SALVAGE.md 5, mcx2 t06): GERMAN, FRENCH, SPANISH, ITALIAN, POLISH or
+// RUSSIAN for the LANGIDs retail's table lists, else ENGLISH (Japanese, Korean, Chinese and Thai are overridden to
+// English, as retail does).
+std::string retail_language_for_langid(uint16_t langid);
 
 // UTF helpers (text is UTF-16 in the DAT files; the HUD lays out code points).
 std::u32string utf16_to_utf32(std::u16string_view s);
 std::u32string utf8_to_utf32(std::string_view s);
+std::string utf32_to_utf8(std::u32string_view s);
 
 // ---- Layout -------------------------------------------------------------------------------------
 // A bone of a shell model in shell MODEL space (bind pose, model units). Verified against the real
@@ -209,12 +220,21 @@ struct ComponentPlacement {
     float z = 0.0f;          // bone z (model units, + = towards the viewer)
 };
 
+// Layer of a component's draw: its base layer, raised to kShellLayerMin when it sits on a shell bone ([port]: above the first
+// shell half), clamped to the 13 HUD layers. Shared by the tactical / galactic HUDs and the shell panels.
+inline constexpr int32_t kShellLayerMin = 2;
+uint32_t layer_of(const CommandBarComponent& c, const ComponentPlacement& p);
+// Size of a component in canvas units: the placement's rectangle, the table size, else the first blank / icon texture's atlas
+// size x scale; `fallback` when it has no art.
+Vec2f component_art_size(const CommandBarComponent& c, const ComponentPlacement& p, const TextureAtlas& atlas, Vec2f fallback);
+// ComponentTable::find of a printf-formatted name with one or two int arguments ("s_select_%02d", "r_%02d%02d").
+int32_t find_fmt(const ComponentTable& table, const char* fmt, int a, int b = -1);
+
 class HudLayout {
 public:
     // Bones of a shell component's model (replaces earlier ones for that shell). Coordinates in model space
     // (see ShellBone); HudLayout::update moves them onto the canvas with shell_offset().
     void set_shell_bones(uint32_t shell_component, std::vector<ShellBone> bones);
-    void clear_shell(uint32_t shell_component) { shells_.erase(shell_component); }
     // Shells whose bones place components (default: all with bones). An inactive shell keeps its bones but
     // places nothing (e.g. i_main_reinforce outside land battles).
     void set_shell_active(uint32_t shell_component, bool active);

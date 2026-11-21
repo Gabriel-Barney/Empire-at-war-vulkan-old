@@ -62,6 +62,23 @@ struct DemoCameraTuning {
     float max_turn_deg_per_s = 25.0f;   // [M] how fast the yaw follows a turning hull
 };
 float demo_wrap_deg(float deg);  // to (-180, 180]
+// mcx4 (tac2 handover; MCX4_T11_T12_RE_ANSWERS §C2, scorer 0x520df0 under Start_Interesting_Object_Cinematic 0x2cd930):
+// the interesting-object pick. Each candidate's seven features are normalised to [0, 1] by their minimum and maximum
+// over the candidates (0 when all are equal); score = sum of weight x normalised feature; the highest score wins (the
+// first in candidate order on a tie). Returns features.size() when there is no candidate. [M] the feature names.
+struct SaliencyWeights {
+    float size = 1.0f, power = 1.0f, x = 0.5f, y = 0.5f, health = 1.0f, targets = 1.5f, speed = 1.0f;  // FoC values
+};
+struct SaliencyFeatures {
+    float size = 0.0f;     // squared model extent
+    float power = 0.0f;    // combat power
+    float x = 0.0f, y = 0.0f;
+    float health = 0.0f;
+    float targets = 0.0f;  // objects targeting it
+    float speed = 0.0f;    // distance moved since the last sample
+};
+SaliencyWeights load_saliency_weights(const data::GameConstants& gc);  // GameConstants Saliency_*; missing: the defaults
+size_t saliency_pick(std::span<const SaliencyFeatures> features, const SaliencyWeights& w);
 // |cos| of the angle between the camera's horizontal view direction and the hull's facing (x, y): 1 = nose-on or tail-on,
 // 0 = broadside. 0 for a vertical facing (no horizontal direction).
 float demo_view_alignment(float yaw_deg, float facing_x, float facing_y);
@@ -96,7 +113,6 @@ public:
     size_t map_index() const { return index_; }
     const std::string& map() const;
     double cycle_delay() const;  // of the current map (120 s past the end of the delay list)
-    double map_started() const { return started_at_; }
     uint64_t starts() const { return starts_; }
 
 private:

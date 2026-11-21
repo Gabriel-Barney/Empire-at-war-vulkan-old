@@ -31,10 +31,12 @@ class StateHasher;
 
 namespace alamo::tactical::fog {
 
-inline constexpr int32_t kMaxCellsPerAxis = 512;
+// FOWGrid W / H are each clamped to [0, 512] (ctor 0x4c0890); a larger map gets coarser cells, never a refusal.
+inline constexpr int32_t kMaxCellsPerAxis = 512;  // limit: retail FOG_OF_WAR §1.1-§1.2 (0x4c0890)
 inline constexpr uint8_t kStateFogged = 0;
 inline constexpr uint8_t kStateFirstReveal = 0xEF;  // 239: a never-seen / regrown cell when first counted
 inline constexpr uint8_t kStateRevealed = 0xFF;
+// limit: retail FOG_OF_WAR §1.1 (+0x08 u16 reveal count saturates)
 inline constexpr uint16_t kCountMax = 0xFFFF;
 inline constexpr float kNoModelFootprint = 10.0f;  // footprint radius without a model; also the min sight radius
 
@@ -92,6 +94,9 @@ public:
     void reveal(float x, float y, float radius, CellList* out, const RevealFlags& f, uint32_t frame);
     // 0x4c0ec0: ordinary cells within rNormal, dense cells within rDense (one list, passes never overlap).
     void reveal_dense(float x, float y, float r_normal, float r_dense, CellList& out, uint32_t frame);
+    // SP5: the cells reveal_dense would count, in the same order, without counting (const: safe in a parallel loop).
+    // reveal_dense == dense_cells then count_cells of the list.
+    void dense_cells(float x, float y, float r_normal, float r_dense, CellList& out) const;
     void collect_circle(float x, float y, float radius, CellList& out, bool unmasked_ok = true, bool masked_ok = true);
     void flash(float x, float y, float radius);            // state := 0xFF over the circle, counts untouched
     void count_cell(uint32_t cell, uint32_t frame);        // §2.3

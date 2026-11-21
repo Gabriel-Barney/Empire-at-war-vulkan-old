@@ -35,7 +35,7 @@
 // plus the object id. Is_Valid() is false once the object is dead (destroyed, even before the
 // flush) or gone; every other method then raises "GameObjectWrapper::<Method> -- this object is
 // dead!" (docs/re/OBJECT_RUNTIME.md §1.5). One script gets the same userdata for the same object
-// (cache keyed by object id, never iterated for logic; sweep_dead_wrappers() drops dead entries).
+// (cache keyed by object id, never iterated for logic; an entry lives as long as the VM [port]).
 #pragma once
 #include <cstdint>
 #include <memory>
@@ -72,9 +72,19 @@ struct LuaHost {
 struct LuaVmOptions {
     std::string script_name = "Script";  // tostring(Script)
     bool math_library = false;           // expose the dmath-backed 'math' table (not in the original)
-    // q6 object scripts: GameObjectTypeWrapper.Get_Name returns the upper-cased name, as the original (it stores type
-    // names upper-cased, OBJECT_TYPES §3.1). [port interim] Off by default: other VMs keep the name as written.
-    bool upper_type_names = false;
+    // GameObjectTypeWrapper.Get_Name returns the upper-cased name, as the original (it stores type names upper-cased,
+    // OBJECT_TYPES §3.1) in every VM: object scripts (q6), story and AI scripts (modc t45: FotR's PlanetTable keys are
+    // upper-case planet type names). Off only for tests that need the name as written.
+    bool upper_type_names = true;
+    // mcx6 t08 (docs/MOD_COMPAT_DESIGN.md §10, P6) [port]: Lua instructions one resume of a script thread, or one host
+    // call into the VM (a chunk run, a global call, an AI or story event), may run before the script is stopped with
+    // a "script_runaway" error. Retail hangs on a script that never yields; far above any normal script, and a pure
+    // count, so deterministic. 0 = no limit.
+    int script_budget = 50'000'000;
+    // [port] require as the port had it before mcx6 t07 (_LOADED[name] = true before the chunk runs, _REQUIREDNAME set
+    // raw and never restored, a false result becomes true). Only for rebuilding a pre-mcx6 save's pristine plan VM
+    // (PlanScriptRuntime::legacy_pristine), whose heap a save names by digest; every other VM uses stock 5.0.2.
+    bool legacy_require = false;
 };
 
 struct UnboundHit {
@@ -148,8 +158,6 @@ public:
     void post_event(std::string_view name);
     // Sets a host value global (Object, Target, ...) to the wrapper of `h` (null handle -> nil).
     void set_object_global(std::string_view name, objects::ObjectHandle h);
-    // Drops cached wrappers of dead objects (call at a deterministic point, e.g. after a flush).
-    void sweep_dead_wrappers();
 
     // ---- q6 script pool (docs/re/OBJECT_SCRIPTS.md §1.3, §1.4, §2.3; the host is engine/apps/sim object_scripts) ----
     // Release steps 1-3 of 0x2488e0: the exit flag set, every thread killed and removed (thread ids restart at 0, as the
@@ -170,6 +178,12 @@ public:
     // ---- diagnostics ----
     const std::vector<std::string>& messages() const;  // _ScriptMessage / _OuputDebug / print lines
     const std::vector<std::string>& errors() const;    // thread errors
+    // mcx6 t08: scripts stopped by LuaVmOptions::script_budget (their errors() / error text says "script_runaway").
+    uint32_t runaway_count() const;
+    // lua_pcall(L, nargs, nresults, 0) on this VM's state or one of its threads, under the runaway guard: run / call /
+    // require and the host's other calls into Lua (AI events, story triggers, callbacks) go through it. A call made from
+    // inside a script running on the same state counts against that run's budget (it does not start a new one).
+    int protected_call(lua_State* L, int nargs, int nresults);
     std::vector<UnboundHit> unbound_hits() const;      // names sorted, counts > 0 only
     uint64_t unbound_total() const;
     // How a method resolves on a wrapper of class `cls`: 1 implemented, 0 unbound stub, -1 missing.

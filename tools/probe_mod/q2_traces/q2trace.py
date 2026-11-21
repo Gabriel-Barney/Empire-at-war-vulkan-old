@@ -34,6 +34,10 @@ import subprocess
 import sys
 import zlib
 
+# The Q2TRACE 1 reader, the LCG step counter and the CRC v1 reader live in tools/parity/trace_parsers.py (ref3 t02).
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "parity"))
+from trace_parsers import Frame, lcg_steps, parse, read_crc_v1  # noqa: E402,F401
+
 MASK64 = (1 << 64) - 1
 P1, P2, P5 = 0x9E3779B185EBCA87, 0xC2B2AE3D27D4EB4F, 0x27D4EB2F165667C5
 LCG_MUL, LCG_ADD = 0x41C64E6D, 0xBDF
@@ -113,81 +117,17 @@ def combine(names, crcs):
     return h.digest()
 
 
-def lcg_steps(a, b, limit):
-    """Number of LCG steps from state a to state b (None if more than limit)."""
-    s = a
-    for i in range(limit + 1):
-        if s == b:
-            return i
-        s = (s * LCG_MUL + LCG_ADD) & 0xFFFFFFFF
-    return None
-
-
-# ---- parsing ----------------------------------------------------------------------------------------
-class Frame:
-    __slots__ = ("g", "mtype", "mframe", "rng", "pause", "stack", "flags", "cycle", "s", "key", "lines")
-
-    def __init__(self, parts):
-        self.g, self.mtype, self.mframe = int(parts[1]), int(parts[2]), int(parts[3])
-        self.rng = int(parts[4], 16)
-        self.pause, self.stack, self.flags = int(parts[5]), int(parts[6]), int(parts[7])
-        self.cycle = tuple(int(x) for x in parts[8:11]) if len(parts) >= 11 else None
-        self.s = None
-        self.key = False
-        self.lines = []
-
-
-def parse(path):
-    meta, header = {}, {}
-    frames, types, end_reason = [], {}, None
-    cur = None
-    with open(path, "r", encoding="ascii", newline="\n") as fh:
-        first = fh.readline().rstrip("\n")
-        if first != "Q2TRACE 1":
-            raise ValueError("not a Q2TRACE 1 file: %r" % first)
-        in_header = True
-        for ln, line in enumerate(fh, 2):
-            line = line.rstrip("\n")
-            if not line:
-                continue
-            p = line.split(" ")
-            tag = p[0]
-            if in_header:
-                if tag == "meta":
-                    meta[p[1]] = " ".join(p[2:])
-                elif tag == "end_header":
-                    in_header = False
-                else:
-                    header[tag] = p[1:]
-                continue
-            if tag == "F":
-                cur = Frame(p)
-                frames.append(cur)
-            elif tag == "S":
-                cur.s = p[1:]
-            elif tag == "K":
-                cur.key = True
-            elif tag == "M":
-                meta[p[1]] = " ".join(p[2:])
-            elif tag in ("O", "X", "G", "C", "P"):
-                cur.lines.append(p)
-            elif tag == "start":
-                header["start"] = p[1:]
-            elif tag == "T":
-                types[int(p[1])] = (int(p[2], 16), int(p[3], 16), " ".join(p[4:]))
-            elif tag == "E":
-                end_reason = " ".join(p[1:])
-            elif tag == "end":
-                break
-            else:
-                raise ValueError("line %d: unknown tag %r" % (ln, tag))
-    return meta, header, frames, types, end_reason
 
 
 # ---- validate -----------------------------------------------------------------------------------------
 def validate(path, json_out=None, quiet=False):
     meta, header, frames, types, end_reason = parse(path)
     errors, notes = [], []
+    # The reader writes the T (type) lines at the end: a cut trace has none, so its state digests (which hash the type
+    # name CRC) cannot be rebuilt. Then only the object count, the object CRC sum and the RNG digests are checked.
+    check_types = bool(types) or not meta.get("truncated")
+    if not check_types:
+        notes.append("no T lines (trace cut before its end): S-line state digests checked without the object types")
     objs, planets, players = {}, {}, {}
     seed = int(header["seed"][0], 16) if "seed" in header else None
     draws, prev = [], None
@@ -253,7 +193,7 @@ def validate(path, json_out=None, quiet=False):
                 errors.append("frame %d: no S line" % fr.g)
             else:
                 ok = (int(fr.s[1]) == len(live) and int(fr.s[3], 16) == sum_calc and int(fr.s[4], 16) == rng_crc(fr.rng)
-                      and int(fr.s[5], 16) == hr.digest() and int(fr.s[6], 16) == h.digest())
+                      and int(fr.s[5], 16) == hr.digest() and (not check_types or int(fr.s[6], 16) == h.digest()))
                 if ok:
                     digest_ok += 1
                 else:
@@ -301,6 +241,8 @@ def validate(path, json_out=None, quiet=False):
         notes.append("cached per-object CRC (+0x2C8) is always 0: the frame CRC is not computed in this session")
     if ring_written == 0:
         notes.append("FrameSynchronizer CRC ring never written (entries stay frame=-1): no frame CRC in single player")
+    if meta.get("truncated"):
+        notes.append(meta["truncated"])
     hist = {}
     for _, gap, n in draws:
         if gap == 1 and n is not None:
@@ -374,21 +316,9 @@ def to_q1(path, out, tick_mode="mode", include_torn=False):
 
 
 def read_crc(path):
-    systems, parity, recs = [], [], {}
-    with open(path, "r", encoding="ascii") as fh:
-        if fh.readline().strip() != "ALAMO_CRC 1":
-            raise ValueError("%s: not ALAMO_CRC 1" % path)
-        for line in fh:
-            p = line.split()
-            if not p or p[0] == "#":
-                continue
-            if p[0] == "systems":
-                systems = p[2:]
-            elif p[0] == "parity":
-                parity = p[2:]
-            else:
-                recs[int(p[0])] = (int(p[1], 16), int(p[2], 16), [int(x, 16) for x in p[3:]])
-    return systems, parity, recs
+    """{tick: (combined, parity, [system digests])} view of trace_parsers.read_crc_v1."""
+    systems, parity, recs = read_crc_v1(path)
+    return systems, parity, {tick: (comb, par, cols) for tick, comb, par, cols in recs}
 
 
 def compare(ref_path, eng_path):
@@ -510,6 +440,24 @@ def selftest_fake(bindir, outdir):
         if scen == "skirmish" and summary["light_samples"] == 0:
             print("FAKE skirmish: expected light samples with --object-budget-ms 0")
             rc = 1
+        if scen == "skirmish":
+            # storyb t09: a trace cut mid-line (reader killed) still validates: the cut frame is dropped, no digest error
+            with open(trace, "rb") as fh:
+                data = fh.read()
+            cut_at = data.rfind(b"\nO ", 0, len(data) * 2 // 3) + 5
+            cut = os.path.join(outdir, "fake_skirmish_cut.q2t")
+            with open(cut, "wb") as fh:
+                fh.write(data[:cut_at])
+            try:
+                cs, _ = validate(cut, os.path.join(outdir, "fake_skirmish_cut_summary.json"), quiet=True)
+                ok = (0 < cs["frames"] < summary["frames"] and cs["digest_bad"] == 0 and
+                      any("cut mid-line" in n_ for n_ in cs["notes"]))
+            except Exception as e:  # noqa: BLE001
+                ok, cs = False, {"exception": repr(e)}
+            if not ok:
+                print("FAKE skirmish: a trace cut mid-line did not validate as a partial trace: %s" %
+                      {k: cs.get(k) for k in ("frames", "digest_bad", "notes", "exception")})
+                rc = 1
         if scen == "galactic" and not any("seed" in n for n in summary["notes"]):
             print("FAKE galactic: expected the seed-0 note")
             rc = 1

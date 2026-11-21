@@ -18,6 +18,8 @@
 #include <algorithm>
 
 #include "alamo/core/file_provider.hpp"
+#include "alamo/core/sim_crc.hpp"
+#include "alamo/core/host_fs.hpp"
 #include "alamo/core/hash.hpp"
 #include "alamo/core/log.hpp"
 #include "alamo/data/game_database.hpp"
@@ -29,6 +31,7 @@
 #include "alamo/objects/object_store.hpp"
 #include "alamo/objects/type_fields.hpp"
 #include "alamo/objects/object_types.hpp"
+#include "alamo/test/support.hpp"
 #ifdef ALAMO_OBJECTS_HAVE_VFS
 #include "alamo/vfs/vfs.hpp"
 #endif
@@ -40,18 +43,11 @@ using namespace alamo;
 using namespace alamo::objects;
 namespace fs = std::filesystem;
 
-static int g_fail = 0;
-#define CHECK(c)                                                     \
-    do {                                                             \
-        if (!(c)) {                                                  \
-            std::printf("FAIL %s:%d: %s\n", __FILE__, __LINE__, #c); \
-            ++g_fail;                                                \
-        }                                                            \
-    } while (0)
+using ::alamo::test::g_fail;
 
 static void test_schema() {
     const auto rows = field_schema();
-    CHECK(rows.size() == 2918);  // 1675 + 1224 + 14 + 5 rows in docs/re/xml_field_tables.md
+    CHECK(rows.size() == 2984);  // 1675 + 1224 + 14 + 5 rows in docs/re/xml_field_tables.md, + 66 of modc t25
     const uint32_t ms = find_field_schema("max_speed");
     CHECK(ms != kNoSchema && rows[ms].code == 0x8 && rows[ms].kind() == FieldKind::Float && rows[ms].offset == 0x37c);
     const uint32_t dummy = find_field_schema("Is_Dummy");
@@ -88,11 +84,18 @@ static void test_schema() {
           behavior_type_id("EXPLOSION") == 0x20 && behavior_type_id("DUMMY_GROUND_BASE") == 0x5B &&
           behavior_type_id("DUMMY_UPGRADE") == beh::DummyUpgrade &&
           behavior_type_id("DUMMY_DESTROY_AFTER_PLANETARY_BOMBARD") == 0x69 && behavior_type_id("Selectable") == 0x02);
+    CHECK(behavior_type_id("DISABLE_FORCE_ABILITIES") == beh::DisableForceAbilities && beh::DisableForceAbilities == 0x52 &&
+          behavior_type_id("HOLSTER_WEAPON") == beh::HolsterWeapon && beh::HolsterWeapon == 0x4E &&
+          behavior_type_id("TACTICAL_SUPER_WEAPON") == beh::TacticalSuperWeapon);  // cu8f t02 / t07
     CHECK(behavior_type_id("NOT_A_BEHAVIOR") == kNoBehavior && behavior_type_name(0x1F).empty() &&
           behavior_type_name(0x2C) == "TACTICAL_SUPER_WEAPON");
     CHECK(is_behavior_list_tag("spacebehavior") && !is_behavior_list_tag("Behaviors"));
     CHECK(kind_of_code(0x2a) == FieldKind::Raw && kind_of_code(0x17) == FieldKind::Name &&
           kind_of_code(0x16) == FieldKind::NumberList && kind_of_code(0x5) == FieldKind::Int);
+    // modc t29: code 0x50 is a bool written into a flag bit (CommandBarComponent Hidden / Toggle / ...).
+    CHECK(kind_of_code(0x50) == FieldKind::Bool);
+    const uint32_t hidden = find_field_schema("Hidden", "CommandBarComponent");
+    CHECK(hidden != kNoSchema && field_schema()[hidden].code == 0x50 && field_schema()[hidden].kind() == FieldKind::Bool);
 }
 
 static void test_classify() {
@@ -118,10 +121,7 @@ static void test_classify() {
           shape_of("") == ValueShape::Empty && shape_of("a = b") == ValueShape::Text);
 }
 
-static void write_file(const fs::path& p, const std::string& s) {
-    fs::create_directories(p.parent_path());
-    std::ofstream(p, std::ios::binary) << s;
-}
+using ::alamo::test::write_file;
 
 // Every element below a file root, once per walk: must equal types + fields (nothing dropped).
 static size_t elements_below_roots(const ObjectTypeDatabase& db) {
@@ -209,7 +209,7 @@ static void test_loader_synthetic() {
     CHECK(db.get_float(0, "max_speed") == 3.5f);
     CHECK(db.fields_of(0, "Max_Speed").size() == 2);
     CHECK(db.get_list(0, "Behavior") == (std::vector<std::string_view>{"A", "B", "C"}));
-    CHECK(!db.get_bool(0, "Is_Dummy").has_value());
+    CHECK(db.get_bool(0, "Is_Dummy") == false);  // mcx1 t02 (Q2): "maybe" is neither "1" nor a first Y / T -> false
     CHECK(db.get_text(0, "My_Unknown_Tag") == std::string_view("hello"));
     CHECK(!db.get_text(0, "Stacking_Category").has_value());  // nested, not a direct child
     // Nested sub-object: schema chosen by the enclosing element, attributes kept.
@@ -260,7 +260,6 @@ static void test_loader_synthetic() {
     CHECK(none.type_count() == 0 && none.find("x") == kNone && none.get_text(0, "x") == std::nullopt);
     remove_all_long(root, ec);
 }
-
 
 static void test_converters() {
     CHECK(c_atoi("  -12abc") == -12 && c_atoi("+7") == 7 && c_atoi("x") == 0 && c_atoi("") == 0);
@@ -319,6 +318,9 @@ static void test_types_synthetic() {
                "  <CategoryMask>Fighter</CategoryMask><AI_Combat_Power>1.5</AI_Combat_Power></SpaceUnit>\n"
                " <SpaceUnit Name=\"F2\"><Max_Speed>3.5</Max_Speed><Build_Cost_Credits>20</Build_Cost_Credits>\n"
                "  <CategoryMask>Fighter | Bomber</CategoryMask><AI_Combat_Power>2</AI_Combat_Power></SpaceUnit>\n"
+               " <SpaceUnit Name=\"Num\"><Override_Bounty_SP>50</Override_Bounty_SP>\n"
+               "  <Bombing_Run_Prevention_Radius>800.7</Bombing_Run_Prevention_Radius><Population_Value>3</Population_Value>\n"
+               "  <Override_Bounty_MP>-2.5</Override_Bounty_MP></SpaceUnit>\n"
                "</R>\n");
     write_file(root / "Data/XML/T2.xml",
                "<R><SpaceUnit Name=\"Later\"><Variant_Of_Existing_Type>Base_Ship</Variant_Of_Existing_Type></SpaceUnit>\n"
@@ -341,6 +343,17 @@ static void test_types_synthetic() {
     CHECK(ty.get_bool(base, "Is_Dummy") && !ty.get_bool(base, "Hyperspace") && ty.get_float(base, "Mass") == 2.0f);
     CHECK(ty.get_list(base, "Behavior").size() == 3 && ty.get_list(base, "Behavior")[2] == "STARSHIP_COMBATANT");
     CHECK(ty.get_int(base, "Required_Ground_Base_Level") == 1);  // §6.1 normalisation
+    // bkc1 t07 (b0126): numeric getters read the field's own slot whatever its schema kind. Override_Bounty_SP and
+    // Bombing_Run_Prevention_Radius are float-parsed (code 0x8): get_int truncates; Population_Value is int (0x6).
+    {
+        const TypeIndex num = T("Num");
+        CHECK(num != kNone);
+        CHECK(ty.get_int(num, "Override_Bounty_SP") == 50 && ty.get_float(num, "Override_Bounty_SP") == 50.0f);
+        CHECK(ty.get_int(num, "Bombing_Run_Prevention_Radius") == 800);
+        CHECK(ty.get_int(num, "Override_Bounty_MP") == -2);  // toward zero, as a C cast
+        CHECK(ty.get_float(num, "Population_Value") == 3.0f && ty.get_int(num, "Population_Value") == 3);
+        CHECK(ty.get_int(base, "Override_Bounty_SP") == 0);  // unset: the zero default
+    }
     CHECK(ty.get_sub_objects(base, "Abilities").size() == 1);
     CHECK(ty.stats().tbd == 1 && ty.stats().tags_ignored >= 1 && ty.stats().subobject_lists == 1);
     // Variant: clearing list (last occurrence), type-name list (all), empty tag no-op, scalars inherited.
@@ -408,6 +421,49 @@ static bool same_types(const GameObjectTypes& a, const GameObjectTypes& b) {
 
 // ------------------------------------------------------------------------------------------
 // OBJECT_TYPES.md §9 / OBJECT_RUNTIME.md §9 rules
+
+// mcx1 t06 (D2, Gabriel 2026-11-17; DECISIONS.md "Mod compatibility system decisions"): squadrons are retail's. Every
+// Squadron_Units list keeps its members as written (OBJECT_TYPES.md §4.4: repeated list tags append) and the prices stay the
+// XML's (or the members' derived sum), for one-type fighter / bomber squadrons too; the 2026-11-13 resize to 12 is gone.
+static void test_retail_squadrons() {
+    const fs::path root = fs::temp_directory_path() / "alamo_objects_squad_size_test";
+    std::error_code ec;
+    remove_all_long(root, ec);
+    write_file(root / "Data/XML/GameObjectFiles.xml", "<L><File>S.xml</File></L>");
+    write_file(root / "Data/XML/S.xml",
+               "<R>\n"
+               " <Squadron Name=\"Fsq\"><Squadron_Units>Fi, Fi, Fi, Fi</Squadron_Units><Build_Cost_Credits>-1</Build_Cost_Credits></Squadron>\n"
+               " <Squadron Name=\"Bsq\"><Squadron_Units>Bo, Bo</Squadron_Units><Build_Cost_Credits>150</Build_Cost_Credits>\n"
+               "  <Tactical_Build_Cost_Multiplayer>550</Tactical_Build_Cost_Multiplayer><Score_Cost_Credits>370</Score_Cost_Credits></Squadron>\n"
+               " <Squadron Name=\"Bsq_V\"><Variant_Of_Existing_Type>Bsq</Variant_Of_Existing_Type>\n"
+               "  <Tactical_Build_Cost_Multiplayer>350</Tactical_Build_Cost_Multiplayer></Squadron>\n"
+               " <Squadron Name=\"Bsq_Hero\"><Variant_Of_Existing_Type>Bsq</Variant_Of_Existing_Type><Squadron_Units>He, Bo</Squadron_Units></Squadron>\n"
+               " <Squadron Name=\"Fsq_V\"><Variant_Of_Existing_Type>Fsq</Variant_Of_Existing_Type></Squadron>\n"
+               " <Squadron Name=\"Mixed\"><Squadron_Units>Fi, Bo</Squadron_Units></Squadron>\n"
+               " <Squadron Name=\"Hero\"><Squadron_Units>He, He</Squadron_Units></Squadron>\n"
+               " <Squadron Name=\"Corv\"><Squadron_Units>Co, Co, Co</Squadron_Units></Squadron>\n"
+               " <SpaceUnit Name=\"Fi\"><CategoryMask>Fighter | AntiBomber</CategoryMask><Build_Cost_Credits>10</Build_Cost_Credits>\n"
+               "  <AI_Combat_Power>2</AI_Combat_Power></SpaceUnit>\n"
+               " <SpaceUnit Name=\"Bo\"><CategoryMask>Bomber | AntiCapital</CategoryMask></SpaceUnit>\n"
+               " <SpaceUnit Name=\"He\"><CategoryMask>Fighter | SpaceHero</CategoryMask></SpaceUnit>\n"
+               " <SpaceUnit Name=\"Co\"><CategoryMask>Corvette</CategoryMask></SpaceUnit>\n"
+               "</R>\n");
+    DirectoryProvider dp(root.string());
+    ObjectTypeDatabase raw;
+    CHECK(raw.load(dp));
+    GameObjectTypes ty;
+    CHECK(ty.build(raw, &dp));
+    auto members = [&](const char* n) { return ty.get_list(raw.find(n), "Squadron_Units").size(); };
+    CHECK(members("Fsq") == 4u && members("Bsq") == 2u && members("Fsq_V") == 4u);
+    CHECK(members("Mixed") == 2u && members("Hero") == 2u && members("Corv") == 3u);
+    CHECK(members("Bsq_V") == 2u && members("Bsq_Hero") == 2u);
+    auto cost = [&](const char* n, const char* tag) { return ty.get_int(raw.find(n), tag); };
+    CHECK(cost("Fsq", "Build_Cost_Credits") == 40);  // derived: 4 members x 10
+    CHECK(cost("Bsq", "Build_Cost_Credits") == 150 && cost("Bsq", "Tactical_Build_Cost_Multiplayer") == 550);
+    CHECK(cost("Bsq_V", "Build_Cost_Credits") == 150 && cost("Bsq_V", "Tactical_Build_Cost_Multiplayer") == 350);
+    CHECK(ty.get_float(raw.find("Fsq"), "AI_Combat_Power") == 8.0f);  // the members' power summed, not scaled
+    remove_all_long(root, ec);
+}
 
 static void test_enum_converters() {
     EnumRegistry reg;  // built-in tables
@@ -651,6 +707,28 @@ static void test_s1_rules() {
     CHECK(ty.get_int(T("TSWG"), "Space_Override_Population_Value") == -1 &&
           ty.get_int(T("TSWG"), "Land_Override_Population_Value") == 3);
     CHECK(ty.placed_at_markers(T("D")) && !ty.placed_at_markers(T("TSW")));
+    {  // OBJECT_RUNTIME §2.5 exception: a +0xE3 type is not marked while a live same-type, same-owner object remains.
+        IdCounter mid;
+        ObjectStore galaxy(ModeKind::Galactic, StoreKind::Primary, ty, &mid);
+        ObjectStore battle(ModeKind::Space, StoreKind::Primary, ty, &mid);
+        battle.on_parent_mode_death = [&](const ObjectStore& s, ObjectHandle d) { mark_parent_mode_object_for_death(galaxy, s, d); };
+        SpawnParams mp;
+        mp.type = T("D");
+        mp.owner = 1;
+        const ObjectHandle g1 = galaxy.create(mp), g2 = galaxy.create(mp);
+        mp.parent_mode_id = galaxy.id(g1);
+        const ObjectHandle d1 = battle.create(mp);
+        mp.parent_mode_id = galaxy.id(g2);
+        const ObjectHandle d2 = battle.create(mp);
+        mp.parent_mode_id = kNoObjectId;
+        mp.owner = 2;
+        const ObjectHandle other_owner = battle.create(mp);
+        battle.destroy(d1);  // d2 (same owner) still alive: skipped
+        CHECK(!(galaxy.flags(g1) & kFlagMarkedByChildMode));
+        battle.destroy(d2);  // the last one of owner 1 (owner 2's copy does not count): marked
+        CHECK(galaxy.flags(g2) & kFlagMarkedByChildMode);
+        CHECK(battle.alive(other_owner));
+    }
     // Company power: IC = 4 x 1 (plain); OC = IC x clamp(2/4) + U (0) = 2.
     CHECK(ty.get_float(T("IC"), "AI_Combat_Power") == 4.0f && ty.get_float(T("OC"), "AI_Combat_Power") == 2.0f);
 
@@ -1474,21 +1552,7 @@ static void test_carried_type() {
 // ------------------------------------------------------------------------------------------
 // Real data
 
-static std::string env_or(const char* name, const char* fallback) {
-#ifdef _MSC_VER
-    char* v = nullptr;
-    size_t len = 0;
-    std::string out = fallback;
-    if (_dupenv_s(&v, &len, name) == 0 && v) {
-        if (*v) out = v;
-        std::free(v);
-    }
-    return out;
-#else
-    const char* v = std::getenv(name);
-    return (v && *v) ? std::string(v) : std::string(fallback);
-#endif
-}
+using ::alamo::test::env_or;  // alamo/test/support.hpp
 
 static std::unique_ptr<FileProvider> open_source(const std::string& root, bool foc, std::string& kind) {
     auto dp = std::make_unique<DirectoryProvider>(root);
@@ -1597,6 +1661,31 @@ static void integration(const std::string& root, const char* label, bool foc) {
                 types.faction_names().size(), ts.factions_dropped);
     if (foc) CHECK(ts.variants == 911 && ts.resolved_pass0 == 911 && ts.unresolved == 0);
     else CHECK(ts.variants == 449 && ts.resolved_later == 7 && ts.unresolved == 0);
+    if (foc) {  // bkc1 t07 (b0126): the float field read as an int (A2M_R2_UW_BOUNTY_TRACE section 1: Gallofree 50)
+        const TypeIndex g = db.find("Gallofree_Transport");
+        CHECK(g != kNone && types.get_int(g, "Override_Bounty_SP") == 50);
+    }
+    if (foc) {  // bkc1 t04 (b0012, COMMANDS 2.4.1, q6 t15 probe 6): what SelectAll leaves out, in the shipped data
+        const BehaviorTypeId pad = behavior_type_id("TACTICAL_BUILD_OBJECTS");
+        const BehaviorTypeId ground = behavior_type_id("DUMMY_GROUND_STRUCTURE");
+        const BehaviorTypeId star_base = behavior_type_id("DUMMY_STAR_BASE");
+        uint32_t pads = 0, selectable_pads = 0;
+        for (TypeIndex t = 0; t < types.size(); ++t) {
+            if (!types.has_behavior(t, BehaviorSet::Union, pad)) continue;
+            ++pads;
+            selectable_pads += types.has_behavior(t, BehaviorSet::Union, beh::Selectable) ? 1u : 0u;
+        }
+        std::printf("  build pads %u (SELECTABLE %u)\n", pads, selectable_pads);
+        CHECK(pads > 0 && selectable_pads == 0);  // a pad is never selected itself (its turret is a unit of its own)
+        for (const char* n : {"E_Ground_Barracks", "E_Ground_Light_Vehicle_Factory", "R_Ground_Barracks"}) {
+            const TypeIndex t = db.find(n);
+            CHECK(t != kNone && types.has_behavior(t, BehaviorSet::Union, ground));
+        }
+        for (const char* n : {"Empire_Star_Base_1", "Rebel_Star_Base_3", "Underworld_Star_Base_5"}) {
+            const TypeIndex t = db.find(n);
+            CHECK(t != kNone && types.has_behavior(t, BehaviorSet::Union, star_base));
+        }
+    }
     CHECK(ts.subobject_unprocessed == 0);
     // §9 rules on real data.
     std::printf("  section 9: enums converted %u failed %u, masks converted %u failed %u; STARSHIP_COMBATANT appended "
@@ -1707,6 +1796,60 @@ static void integration(const std::string& root, const char* label, bool foc) {
     std::printf("  coverage report: %s (%s)\n", path_to_utf8(out).c_str(), written ? "written" : "NOT WRITTEN (non-fatal)");
 }
 
+// ref6 t01: every typed handle (alamo/objects/type_tags.hpp) names a type field, an unset tag reads the handle's one
+// default through get(t, handle), a set one its XML value, and name(t) is the type's name.
+// What an unset tag reads equals the handle's default (Float / Int / Bool / Text) or the kind's fixed unset value.
+template <class T>
+[[maybe_unused]] static bool unset_reads_default(const GameObjectTypes& ty, TypeIndex t, const TypeTag<T>& k) {
+    return ty.get(t, k) == k.def;
+}
+[[maybe_unused]] static bool unset_reads_default(const GameObjectTypes& ty, TypeIndex t, const VecTag& k) {
+    return ty.get(t, k) == std::array<float, 4>{};
+}
+// A list carries no default in its handle: an unset list reads empty, except Behavior, which the loader fills with the
+// class element's own behaviours.
+[[maybe_unused]] static bool unset_reads_default(const GameObjectTypes& ty, TypeIndex t, const ListTag& k) {
+    return k.tag == "Behavior" || (ty.get(t, k).empty() && ty.get_type_refs(t, k).empty());
+}
+[[maybe_unused]] static bool unset_reads_default(const GameObjectTypes& ty, TypeIndex t, const RefTag& k) { return ty.get(t, k) == kNone; }
+[[maybe_unused]] static bool unset_reads_default(const GameObjectTypes& ty, TypeIndex t, const MaskTag& k) { return ty.get(t, k) == 0; }
+[[maybe_unused]] static bool unset_reads_default(const GameObjectTypes& ty, TypeIndex t, const SubObjectsTag& k) {
+    return ty.sub_objects(t, k).empty();
+}
+
+static void test_type_tags() {
+    const fs::path root = fs::temp_directory_path() / "alamo_objects_type_tags";
+    std::error_code ec;
+    remove_all_long(root, ec);
+    write_file(root / "Data/XML/GameObjectFiles.xml", "<L><File>S.xml</File></L>");
+    write_file(root / "Data/XML/S.xml",
+               "<R><GroundInfantry Name=\"Bare\"></GroundInfantry>\n"
+               "<GroundInfantry Name=\"Set\"><Guard_Chase_Range>250</Guard_Chase_Range><Ranged_Target_Z_Adjust>0</Ranged_Target_Z_Adjust>"
+               "<Shield_Requires_Base_Power>No</Shield_Requires_Base_Power><Custom_Hard_XExtent>12</Custom_Hard_XExtent></GroundInfantry></R>");
+    DirectoryProvider dp(root.string());
+    ObjectTypeDatabase raw;
+    CHECK(raw.load(dp));
+    GameObjectTypes types;
+    CHECK(types.build(raw));
+    const TypeIndex bare = raw.find("Bare"), set = raw.find("Set");
+    int n = 0;
+#define ALAMO_TEST_TAG(K, N, D)                                         \
+    {                                                                   \
+        ++n;                                                            \
+        CHECK(find_type_field(tags::N.tag) != 0xFFFFFFFFu);             \
+        if (!unset_reads_default(types, bare, tags::N))                 \
+            std::printf("  tags::%s: an unset tag reads another value\n", #N); \
+        CHECK(unset_reads_default(types, bare, tags::N));               \
+    }
+    ALAMO_TYPE_TAGS(ALAMO_TEST_TAG)
+#undef ALAMO_TEST_TAG
+    CHECK(n > 0);
+    CHECK(types.get(set, tags::Guard_Chase_Range) == 250.0f && types.get(set, tags::Ranged_Target_Z_Adjust) == 0.0f);
+    CHECK(!types.get(set, tags::Shield_Requires_Base_Power) && types.get(set, tags::Custom_Hard_XExtent) == 12.0f);
+    CHECK(types.name(set) == "Set" && types.name(static_cast<TypeIndex>(types.size())).empty());
+    std::printf("  type tags: %d handles, defaults checked\n", n);
+}
+
 int main() {
     std::setvbuf(stdout, nullptr, _IONBF, 0);
     log::set_min_level(log::Level::Error);  // the loaders warn by design; tests read diagnostics
@@ -1715,6 +1858,7 @@ int main() {
     test_loader_synthetic();
     test_converters();
     test_types_synthetic();
+    test_retail_squadrons();
     test_enum_converters();
     test_s1_rules();
     test_s1_registries();
@@ -1722,6 +1866,7 @@ int main() {
     test_behavior_scheduling();
     test_store_save();
     test_carried_type();
+    test_type_tags();  // ref6 t01
     integration(env_or("ALAMO_FOC_DATA", "/home/claude/data/foc"), "FoC", true);
     integration(env_or("ALAMO_EAW_DATA", "/home/claude/data/eaw"), "EaW", false);
     std::printf(g_fail ? "alamo_objects_tests: %d failure(s)\n" : "alamo_objects_tests: OK\n", g_fail);

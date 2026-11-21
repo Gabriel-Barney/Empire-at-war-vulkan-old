@@ -2,7 +2,6 @@
 #include "alamo/render/sim_beams.hpp"
 
 #include <algorithm>
-#include <cctype>
 #include <cmath>
 
 #include "alamo/core/hash.hpp"
@@ -14,19 +13,12 @@ namespace alamo::render {
 
 namespace {
 
-bool iequals(std::string_view a, std::string_view b) {
-    if (a.size() != b.size()) return false;
-    for (size_t i = 0; i < a.size(); ++i)
-        if (std::tolower(static_cast<unsigned char>(a[i])) != std::tolower(static_cast<unsigned char>(b[i]))) return false;
-    return true;
-}
-
 uint8_t kind_of_tag(std::string_view tag) {
-    if (iequals(tag, "Tractor_Beam_Attack_Ability")) return kBeamTractor;
-    if (iequals(tag, "Energy_Weapon_Attack_Ability")) return kBeamEnergyWeapon;
-    if (iequals(tag, "Super_Laser_Ability")) return kBeamSuperLaser;
-    if (iequals(tag, "Laser_Defense_Ability")) return kBeamLaserZap;
-    if (iequals(tag, "Leech_Shields_Ability")) return kBeamLeech;
+    if (ascii_iequals(tag, "Tractor_Beam_Attack_Ability")) return kBeamTractor;
+    if (ascii_iequals(tag, "Energy_Weapon_Attack_Ability")) return kBeamEnergyWeapon;
+    if (ascii_iequals(tag, "Super_Laser_Ability")) return kBeamSuperLaser;
+    if (ascii_iequals(tag, "Laser_Defense_Ability")) return kBeamLaserZap;
+    if (ascii_iequals(tag, "Leech_Shields_Ability")) return kBeamLeech;
     return 0;
 }
 
@@ -49,7 +41,7 @@ struct Fields {
     std::vector<std::pair<std::string_view, std::string_view>> kv;
     std::string_view get(std::string_view tag) const {
         for (const auto& [k, v] : kv)
-            if (iequals(k, tag)) return v;
+            if (ascii_iequals(k, tag)) return v;
         return {};
     }
     std::string_view get2(std::string_view a, std::string_view b) const {
@@ -119,7 +111,7 @@ void BeamStyleTable::build(const objects::GameObjectTypes& types, const BeamCons
             std::string_view name;
             for (uint32_t a = 0; a < fc.attr_count[f]; ++a) {
                 const objects::XmlAttr& at = db.attributes()[fc.attr_begin[f] + a];
-                if (iequals(at.name, "Name")) name = at.value;
+                if (ascii_iequals(at.name, "Name")) name = at.value;
             }
             if (name.empty()) continue;
             Fields fields;
@@ -172,6 +164,7 @@ void BeamStyleTable::build(const objects::GameObjectTypes& types, const BeamCons
 uint64_t beam_key(const SnapshotBeam& b) {
     uint64_t k = (static_cast<uint64_t>(static_cast<uint32_t>(b.owner)) << 8) | b.kind;
     if (b.kind == kBeamLaserZap) k |= static_cast<uint64_t>(b.frame & 0xFFFFFFu) << 40;
+    if (b.kind == kBeamDrain) k |= static_cast<uint64_t>(static_cast<uint32_t>(b.target) & 0xFFFFFFu) << 40;  // one per victim
     return k;
 }
 
@@ -210,6 +203,8 @@ std::vector<BeamInstance> beams_from_frame(const InterpolatedFrame& frame, const
                 Vec3 p{};
                 if (!hb.empty() && bone(*target, hb, p)) end = p;
             }
+            Vec3 p{};
+            if (!r.style.end_bone.empty() && bone && bone(*target, r.style.end_bone, p)) end = p;  // vis1 t08: drain
         }
         b.end = f3(end);
         // near end: the owner's bone, else the owner position

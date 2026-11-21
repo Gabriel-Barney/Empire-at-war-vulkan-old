@@ -24,7 +24,6 @@ namespace alamo::render {
 
 class BeamStyleTable {
 public:
-    void set_constants(const BeamConstants& gc) { gc_ = gc; }
     const BeamConstants& constants() const { return gc_; }
     // Reads the specials (<Abilities> sub-objects: Tractor_Beam_Attack_Ability, Energy_Weapon_Attack_Ability,
     // Super_Laser_Ability, Laser_Defense_Ability, Leech_Shields_Ability), Ranged_Target_Z_Adjust and the <HardPoints> names
@@ -57,7 +56,8 @@ using BeamBoneFn = std::function<bool(const SnapshotObject& o, std::string_view 
 // energy weapon ends at the target centre).
 std::vector<BeamInstance> beams_from_frame(const InterpolatedFrame& frame, const BeamStyleTable* styles, const BeamBoneFn& bone);
 
-// Stable identity of a beam across frames: owner id and kind; a zap also carries its battle frame (one-shot).
+// Stable identity of a beam across frames: owner id and kind; a zap also carries its battle frame (one-shot), a drain bolt
+// its victim (one per victim).
 uint64_t beam_key(const SnapshotBeam& b);
 
 #ifdef ALAMO_SIM_HAVE_BATTLES

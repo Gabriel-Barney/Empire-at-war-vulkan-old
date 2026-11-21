@@ -1,38 +1,23 @@
 #include "alamo/galactic/economy.hpp"
+#include "alamo/core/frames.hpp"
 
 #include <algorithm>
 #include <cmath>
 
 #include "alamo/core/dmath.hpp"
+#include "alamo/core/ascii.hpp"
 #include "alamo/objects/type_fields.hpp"
 
 namespace alamo::galactic {
 
 namespace {
 
-bool iequals(std::string_view a, std::string_view b) {
-    if (a.size() != b.size()) return false;
-    for (size_t i = 0; i < a.size(); ++i) {
-        char x = a[i], y = b[i];
-        if (x >= 'A' && x <= 'Z') x = static_cast<char>(x - 'A' + 'a');
-        if (y >= 'A' && y <= 'Z') y = static_cast<char>(y - 'A' + 'a');
-        if (x != y) return false;
-    }
-    return true;
-}
-
-std::string_view trim_ws(std::string_view s) {
-    while (!s.empty() && (s.front() == ' ' || s.front() == '\t' || s.front() == '\r' || s.front() == '\n')) s.remove_prefix(1);
-    while (!s.empty() && (s.back() == ' ' || s.back() == '\t' || s.back() == '\r' || s.back() == '\n')) s.remove_suffix(1);
-    return s;
-}
-
 }  // namespace
 
 ForceSide parse_force_side(std::string_view text) {
-    text = trim_ws(text);
-    if (iequals(text, "Light")) return ForceSide::Light;
-    if (iequals(text, "Dark")) return ForceSide::Dark;
+    text = ascii_trim(text);
+    if (ascii_iequals(text, "Light")) return ForceSide::Light;
+    if (ascii_iequals(text, "Dark")) return ForceSide::Dark;
     return ForceSide::Neutral;
 }
 
@@ -66,13 +51,13 @@ namespace econ {
 
 int32_t fiscal_period_frames(float seconds) {
     const float f = 30.0f * seconds;
-    return static_cast<int32_t>(std::round(f));  // std::round: half away from zero
+    return frames_round(f);  // std::round: half away from zero
 }
 
 int32_t timer_frames(float seconds) {
     const float f = 30.0f * seconds;
     if (!(f > -2147483520.0f && f < 2147483520.0f)) return f > 0.0f ? std::numeric_limits<int32_t>::max() : 0;
-    return static_cast<int32_t>(f);  // truncates toward zero
+    return static_cast<int32_t>(f);  // truncates toward zero  // frame-cast-ok: range-guarded above
 }
 
 float timer_remaining_seconds(int32_t start, int32_t duration, int32_t now) {
@@ -143,9 +128,10 @@ float build_time_t0(int32_t build_time_seconds, float production_speed_factor) {
 
 float tech_time_factor(int32_t starbase_level, int32_t tech_level, const std::array<float, 5>& table) {
     const int32_t d = starbase_level - tech_level;
+    // A2K_T01_BUILD_COST_RE 2.1 [H]: the index is d - 1 (d = 1 -> _0, 3 -> _2, >= 5 -> _4).
     if (d <= 0) return 1.0f;
-    if (d >= 4) return table[4];
-    return table[static_cast<size_t>(d)];
+    if (d >= 5) return table[4];
+    return table[static_cast<size_t>(d - 1)];
 }
 
 float build_time(const BuildTimeInputs& in) {
@@ -196,7 +182,7 @@ float base_speed(float slowest_hyperspace_speed, float faction_factor, float m) 
     return slowest_hyperspace_speed * faction_factor * m;
 }
 
-bool fleet_step(Vec3f& pos, const Vec3f& target, float v, Vec3f* facing) {
+bool fleet_step(Vec3& pos, const Vec3& target, float v, Vec3* facing) {
     const float dx = target.x - pos.x, dy = target.y - pos.y, dz = target.z - pos.z;
     const float len2 = dx * dx + dy * dy + dz * dz;
     if (!(len2 > 0.0f)) {
@@ -207,8 +193,8 @@ bool fleet_step(Vec3f& pos, const Vec3f& target, float v, Vec3f* facing) {
     if (facing) *facing = {dx / len, dy / len, dz / len};
     if (!(v > 0.0f)) return false;
     const float k = v / len;
-    const Vec3f vel{dx * k, dy * k, dz * k};
-    const Vec3f np{pos.x + vel.x, pos.y + vel.y, pos.z + vel.z};
+    const Vec3 vel{dx * k, dy * k, dz * k};
+    const Vec3 np{pos.x + vel.x, pos.y + vel.y, pos.z + vel.z};
     const float rx = target.x - np.x, ry = target.y - np.y, rz = target.z - np.z;
     const float rem = dmath::sqrt(rx * rx + ry * ry + rz * rz);
     const float speed = dmath::sqrt(vel.x * vel.x + vel.y * vel.y + vel.z * vel.z);
@@ -218,14 +204,6 @@ bool fleet_step(Vec3f& pos, const Vec3f& target, float v, Vec3f* facing) {
     }
     pos = target;
     return true;
-}
-
-int32_t hop_frames_1d(float distance, float v) {
-    Vec3f p{0.0f, 0.0f, 0.0f};
-    const Vec3f t{distance, 0.0f, 0.0f};
-    for (int32_t k = 1; k < 10000000; ++k)
-        if (fleet_step(p, t, v, nullptr)) return k;
-    return -1;
 }
 
 float political_delta(int32_t elapsed_frames, float m, float change_seconds) {
@@ -238,6 +216,27 @@ float influence_alignment_factor(ForceSide owner, ForceSide planet, float streng
     if (owner == ForceSide::Neutral || planet == ForceSide::Neutral) return 1.0f;
     if (owner == planet) return 1.0f - strength * bonus;
     return 1.0f + strength * penalty;
+}
+
+std::string build_countdown_speech(std::string_view prefix, float previous, float remaining) {
+    if (prefix.empty()) return {};
+    const int32_t r = static_cast<int32_t>(remaining), p = static_cast<int32_t>(previous);
+    const auto band = [](float t, int32_t v) {  // the value whose change fires the event, by band
+        if (t >= 60.0f) return v / 60 + 1;
+        if (t >= 10.0f) return 1000 + v / 10;
+        return 2000 + v;
+    };
+    if (band(remaining, r) == band(previous, p)) return {};
+    std::string out(prefix);
+    if (remaining >= 60.0f) out += std::to_string(r / 60 + 1) + "_Minutes";
+    else out += std::to_string(r + 1) + "_Seconds";
+    return out;
+}
+
+std::string build_countdown_text(float remaining) {
+    const int32_t r = static_cast<int32_t>(remaining) + 1;
+    const int32_t sec = r % 60;
+    return std::to_string(r / 60) + ":" + (sec < 10 ? "0" : "") + std::to_string(sec);
 }
 
 float political_ramp(float control, float target, float delta) {

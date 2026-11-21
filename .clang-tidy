@@ -1,0 +1,41 @@
+# clang-tidy checks for engine/ and tools/ (docs/BUILD.md, "clang-tidy"). Real-bug checks only: style is not checked, and
+# what the compilers already warn about at /W4 / -Wconversion -Wshadow is left out. clangd shows these in the editor too.
+# Runner: python -I tools/lint/run_tidy.py (needs a clang tree's compile_commands.json, e.g. build-wt-clang).
+# Turned off after the first pass (2026-11-15, 196 sim files), each because every hit was a deliberate idiom here:
+#   integer-division (grid rows, formation rings), misplaced-widening-cast and implicit-widening-of-multiplication-result
+#   (small known-range values), suspicious-memory-comparison (bitwise compares are the determinism-safe choice),
+#   inc-dec-in-conditions, suspicious-stringview-data-usage (from_chars with an end pointer), return-const-ref-from-parameter
+#   (callers pass stored units), empty-catch (noexcept waits and logging), incorrect-roundings (non-negative inputs),
+#   assignment-in-if-condition (style), misc-redundant-expression (x != x / x - x NaN tests). performance-* is off while
+#   tier-3 work is paused (docs/DECISIONS.md, "Current focus").
+Checks: >
+  -*,
+  bugprone-*,
+  -bugprone-easily-swappable-parameters,
+  -bugprone-narrowing-conversions,
+  -bugprone-branch-clone,
+  -bugprone-switch-missing-default-case,
+  -bugprone-macro-parentheses,
+  -bugprone-reserved-identifier,
+  -bugprone-exception-escape,
+  -bugprone-incorrect-roundings,
+  -bugprone-assignment-in-if-condition,
+  -bugprone-integer-division,
+  -bugprone-misplaced-widening-cast,
+  -bugprone-implicit-widening-of-multiplication-result,
+  -bugprone-suspicious-memory-comparison,
+  -bugprone-inc-dec-in-conditions,
+  -bugprone-suspicious-stringview-data-usage,
+  -bugprone-return-const-ref-from-parameter,
+  -bugprone-empty-catch,
+  clang-analyzer-core.*,
+  clang-analyzer-cplusplus.*,
+  clang-analyzer-deadcode.DeadStores,
+  concurrency-mt-unsafe,
+  misc-misplaced-const
+WarningsAsErrors: ''
+HeaderFilterRegex: '.*[/\\](engine|tools)[/\\].*'
+CheckOptions:
+  concurrency-mt-unsafe.FunctionSet: any
+  # int8_t / uint8_t are small integers here (-1 = none), not characters.
+  bugprone-signed-char-misuse.CharTypdefsToIgnore: 'int8_t;std::int8_t'

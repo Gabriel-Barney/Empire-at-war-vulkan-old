@@ -21,7 +21,7 @@ static std::vector<uint8_t> build(int ver, const std::vector<F>& files, bool enc
     // names table
     std::vector<uint8_t> names;
     for (auto& f : files) { p16(names, uint16_t(f.name.size())); names.insert(names.end(), f.name.begin(), f.name.end()); }
-    size_t hdr = ver == 1 ? 8 : ver == 2 ? 20 : 24;
+    size_t hdr = static_cast<size_t>(ver == 1 ? 8 : ver == 2 ? 20 : 24);
     size_t recsz = 20;
     uint32_t data_start = uint32_t(hdr + names.size() + files.size() * recsz);
     // records sorted by crc

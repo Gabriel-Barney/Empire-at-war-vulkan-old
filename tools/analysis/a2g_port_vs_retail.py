@@ -26,8 +26,12 @@ Python 3 standard library only.
 """
 import argparse
 import collections
+import os
 import re
 import sys
+
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'parity'))
+import trace_parsers as tp  # noqa: E402  (tools/parity: the port AI-log reader, shared with the parity harness)
 
 FPS = 30.0
 PAY0, PERIOD = 1351, 1350          # first fiscal payment (mode frame) and the cycle, both sides (A2F_T07 1 point 5)
@@ -185,7 +189,6 @@ def cmd_budget(a):
 
 
 PSTART_RE = re.compile(r'\|PSTART\|plan=(\w+) t=\S+ f=(\d+) fac=(\w+)')
-PLAN_RE = re.compile(r'^(\d+) p(\d+) plan (\d+) (\S+) (for|ended) ?(.*)$')
 # a2h t02 kit (tools/probe_mod/a2f_budget): start number n and the end records of the same script instance (sid)
 REC_RE = re.compile(r'^A2FB1\|P\|([^|]*)\|\d+\|(PSTART|PRET|PEXIT|PFAIL)\|plan=(\w+) t=\S+ f=(\d+) fac=(\w+) (.*)\|END$')
 MJ_RE = re.compile(r'\|MJ\|tag=(\w+) t=\S+ f=(\d+) fac=(\w+) (.*)\|END$')
@@ -248,18 +251,16 @@ def cmd_plans(a):
                 p, fac, c['with_n'], c['PEXIT'], c['PFAIL'], c['PRET'], c['no_end']))
     for path in a.port_log:
         starts, rel, ends = collections.Counter(), collections.Counter(), collections.Counter()
-        with open(path, encoding='utf-8', errors='replace') as f:
-            for line in f:
-                m = PLAN_RE.match(line.strip())
-                if not m or int(m.group(1)) > window:
-                    continue
-                key = (m.group(4), 'p' + m.group(2))
-                if m.group(5) == 'for':
-                    starts[key] += 1
-                else:
-                    ends[key] += 1
-                    if '(released)' in m.group(6):
-                        rel[key] += 1
+        for frame, player, _, name, kind, rest in tp.ai_log_plans(path):
+            if frame > window:
+                continue
+            key = (name, 'p%d' % player)
+            if kind == 'for':
+                starts[key] += 1
+            else:
+                ends[key] += 1
+                if '(released)' in rest:
+                    rel[key] += 1
         print('== port %s, frames 0..%d: plan starts / ended (released)' % (path, window))
         for key in sorted(starts, key=lambda k: (-starts[k], k)):
             if a.only and not any(o in key[0] for o in a.only):
@@ -341,15 +342,13 @@ def cmd_major(a):
     for path in a.port_log or []:
         c = collections.Counter()
         first = {}
-        with open(path, encoding='utf-8', errors='replace') as f:
-            for line in f:
-                m = PLAN_RE.match(line.strip())
-                if not m or m.group(5) != 'for' or int(m.group(1)) > a.window:
-                    continue
-                if 'FLUSHMAJORITEM' in norm_plan(m.group(4)) or 'MAJORITEM' in norm_plan(m.group(6)):
-                    key = (m.group(4), 'p' + m.group(2))
-                    c[key] += 1
-                    first.setdefault(key, int(m.group(1)))
+        for frame, player, _, name, kind, rest in tp.ai_log_plans(path):
+            if kind != 'for' or frame > a.window:
+                continue
+            if 'FLUSHMAJORITEM' in norm_plan(name) or 'MAJORITEM' in norm_plan(rest):
+                key = (name, 'p%d' % player)
+                c[key] += 1
+                first.setdefault(key, frame)
         print('== port %s: flush / reclaim plan starts in frames 0..%d' % (path, a.window))
         for key, cnt in sorted(c.items()):
             print('  %-50s %-4s %4d  first f=%d' % (key[0], key[1], cnt, first[key]))

@@ -5,6 +5,7 @@
 
 #include "alamo/core/file_provider.hpp"
 #include "alamo/video/video.hpp"
+#include "alamo/video/bink_header.hpp"
 #include "ffmpeg_api.hpp"
 
 namespace alamo::video {
@@ -35,7 +36,6 @@ struct BinkDecoder::Impl {
     bool end = false;
 
     std::vector<float> audio;  // queued interleaved PCM
-    int64_t audio_total = 0;
 
     ~Impl() { close(); }
 
@@ -218,7 +218,6 @@ struct BinkDecoder::Impl {
                 audio.resize(base);  // unexpected format: drop
                 return;
         }
-        audio_total += n;
     }
 
     void decode_audio_packet() {
@@ -334,6 +333,13 @@ std::unique_ptr<BinkDecoder> BinkDecoder::open(const alamo::FileProvider& files,
 std::unique_ptr<BinkDecoder> BinkDecoder::open_memory(std::vector<uint8_t> bytes, const OpenOptions& opt,
                                                       std::string* err) {
     std::string e;
+    if (const auto h = probe_bink_header(bytes)) {  // a movie FFmpeg cannot play is named before it is opened (mcx2 t05)
+        const std::string why = bink_unsupported_reason(*h);
+        if (!why.empty()) {
+            if (err) *err = why;
+            return nullptr;
+        }
+    }
     const Api* ff = detail::api(&e);
     if (!ff) {
         if (err) *err = e;
@@ -362,7 +368,6 @@ size_t BinkDecoder::take_audio(std::vector<float>& interleaved) {
     return frames;
 }
 
-int64_t BinkDecoder::audio_frames_decoded() const { return impl_->audio_total; }
 
 bool BinkDecoder::rewind() {
     impl_->audio.clear();

@@ -16,8 +16,10 @@ Related: `AI_TACTICAL.md` §7, `L1_S4_REMAINING.md` §3.6 / §4.2, `STATION_HANG
   +0x20 flags (0x140b154bc): 0x1 heroes, 0x2 "free starting units" (IDC_ALLOW_STARTING_UNIT_PURCHASE /
   TEXT_FREE_STARTING_UNITS), 0x4 super weapons, 0x8 pre-built bases, 0x10 random events, 0x20 record valid. [H]
 - Defaults from GameConstants MP_Default_* (GC+0x590..+0x5b4) in 0x4acc60 / 0x4acf00. The default win
-  condition is chosen by a game-kind enum (not the mode type): kind 2 takes the land default (GC+0x5b8),
-  other kinds the space default (GC+0x5bc), kind 4 forces 0x15. [M]
+  condition is chosen by the lobby / staging **game type** (the `IDC_GAME_TYPE_LIST` enum, UI.md §9.7; not the mode
+  type) in 0x4acf00(options, type, keep): type 1 (campaign) leaves it, type 2 takes the land default (GC+0x5b8),
+  type 4 forces 0x15, any other type the space default (GC+0x5bc). 0x4ad000(options, type) then steps an invalid
+  value to the next valid one: type 2 accepts 0x12..0x14, type 3 0x12 / 0x16, type 4 only 0x15. [H] (ccpgt t01)
 - Has-AI 0x2814d0 = player+0x360 non-null. 0x28b060 = GMM+0x18 == 3 and GMM+0x20 != 1. [H]
   0x140b15490 is a global that skips pre-built pads, the income tick and selects the MP buildable list;
   its meaning is not settled [L].
@@ -33,6 +35,20 @@ Related: `AI_TACTICAL.md` §7, `L1_S4_REMAINING.md` §3.6 / §4.2, `STATION_HANG
 - After the slots: one player per faction with Create_Player_In_Multiplayer_Games and not Is_Playable,
   in FACTIONS.XML order (Pirates, Neutral, Hostile, Sarlacc, Hutts in FoC). Two slots give 7 players with
   Neutral = id 3, which matches the Geonosis trace (human Empire 0, AI Rebel 1, Neutral 3). [H]
+
+### 1.1 AI difficulty: the slot combo and the Gameplay options radio (skm1 t06, REA, 2026-11-17) [H unless tagged]
+
+- Staging slot combos: the single-player staging open path 0xf1230 (and the row rebuild 0x1013f0) fill an AI slot's
+  `IDC_PLAYER_NAME_n` combo from `TEXT_EASY_AI_PLAYER`, `TEXT_MEDIUM_AI_PLAYER`, `TEXT_HARD_AI_PLAYER`, with
+  `TEXT_OPEN_PLAYER` for an unused slot (`TEXT_NO_PLAYER` is the LAN / internet dialogs' text only, 0x271b0 / 0xb4b10).
+  The pick is the slot's difficulty +0x158, copied to the player's AI difficulty +0x3bc (§1). [H strings and xrefs; M row
+  order: Open first, then Easy / Medium / Hard]
+- Gameplay options Accept (`IDD_GAMEPLAY_OPTIONS_DIALOG` handler 0xa0f30): `IDC_RADIO_EASY` / `_MEDIUM` / `_HARD` give 0 / 1 /
+  2, passed to 0x28d760(GMM, d). That stores d at GMM+0xb8 (the session difficulty) and, for every PlayerList player that
+  has an AI (0x2814d0) and is not human (+0x62 == 0), calls Set_Difficulty 0x4b0dc0 on its AIPlayer (+0x360). So the radio
+  changes the difficulty of **every AI player of the running game at once** (Set_Difficulty rescales the health, hard-point
+  health and shields of the player's objects, AI_GALACTIC §1; the tactical multipliers of AI_TACTICAL §4.5 follow the new
+  record). Which later start reads GMM+0xb8 as its default was not traced [M].
 
 ## 2. Start sequence (item 3)
 
@@ -76,6 +92,10 @@ Land_ / Space_Skirmish_Unit_Buy_Credits (+0x28c4 / +0x28c8, 50000 / 100000) have
 - 0x29e960: land uses the type's Company_Units (+0x958/+0x960), space Squadron_Units (+0x978/+0x980);
   each member is created by 0x2b3be0, then grouped (0x2a5a60) and signal 0x1d is sent. With the
   registration flag the objects join the GOM per-player garrison list (GOM+0x550, stride 0x48). [H]
+- Space (skai t21, 2026-11-16, retail Geonosis trace 20261116-003910 frame 1 [H, trace]): the start squadrons stand in
+  rings around their spawn marker (Empire TIE Interceptors: one at the marker, 6 at r ~40, the rest at r ~80; Rebel
+  X-Wings likewise), not in rows. The port places them with the same free ring search as land (`script_member_spots`
+  at the marker) in a space skirmish map battle.
 
 ### 2.3 Space special weapons 0x293d60 (space mode only) [H]
 For each player with a playable faction, Standalone_Space_Maps_Special_Weapon_A (+0x2b08) and _B
@@ -93,6 +113,13 @@ This is where Ground_Empire_Hypervelocity_Gun / Ground_Ion_Cannon in the space t
   (+0x2c8), registered with the AI free store (0x4d31a0), message 0xe7 for the local player and the
   faction speech +0x22a0. In space the pending list is launched by the skirmish station hangar
   (STATION_HANGARS_SOUND §2.4 step 8). 0x287e70 also services the build manager every frame.
+- **Garrison_Upgrade_Ability** (`GarrisonUpgradeAbilityClass`; tru3 t05, 2026-11-20, read from `re_reference/`) [H]:
+  apply 0x6ffc60 appends each `Additional_Garrison_Units` type (ability +0x188, count +0x190, list order, repeats kept)
+  to the owner's list +0x2a8 (append 0x6ffbf0), or with `Apply_To_All_Allies` (+0x178) to the list of every player
+  allied with the owner (0x2823e0: relation 0), index order. Remove 0x6ffe30 erases one occurrence of each type (the
+  first, 0x474a0), from the same players. Can-apply 0x6ffdb0: only in a skirmish (0x28afb0). The validator 0x6fffa0
+  only warns when the list is empty. Shipped: `RL_ / EL_ / RS_ / ES_More_Garrisons_L1_Bonus` (UPGRADEOBJECTS.XML).
+  So the next re-delivery copies the start force plus the upgrade's units.
 
 ### 2.5 Map data that is NOT a start-state source [M]
 - Map mini chunk 0x2B (placement parser 0x39ce40) sets object+0x300, the model ALT / damage-state index
@@ -106,7 +133,9 @@ skirmish): if the pad's data pack (obj+0x150) holds a pre-placed type (+0x18, ma
 empty, and either not skirmish or (option flag 0x8 and the pad type's Respects_Skirmish_Pre_Build_Bases_Option
 +0xe5), the type is created for the pad owner (+0x58) at the build bone (0x42e280) with the pad
 orientation; an under-construction type is replaced by its Tactical_Buildable_Constructed (+0x9f0).
-Then sell/garrison setup, +0x3cb copied, revealed to all players, +0x18 cleared. Otherwise pad anim 0x75.
+Then sell/garrison setup, +0x3cb copied, revealed to all players, +0x18 cleared. Otherwise (a skirmish whose option
+flag 0x8 is off, or a pad type without the flag) the pad plays Pad_Sell 0x75 (0xFFFF, one-shot, blend 0, speed 1) [H,
+tru3 t06]; a pad without a pre-placed type, or not empty, plays nothing.
 
 ### 2.7 The buy-units dialog IDD_SKIRMISH_BUY_UNITS_DIALOG (q6 RE, 2026-11-04) [H unless tagged]
 
@@ -201,6 +230,12 @@ member (+0x958 entry 1) [M].
 - The port's pre-battle buy screen (`engine/apps/game/app/app_screens.cpp`, `open_buy_units`) is a [port] feature: the
   original single-player skirmish has none. Its budget, its use of the bought list as the start force and the screen
   itself stay port decisions (kept by Gabriel 2026-11-04; PHASE4 Decisions).
+- modc t49: with option flag 0x2 off (the GameConstants default `MP_Default_Free_Starting_Units = no`, as Fall of the
+  Republic ships it) the slots start without forces (§2 step 4), so a bought list would never reach the map. The port
+  skips its buy screen then and starts the battle with the map's pre-built bases only; the flag's control
+  (`IDC_ALLOW_STARTING_UNIT_PURCHASE`) names the starting purchase, which the original then does not allow either.
+- modc t48: a slot whose faction has no default forces starts the map battle empty (`SkirmishSetup::empty_slots_ok`),
+  as retail starts Age of Legends' land skirmish (modc t09 A4); only the older hop scaffold (tests) still refuses it.
 - To match the original's list, replace the port's filter (unit kind from `galactic_unit_kind`, first 24 by type index,
   ascending cost) with steps 1–4 above plus the named-hero rule; no cap; order by cost descending. The original's tie
   order is undefined; use type index ascending for equal costs [port].
@@ -212,6 +247,29 @@ member (+0x958 entry 1) [M].
   Say [port] where it is applied.
 - Cost column = `Build_Cost_Credits` (not the tactical cost); no population column.
 
+### 2.8 Slot defaults when the staging dialog opens (modc t40, 2026-11-17) [H unless tagged]
+
+Source: the single-player staging setup 0xf1230 (it fills `IDC_PLAYER_FACTION_n` through 0xfa1c0 and refreshes the slots
+through 0xfe7c0); the profile copy 0x338e80; the faction-change handlers in 0xf2690. Retail check: `tools/probe_mod/modc_t09`
+(A3, R2).
+
+- Two slot records are built: the local player and one AI (name `TEXT_AI_PLAYER_NAME`). The record's faction is an
+  index into the faction combo's list (the playable factions, §2.7 / UI.md 3.7).
+- **Local slot faction** = a global the player profile keeps (the profile copy writes it with the player colour; the
+  faction-change handlers set it when the player picks another faction). Nothing sets it before a profile has one, so a
+  fresh profile starts at index 0 [M for "fresh": the global's start value is 0 in the image; the profile load path that
+  fills it was not read].
+- **AI slot faction** = local index XOR 1; when that index has no faction or the faction is not playable (+0x20a8), 0.
+- **Colours**: local = the profile's colour (kept with the faction); AI = colour 1, or colour 2 when the local colour is 1.
+- **Teams**: the AI's team = local team XOR 1, 0 when that is not below the team count.
+- Retail run 2026-11-17 (a profile whose saved faction index is 1): EAW-Remake (list Rebel, Empire, ...) opens on
+  Empire for the player and Rebel for the AI; Age of Legends (list "= MAJOR POWERS ===", New Republic, ...) opens on New
+  Republic for the player and the header row for the AI. Both match index 1 / (1 XOR 1).
+- Port (modc t47): `FrontEnd::fill_skirmish` / `fill_skirmish_slots` apply the rules above. The local faction and colour
+  come from the port's options profile (`game_options.txt` keys `skirmish_faction` / `skirmish_colour`, written when a
+  skirmish starts). [port] The faction is kept by name, not by row, so a mod with another faction list opens on row 0; the
+  port writes it at Start, not on each faction change; slots 2.. keep row p % 2 and their slot index as colour.
+
 ## 3. Tactical production (item 1)
 
 Build manager at player+0x3a0 (ctor 0x4967a0): queues at +0 and +0x18 (queue index = type
@@ -219,14 +277,76 @@ Tactical_Production_Queue +0xa30 minus 2, so only 2 and 3 are valid), player id 
 modifier map +0x38, price modifier map +0x78. [H]
 
 Enqueue 0x496a20(manager, type, builder, queue) [H]:
-- Check 0x497140: queue 2 or 3; builder friendly; in land the builder is not ion-stunned
-  (behaviour 0x45, 0x4c3700); the type is in the builder type's buildable list for the builder owner's
-  faction (§7); Build_Limit fields +0x880..+0x88c counting queued entries; price and time finite and
-  greater than zero; prerequisites (+0xa18) owned.
+- Check 0x497140(manager, type, builder, counting_self), in read order [H]: type set and `Tactical_Production_Queue`
+  (+0xa30) 2 or 3; the manager's player (+0x30) exists; builder set and friendly to that player (0x39a2c0); in land
+  (mode vf 0xe0 == 1) the builder is not ion-stunned (behaviour 0x45, 0x4c3700); the type is in the builder type's list
+  (0x372c10 / 0x374420, §7) for the faction of the **builder's owner**; `Build_Limit_Lifetime_Per_Player` +0x888 (0
+  fails; above 0, the lifetime count 0x281c70 must stay below it); `Build_Limit_Current_Per_Player` +0x880 (0 fails;
+  above 0, current count 0x281df0 plus queued count 0x281ac0 must stay below it, or may equal it when counting_self);
+  `Build_Limit_Lifetime_For_All_Allies` +0x88c and `Build_Limit_Current_For_All_Allies` +0x884 the same with allies; cost
+  0x496d80 and build time 0x496f00 above 0 and not the 1e18 "never" value; every `Tactical_Build_Prerequisites` type
+  (+0xa18, count +0xa20) owned by the player or an ally (0x281df0 with allies). It also calls 0x370320(type, 0x65) and
+  ignores the result. No credit test here. [M: the three counters' exact meaning is from their use, not read]
+- **Build bar** (command bar refresh 0x31b590, run for tactical modes by 0x30c3b0) [H]. For the selected object without a
+  `TACTICAL_BUILD_OBJECTS` behaviour whose type has a list for the **local player's** faction, each list entry:
+  1. skipped when `Is_Named_Hero` (+0x13) and the heroes option bit (0x140b154bc & 1) is off, or
+     `Is_Skirmish_Tactical_Super_Weapon` (+0x1c) and bit 4 is off;
+  2. **shown** only when 0x288b80(local player, type) passes: `Cinematic_Object_Only` (+0x21) clear, tactical cost
+     0x3743f0 above 0, the same two option bits, company member (+0x2a) and squadron member (+0x29) clear (STRATEGIC_GAPS
+     §1.2), `Affiliation` (+0xef0) contains the player's faction (0x3751a0), every prerequisite owned with allies, no
+     hostile-owned object on the +0xa70 type chain, and the four `Build_Limit_*` fields not reached (built counts only);
+  3. **enabled** = 0x288d70(local player, type, no credit check): the same reads in the order +0x21, cost, +0x2a, +0x29,
+     affiliation, prerequisites, +0x888, +0x88c, +0x880, +0x884, except that the current limits count built **plus
+     queued**; in land it is forced off while the selected builder is ion-stunned;
+  4. "queue open" = the local player has a build manager and its queue for the type's +0xa30 holds fewer than
+     `Max_Build_Queue` (0x140b26f78) entries;
+  5. 0x309af0 draws the button: cost text from 0x496d80 (0x3744e0 for behaviour-0x2a types); the button is greyed
+     (tint 0x808080, disabled state) when cost > credits (player +0x70) and the player is not pay-as-you-go (0x289050),
+     or not enabled, or the queue is full, or, only outside a builder's list while a galactic mode exists, the population
+     test 0x2ac320 fails (the builder-list path sets command bar +0x2042, so a station's or factory's buttons never test
+     population). The tooltip adds no requirement text.
+  The AI's tactical buy path 0x727d30 uses 0x288b80 and then 0x497140 per free-store builder, so the AI follows the
+  same rule. [H]
+- **Not read by any tactical path** [H]: `Required_Timeline` +0xf08, `Required_Ground_Base_Level` +0xf0c,
+  `Required_Star_Base_Level` +0xf10, `Required_Special_Structures` +0xf18, `Required_Planets` +0xf50 (and the +0xf58 /
+  +0xf60 / +0xf80 lists), `Tech_Level` +0x89c, `Build_Advances_Tech_Level` +0x894, `Build_Initially_Locked` +0xc1 and the
+  per-player lock / unlock lists (0x282550 / 0x282580). A byte scan of every instruction with those displacements finds
+  them only in galactic production (0x2804d0 used by the galactic enqueue 0x3fff70 and the galactic build bar 0x3145c0;
+  0x280190; 0x282400), the variant copy 0x36c000, text / encyclopedia code (0x2c4370, 0x367250, 0x36a070) [M on those
+  roles] and AI galactic code (0x726010, 0x6xxxxx), never in 0x31b590 / 0x309af0 / 0x288b80 / 0x288d70 / 0x496a20 /
+  0x497140 / the production event 0x524130 (whose tactical branch calls 0x496a20 directly). So in tactical a special
+  structure, a planet list, a star-base / ground-base level or a tech level is **not compared against anything**: not
+  the station's level, not the structures owned in battle, not the galactic planet. In tactical, the station level is
+  expressed only by which station type (`Skirmish_..._Star_Base_N`, each with its own list) is on the map.
+- Skirmish versus a galactic-launched battle [H]: the predicates have no skirmish branch. Only the inputs differ: the
+  list (`Tactical_Buildable_Objects_Multiplayer` +0x9d0 when 0x28afb0 "is skirmish" or 0x140b15490 is set, else
+  `..._Campaign` +0x9b8) and the cost (+0x9fc in skirmish, else +0x9f8 falling back to +0x9fc below 1). The option bits
+  read from 0x140b154bc apply in both (in a campaign the GC menu's copy) [M]. The rule above is common to all tactical
+  production.
+- [open, modc t50] Retail run modc_t45 (2026-11-17): EAW-Remake's TIE / Arquitens buttons (no `Tactical_Build_
+  Prerequisites`; `Required_Star_Base_Level` 2, `Required_Special_Structures` `E_Shipyard_1`, Arquitens_E also a
+  `Required_Planets` list) are shown but grey on the skirmish station at level 1 and after the level-2 upgrade, and a click
+  queues nothing. The binary rules out the Required_* fields, Tech_Level (99 on the Remake's squadron) and locks as the
+  cause. The Remake sets `Pay_As_You_Go` true (its `Gameconstants.xml`), so the credit test cannot grey either. Because
+  the button is shown, 0x288b80 passed, which reads the same type fields as 0x288d70; what is left in the code is (a) the
+  human's `Tactical_Units` queue (2) already holding `Max_Build_Queue` entries, or (b) a current build limit reached once
+  queued entries are counted (0x281ac0). Neither shows in the loose XML (no `Build_Limit_*` on `TIE_Fighter_Squadron`;
+  the type default of +0x884 / +0x88c is -1, +0x880 / +0x888 assumed the same [M]), so the Remake's cause is still
+  unexplained [L]. Next step: hook 0x288d70's result and 0x497510(manager, 2) in that skirmish (Frida or a TTD trace),
+  and check which XML the game really loads for those types.
 - A human is limited to fewer than GC Max_Build_Queue entries (0x140b26f78, default 5); AI is unlimited.
 - Pay-as-you-go test 0x289050: an AI player always counts as PAYG; a human uses GC Pay_As_You_Go
   (+0x320, false in FoC). Not PAYG (FoC humans): fail if credits < cost, else deduct the full cost at
   enqueue. PAYG: no charge at enqueue. [H]
+- **Correction (bkg1 b0001, `BKG1_RE_ANSWERS.md` 7.3) [H]:** "PAYG" for the AI does not mean the AI pays per
+  frame. 0x289050 returns 1 for every player whose is-human byte +0x62 is 0, and the service 0x498170 only advances
+  the timer for such a player: **the build manager never charges an AI player** (only a PAYG human pays
+  slice / total × cost per frame, 0x498ec0, and stalls when broke). The AI pays in the AI layer instead: 0x6c2d60 at
+  plan instantiation takes the plan's whole net cost (PP+0x44) in one Add_Credits step and holds it as escrow
+  (PP+0x1A4); each accepted order and pad reservation draws the escrow down (0x6c1e80, base price 0x3743f0, clamped
+  at 0); plan end 0x5f6a50 refunds the rest (× Credit_Multiplier for an AI). Cancel refund 0x499000: full cost for a
+  non-PAYG payer, the paid fraction clamp(1 − remaining / total) × cost for a PAYG one, so an AI auto-cancel hands the
+  AI progress × cost [M effect].
 - Entry (ObjectUnderConstruction): type, total time, timer, remaining, player, queue, cost, builder id
   (0x3fffff if none). Local player: queue SFX (type +0x1490 / +0x1450) or speech (+0x1570).
 
@@ -350,8 +470,12 @@ Evaluator 0x344710 (E wins when no blocker is left) [H unless marked]:
 - 0x13: behaviour 0x62 objects enemy to E, Victory_Relevant, alive.
 - 0x14: behaviour 0x5F (DUMMY_GROUND_STRUCTURE) objects enemy to E with HQ_Win_Condition_Relevant (+0x61),
   alive. No Victory_Relevant test.
-- 0x15: CAPTURE_POINT (0x3d) objects whose type has Control_Point_Domination_Condition_Relevant (+0x62);
-  the rest of the body was not read [L].
+- 0x15 (ccpgt t01) [H]: no win unless E's faction is `Is_Playable` (+0x20a8). Candidates: every CAPTURE_POINT
+  (0x3d) object of the GOM's full list (gom +0x38, any owner, E included) whose type has
+  Control_Point_Domination_Condition_Relevant (+0x62). No Victory_Relevant, alive / dying (+0x3a0) or behaviour test.
+  None found: no win. Else E wins when **every** candidate is allied with E (0x39a2c0: relation(E → object owner
+  +0x58) == 0, so E itself or a team ally). A Neutral- or Hostile-owned point (relation 2) blocks like an enemy one.
+  Symmetric for humans and AIs (no "if E is not human" clause as in 0x16). Trigger and timer: §4.2.
 - 0x16 (and campaign 0xf), space only: DUMMY_STAR_BASE objects enemy to E, ignoring dead (0x40), flag
   0x80, non-Victory_Relevant and non-playable-owner ones. None left: E wins. If E is not human, E wins
   only when no remaining starbase is allied (0x39a2c0) with a human player.
@@ -393,7 +517,77 @@ Re-read of 0x344710 cases 0x12–0x14 and of the readers in OBJECT_SCRIPTS §10.
 - Run the check only when a Victory_Relevant object leaves a player (death / removal / owner change), not on spawns,
   and apply the 210-frame declaration countdown.
 - The win condition that is registered is the lobby option's (§2 step 4): 0x12 alone, or 0x13 / 0x14 when the base /
-  HQ option is chosen; 0x12 is still evaluated first on every trigger.
+  HQ option is chosen; 0x12 is still evaluated first on every trigger. (ccpgt t01: 0x344710 only looks at records
+  whose {type, player} equals the request, and 0xeed80 registers exactly one record per player, of the option's type.
+  So a test of a type that was not registered answers "no": in a 0x13 / 0x14 / 0x15 game the 0x12 test never wins.)
+
+### 4.2 Control point domination (ccpgt t01, 2026-11-08) [H unless tagged]
+
+Sources: 0x344710 case 0x15, 0x360d90 (arm), 0x3639d0 (tactical tick), 0x3611f0 (announcer), 0x500e30 / 0x501980
+(capture service), 0x2c0340, 0xeed80, 0x3464b0, 0x39a2c0 / 0x2823e0; FoC MARKERS.XML, GAMECONSTANTS.XML, FACTIONS.XML.
+- **Relevant objects (data):** only `Reinforcement_Point` (MARKERS.XML: CAPTURE_POINT, REINFORCEMENT_POINT, transition
+  10 s, radius 100) sets `Control_Point_Domination_Condition_Relevant Yes`; its six `Reinforcement_Point_PlusN_Cap`
+  variants inherit it. Default false: build pads (also CAPTURE_POINT) never count, and the faction-fixed
+  `Reinforcement_Point_Rebel / _Empire / _Underworld` have neither CAPTURE_POINT nor the flag. Map owner of the
+  shipped points not read [M: Neutral by the §2.1 remap].
+- **Not tested from object loss.** 0x2c0340 never tests 0x15, and its 0x12 / 0x13 / 0x14 / 0x16 tests find no record in
+  a 0x15 game (§4.1 last port note). **Elimination cannot win a 0x15 game**, and a map without a relevant point never
+  ends by victory.
+- **Arm / disarm** (0x360d90(mode, point, old owner, new owner)): its only caller is the capture service 0x501980 via
+  0x500e30, when a capture transition **completes**, before the owner is written (0x38e5a0). Ignored unless the mode is
+  tactical, the monitor exists, the point's type has +0x62 and some player has a {0x15, player} record (0x3464b0).
+  Then: new owner's faction not `Is_Playable` (a point turning Neutral) → disarm. Else collect the relevant points as in
+  0x344710 and skip the changing point itself; if every other one is allied with the new owner (0x39a2c0) → arm:
+  mode +0x2b0 := 1, +0x2b4 := round-half-away(FPS × `Control_Point_Domination_Victory_Time_In_Secs`, GC+0x11b30, 30.0
+  in FoC) = **900 frames**, +0x2b8 := new owner id, announce once; otherwise disarm (+0x2b0 := 0, +0x2b4 / +0x2b8 := −1).
+  An enemy capture always passes through Neutral (L1_S4_REMAINING §4.2), so it disarms on its first transition.
+  Owner changes outside the capture service (Lua `Change_Owner`, 0x501050 resets) do not re-check [M: from the single
+  caller of 0x500e30].
+- **Countdown** (tactical tick 0x3639d0, every tick, not gated by 0x140b15490): while +0x2b0 is set, +0x2b4 −= 1, then
+  the announcer; when +0x2b4 ≤ 0, the monitor exists and no result is ready (0x342dc0), test 0x15 for player +0x2b8
+  (0x346460, hold → queued as usual) and disarm. The test re-checks every relevant point (now with the new owner).
+  A pass declares with the record's 210-frame countdown, so the battle ends ~900 + 210 frames after the last capture.
+  [M: ±1 frame for the order of the capture service and the mode tick in one frame.]
+- **Announcer** 0x3611f0 (presentation): when +0x2b4 equals 60 / 30 / 15 / 5 s × FPS, the local player's faction plays
+  `SFXEvent_HUD_Reinforcement_Point_Owned_*` (local player dominates), `_Ally_Owned_*` (relation 0) or `_Enemy_Owned_*`
+  (relation 1) for that mark; Neutral observers hear nothing. With 30 s the lines are 30 s (at arming), 15 s, 5 s.
+- Shipped `_MP_LAND_*` mini 0A tags (effective file after the patches; UI.md §9.4): `control` in any case on 18 of 24
+  (Bespin, Bothawui, Corellia, Dagobah, Dantooine, Endor, Felucia, Geonosis, Honoghr, Hoth, Hypori, Kamino, Kessel,
+  Mandalore, Naboo, Saleucami, Tatooine, Yavin); empty or blank on Alderaan, Dathomir, Polus, Ryloth, Shola, Utapau.
+  Which maps place `Reinforcement_Point` objects was not checked [M].
+- Mode +0x2b0..+0x2b8 in saves not read [L].
+
+**Port notes**
+- 0x15: count CAPTURE_POINT objects whose type has the flag, any owner, no alive / Victory_Relevant / script-flag test;
+  win for E only if E's faction is playable, at least one point exists and every point is relation 0 to E.
+- Run the check only from the domination timer, never from object loss; register only {0x15, player} records, so no
+  elimination win. Arm / disarm on each completed capture transition of a relevant point (the changing point is
+  skipped, it is about to become the new owner's), timer round(FPS × GC time) = 900, minus 1 per tick, test at ≤ 0,
+  then the usual 210-frame declaration countdown. Keep the timer state in the battle state (sim, CRC-relevant).
+- The announcer is presentation only.
+- Port status (ccpgt t02, 2026-11-08): `BattleConfig::control_point_domination` (alamo_game: the staging screen's Capture
+  Control Points row on a land map; alamo_headless `--skirmish-ai foc-land|skirmish --control-points`) registers only
+  {0x15, player} (skirmish slots; [port] attacker and defender in alamo_game's hop battle), arms / disarms on each completed
+  capture event, counts down per battle tick in the victory check and tests 0x15 at <= 0 (`tactical_battle_victory.cpp`);
+  the timer is in the battle hash (while armed) and the battle save (state version 9). `TacticalBattle::control_point_timer()` /
+  `control_point_leader()` expose the timer for the host.
+- Port status (ccpgu, 2026-11-12): alamo_game plays the announcer (`GameAudioHost::control_point_line`, called from
+  `battle_tick`): the leader's relation to the local player picks `_Owned_` (the local player leads), `_Ally_Owned_` (relation
+  0) or `_Enemy_Owned_` (relation 1); a line plays on the tick the timer reaches 1800 / 900 / 450 / 150 frames and on an arm
+  or re-arm at that value (the shipped 900-frame timer gives the 30 s line at arming, then 15 s and 5 s); a Neutral observer
+  hears nothing. Test `alamo_game_audio_host_tests`.
+- AI in a type-4 game (ccpgu t03, 2026-11-12): `Game.IsLandControlGame` (AI_GALACTIC_TOKENS 0x6e2060: GameModeManager +0x20 ==
+  4) was never set in the port, so the skirmish AI ignored the points. +0x20 is written only when a game starts (from the
+  game setup), so the token is fixed for a battle; in a conquest land skirmish it is 0 ([H] measured, skai t15 2026-11-17:
+  SKAI_T15_PLAN_RETEST "IsLandControlGame is 0 in a conquest skirmish"; a 2026-11-16 reading of 1 was wrong and is
+  reverted). `BattleAi::fill` sets it with `control_point_domination` [port: that win condition stands for type 4]. The shipped data has no other type-4 rule: `May_Lose_Land_Control_Game` (=
+  owns no Reinforcement_Point and IsLandControlGame) doubles `Should_Secure_Victory_Control_Point` (goal
+  Secure_Victory_Control_Point, plan SecureVictoryControlPoint.lua: Produce_Force infantry + vehicle / hero escort, Move_To,
+  Guard_Target), forces `Should_Build_Infantry_Emergency` and blocks unit / structure builds, tech and early upgrades and
+  bunker garrisons until a point is held. Port run `alamo_headless --skirmish-ai foc-land --map _MP_LAND_ENDOR
+  --control-points --ticks 12000`: 0 SecureVictoryControlPoint plans before the fix; after it both AIs start them (first at
+  frame 499; 29 ended, 5 in success) and each holds one or two of the five Reinforcement_Points through the run. Test
+  `test_battle_ai_land_mode` (alamo_sim_battles_ai_tests).
 
 ## 5. Income streams (item 4)
 
@@ -432,6 +626,13 @@ Re-read of 0x344710 cases 0x12–0x14 and of the readers in OBJECT_SCRIPTS §10.
 - Interpolator vf2 0x2c8660: points sorted by x on first use; piecewise linear between points; x below the
   first point or above the last gives 0; fewer than two points gives 0.
 - FoC data: N = 2 gives 9.29, cap 9; N = 4 gives 7; N = 8 gives 5; N > 8 gives 0.
+- **What "used" counts (bkg1 b0001, `BKG1_RE_ANSWERS.md` 7.1) [H]:** 0x2aba70 is not a company count. Each
+  registered company member holds Population_Value / its company's Company_Units count and the float sum is rounded
+  up. Start forces (0x2a4fc0 → 0x29e960 with the population flag off) never count; a landing transport counts the
+  full company from the drop to the unload; Droids_Team has Population_Value 0, heroes 1, structures and pool entries
+  0. Capacity +0x404 is at least 100 (the owned REINFORCEMENT_POINT), so the curve is the limit. TF.Reinforce reads
+  the remaining room once, so one call can drop several companies past the cap. This is why retail fields 13-14
+  companies under a cap of 9, and why pool drops stop when used reaches 9 (frame 15422 in SKAI_T06).
 
 ## 7. Lua build list and Find_Nearest (item 6) [H]
 
@@ -455,7 +656,8 @@ allied with the pad owner), and the structure belongs to its builder, not to the
 - ~~The pre-game buy-units dialog: what it buys and how the 2000 budget is spent.~~ §2.7 (q6, 2026-11-04). Still open:
   which command-bar button / key opens it in battle (0x37760 / 0x36250) [L], and whether the reinforcement placement it
   starts charges credits [M].
-- Body of victory type 0x15 (control point domination). [L]
+- ~~Body of victory type 0x15 (control point domination).~~ §4 / §4.2 (ccpgt t01, 2026-11-08). Still open: which
+  shipped maps place `Reinforcement_Point` objects and their start owner [M]; whether the domination timer is saved [L].
 - Meaning of player+0x180, global 0x140b15490 and predicate 0x35f790. [L]
 - Sort key slot+0xa0 for slots when GMM+0x20 != 1. [M]
 - Whether retail space maps carry PLAYER_<k>_SPAWN_POINT_MARKER objects: the two fighter squadrons per side
@@ -484,15 +686,16 @@ Port status (headless `--skirmish-ai skirmish` / `foc-land`, `tactical_battle_sk
 
 | Item | Port |
 |---|---|
-| §1 slot map | slot 0 / 1 = the two battle players by ascending id (Empire 0, Rebel 1); non-playable players follow in GalacticRules order, not the lobby order [M]. |
-| §2 step 3 credits | MP_Default_Credits for the two slots when the battle starts. |
-| §2.2 starting forces | the factions' Space_ / Land_Skirmish_AI_Default_Forces as the battle's start participants at the slot's start anchor (Player_k / Team_tt spawn markers, bt_skirmish_anchors); no garrison re-delivery (§2.4) [port]. |
+| §1 slot map | slot 0 / 1 = the two battle players by ascending id (Empire 0, Rebel 1); non-playable players follow in GalacticRules order, not the lobby order [M]. skm2 t02 (2026-11-17): alamo_game's skirmish plays every opened staging slot (up to 8): slot k = player k (human 0, the first AI 1, then the slots the player opened), each with its own galaxy planet for its start forces, its faction, team (IDC_PLAYER_TEAM_n - 1, BattleConfig::skirmish_slots) and AI difficulty (slot combo, §1.1; galactic row, galactic and tactical AI). Every slot gets a victory record, income, garrison re-delivery, pre-built base pads and a start anchor (side k: Player_k marker, else the k-th Team_tt marker of its team; [port] land steps back from the last match, space on from the first; no marker: a fallback anchor around the map centre). Relations: the team rule of TACTICAL_COMBAT §2.10 (0x297470: allies = same team, players without a slot have no team) whenever the host gives the slot list; the faction rule stays for alamo_headless. Team_NN structure markers go to the first slot of team NN (BKG3 Q3.1). The land unit cap uses the slot count. |
+| §1.1 Gameplay options difficulty | skm2 t01 (2026-11-17): the Accept sends a port command (PortExtension `AD`, one byte 0..2) so replays reproduce it; at the command phase GameSession sets the session difficulty and every skirmish slot's, then for every non-human AI player in player order: the galaxy's DifficultyAdjustments row (GalacticSim::set_ai_difficulty), the galactic AI (contrast, goal sleep), the running battle (CombatSystem::set_player_difficulty: live units' hull and shield x new / old Health_ / Shield_Multiplier, then the damage multiplier) and its tactical AI (contrast, goal sleep, build-time multiplier), and the tactical setup for later battles. [port] hard-point health is not rescaled (the port's hard-point maximum has no difficulty factor) [open, b0491]. skm2 t03: the tactical perception's `IsDifficulty` (AI_TACTICAL_PERCEPTION, 0x6e0620) reads each AI player's difficulty (it was always 0: the host never filled it), and team mates are allies (relation 0) in the perception, so the friendly-force leaves count them. |
+| §2 step 3 credits | MP_Default_Credits for the two slots when the battle starts. skm1 t01 / t02: alamo_game's skirmish (GameSession, a start_map_battle with BattleConfig::skirmish_map, no galactic hop) passes the staging options (BattleConfig::SkirmishOptions); every galactic player's credits are set to the option credits right before the battle's setup (the scaffold galaxy may have paid income). Flags: heroes (0x1) and super weapons (0x4) gate Is_Named_Hero / Is_Skirmish_Tactical_Super_Weapon production (0x288b80) and the bombing run (0x494410); pre-built base (0x8) gates §2.6; free starting units (0x2) decides whether the slots' start forces are placed. The buy-units screen's list still hides named heroes whatever the option [open]. |
+| §2.2 starting forces | the factions' Space_ / Land_Skirmish_AI_Default_Forces as the battle's start participants at the slot's start anchor (Player_k / Team_tt spawn markers, bt_skirmish_anchors). skm1 t07: the start participants' units are the slot's garrison list; when the last one is gone, after the faction's Garrison_Reinforcement_Delay_Seconds (default 20 s) the start-force types are delivered once: land into the reinforcement pool, space as the pending list the skirmish station hangar launches (§2.4). tru3 t05: Garrison_Upgrade_Ability adds its Additional_Garrison_Units to the slot's garrison list while the upgrade exists (§2.4; SpecialClass::GarrisonUpgrade, TacticalBattle::sk_garrison_upgrade). |
 | §2.3 space special weapons | not placed [port, open]. |
 | §2.5 / §2.6 pre-built pads | t50 rule kept: the Team_NN Command Center and Barracks pads of both slots start built, from MultiplayerStructureMarker data. §2.5 says retail reads that data only in campaign and pre-builds from the map's pre-placed pad type (+0x18), which the port's map reader does not decode [M, open]. |
 | §3 production | land and space skirmish; a finished land company joins the reinforcement pool and arrives by a later Reinforce landing (§3.1, q6 t19, 2026-11-04). Space production still appears in front of its builder [port]. |
-| §4 victory | 0x13 (land) and 0x16 (space) polled each frame, declared at once, reported as 0x0e / 0x0f [port]. |
+| §4 victory | 0x13 (land) and 0x16 (space) polled each frame, declared at once, reported as 0x0e / 0x0f [port]. skm1 t02: the option's win condition per slot (land 0x12 / 0x13 / 0x14, space 0x12 / 0x16; others fall back to the kind's default); 0x12 counts only human / AI owners' Victory_Relevant objects, 0x14 the enemy DUMMY_GROUND_STRUCTURE objects with HQ_Win_Condition_Relevant; a lost tracked object tests 0x12, then (base component) 0x13 and 0x14, (star base) 0x16, only the types the slot has a record of. |
 | §5 income | per-frame float add of (base × multiplier + additive) / interval / 30 for the object's own stream; a mod on the object's own stream (the supply dock) counts while the object lives; mods on other streams are not applied [M]. |
-| §6 unit cap | ConflictFactionInfo::unit_cap_for_players: sorted keys, linear, 0 outside, integer part (2 players: 9); N = the two slots. |
+| §6 unit cap | ConflictFactionInfo::unit_cap_for_players: sorted keys, linear, 0 outside, integer part (2 players: 9); N = the slot count (skm2 t02). |
 | L1_S4 §4.2 capture start gate | 0 in skirmish map battles. |
 | Time limit | none for the skirmish host (the port's 8-minute campaign battle limit is off; the run ends at `--ticks`). |
 | L1_S4 §3.6 pad rule 0x42e400 | a Neutral-faction owner (map props) does not block a pad (BATTLE_TRANSITIONS: "a Neutral player is simply not an enemy"); with `Influences_Capture_Point` defaulting to true, every prop near a pad blocked it before [M]. The Lua `pad_rule` copy (`engine/lua`) still uses the battle's `is_enemy` [open]. Correction (q6 t19, AI_TACTICAL §7.5.1) [H]: 0x42e400 has no Neutral exemption; every alive `Influences_Capture_Point` object not allied (relation ≠ 0) with the pad owner blocks, Neutral-owned ones included, unless it has BASE_SHIELD or DUMMY_GROUND_STRUCTURE. Which shipped props near pads have `Influences_Capture_Point` (default true) decides the effect [open]. Port (q6 t19, 2026-11-04): the exemption is gone, and the candidates are the battle's live units only [port, open], because Neutral props (`Influences_Capture_Point` unset) next to three Utapau pads otherwise stopped every AI build there (AI_TACTICAL §7.5.1 Port notes). |
@@ -505,7 +708,7 @@ builds a Ground Mining Facility (frame 3575), then buys tech 2 and 3, upgrades, 
 Mineral Processors, vehicles and heroes; the Empire stays at its pre-built base with Boba Fett and infantry, builds one
 Mineral Processor, and its Destroy_Structure plans fail. Geonosis (space, idle human Empire): the Rebel's credits at frame
 600 are 2500.0, as in the retail trace; later the Rebel takes fewer extractor pads than retail (2 vs 5 by 5400): its
-Secure_Build_Pad_Space plans (MOVETOLOCATIONRUSH) end in failure 15 frames after they start [open].
+Secure_Build_Pad_Space plans (MOVETOLOCATIONRUSH) end in failure 15 frames after they start [fixed by skai t17, 2026-11-16: the empty EscortForce is not created, SKAI_T17_SPACE_BUILD_RE §1].
 
 skai t02 (the AI takes the enemy base) [open, retail probe]: in the port the Rebel never starts a Destroy_Structure plan.
 Its free store is empty at every solve: its whole army (5 infantry teams and the droids) is at the 2-player land cap of 9
@@ -514,3 +717,16 @@ drops or vehicles count apart), and does retail pre-empt those plans for an atta
 `tools/probe_mod/q2_traces/run_skirmish_land_attack.cmd` (Utapau, idle Empire vs Rebel Medium, 36000 ticks), read with
 `analysis/land_attack.py`. Port run to compare: `alamo_headless --skirmish-ai skirmish --map _MP_LAND_UTAPAU --human EMPIRE
 --ticks 36000`.
+
+skai t07-t11 (2026-11-12) port status: §2.6 pre-built pads = every active pad whose type keeps the default
+Respects_Skirmish_Pre_Build_Bases_Option (only the five generic `<FACTION>_BUILD_PAD`s set it false) starts built with the
+owner's first UC type of its faction row ([port] proxy for the map-saved pre-placed type, vf13 not decoded); Utapau gets 10
+structures per slot, as retail's frame 0. Land start companies stand on the last TEAM_tt spawn marker in map order. The
+skirmish AI pays pad builds (Tactical_Build_Cost_Multiplayer) when it starts one; campaign land battles keep the free AI
+pad builds of L1_S4 §3.6 [port]. Build_Limit_Current_Per_Player: 0 refuses, > 0 refuses at live + queued >= limit
+(STRATEGIC_GAPS 23). A survivor company (Destruction_Survivors) spawns its Company_Units. Imperial Command Center self repair
+and E_Magnetically_Sealed_Structure (Initially_Enabled No) were already as retail.
+
+Answered by the retail runs of 2026-11-08 (skai t06): `SKAI_T06_LAND_RUNS.md` (retail does not take the base in 36000 frames:
+the Command Center survives; pre-built base of 9 structures per slot; default forces on the last TEAM_tt spawn marker; the AI
+pays production at enqueue and pad builds at UC creation; Neutral pads change owner 150 frames after the first unit arrives).

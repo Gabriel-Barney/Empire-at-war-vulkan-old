@@ -23,6 +23,7 @@
 #include <unordered_map>
 #include <vector>
 
+#include "alamo/render/light_pulse.hpp"
 #include "alamo/render/camera.hpp"
 #include "alamo/render/hardpoints.hpp"
 #include "alamo/render/map_scene.hpp"
@@ -71,11 +72,14 @@ struct SimInstanceStats {
     uint32_t fog_faded_out = 0;     // R5: not drawn because their fog alpha fell below kFogHideAlpha
     uint32_t alt_nonzero = 0;       // R4: drawn with a damage alternate (Instance::alt != 0)
     uint32_t bone_hidden_meshes = 0;  // R3: meshes hidden by the clip's per-bone visibility
+    uint32_t script_hidden_meshes = 0;  // mcx6 t04: meshes hidden by Hide_Sub_Object
     uint32_t hardpoint_events = 0;  // R5: hardpoint destructions applied from the frame's events
     uint32_t contained = 0;         // R3: kSnapContained objects (not drawn)
     uint32_t script_hidden = 0;     // q6 t19: Lua Hide(true) objects (SnapshotObject::script_hidden: not drawn, no ghost)
     uint32_t ghosts = 0;            // R5: last-seen ghosts drawn this frame
     uint32_t muzzle_meshes = 0;     // R3: sub-objects shown by muzzle state
+    uint32_t engine_glow_changed = 0;  // bkx1 t05: instances whose engine glow proxies changed visibility
+    uint32_t script_emitters = 0;      // mcx6 t05: instances whose particle proxies a Show_Emitter override changed
     uint32_t attachment_posed = 0;  // R3 T6: Model_To_Attach instances posed by the scene-model source
     uint32_t stealthed = 0;         // R5: drawn with the stealth mesh swap (kSnapStealthMeshes)
     uint32_t stealth_tinted = 0;    // R5: drawn with the Stealth_Color multiply (spring value > 0.01)
@@ -111,12 +115,45 @@ public:
     // visible. Same call rules as the pose source.
     using VisibilitySource = std::function<std::span<const uint8_t>(objects::ObjectId id, const GpuModel& model)>;
     void set_visibility_source(VisibilitySource fn) { visibility_ = std::move(fn); }
+    // mcx6 t04: Lua Hide_Sub_Object (STORYB_T17_HIDDEN_UNITS.md §1.1): the mesh names (upper case) hidden on one object;
+    // a mesh of the drawn model with one of those names (any case) is not drawn, so the render, shadow and selection
+    // passes, which share the instance's mesh mask, leave it out. Empty span = none. Same call rules as the pose source.
+    using HiddenMeshSource = std::function<std::span<const std::string>(objects::ObjectId id)>;
+    void set_hidden_mesh_source(HiddenMeshSource fn) { hidden_meshes_ = std::move(fn); }
+    // mcx6 t05: Lua Show_Emitter (0x581120 -> 0x265ae0, BKX1_RENDER_RE §1.1): per object, the particle prefix groups
+    // (particle_emitter_groups bits) a script showed / hid. Every particle proxy of the drawn model in a hidden group is
+    // hidden, else in a shown group shown, on top of the hardpoint / bone mask (a hide wins when a proxy is in both). On a
+    // SimpleSpace engine-glow unit the pe / pte groups are left to the glow rule, which retail's locomotor service
+    // re-applies every service [M]. {0, 0} = none. Same call rules as the pose source.
+    struct EmitterOverride {
+        uint8_t show = 0, hide = 0;
+    };
+    using EmitterSource = std::function<EmitterOverride(objects::ObjectId id)>;
+    void set_emitter_source(EmitterSource fn) { emitters_ = std::move(fn); }
     // R5 HideWhenFogged presentation (ABILITY_VISUALS 1.4, 0x53ddc0): kSnapFogHidden objects fade out with the critically
     // damped spring of smooth time kFogSpringTime (0.25 s: omega 8 / s), stepped once per new sim tick at dt = 1/30, and
     // are not drawn once their alpha is below kFogHideAlpha (0.025). Types with Last_State_Visible_Under_FOW (type +0x88)
     // switch instantly. `seconds` 0 = instant for every type. Objects new in a frame start at their target.
     static constexpr float kFogHideAlpha = 0.025f;
     void set_fog_smooth_time(float seconds) { fog_smooth_time_ = seconds; }
+    // vis1 t02 (WEATHER_VISUALS §4): land hosts pass the shadow detail of the object blob shadows (blob_shadows.hpp); a
+    // type in blob mode at that detail (0 < detail < Blob_Shadow_Below_Detail_Level) draws without its shadow volume
+    // (Instance::no_shadow), as retail turns the model's stencil shadow off when it creates the blob. < 0 (default): off.
+    void set_blob_shadow_detail(int32_t detail) { blob_detail_ = detail; }
+    // mcx4 t14 (MCX4_T14_RE_ANSWERS "GameConstants.Mouse_Over_Highlight_Scale", 0x3c26c0 from the colour callback
+    // 0x3a0c20): the object under the cursor draws with LIGHT_SCALE.rgb x hover_brighten(scale, amount). [port] the
+    // amount (object +0x44, 0..1) is 1 while hovered; kNoObjectId = none.
+    void set_hover(objects::ObjectId id, float scale) {
+        hover_ = id;
+        hover_scale_ = scale;
+    }
+    static float hover_brighten(float scale, float amount) { return 1.0f + (scale - 1.0f) * amount; }
+    // mcx4 t15 (light_pulse.hpp): the running object light effects by object id and the wall time to evaluate them at.
+    // Null = none. Must outlive the build.
+    void set_light_pulses(const std::map<uint64_t, LightPulse>* pulses, double now) {
+        pulses_ = pulses;
+        pulse_now_ = now;
+    }
     float fog_alpha(objects::ObjectId id) const;  // 1 when unknown
     // R5 stealth presentation (ABILITY_VISUALS 1.1-1.3): per object a critically damped spring 0 -> 1 over the type's
     // Stealth_Transition_Time (or SnapshotObject::stealth_time) towards the fade target (kSnapStealthMeshes: 1, else 0),
@@ -181,7 +218,14 @@ private:
     bool show_damage_ = false;
     PoseSource pose_;  // R3
     VisibilitySource visibility_;  // R3
+    HiddenMeshSource hidden_meshes_;  // mcx6 t04
+    EmitterSource emitters_;          // mcx6 t05
     float fog_smooth_time_ = kFogSpringTime;  // R5
+    int32_t blob_detail_ = -1;                 // vis1 t02
+    objects::ObjectId hover_ = objects::kNoObjectId;  // mcx4 t14: set_hover
+    const std::map<uint64_t, LightPulse>* pulses_ = nullptr;  // mcx4 t15: set_light_pulses
+    double pulse_now_ = 0.0;
+    float hover_scale_ = 1.5f;
     AttachmentPoseSource attach_pose_;  // R3 T6
     bool ghosts_enabled_ = true;        // R5
     std::map<objects::ObjectId, Ghost> ghosts_;  // R5, ordered by id
@@ -196,8 +240,8 @@ private:
 //   * Projectile_Custom_Render 1 / 2: a procedural laser (projectile_laser -> SimInstanceBuilder::lasers(), drawn by
 //     Renderer::set_lasers); the type's ALO is never loaded or drawn;
 //   * otherwise the type's Space_ / Land_Model_Name drawn like an object: projectile_transform (local X = flight direction,
-//     Scale_Factor). `model` is unused (kept for callers).
-assets::Mat3x4 projectile_transform(const SnapshotProjectile& p, const SnapshotTypeInfo* type, const GpuModel* model);
+//     Scale_Factor).
+assets::Mat3x4 projectile_transform(const SnapshotProjectile& p, const SnapshotTypeInfo* type);
 // The laser of a custom-rendered projectile: kind = Projectile_Custom_Render, centred on the position along the flight
 // direction (the render object's local +Y), length = Projectile_Length x Scale_Factor, width, texture slot, colour.
 // False: not a laser type (custom render 0 / unknown) or no width / length.

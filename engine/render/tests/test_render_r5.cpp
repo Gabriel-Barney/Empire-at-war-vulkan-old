@@ -26,6 +26,7 @@
 #include "alamo/core/log.hpp"
 #include "alamo/jobs/job_system.hpp"
 #include "alamo/objects/game_object_types.hpp"
+#include "alamo/render/blob_shadows.hpp"
 #include "alamo/render/fog_view.hpp"
 #include "alamo/render/lod.hpp"
 #include "alamo/render/map_scene.hpp"
@@ -39,6 +40,8 @@
 #include "alamo/render/surface_fx.hpp"
 #include "alamo/rhi/rhi.hpp"
 #include "alamo/vfs/vfs.hpp"
+#include "alamo/test/support.hpp"
+#include "alamo/render/test/gpu.hpp"
 #ifdef ALAMO_R5_HAVE_FOG
 #include "alamo/tactical/fog/fog_of_war.hpp"
 #endif
@@ -51,30 +54,9 @@
 using namespace alamo;
 namespace fs = std::filesystem;
 
-static int g_fail = 0;
-#define CHECK(c)                                                     \
-    do {                                                             \
-        if (!(c)) {                                                  \
-            std::printf("FAIL %s:%d: %s\n", __FILE__, __LINE__, #c); \
-            ++g_fail;                                                \
-        }                                                            \
-    } while (0)
+using ::alamo::test::g_fail;
 
-static std::string env_or_empty(const char* name) {
-#ifdef _MSC_VER
-    char* v = nullptr;
-    size_t len = 0;
-    std::string out;
-    if (_dupenv_s(&v, &len, name) == 0 && v) {
-        out = v;
-        std::free(v);
-    }
-    return out;
-#else
-    const char* v = std::getenv(name);
-    return v ? std::string(v) : std::string();
-#endif
-}
+using ::alamo::test::env_or_empty;
 
 static std::span<const uint8_t> bytes_of(std::string_view s) { return {reinterpret_cast<const uint8_t*>(s.data()), s.size()}; }
 
@@ -267,7 +249,7 @@ static void test_oi_snapshot() {
     quirk.damage_thresholds = {1.0f};
     quirk.damage_alternates = {3};
     CHECK(render::damage_alt_index(quirk, 1.0f) == 3);
-    // R1 authoritative combat source: its states replace the provisional bits of the objects it tracks.
+    // R1 authoritative combat source: its states replace the bits of the objects it tracks.
     render::SimSnapshot s;
     s.objects = {sobj(3, 1, 0, 3), sobj(5, 2, 3, 2)};
     s.hardpoint_destroyed = {1, 0, 1, 1, 0};
@@ -436,6 +418,19 @@ static void test_builder() {
     vis = {1, 1, 1};
     b.build(h, models, main, bg, &st);
     CHECK(st.bone_hidden_meshes == 0 && (main[0].mesh_hidden.empty() || main[0].mesh_hidden[1] == 0));
+    // mcx6 t04 Hide_Sub_Object: the named mesh (any case) hidden on that object only; the mask the shadow and selection
+    // passes share. Shown again when the name is gone.
+    std::vector<std::string> hidden_names = {"flag"};
+    b.set_hidden_mesh_source([&](objects::ObjectId id) {
+        return id == 9 ? std::span<const std::string>(hidden_names) : std::span<const std::string>();
+    });
+    b.build(h, models, main, bg, &st);
+    CHECK(main.size() == 1 && main[0].mesh_hidden.size() >= 2 && main[0].mesh_hidden[0] == 0 && main[0].mesh_hidden[1] == 1);
+    CHECK(st.script_hidden_meshes == 1);
+    hidden_names.clear();
+    b.build(h, models, main, bg, &st);
+    CHECK(st.script_hidden_meshes == 0 && (main[0].mesh_hidden.empty() || main[0].mesh_hidden[1] == 0));
+    b.set_hidden_mesh_source({});
     // R4 ALT selection: every alternate uploaded (kAnyAlt), the default look keeps alt 0.
     const render::MeshSelection all = render::select_meshes_all_lods(*gm.asset, render::kAnyAlt, true, nullptr);
     CHECK(all.mesh_visible == std::vector<uint8_t>({1, 1, 1}) && all.alt == 0);
@@ -963,7 +958,7 @@ static void test_sim_decorations(const render::SurfaceFxLibrary& lib) {
         deco.update(f);
     }
     CHECK(deco.generator_count() == 3 && deco.track_meshes().size() >= 2);
-    // Geometry detail below min_geometry_lod: no new tracks; the object leaves: generators dropped.
+    // The object leaves the frame: its generators are dropped.
     f.tick = 231;
     f.objects.clear();
     deco.update(f);
@@ -1102,43 +1097,9 @@ static void test_real_surface_data() {
 }
 
 // ------------------------------------------------------------------------------------------- GPU
-struct Gpu {
-    rhi::Context ctx;
-    rhi::Allocator alloc;
-    rhi::Uploader up;
-    rhi::FrameRing ring;
-};
+using Gpu = render::test::GpuCore;
 
-struct Offscreen {
-    rhi::Image color, depth;
-    rhi::Buffer readback;
-    uint32_t w = 0, h = 0;
-    bool create(Gpu& g, uint32_t width, uint32_t height) {
-        w = width;
-        h = height;
-        rhi::ImageDesc cd;
-        cd.format = rhi::Format::RGBA8;
-        cd.width = w;
-        cd.height = h;
-        cd.mips = 1;
-        cd.usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT;
-        rhi::ImageDesc dd = cd;
-        dd.format = rhi::Format::D32F;
-        dd.usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT;
-        return g.alloc.create_image(cd, color) && g.alloc.create_image(dd, depth) &&
-               g.alloc.create_buffer(static_cast<VkDeviceSize>(w) * h * 4, VK_BUFFER_USAGE_TRANSFER_DST_BIT, rhi::MemoryUsage::Readback,
-                                     readback);
-    }
-    void destroy(Gpu& g) {
-        g.alloc.destroy(color);
-        g.alloc.destroy(depth);
-        g.alloc.destroy(readback);
-    }
-    std::vector<uint8_t> pixels() const {
-        const auto* p = static_cast<const uint8_t*>(readback.mapped());
-        return std::vector<uint8_t>(p, p + static_cast<size_t>(w) * h * 4);
-    }
-};
+using Offscreen = render::test::OffscreenWithDepth;  // alamo/render/offscreen.hpp
 
 static bool render_frame(Gpu& g, render::Renderer& r, Offscreen& o, const render::ViewMatrices& vm, std::span<const render::Instance> inst,
                          render::GpuModel* resident, render::DrawStats& stats, render::DrawMode mode, const render::RecordOptions& ro,
@@ -1259,7 +1220,7 @@ static void test_gpu_alt(Gpu& g, render::Renderer& r) {
                 CHECK(render_frame(g, r, o, vm, std::span<const render::Instance>(&in, 1), &model, st, render::DrawMode::Unlit, ro));
                 if (model.resident() && st.draws > 0 && st.pending_pipeline == 0 && st.translation_pending == 0) break;
                 r.wait_translations();
-                r.pipelines().wait_idle();
+                r.wait_pipelines();
             }
             const std::vector<uint8_t> px = o.pixels();
             left[alt] = region_luma(px, o.w, 0, 0, o.w / 2, o.h);
@@ -1414,7 +1375,7 @@ static void test_gpu_real(Gpu& g, const std::string& out_dir) {
                    ws.terrain_pending == 0 && ws.water_pending == 0 && ws.decorations.pending == 0 && ws.decorations.fow_draws > 0;
             if (!done && scene.ready()) {
                 rr.wait_translations();
-                rr.pipelines().wait_idle();
+                rr.wait_pipelines();
             }
         }
         CHECK(done);
@@ -1558,7 +1519,7 @@ static void test_gpu_real_stage2(Gpu& g, const std::string& out_dir) {
                    (space ? ws.decorations.space_fow_draws > 0 : ws.decorations.fow_draws > 0) && (!up || tank.resident());
             if (!done && scene.ready()) {
                 rr.wait_translations();
-                rr.pipelines().wait_idle();
+                rr.wait_pipelines();
             }
         }
         CHECK(done);
@@ -2078,6 +2039,231 @@ static void test_stealth_type_table() {
                 static_cast<double>(u.stealth_color[1]), static_cast<double>(u.stealth_color[3]), static_cast<double>(u.stealth_time));
 }
 
+// vis1 t02 (docs/re/WEATHER_VISUALS.md §4): object blob shadows - the shadow-detail rule, the per-object placement and the
+// type fields read from the real data.
+static void test_blob_shadows() {
+    using render::BlobShadowMode;
+    CHECK(render::blob_shadow_mode(0, 99) == BlobShadowMode::None);
+    CHECK(render::blob_shadow_mode(3, 99) == BlobShadowMode::Blob && render::blob_shadow_mode(3, 3) == BlobShadowMode::Stencil);
+    CHECK(render::blob_shadow_mode(2, 3) == BlobShadowMode::Blob && render::blob_shadow_mode(1, 0) == BlobShadowMode::Stencil);
+    const std::string dir = (fs::temp_directory_path() / "alamo_render_r5_tests").string();
+    std::string err;
+    const auto w = render::make_synthetic_sim_world(dir, &err);
+    CHECK(w != nullptr);
+    if (!w) return;
+    render::SnapshotTypeTable table;
+    table.build(w->types, objects::ModeKind::Land);
+    CHECK(table.size() >= 1 && table[0].blob_material.empty() && table[0].blob_size[0] == 1.0f && table[0].blob_below_detail == 0);
+    table.set_blob_shadow(0, "tree_shadow", 60.0f, 40.0f, 99, "B_Chest", 0.75f);
+    std::vector<terrain::ShadowBlobMaterial> mats = terrain::builtin_blob_materials();
+    mats.push_back({"Generic_Shadow", "w_shadow_blob.tga", "", "", terrain::RenderMode::Modulate});
+    mats.push_back({"Tree_Shadow", "w_shadow_tree_blob.tga", "", "", terrain::RenderMode::Modulate});
+    render::BlobShadowBuilder b;
+    b.set_materials(mats);
+    render::InterpolatedFrame f;
+    f.objects = {sobj(1, 10), sobj(2, 20), sobj(3, 30), sobj(4, 40), sobj(5, 50)};
+    for (render::SnapshotObject& o : f.objects) o.flags = render::kSnapDrawable;
+    f.objects[0].facing = {0, 1, 0};
+    f.objects[1].flags |= render::kSnapFogHidden;
+    f.objects[2].flags |= render::kSnapContained;
+    f.objects[3].flags = 0;  // no model
+    f.objects[4].script_hidden = true;
+    const render::BlobBoneFn bone = [](const render::SnapshotObject& o, std::string_view name, Vec3& out) {
+        if (o.id != 1 || name != "B_Chest") return false;
+        out = {o.position.x + 1.0f, 2.0f, 3.0f};
+        return true;
+    };
+    std::vector<terrain::ShadowBlob> out;
+    b.build(f, table, render::kPortShadowDetailOn, bone, out);
+    CHECK(out.size() == 1);
+    if (out.size() == 1) {
+        const terrain::ShadowBlob& s = out[0];
+        CHECK(s.position[0] == 11.0f && s.position[1] == 2.0f);  // the bone's world position, z dropped
+        CHECK(std::fabs(s.rotation - 1.5707964f) < 1e-5f && s.width == 60.0f && s.height == 40.0f && s.intensity == 0.75f);
+        CHECK(s.material == 3);  // Tree_Shadow, matched case-insensitively
+    }
+    b.build(f, table, 0, bone, out);  // shadows off: no blobs
+    CHECK(out.empty());
+    table.set_blob_shadow(0, "No_Such_Material", 5.0f, 5.0f, 3);  // level 3 at detail 3: the stencil shadow, no blob
+    b.set_materials(mats);
+    b.build(f, table, render::kPortShadowDetailOn, nullptr, out);
+    CHECK(out.empty());
+    b.build(f, table, 2, nullptr, out);  // detail 2 < 3: a blob; unknown material -> the default shadow (0)
+    CHECK(out.size() == 1 && out[0].material == 0 && out[0].position[0] == 10.0f);
+    {  // the instance builder drops the shadow volume of a type in blob mode (and only then)
+        render::GpuModel gm;
+        gm.asset = three_bone_model();
+        gm.mesh_hidden.assign(3, 0);
+        FakeModels models;
+        models.model = &gm;
+        render::SimInstanceBuilder ib(table);
+        render::InterpolatedFrame one;
+        one.objects = {sobj(1, 0)};
+        one.objects[0].flags = render::kSnapDrawable;
+        one.tick = 1;
+        std::vector<render::Instance> main, bg;
+        ib.build(one, models, main, bg);  // detail unset: unchanged behaviour
+        CHECK(main.size() == 1 && !main[0].no_shadow);
+        ib.set_blob_shadow_detail(render::kPortShadowDetailOn);  // level 3 type at detail 3: stencil shadow kept
+        ib.build(one, models, main, bg);
+        CHECK(main.size() == 1 && !main[0].no_shadow);
+        table.set_blob_shadow(0, "Tree_Shadow", 30.0f, 30.0f, 99);
+        render::SimInstanceBuilder ib2(table);
+        ib2.set_blob_shadow_detail(render::kPortShadowDetailOn);
+        ib2.build(one, models, main, bg);
+        CHECK(main.size() == 1 && main[0].no_shadow);
+    }
+
+    const std::string root = env_or_empty("ALAMO_FOC_DATA");
+    if (root.empty()) {
+        std::printf("blob shadows: rules OK; real data: ALAMO_FOC_DATA not set, skipped\n");
+        return;
+    }
+    vfs::VfsConfig cfg;
+    cfg.foc_root = root;
+    auto files = vfs::Vfs::create(cfg, &err);
+    CHECK(files != nullptr);
+    if (!files) return;
+    objects::ObjectTypeDatabase db;
+    CHECK(db.load(*files));
+    objects::GameObjectTypes types;
+    CHECK(types.build(db, files.get()));
+    render::SnapshotTypeTable real;
+    real.build(types, objects::ModeKind::Land);
+    const objects::TypeIndex bush = real.find("Prop_Tatooine_Bush00"), scout = real.find("Scout_Trooper");
+    CHECK(bush != objects::kNone && scout != objects::kNone);
+    if (bush == objects::kNone || scout == objects::kNone) return;
+    CHECK(real[bush].blob_material == "Tree_Shadow" && real[bush].blob_below_detail == 99 && real[bush].blob_size[0] == 30.0f &&
+          real[bush].blob_size[1] == 30.0f);
+    CHECK(real[scout].blob_material == "Generic_Shadow" && real[scout].blob_below_detail == 3 && real[scout].blob_size[0] == 18.0f &&
+          real[scout].blob_size[1] == 7.0f && real[scout].blob_bone == "B_Chest");
+    {  // mcx4 t15 (docs/re/MCX4_T15_RE_ANSWERS.md): Exclude_From_Distance_Fade (Prop_Rock_Cluster_02 true) -> no fade cull
+        // ledger: verifies GameObjectType.Exclude_From_Distance_Fade
+        const objects::TypeIndex rock = real.find("Prop_Rock_Cluster_02");
+        CHECK(rock != objects::kNone && real[rock].no_distance_fade && !real[scout].no_distance_fade);
+    }
+    {  // mcx4 t15 (docs/re/MCX4_PRES_RE_ANSWERS_2.md Q7): the light effect shapes; GameConstants Shield_Flash_Scale /
+       // Shield_Flash_Duration feed a type-1 Color_Flash.
+        // ledger: verifies GameConstants.Shield_Flash_Scale
+        // ledger: verifies GameConstants.Shield_Flash_Duration
+        const float base[3] = {1.0f, 1.0f, 1.0f};
+        float o[3];
+        render::LightPulse p;
+        p.type = 1;
+        p.c1[0] = 1.0f;
+        p.c1[1] = 1.1f;
+        p.c1[2] = 1.25f;
+        p.duration = 0.1f;
+        p.start = 10.0;
+        CHECK(render::light_pulse_rgb(p, 10.0, base, o) && std::fabs(o[2] - 1.25f) < 1e-5f);    // starts at C1
+        CHECK(render::light_pulse_rgb(p, 10.05, base, o) && std::fabs(o[2] - 1.125f) < 1e-4f);  // halfway back
+        CHECK(!render::light_pulse_rgb(p, 10.125, base, o) && o[2] == 1.0f && !render::light_pulse_rgb(p, 9.9, base, o));  // over
+        p.type = 3;  // Smooth_Pulse, N = 2 over 1 s: peaks at 0.25 s and 0.75 s
+        p.duration = 1.0f;
+        p.pulses = 2;
+        p.c1[0] = 3.0f;
+        CHECK(render::light_pulse_rgb(p, 10.25, base, o) && std::fabs(o[0] - 3.0f) < 1e-4f);
+        CHECK(render::light_pulse_rgb(p, 10.5, base, o) && std::fabs(o[0] - 1.0f) < 1e-4f);
+        p.type = 2;  // Linear_Pulse: the triangle peaks at the half period
+        CHECK(render::light_pulse_rgb(p, 10.25, base, o) && std::fabs(o[0] - 3.0f) < 1e-4f);
+        p.type = 4;  // Two_Way_Pulse: the second half of each pulse goes to C2
+        p.c2[0] = 0.0f;
+        CHECK(render::light_pulse_rgb(p, 10.375, base, o) && std::fabs(o[0] - 0.0f) < 1e-4f);
+        p.type = 5;  // Continuous_Smooth_Pulse never ends, starts at B
+        CHECK(render::light_pulse_rgb(p, 10.0, base, o) && std::fabs(o[0] - 1.0f) < 1e-4f && render::light_pulse_rgb(p, 99.0, base, o));
+    }
+    {  // mcx4 t14 (docs/re/MCX4_PRES_RE_ANSWERS_3.md Q10): the GUI flash - GUI_Flash_Level 3 -> 4x at the start, back to
+       // 1x over GUI_Rapid_Flash_Duration 0.1 s, three times in a row
+        // ledger: verifies GameConstants.GUI_Flash_Level
+        // ledger: verifies GameConstants.GUI_Rapid_Flash_Duration
+        const float base[3] = {1.0f, 1.0f, 1.0f};
+        float o[3];
+        render::LightPulse p;
+        p.type = 1;
+        p.c1[0] = p.c1[1] = p.c1[2] = 1.0f + 3.0f;
+        p.duration = 0.1f;
+        p.repeats = 3;
+        p.start = 0.0;
+        CHECK(render::light_pulse_rgb(p, 0.0, base, o) && std::fabs(o[0] - 4.0f) < 1e-4f);
+        CHECK(render::light_pulse_rgb(p, 0.15, base, o) && std::fabs(o[0] - 2.5f) < 1e-3f);   // the second flash, halfway
+        CHECK(render::light_pulse_rgb(p, 0.2125, base, o) && o[0] > 3.0f);                     // the third has started
+        CHECK(!render::light_pulse_rgb(p, 0.3125, base, o));
+    }
+    {  // mcx4 t14 (docs/re/MCX4_T14_RE_ANSWERS.md): Mouse_Over_Highlight_Scale 1.5 -> a hovered object up to 1.5x brighter
+        // ledger: verifies GameConstants.Mouse_Over_Highlight_Scale
+        CHECK(render::SimInstanceBuilder::hover_brighten(1.5f, 1.0f) == 1.5f && render::SimInstanceBuilder::hover_brighten(1.5f, 0.0f) == 1.0f);
+        CHECK(render::SimInstanceBuilder::hover_brighten(1.5f, 0.5f) == 1.25f);
+    }
+    uint32_t with_blob = 0, blob_at_on = 0;
+    for (objects::TypeIndex t = 0; t < real.size(); ++t) {
+        if (real[t].blob_material.empty()) continue;
+        ++with_blob;
+        blob_at_on += render::blob_shadow_mode(render::kPortShadowDetailOn, real[t].blob_below_detail) == BlobShadowMode::Blob ? 1u : 0u;
+    }
+    CHECK(with_blob >= 250 && blob_at_on >= 20 && blob_at_on < with_blob);
+    std::printf("blob shadows: %u types with Blob_Shadow_Material_Name, %u draw a blob at Shadow detail On\n", with_blob, blob_at_on);
+}
+
+// mcx6 t05: Lua Show_Emitter's particle prefix groups (BKX1_RENDER_RE §1.1) through the builder's emitter source.
+static void test_script_emitters() {
+    const std::string dir = (fs::temp_directory_path() / "alamo_render_r5_tests").string();
+    std::string err;
+    const auto w = render::make_synthetic_sim_world(dir, &err);
+    CHECK(w != nullptr);
+    if (!w) return;
+    CHECK(render::particle_emitter_groups("PE_Engine") == 0x01 && render::particle_emitter_groups("pte_x") == 0x02 &&
+          render::particle_emitter_groups("PEM_X") == 0x41 && render::particle_emitter_groups("pptw_glow") == 0x20 &&
+          render::particle_emitter_groups("prs") == 0x80 && render::particle_emitter_groups("pgw1") == 0x08 &&
+          render::particle_emitter_groups("pas") == 0x10 && render::particle_emitter_groups("p_smoke") == 0);
+    render::SnapshotTypeTable table;
+    table.build(w->types, objects::ModeKind::Land);
+    auto ma = std::make_shared<assets::ModelAsset>(*three_bone_model());
+    ma->name = "R5_EMITTERS.ALO";
+    ma->proxies.clear();
+    for (const char* n : {"PE_ENGINE", "PI_SPARK", "PEM_X"}) {  // proxy sub-objects 3, 4, 5 (after the 3 meshes)
+        assets::Proxy px;
+        px.name = n;
+        px.bone = 1;
+        px.hidden = std::string_view(n) == "PI_SPARK";  // the model hides the ion-stun sparks
+        ma->proxies.push_back(px);
+    }
+    render::GpuModel gm;
+    gm.asset = ma;
+    gm.max_alt = 1;
+    gm.mesh_hidden.assign(3, 0);
+    FakeModels models;
+    models.model = &gm;
+    render::SimInstanceBuilder b(table);
+    render::SimInstanceBuilder::EmitterOverride eo;
+    b.set_emitter_source([&](objects::ObjectId id) { return id == 9 ? eo : render::SimInstanceBuilder::EmitterOverride{}; });
+    render::InterpolatedFrame f;
+    f.tick = 1;
+    f.objects = {sobj(9, 0), sobj(10, 5)};
+    std::vector<render::Instance> main, bg;
+    render::SimInstanceStats st;
+    const auto hidden = [&](size_t i, size_t sub) { return main[i].mesh_hidden.size() > sub && main[i].mesh_hidden[sub] != 0; };
+    b.build(f, models, main, bg, &st);  // no override: the model's own flags
+    CHECK(main.size() == 2 && !hidden(0, 3) && hidden(0, 4) && !hidden(0, 5) && st.script_emitters == 0);
+    eo.hide = 0x01;  // Show_Emitter("Engines", false): pe* (PEM_X too, prefix length only), object 9 only
+    b.build(f, models, main, bg, &st);
+    CHECK(hidden(0, 3) && hidden(0, 4) && hidden(0, 5) && !hidden(1, 3) && st.script_emitters == 1);
+    eo.hide = 0;
+    eo.show = 0x05;  // Engines and Ion_Stun shown: the model-hidden sparks too
+    b.build(f, models, main, bg, &st);
+    CHECK(!hidden(0, 3) && !hidden(0, 4) && !hidden(0, 5) && hidden(1, 4) && st.script_emitters == 1);
+    eo.show = 0x01;
+    eo.hide = 0x40;  // a hide wins for a proxy in a shown and a hidden group (PEM_X: 0 and 6)
+    b.build(f, models, main, bg, &st);
+    CHECK(!hidden(0, 3) && hidden(0, 5));
+    // A SimpleSpace engine-glow unit: pe / pte are the glow rule's, the script's Engines hide does not apply.
+    eo.show = 0;
+    eo.hide = 0x01;
+    f.objects[0].engine_flags = render::kEngineGlowUnit;
+    f.objects[0].engine_speed_ratio = 1.0f;
+    b.build(f, models, main, bg, &st);
+    CHECK(!hidden(0, 3) && st.script_emitters == 0);
+}
+
 int main() {
     std::setvbuf(stdout, nullptr, _IONBF, 0);
     log::set_min_level(log::Level::Error);
@@ -2090,12 +2276,14 @@ int main() {
     test_snapshot_plumbing();
     test_oi_snapshot();
     test_builder();
+    test_script_emitters();
     test_oi_builder();
     test_stage2_builder();
     test_stealth_spring();
     test_stealth_hardpoint_mask();
     test_stealth_builder();
     test_stealth_type_table();
+    test_blob_shadows();
 #ifdef ALAMO_R5_HAVE_ANIM
     test_anim_visibility();
 #endif

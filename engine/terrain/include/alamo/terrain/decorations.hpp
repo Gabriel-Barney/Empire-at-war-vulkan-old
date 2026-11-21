@@ -133,8 +133,11 @@ struct DecalGeometry {
 // has non-finite corners is rejected with a warning on channel "terrain". Each cell yields at most
 // 2 triangles x a 7-gon (7 vertices, 15 indices), hence kMaxDecalVertices / kMaxDecalIndices.
 // Caps vs the 65 vanilla decals (UM11, the only map with decals): see kMaxMapDecalVertices.
+// limit: guard hostile .ted: decal AABB cells (256x vanilla), rejected + logged
 inline constexpr uint32_t kMaxDecalCells = 1024;  // e.g. 32 x 32 cells = 640 x 640 world units
+// limit: guard derived: 14 x kMaxDecalCells
 inline constexpr uint32_t kMaxDecalVertices = 14u * kMaxDecalCells;
+// limit: guard derived: 30 x kMaxDecalCells
 inline constexpr uint32_t kMaxDecalIndices = 30u * kMaxDecalCells;
 bool build_decal_geometry(const Terrain& terrain, const TerrainDecal& decal, DecalGeometry& out);
 // Every map decal (out[i] <-> terrain.decals[i]) under a per-map budget: a decal whose worst-case
@@ -144,7 +147,9 @@ bool build_decal_geometry(const Terrain& terrain, const TerrainDecal& decal, Dec
 // of calling build_decal_geometry per decal. Caps vs the 65 vanilla decals (UM11: 64 x 15x15, one
 // 19x19 mode 6): largest decal 4 cells / 14 vertices / 36 indices, map 402 vertices / 804 indices
 // -> 256x (cells) and ~160x (map vertices) margin.
+// limit: guard per-map decal budget (~160x vanilla UM11), skip + log
 inline constexpr uint32_t kMaxMapDecalVertices = 65536;
+// limit: guard derived: 6 x kMaxMapDecalVertices
 inline constexpr uint32_t kMaxMapDecalIndices = 6u * kMaxMapDecalVertices;
 size_t build_map_decal_geometry(const Terrain& terrain, std::vector<DecalGeometry>& out);
 struct DecalFade {
@@ -194,8 +199,6 @@ struct BlobGeometry {
 bool build_blob_geometry(const Terrain& terrain, const ShadowBlob& blob, RenderMode mode, BlobGeometry& out);
 // Colour rules of 3.3 (0x12ff60), returned as B, G, R, A.
 std::array<uint8_t, 4> blob_vertex_color(RenderMode mode, const float (&rgba)[4], float alpha);
-// Rewrites only the colours (the engine does this when only the intensity changes).
-void set_blob_color(BlobGeometry& g, RenderMode mode, const ShadowBlob& blob);
 
 // ---------------------------------------------------------------- map tracks (types 3 / 5)
 struct SplineSample {
@@ -211,6 +214,7 @@ struct SplineSample {
 // Hostile input: a track with more than kMaxTrackPoints finite control points (checked before
 // anything is allocated), or whose arc length or any sample is non-finite (e.g. coordinates near
 // FLT_MAX overflowing the spline), yields no samples (logged on channel "terrain").
+// limit: guard hostile .ted: track control points (~110x vanilla), no samples
 inline constexpr uint32_t kMaxTrackPoints = 4096;  // vanilla max 37 (509 tracks): ~110x margin
 std::vector<SplineSample> sample_track_spline(const TerrainTrack& track, uint32_t max_samples = 16384);
 
@@ -236,15 +240,20 @@ struct TrackGeometry {
 // spans the whole track, coarser); either clip logs a warning on channel "terrain". Caps vs the
 // 509 vanilla tracks (24 maps): largest track 642 vertices / 2556 indices (214 rows, profile 3),
 // largest map 3096 vertices / 9612 indices -> ~10-25x margin.
+// limit: guard hostile .ted: track profile entries (truncated, logged)
 inline constexpr uint32_t kMaxTrackProfile = 32;
+// limit: guard per-track ribbon vertices (~25x vanilla); rows coarsened
 inline constexpr uint32_t kMaxTrackVertices = 16384;
+// limit: guard derived: 6 x kMaxTrackVertices
 inline constexpr uint32_t kMaxTrackIndices = 6u * kMaxTrackVertices;
 bool build_track_geometry(const Terrain& terrain, const TerrainTrack& track, TrackGeometry& out);
 // Every map track (out[i] <-> terrain.tracks[i]) under a per-map budget: a track whose ribbon
 // would push the running totals over kMaxMapTrackVertices / kMaxMapTrackIndices is skipped (empty
 // mesh, rows = columns = 0, logged); the check runs after sampling the spline and before the
 // ribbon is allocated. Returns the number of ribbons built.
+// limit: guard per-map ribbon budget (~21x vanilla), skip + log
 inline constexpr uint32_t kMaxMapTrackVertices = 65536;
+// limit: guard derived: 6 x kMaxMapTrackVertices
 inline constexpr uint32_t kMaxMapTrackIndices = 6u * kMaxMapTrackVertices;
 size_t build_map_track_geometry(const Terrain& terrain, std::vector<TrackGeometry>& out);
 // Texture-matrix translation (frac(t * u_speed), frac(t * v_speed)); t = seconds since attach.
@@ -290,6 +299,7 @@ public:
         float distance = 0.0f;           // head distance when the point was dropped
         bool gap = false;                // drawn with alpha 0
     };
+    // limit: guard dynamic trail points; a longer jump restarts the trail [L]
     static constexpr size_t kMaxPoints = 4096;
 
     explicit DynamicTrackGenerator(const DynamicTrackParams& params);

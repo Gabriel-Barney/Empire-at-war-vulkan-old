@@ -1,6 +1,6 @@
 // N1 save / load of the galactic AI (GalacticAiWorld::write / read; contract alamo/core/save_file.hpp).
 //
-// LAYOUT (u32 version 2 first; every count before its items; maps in key order, lists in their own order):
+// LAYOUT (u32 kWorldVersion first; every count before its items; maps in key order, lists in their own order):
 //   shape        AI player pattern, plan library size, planet count (validated against the rebuilt world)
 //   counters     now, perception frame, market frame, current plan, the six id counters, orders / rejected
 //   gate         AiEnableGate
@@ -9,7 +9,8 @@
 //   lua world    the AI's own LuaPlayerWorld (Suspend_AI flag, per-player script state, pending requests) and the
 //                world's GlobalValue map
 //   players      per AI player (index order): AiContext (goals, templates, learning, budget, clocks), known objects,
-//                pending desire bonuses, reachability caches (per frame / 10 s source lists), AiPathFinder, free-store VM
+//                pending desire bonuses, reachability caches (10 s source lists, the per-target 10 s stage lists),
+//                AiPathFinder, free-store VM
 //   plans        PlanInstance + its Lua VM; task forces; blocking statuses; PotentialPlans; build tasks, the pending
 //                list, the planet build queues, the market's per-frame delivery floods, free-store reservations and
 //                moves, PAYG reclaims
@@ -25,9 +26,9 @@
 // name, then the AI's host hooks (players world, AI host, markup host) are re-pointed at this world.
 //
 // NOT SAVED (rebuilt or diagnostic): definitions, plan library, equations, type info / masks, the equation-name and
-// team-type lookup caches, planet Layer_Z_Adjust values (static data), the per-player perception memories handed to the
-// S2 resolver and the resolver itself (copies of GalacticPerception's, rebuilt), the token resolver's neighbour lists,
-// the path finders' matrices (rebuilt from their saved inputs and checked against the saved digest), the decision log,
+// team-type lookup caches, planet Layer_Z_Adjust values and the planet node rank (static data), the per-player
+// perception memories handed to the S2 resolver and the resolver itself (copies of GalacticPerception's, rebuilt), the
+// token resolver's neighbour lists, the path finders' matrices (rebuilt from their saved inputs and checked against the saved digest), the decision log,
 // Lua error lists and the proposal statistics (diagnostics), host attachments (order sink, story worlds, the
 // session GlobalValue store, sim hooks registered by start()).
 //
@@ -35,7 +36,10 @@
 // only part read in place, is read after the whole stream validated; then everything is committed.
 #include <algorithm>
 #include <array>
+#include <cassert>
 #include <span>
+#include <string>
+#include <type_traits>
 
 #include "ai_save_io.hpp"
 #include "galactic_ai_impl.hpp"
@@ -46,21 +50,76 @@ using save::get_vec;
 using save::put_vec;
 
 namespace {
-constexpr uint32_t kWorldVersion = 3;  // 2: pristine pooled VMs by reference; 3: AI player types (q6 t07)
+// 2: pristine pooled VMs by reference; 3: AI player types (q6 t07); 4 (cu12 t14): the status records' orders_out byte
+// removed (never set or read); 5 (A2k t02): per-target stage lists; 6 (a2l t03): the per-frame reachability cache
+// removed (galactic blocked() reads the per-target lists), the task force's stage area (TF +0x100) after its stage;
+// 7 (q2f t09): the task force's sync gather state after its stage area; 8 (a2m t02): the task force's FleetObject (TF
+// +0x120) after its sync state, the MoveTo status's fleet after its mode.
+// 9 (mcx4 t05): + each build task's claim frame; 10 (mcx8 t12): + each pending desire bonus's blocking status.
+constexpr uint32_t kWorldVersion = 10;
 // 2: logic frame, player conflict stamps, conflict observer (q6 t03); 3: leaf cache keyed by (leaf, instance, system player,
-// parameter set) with each entry's parameters, the 0xE visible flags and the last seen surface units (q6 t18)
-constexpr uint32_t kResolverVersion = 3;
+// parameter set) with each entry's parameters, the 0xE visible flags and the last seen surface units (q6 t18); 4 (ref4
+// t02): + each cached parameter's converted enum value (ParamValue::enum_value: the category mask a 0xE recompute reads).
+// Version 3 still loads, its parameters' enum values 0 as before.
+constexpr uint32_t kResolverVersion = 4;
+constexpr uint32_t kResolverVersionNoEnumValue = 3;
+
+// REF4 t02: ByteWriter's calls into a StateHasher, so a write list is also a CRC list (GalacticSimTokenResolver).
+class HashWriter {
+public:
+    explicit HashWriter(StateHasher& h) : h_(h) {}
+    HashWriter& u8(uint8_t v) {
+        h_.u8(v);
+        return *this;
+    }
+    HashWriter& u32(uint32_t v) {
+        h_.u32(v);
+        return *this;
+    }
+    HashWriter& i32(int32_t v) {
+        h_.i32(v);
+        return *this;
+    }
+    HashWriter& u64(uint64_t v) {
+        h_.u64(v);
+        return *this;
+    }
+    HashWriter& f64(double v) {
+        h_.f64(v);
+        return *this;
+    }
+    HashWriter& boolean(bool v) {
+        h_.boolean(v);
+        return *this;
+    }
+    HashWriter& str(const std::string& v) {
+        h_.str(v);
+        return *this;
+    }
+
+private:
+    StateHasher& h_;
+};
+template <class W>
+constexpr bool kHashing = std::is_same_v<W, HashWriter>;
+// A field written by the save and left out of the CRC (the lint reads save_only's arguments as saved, not hashed).
+template <class W>
+void save_only(W& w, uint64_t v) {
+    if constexpr (!kHashing<W>) w.u64(v);
+}
 
 // ---- perception parameters (a leaf cache entry's bindings copy) ----
-void put_param(ByteWriter& w, const Param& p) {
+template <class W>
+void put_param(W& w, const Param& p) {
     w.str(p.name);
     w.u8(static_cast<uint8_t>(p.value.kind));
     w.f64(p.value.number);
     w.str(p.value.text);
     w.u32(static_cast<uint32_t>(p.value.enum_values.size()));
     for (const std::string& e : p.value.enum_values) w.str(e);
+    w.u64(static_cast<uint64_t>(p.value.enum_value));  // version 4
 }
-bool get_param(ByteReader& r, Param& p) {
+bool get_param(ByteReader& r, Param& p, uint32_t version) {
     p.name = r.str();
     const uint8_t kind = r.u8();
     if (kind > static_cast<uint8_t>(ParamValue::Kind::Identifier)) r.fail();
@@ -69,8 +128,10 @@ bool get_param(ByteReader& r, Param& p) {
     p.value.text = r.str();
     p.value.enum_values.resize(save::count(r, 4));
     for (std::string& e : p.value.enum_values) e = r.str();
+    if (version != kResolverVersionNoEnumValue) p.value.enum_value = static_cast<int64_t>(r.u64());
     return r.ok();
 }
+// limit: guard save decode: nested AI global value depth, refuses
 constexpr int kMaxValueDepth = 32;
 
 // ---- objects ----
@@ -293,10 +354,9 @@ struct StagedPlayer {
     AiContext ctx{AiMode::Galactic};
     std::set<objects::ObjectId> known;
     std::vector<PendingBonus> bonuses;
-    int64_t reach_frame = -1;
-    std::vector<std::vector<uint8_t>> reach;
     AiPathFinder paths;
     std::array<PlayerAi::SourceList, 6> sources;
+    std::vector<std::array<PlayerAi::SourceList, 6>> stage_lists;
     bool has_fs = false;
     std::unique_ptr<lua::LuaVm> fs_vm;  // null with has_fs: keep the current VM (tests without Lua state)
 };
@@ -307,8 +367,19 @@ bool valid_planet_or_none(PlanetIndex p, size_t planets) { return p == kInvalidP
 
 // ================================================================ GalacticSimTokenResolver
 
+// REF4 t02: write() and hash() walk one list (visit_saved); before, the resolver (its leaf cache included) had no CRC.
 void GalacticSimTokenResolver::write(ByteWriter& w) const {
     w.u32(kResolverVersion);
+    visit_saved(w);
+}
+
+void GalacticSimTokenResolver::hash(StateHasher& h) const {
+    HashWriter hw(h);
+    visit_saved(hw);
+}
+
+template <class W>
+void GalacticSimTokenResolver::visit_saved(W& w) const {
     w.i32(frame_);
     w.u32(static_cast<uint32_t>(stamp_space_.size()));
     for (const auto* v : {&stamp_space_, &stamp_ground_, &stamp_conversion_, &stamp_corruption_, &last_owner_})
@@ -327,7 +398,7 @@ void GalacticSimTokenResolver::write(ByteWriter& w) const {
         w.u32(static_cast<uint32_t>(e.params.size()));
         for (const Param& p : e.params) put_param(w, p);
     }
-    w.u64(hits_);
+    save_only(w, hits_);  // a statistic (cache_hits)
     // version 2 (q6 t03)
     w.i32(logic_frame_);
     for (const std::vector<int32_t>& s : player_stamps_) {
@@ -357,7 +428,7 @@ void GalacticSimTokenResolver::write(ByteWriter& w) const {
 
 bool GalacticSimTokenResolver::read(ByteReader& r) {
     const uint32_t version = r.u32();
-    if (!r.ok() || version < 1 || version > kResolverVersion) return false;
+    if (!r.ok() || (version != kResolverVersion && version != kResolverVersionNoEnumValue)) return false;
     const int32_t frame = r.i32();
     const uint32_t n = save::count(r, 22);
     if (!r.ok() || (n != 0 && n != sim_->planets().size())) return false;
@@ -373,17 +444,9 @@ bool GalacticSimTokenResolver::read(ByteReader& r) {
         e = r.u8();
         if (e > 1) r.fail();
     }
-    std::map<CacheKey, Entry> cache;
-    const uint32_t nc = save::count(r, version >= 3 ? 32 : 40);
+    LeafCache cache;  // sp4a: the resolver's map type (same key order)
+    const uint32_t nc = save::count(r, 32);
     for (uint32_t i = 0; i < nc && r.ok(); ++i) {
-        if (version < 3) {  // the old key carried Target / Enemy / Human: parsed and dropped (the cache restarts empty)
-            (void)r.str();
-            for (int f = 0; f < 5; ++f) (void)r.i32();
-            (void)r.str();
-            (void)r.f64();
-            (void)r.i32();
-            continue;
-        }
         CacheKey k;
         k.leaf = r.str();
         k.inst = r.i32();
@@ -394,62 +457,44 @@ bool GalacticSimTokenResolver::read(ByteReader& r) {
         e.stamp = r.i32();
         e.params.resize(save::count(r, 18));
         for (Param& p : e.params)
-            if (!get_param(r, p)) break;
+            if (!get_param(r, p, version)) break;
         if (!cache.empty() && !(cache.rbegin()->first < k)) r.fail();
         cache.emplace_hint(cache.end(), std::move(k), std::move(e));
     }
     const uint64_t hits = r.u64();
-    // version 2 (q6 t03); a version-1 image: no stamps, the observer re-synchronises at its next pass
-    int32_t logic_frame = frame;
+    const int32_t logic_frame = r.i32();
     std::array<std::vector<int32_t>, 4> stamps;
-    uint32_t log_seen = kLogUnseen;
-    ObservedConflict active;
-    if (version >= 2) {
-        logic_frame = r.i32();
-        for (std::vector<int32_t>& s : stamps) {
-            s.resize(save::count(r, 4));
-            for (int32_t& x : s) {
-                x = r.i32();
-                if (x < -1) r.fail();
-            }
+    for (std::vector<int32_t>& s : stamps) {
+        s.resize(save::count(r, 4));
+        for (int32_t& x : s) {
+            x = r.i32();
+            if (x < -1) r.fail();
         }
-        log_seen = r.u32();
-        active.valid = r.boolean();
-        active.kind = r.u8();
-        active.planet = r.u32();
-        active.attacker = r.i32();
-        active.defender = r.i32();
-        const uint8_t flags = r.u8();
-        if (flags > 15) r.fail();
-        active.linked = (flags & 1u) != 0;
-        active.space_stamped = (flags & 2u) != 0;
-        active.ground_stamped = (flags & 4u) != 0;
-        active.in_battle = (flags & 8u) != 0;
     }
-    // version 3 (q6 t18); older: no visible flags, the surface units as the sim holds them now (no landing at the next pass)
-    std::vector<std::vector<uint32_t>> visible;
-    std::vector<std::vector<int32_t>> surface;
-    if (version >= 3) {
-        visible.resize(save::count(r, 4));
-        for (std::vector<uint32_t>& row : visible) {
-            row.resize(save::count(r, 4));
-            for (uint32_t& x : row) x = r.u32();
-        }
-        surface.resize(save::count(r, 4));
-        if (!surface.empty() && surface.size() != n) r.fail();
-        for (std::vector<int32_t>& ids : surface) {
-            ids.resize(save::count(r, 4));
-            for (int32_t& id : ids) id = r.i32();
-            if (!std::is_sorted(ids.begin(), ids.end())) r.fail();
-        }
-    } else if (n != 0) {
-        const auto planets = sim_->planets();
-        surface.resize(n);
-        for (size_t i = 0; i < n; ++i) {
-            for (const ObjectHandle u : planets[i].surface)
-                if (sim_->store().alive(u)) surface[i].push_back(sim_->store().id(u));
-            std::sort(surface[i].begin(), surface[i].end());
-        }
+    const uint32_t log_seen = r.u32();
+    ObservedConflict active;
+    active.valid = r.boolean();
+    active.kind = r.u8();
+    active.planet = r.u32();
+    active.attacker = r.i32();
+    active.defender = r.i32();
+    const uint8_t flags = r.u8();
+    if (flags > 15) r.fail();
+    active.linked = (flags & 1u) != 0;
+    active.space_stamped = (flags & 2u) != 0;
+    active.ground_stamped = (flags & 4u) != 0;
+    active.in_battle = (flags & 8u) != 0;
+    std::vector<std::vector<uint32_t>> visible(save::count(r, 4));
+    for (std::vector<uint32_t>& row : visible) {
+        row.resize(save::count(r, 4));
+        for (uint32_t& x : row) x = r.u32();
+    }
+    std::vector<std::vector<int32_t>> surface(save::count(r, 4));
+    if (!surface.empty() && surface.size() != n) r.fail();
+    for (std::vector<int32_t>& ids : surface) {
+        ids.resize(save::count(r, 4));
+        for (int32_t& id : ids) id = r.i32();
+        if (!std::is_sorted(ids.begin(), ids.end())) r.fail();
     }
     if (!r.ok() || !r.done()) return false;
     visible_ = std::move(visible);
@@ -491,6 +536,8 @@ void GalacticAiWorld::set_save_lua_state(bool on) { impl_->lua_state = on; }
 
 void GalacticAiWorld::write(ByteWriter& w) const {
     const Impl& m = *impl_;
+    // bkg2 b0099: lost_tfs / lost_members are neither saved nor hashed; every prune_tf caller drains them in the frame.
+    assert(m.lost_tfs.empty() && m.lost_members.empty());
     const objects::ObjectStore& st = m.store;
     w.u32(kWorldVersion);
     // ---- shape ----
@@ -546,15 +593,19 @@ void GalacticAiWorld::write(ByteWriter& w) const {
             w.i32(b.target);
             w.f32(b.bonus);
             w.i64(b.deadline);
+            w.i32(b.status);  // v10
         }
-        w.i64(p.reach_frame);
-        w.u32(static_cast<uint32_t>(p.reach.size()));
-        for (const std::vector<uint8_t>& v : p.reach) put_vec(w, v);
         p.paths.write(w);
         for (const PlayerAi::SourceList& s : p.sources) {
             w.i64(s.frame);
             put_vec(w, s.planets);
         }
+        w.u32(static_cast<uint32_t>(p.stage_lists.size()));  // per-target lists (0 or the planet count)
+        for (const auto& levels : p.stage_lists)
+            for (const PlayerAi::SourceList& s : levels) {
+                w.i64(s.frame);
+                put_vec(w, s.planets);
+            }
         w.boolean(p.fs_vm != nullptr);
         if (p.fs_vm) put_vm(w, m.lua_state, *p.fs_vm);
     }
@@ -593,6 +644,14 @@ void GalacticAiWorld::write(ByteWriter& w) const {
         put_vec(w, t.wanted_source);
         put_vec(w, t.builds);
         w.i32(t.stage);
+        w.i32(t.area);
+        w.boolean(t.sync);
+        w.boolean(t.sync_started);
+        w.f64(t.sync_left);
+        w.i64(t.sync_frame);
+        put_handles(w, st, t.sync_units);
+        put_vec(w, t.sync_etas);
+        w.u32(t.fleet);
         w.boolean(t.had_units);
         w.boolean(t.no_units_sent);
         w.boolean(t.alive);
@@ -608,8 +667,8 @@ void GalacticAiWorld::write(ByteWriter& w) const {
         w.u8(static_cast<uint8_t>(s.result));
         w.u32(s.dest);
         w.u8(s.mode);
+        w.u32(s.fleet);
         w.i64(s.started);
-        w.boolean(s.orders_out);
         w.u8(static_cast<uint8_t>(s.op));
         w.f64(s.amount);
     }
@@ -655,7 +714,7 @@ void GalacticAiWorld::write(ByteWriter& w) const {
         w.i64(b.created);
         w.i64(b.next_poll);
         w.boolean(b.charged);
-        w.f32(b.charge);
+        w.f32(0.0f);  // former BuildTask::charge (always 0; dropped in a2m t05), kept so version 8 saves still read
         w.i32(b.queue_id);
         w.u32(b.producing_at);
         w.i32(b.queue_entries_before);
@@ -663,6 +722,7 @@ void GalacticAiWorld::write(ByteWriter& w) const {
         w.i32(b.category);
         w.boolean(b.listed);
         w.boolean(b.reclaimed);
+        w.i64(b.claimed);  // v9
     }
     put_vec(w, m.pending_builds);
     w.u32(static_cast<uint32_t>(m.planet_queues.size()));
@@ -749,7 +809,10 @@ bool GalacticAiWorld::read(ByteReader& r) {
             if (!committed) rt.set_vms_created(before);
         }
     } guard{*m.runtime, m.runtime->vms_created()};
-    if (r.u32() != kWorldVersion || !r.ok()) return false;
+    // 6 and 7 are still read: a version-6 task force has no sync gather state; before 8 there is no FleetObject (elected
+    // again on first use) and a MoveTo status takes its task force's FleetObject at its next step.
+    const uint32_t version = r.u32();
+    if (version < 6 || version > kWorldVersion || !r.ok()) return false;
     // ---- shape: the loader rebuilt the same session ----
     if (r.u32() != m.ai.size() || !r.ok()) return false;
     std::vector<uint8_t> present(m.ai.size());
@@ -845,18 +908,23 @@ bool GalacticAiWorld::read(ByteReader& r) {
             b.target = r.i32();
             b.bonus = r.f32();
             b.deadline = r.i64();
+            if (version >= 10) b.status = r.i32();  // older saves: no blocking status
             if (b.goal_type >= goal_types) r.fail();
         }
-        sp.reach_frame = r.i64();
-        sp.reach.resize(save::count(r, 4));
-        if (!sp.reach.empty() && sp.reach.size() != 6) r.fail();
-        for (std::vector<uint8_t>& v : sp.reach)
-            if (!get_vec(r, v)) return false;
         if (!r.ok() || !sp.paths.read(r, m.sim.graph(), m.cfg.path_pf)) return false;
         for (PlayerAi::SourceList& s : sp.sources) {
             s.frame = r.i64();
             if (!get_vec(r, s.planets)) return false;
         }
+        sp.stage_lists.resize(save::count(r, 6 * 12));
+        if (!sp.stage_lists.empty() && sp.stage_lists.size() != planets) r.fail();
+        for (auto& levels : sp.stage_lists)
+            for (PlayerAi::SourceList& s : levels) {
+                s.frame = r.i64();
+                if (!get_vec(r, s.planets)) return false;
+                for (const PlanetIndex k : s.planets)
+                    if (k >= planets) r.fail();
+            }
         sp.has_fs = r.boolean();
         if (!r.ok()) return false;
         if (sp.has_fs) {
@@ -930,6 +998,18 @@ bool GalacticAiWorld::read(ByteReader& r) {
             if (!get_handles(r, st, t.units) || !get_vec(r, t.wanted) || !get_vec(r, t.wanted_source) || !get_vec(r, t.builds))
                 return false;
             t.stage = r.i32();
+            t.area = r.i32();
+            if (version >= 7) {
+                t.sync = r.boolean();
+                t.sync_started = r.boolean();
+                t.sync_left = r.f64();
+                t.sync_frame = r.i64();
+                if (!get_handles(r, st, t.sync_units) || !get_vec(r, t.sync_etas) || t.sync_etas.size() != t.sync_units.size())
+                    return false;
+            }
+            if (version >= 8) {
+                t.fleet = r.u32();  // checked against the fleets where it is read (tf_fleet_object)
+            }
             t.had_units = r.boolean();
             t.no_units_sent = r.boolean();
             t.alive = r.boolean();
@@ -954,11 +1034,13 @@ bool GalacticAiWorld::read(ByteReader& r) {
             const uint8_t result = r.u8();
             s.dest = r.u32();
             s.mode = r.u8();
+            if (version >= 8) {
+                s.fleet = r.u32();  // checked against the fleets where it is read (the MoveTo step)
+            }
             s.started = r.i64();
-            s.orders_out = r.boolean();
             const uint8_t op = r.u8();
             s.amount = r.f64();
-            if (kind > static_cast<uint8_t>(StatusKind::BudgetWait) || result > static_cast<uint8_t>(lua::AiStatusResult::False) ||
+            if (kind > static_cast<uint8_t>(StatusKind::DesireBonus) || result > static_cast<uint8_t>(lua::AiStatusResult::False) ||
                 op > static_cast<uint8_t>(lua::AiBudgetOp::WaitUnallocated) || s.mode > 5 || !valid_planet_or_none(s.dest, planets))
                 r.fail();
             s.kind = static_cast<StatusKind>(kind);
@@ -1007,7 +1089,7 @@ bool GalacticAiWorld::read(ByteReader& r) {
     // ---- build tasks + market ----
     std::map<int32_t, BuildTask> builds;
     {
-        const uint32_t n = save::count(r, 71);
+        const uint32_t n = save::count(r, version >= 9 ? 79 : 71);
         for (uint32_t i = 0; i < n && r.ok(); ++i) {
             BuildTask b;
             b.id = r.i32();
@@ -1024,7 +1106,7 @@ bool GalacticAiWorld::read(ByteReader& r) {
             b.created = r.i64();
             b.next_poll = r.i64();
             b.charged = r.boolean();
-            b.charge = r.f32();
+            (void)r.f32();  // former BuildTask::charge
             b.queue_id = r.i32();
             b.producing_at = r.u32();
             b.queue_entries_before = r.i32();
@@ -1032,6 +1114,7 @@ bool GalacticAiWorld::read(ByteReader& r) {
             b.category = r.i32();
             b.listed = r.boolean();
             b.reclaimed = r.boolean();
+            if (version >= 9) b.claimed = r.i64();  // older saves: no timer running
             if (state > static_cast<uint8_t>(BuildState::Failed)) r.fail();
             b.state = static_cast<BuildState>(state);
             if (!r.ok() || !valid_ai(b.player) || b.queue > 1 || !valid_planet_or_none(b.dest, planets) ||
@@ -1109,14 +1192,19 @@ bool GalacticAiWorld::read(ByteReader& r) {
     std::vector<std::vector<std::unique_ptr<lua::LuaVm>>> pools;
     if (r.u32() != m.runtime->plan_count() || !r.ok()) return false;
     pools.resize(m.runtime->plan_count());
+    std::vector<std::unique_ptr<lua::LuaVm>> legacy(pools.size());  // pre-mcx6 pristine VMs (legacy_pristine)
     for (uint32_t p = 0; p < pools.size(); ++p) {
         const uint32_t n = save::count(r, 6);
         bool pristine_named = false;
         for (uint32_t k = 0; k < n && r.ok(); ++k) {
             if (r.boolean()) {  // this session's own pristine VM of the plan (restore_pools keeps it at this slot)
                 const uint64_t digest = r.u64();
-                if (!r.ok() || pristine_named || !m.runtime->pristine(p) || m.runtime->pristine_digest(p) != digest) return false;
+                if (!r.ok() || pristine_named || !m.runtime->pristine(p)) return false;
                 pristine_named = true;
+                if (m.runtime->pristine_digest(p) != digest) {  // a pre-mcx6 save: its pristine VM had the old require
+                    legacy[p] = m.runtime->legacy_pristine(p, m.defs, digest);
+                    if (!legacy[p]) return false;
+                }
                 pools[p].push_back(nullptr);
                 continue;
             }
@@ -1150,11 +1238,8 @@ bool GalacticAiWorld::read(ByteReader& r) {
                 if (!read_vm_image(img, *e.vm)) return false;
             } else {  // tests without Lua state: the evaluator loaded fresh as on first use
                 if (!m.files) return false;
-                std::vector<uint8_t> bytes;
-                const std::string path = "Data\\Scripts\\Evaluators\\" + e.name + ".lua";
                 std::string err;
-                if (!m.files->read(path, bytes)) return false;
-                e.vm = m.runtime->make_vm(e.name, std::string(reinterpret_cast<const char*>(bytes.data()), bytes.size()), path, &err);
+                e.vm = m.runtime->make_vm_from_file(*m.files, e.name, "Data\\Scripts\\Evaluators\\" + e.name + ".lua", &err);
                 if (!e.vm) return false;
             }
             m.rebind_vm(*e.vm, -1, true);
@@ -1215,11 +1300,10 @@ bool GalacticAiWorld::read(ByteReader& r) {
         pa.ctx = std::move(sp.ctx);
         pa.known = std::move(sp.known);
         pa.bonuses = std::move(sp.bonuses);
-        pa.reach_frame = sp.reach_frame;
-        pa.reach = std::move(sp.reach);
         pa.paths = std::move(sp.paths);
         pa.paths.set_background(m.cfg.path_latency, m.cfg.background);  // OPT2 t02: this world's settings
         pa.sources = std::move(sp.sources);
+        pa.stage_lists = std::move(sp.stage_lists);
         if (!sp.has_fs) pa.fs_vm.reset();
         else if (sp.fs_vm) pa.fs_vm = std::move(sp.fs_vm);
     }
@@ -1235,7 +1319,7 @@ bool GalacticAiWorld::read(ByteReader& r) {
     m.unit_reserved = std::move(unit_reserved);
     m.fs_moves = std::move(fs_moves);
     m.reclaim = std::move(reclaim);
-    m.runtime->restore_pools(std::move(pools), static_cast<size_t>(created));
+    m.runtime->restore_pools(std::move(pools), static_cast<size_t>(created), std::move(legacy));
     guard.committed = true;
     m.scripts.restore(std::move(evals), std::move(missing));
     return true;

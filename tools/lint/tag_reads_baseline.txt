@@ -1,0 +1,2 @@
+# String tag reads per sim file (tools/lint/check_tag_reads.py, ref6 t01). Only goes down; target 0.
+# total 0

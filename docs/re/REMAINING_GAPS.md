@@ -18,7 +18,7 @@ Questions come from the wave A/B "under-specified" lists. Read this file togethe
 | § | Item | Status | Unblocks |
 |---|---|---|---|
 | 1.1–1.4 | Rebel tech theft (`Slicer_Ability`, R2D2_Slicer, RebelAdvanceTechPlan) | [H]; dialog / command setter [M]. **Port ✅ 2026-10-28** (galactic: sweep, slicer apply / AI pick / execute, command kind 2; apps/game slice dialog) | engine/galactic (abilities, unlocks), engine/ai (A2 plan), engine/lua |
-| 1.5–1.6 | Every unlock source for `Build_Initially_Locked`; FoC / TR lock lists | [H]. **Port ✅ 2026-10-28**: items 2–5 wired (corruption capture variant 0x3fb040 wired, tested 2026-10-28), locks on by default | engine/galactic: `set_initial_build_locks` can go on once 1.5 is wired |
+| 1.5–1.6 | Every unlock source for `Build_Initially_Locked`; FoC / TR lock lists | [H]. **Port ✅ 2026-10-28**: items 2–5 wired (corruption capture variant 0x3fb040 wired, tested 2026-10-28), locks always on (the `set_initial_build_locks` switch was removed by cu15, 2026-11-07) | engine/galactic: done |
 | 2 | `Build_Advances_Tech_Level` sets **to**, not by | [H]. **Port ✅ 2026-10-28** | engine/galactic production |
 | 3.1–3.2 | Map base layouts: base-level filter, markers, structure placement, starbase, units | [H]; a few call arguments [M]. **Port ✅ 2026-10-28** (base-level / owner / branch filters, spawn-table draws, marker start placement; not modelled: pass-1 markers, planet upgrades, escorts, DUMMY_STAR_BASE) | engine/apps battle host, engine/tactical |
 | 3.3 | Map ownership and reinforcement / capture points at land start | [H]; slot ↔ player-id meaning **probe**. **Port ✅ 2026-10-28** (map owners kept, Is_Neutral gate, countdown from GameConstants) | battle host, tactical capture points |
@@ -242,7 +242,7 @@ Port correction: the PHASE4 L1 note maps ENABLE_BUILDABLE → `lock_type(false)`
 - **TR:** 478 locked types (loose XML), 7 sliceable, no slicer. TR unlocks through Lua and story:
   - Lua: 103 `Unlock_Tech`, 204 `Lock_Tech`, 34 `Set_Tech_Level` references in the scripts;
   - story: 18 BUILDABLE_UNIT, 13 ENABLE / 13 DISABLE_BUILDABLE, 21 LOCK_UNIT, 3 SET_TECH_LEVEL.
-- **Port:** wire §1.4 (the sweep, set-to semantics) and §1.5 items 2–5, then switch `set_initial_build_locks` on.
+- **Port:** done: §1.4 (the sweep, set-to semantics) and §1.5 items 2–5 are wired and `Build_Initially_Locked` is always enforced (cu15 removed the `set_initial_build_locks` switch, 2026-11-07).
 
 ---
 
@@ -325,7 +325,7 @@ Steps:
    - When in-base markers run out, In_Base falls over to out-base, and vice versa.
    - **Pass 1** reuses the marker whose object id equals +0x3b0. **Pass 0** takes the next unused marker of the group in list order.
    - On placement: +0x3ac := slot index; +0x3b0 := marker id (the battle-to-battle persistence of pad and structure positions); spawn the structure's own type at the marker for the **record defender**; +0x54 := its galactic id (0x3fffff for the temporary additional structures).
-   - **Space, pass 0, no slot, type `Is_Special_Weapon_In_Space`:** spawn for the planet owner at the first behaviour-99 object [M: DUMMY_TACTICAL_SUPER_WEAPON_TARGET / `Death_Star_Position`].
+   - **Space, pass 0, no slot, type `Is_Special_Weapon_In_Space`:** spawn for the planet owner at the first behaviour-99 object [M: DUMMY_TACTICAL_SUPER_WEAPON_TARGET / `Death_Star_Position`]. Corrected 2026-11-20 (TRL2_A_RE_ANSWERS.md Q1 [H]): behaviour 99 (0x63) is DUMMY_SPECIAL_WEAPON_SOURCE (FoC: the planet backdrop props), the origin when none; the weapon is registered (0x35c520, one per player and `Special_Weapon_Index`).
    - **Unplaced structures** take any remaining free in-base, then out-base markers. With none left they are **not spawned**.
 5. **Planet-specific upgrades:** for every player, each type in that player's per-planet list (0x281620 / 0x281760; the corruption `*_Planet_Specific_Tactical_Upgrade` [M]) that is affiliated and has behaviour 0x65 in the mode is spawned at the origin for that player.
 6. **Defender units:**
@@ -556,8 +556,9 @@ circling, follower vf +0x1d8 = SimpleSpace Hermite with strict bracketing); its 
 - Users: FoC 18, TR 107.
 
 ### 5.2 DEPLOY_TROOPERS spawn (state 4 of 0x591a90 → 0x590730) [H]
+> r3g t02 (2026-11-16): the full clip-timed state order (Drop Rope, Deploy Troopers, rope slide 3.9 per frame, Rope Land, Lift Rope) is in R3G_ANIM_TIMED_RE.md §2.
 - **Spawned type.** Ability 38's record `Spawned_Object_Type` (+0x90 / +0x98) must have `Company_Units` (+0x958 / +0x960) or else `Squadron_Units` (+0x978 / +0x980). If neither exists, or there is no model → state 10 (failed).
-- The owner first plays anim 0x5e.
+- The owner plays anim 0x5e (Deploy Troopers) with the spawn; before it, Drop Rope (0x61) has played to its end (r3g t02).
 - **Count:** N = member count − troopers already deployed (behaviour data +0x40).
 - **Bones.** Walk the record's `Owner_Attachment_Bone` list (+0x110) by index i:
   - a bone the **render model** lacks is skipped, but it still uses member index i;

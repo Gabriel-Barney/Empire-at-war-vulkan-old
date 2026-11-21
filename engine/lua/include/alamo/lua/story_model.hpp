@@ -57,16 +57,16 @@ namespace alamo::lua {
 
 class LuaVm;
 
-// A story event / reward parameter: XML text, or a value set from Lua (object, player).
+// A story event / reward parameter: XML text, or text set from Lua (Set_Event_Parameter stores objects and types as
+// their type name, numbers formatted like Lua's tostring).
+// Only Kind::Text exists (cu14 t03, cu14f). The save record and the state hash still write the old layout's constant
+// bytes (kind u8 0, then an i32 -1 after the text) so the story save bytes and the state hash did not change.
 struct StoryParam {
-    enum class Kind : uint8_t { Text, Object, Player };
+    enum class Kind : uint8_t { Text };
     Kind kind = Kind::Text;
-    std::string text;  // Kind::Text (numbers from Lua are formatted like Lua's tostring)
-    int32_t id = -1;   // Kind::Object: object id; Kind::Player: player id
+    std::string text;
 
-    static StoryParam of_text(std::string_view s) { return {Kind::Text, std::string(s), -1}; }
-    static StoryParam of_object(int32_t object_id) { return {Kind::Object, {}, object_id}; }
-    static StoryParam of_player(int32_t player_id) { return {Kind::Player, {}, player_id}; }
+    static StoryParam of_text(std::string_view s) { return {Kind::Text, std::string(s)}; }
     bool empty() const { return kind == Kind::Text && text.empty(); }
 };
 
@@ -75,12 +75,19 @@ enum class StoryObjectiveState : uint8_t { Active, Complete, Failed };
 struct StoryObjective {
     std::string text;  // text id (TEXT_OBJECTIVE_...)
     StoryObjectiveState state = StoryObjectiveState::Active;
-    bool from_lua = false;  // added by Lua Add_Objective
+    // mcx8 t12 (docs/re/MCX8_BINDINGS_PLAYERS_STORY.md "Add_Objective") [H]: the objectives panel section - true = a
+    // "battle info" line (TEXT_TEST_BATTLE_INFO_HEADER; Lua Add_Objective(text, true), the planetary-bonus lines), false =
+    // a numbered objective (TEXT_TEST_OBJECTIVE_HEADER; Add_Objective(text, false), the ADD_OBJECTIVE reward).
+    bool battle_info = false;
 };
 
+// A radar blip (Add_Radar_Blip). Tactical: `name` is the script's name; the blip follows `object_id` when it is >= 0,
+// else it stays at (x, y, z) (an AI target, task force or position argument; mcx8 t12). Galactic: `name` is empty and
+// `object_id` is the planet whose highlight is on (MCX8_BINDINGS_PLAYERS_STORY.md "Add_Radar_Blip").
 struct StoryBlip {
     std::string name;
     int32_t object_id = -1;
+    float x = 0.0f, y = 0.0f, z = 0.0f;
 };
 
 struct StoryHighlight {
@@ -246,16 +253,28 @@ struct StoryNotification {
     bool has_object = false;         // an object came with it (filters / AI_NOTIFICATION Param1)
     int32_t owner = -1;              // owner of that object (FILTER_*)
     bool owner_neutral = false;      // that owner is the neutral player
-    std::string planet;              // planet (Enter family, CONSTRUCT_LEVEL, battles)
+    std::string planet;              // planet (Enter family, CONSTRUCT_LEVEL, battles); "" = no planet
     std::vector<std::string> units;  // fleet contents, unit type names (Enter family, MOVE)
+    // mcx6 t03, Enter family (STORY.md §5 "Enter family match"): the dispatched fleet. no_fleet = the dispatch carried none
+    // (P2 filter, P3 / P6 / P7 then not tested). fleet_hidden = 0x3a9760 (it has contents and all of them are hidden);
+    // fleet_raid = the Raid_Force_* test 0x432e20; fleet_direct = its direct content count (P6). orbit_units = the type
+    // names of every content of every fleet in orbit of the planet, any owner (P4).
+    bool no_fleet = false;
+    bool fleet_hidden = false;
+    bool fleet_raid = false;
+    int32_t fleet_direct = 0;
+    std::vector<std::string> orbit_units;
     double value = 0.0;              // level / credits / count
-    int32_t category = -1;           // CONSTRUCT_LEVEL: 0 starbase, 1 ground base
+    int32_t category = -1;           // CONSTRUCT_LEVEL: 0 ground base (GROUND), 1 starbase (SPACE); value = its Base_Level
     std::vector<StoryParam> params;  // generic rule for types without a modelled evaluator
-    // L1/S4 wave 2a - battles (WIN/LOSE_BATTLES Param2 / Param3, STORY.md §5):
+    // Battles (WIN/LOSE_BATTLES Param2 / Param3, STORY.md §5 and its note "Battle composition", mcx6 t03):
     int32_t location = 0;            // 1 land, 2 space (the S10 battle event's value); 0 unknown
-    bool base = false;               // a starbase / ground base of the defender took part (BASE_SPACE / BASE_LAND)
-    std::vector<uint64_t> friendly;  // CategoryMask of every unit of the plot player's side in the battle
-    std::vector<uint64_t> enemy;     // ... of the other side(s)
+    // The two Ship_Class lists the story manager recorded at the last space conflict decision (-1 = a type without
+    // Ship_Class): the local player's side and everything else; local_player = the machine's local player (FRIENDLY_*
+    // tests local_classes when the plot's player is that player, else other_classes; ENEMY_* the opposite).
+    std::vector<int32_t> local_classes;
+    std::vector<int32_t> other_classes;
+    int32_t local_player = -1;
     // Tactical notifications (COMMAND_UNIT / GUARD_UNIT): the target / guarded object's type name, distance.
     std::string target;
     double distance = -1.0;          // < 0 unknown
@@ -334,13 +353,37 @@ public:
     size_t deliver_script_triggers(uint32_t plot, LuaVm& vm, std::string* err = nullptr);
 
     // ---- host reward hook ----
+    // ref5 t02: the Reward_Type names the model applies itself (exact, upper case), in registration order; the sim's coverage
+    // test checks them against its story reward table's Model rows.
+    static bool has_reward_handler(std::string_view name);
+    static std::vector<std::string_view> reward_names();
     // Called at Fire step 5 for rewards the model does not apply itself (CREDITS, SET_TECH_LEVEL,
     // LINK_TACTICAL, ...), before the dependants of the firing event are checked.
     std::function<void(uint32_t plot, uint32_t event, const std::string& type, const std::vector<StoryParam>& params)>
         on_reward;
-    // GameObjectCategoryType name -> CategoryMask bit(s) (WIN/LOSE_BATTLES CLASS_* composition tests); unset or
-    // 0 = unknown class (never contained).
-    std::function<uint64_t(std::string_view category)> category_mask;
+    // mcx6 STATISTIC_CHANGE (STORY_REWARDS_GALACTIC §1.17): the notification whose dispatch is firing events right now
+    // (the dispatcher's second argument, e.g. the planet of an Enter-family event); nullptr outside a dispatch (explicit
+    // fires, TRIGGER_EVENT, Lua). Cascaded fires see the same notification [M]. Transient: not saved, not hashed.
+    const StoryNotification* firing_notification() const { return firing_; }
+    // mcx6 PICK_PLANET (§1.16, 0x32ae50 -> event vf+0x30): in every plot of this model (active or not, in_table or not),
+    // every event whose own reward is not PICK_PLANET gets each of Reward_Param1..3 whose upper-cased text equals
+    // `placeholder_upper` replaced by `planet`; first, every entry of its event parameters' name lists (the list parser's
+    // separators: whitespace and commas) that equals it (upper-cased) is replaced in place [M: retail does this for the
+    // event classes with a planet-name list]. Returns the number of replaced entries / parameters; `log` gets one line
+    // per replacement ("EVENT <name>, replacing <old> with <new>" for a list entry, "EVENT <name>, Param <i>, replacing
+    // <old> with <new>" for a reward parameter); `changes` gets each changed parameter's previous text (undo_changes).
+    struct ParamChange {
+        uint32_t plot = 0, event = 0;
+        bool reward = false;  // Reward_Param (else Event_Param)
+        uint32_t index = 0;   // 0-based
+        std::string before;
+    };
+    uint32_t replace_placeholder(std::string_view placeholder_upper, std::string_view planet, std::vector<std::string>* log = nullptr,
+                                 std::vector<ParamChange>* changes = nullptr);
+    // Puts back the parameters `changes` recorded (newest first). Definitions only: no state is touched.
+    void undo_changes(const std::vector<ParamChange>& changes);
+    // Drops the last plot (a plot add_plot appended, mcx6 RANDOM_STORY undone on a load). False when there is none.
+    bool remove_last_plot();
     // L1/S4 wave 2b: player -> faction index (FILTER_* compare factions, SCRIPT_GAPS.md §4.5); unset or < 0 = compare
     // players. objects_within(type name, x, y, z, range): some live object of that type in the mode is strictly
     // within `range` (3D) of the point (COMMAND_UNIT §4.3); unset = the notification's target / distance stand in.
@@ -396,14 +439,20 @@ public:
         if (!name.empty()) dialog_loads_.emplace_back(name);
     }
     const std::vector<StoryObjective>& objectives() const { return objectives_; }
-    void add_objective(std::string_view text, bool from_lua);
+    void add_objective(std::string_view text, bool battle_info);
     const std::vector<StoryBlip>& blips() const { return blips_; }
-    void add_blip(std::string_view name, int32_t object_id);  // same name replaces
+    // Appends a blip (the same name twice gives two blips, 0x2de700). remove_blip removes the first (oldest) one of that
+    // name (0x2ff240). The planet forms are the galactic Add / Remove_Radar_Blip(planet): highlight on (once) / off.
+    void add_blip(const StoryBlip& blip);
+    void add_blip(std::string_view name, int32_t object_id) { add_blip(StoryBlip{std::string(name), object_id}); }
     bool remove_blip(std::string_view name);
+    void add_planet_blip(int32_t planet_object_id);
+    bool remove_planet_blip(int32_t planet_object_id);
     const std::vector<StoryHighlight>& highlights() const { return highlights_; }
     void add_highlight(std::string_view name, int32_t object_id);
     bool remove_highlight(std::string_view name);
-    // AI story flags (Check_Story_Flag(player, name, location, reset)) [inferred: raised by the host].
+    // AI story flags (Check_Story_Flag(player, name, location, reset)), raised by the host (TRIGGER_AI). Keyed by
+    // (player, name as given - case kept, location object id or -1); MCX8_BINDINGS_PLAYERS_STORY.md "Check_Story_Flag".
     void raise_ai_flag(int32_t player, std::string_view name, int32_t location_id);
     bool check_ai_flag(int32_t player, std::string_view name, int32_t location_id, bool reset);
 
@@ -446,6 +495,28 @@ private:
     bool same_side(int32_t owner) const;  // FILTER "friendly": same faction (faction_of) / player
     bool tick_timer(StoryEventState& st, double threshold);
     void apply_reward(uint32_t p, uint32_t e);
+    // ref5 t02: the rewards the model applies itself, one handler per Reward_Type name (story_model.cpp reward_handlers()).
+    using RewardFn = void (StoryModel::*)(uint32_t p, uint32_t e, const std::string& type, const std::vector<StoryParam>& rp);
+    struct RewardHandler {
+        std::string_view name;
+        RewardFn fn;
+    };
+    static std::span<const RewardHandler> reward_handlers();
+    void reward_set_flag(uint32_t p, uint32_t e, const std::string& type, const std::vector<StoryParam>& rp);
+    void reward_increment_flag(uint32_t p, uint32_t e, const std::string& type, const std::vector<StoryParam>& rp);
+    void reward_add_objective(uint32_t p, uint32_t e, const std::string& type, const std::vector<StoryParam>& rp);
+    void reward_objective_state(uint32_t p, uint32_t e, const std::string& type, const std::vector<StoryParam>& rp);
+    void reward_update_objective(uint32_t p, uint32_t e, const std::string& type, const std::vector<StoryParam>& rp);
+    void reward_remove_objective(uint32_t p, uint32_t e, const std::string& type, const std::vector<StoryParam>& rp);
+    void reward_remove_all_objectives(uint32_t p, uint32_t e, const std::string& type, const std::vector<StoryParam>& rp);
+    void reward_trigger_event(uint32_t p, uint32_t e, const std::string& type, const std::vector<StoryParam>& rp);
+    void reward_reset_event(uint32_t p, uint32_t e, const std::string& type, const std::vector<StoryParam>& rp);
+    void reward_reset_branch(uint32_t p, uint32_t e, const std::string& type, const std::vector<StoryParam>& rp);
+    void reward_disable_branch(uint32_t p, uint32_t e, const std::string& type, const std::vector<StoryParam>& rp);
+    void reward_disable_story_event(uint32_t p, uint32_t e, const std::string& type, const std::vector<StoryParam>& rp);
+    void reward_story_element(uint32_t p, uint32_t e, const std::string& type, const std::vector<StoryParam>& rp);
+    void reward_remove_story_goal(uint32_t p, uint32_t e, const std::string& type, const std::vector<StoryParam>& rp);
+    void reward_story_goal_completed(uint32_t p, uint32_t e, const std::string& type, const std::vector<StoryParam>& rp);
     void call_script(uint32_t p, const std::string& name);
     void build_plot_order();
     StoryObjective* find_objective(std::string_view text);
@@ -471,6 +542,7 @@ private:
     double time_ = 0.0;
     bool paused_ = false;
     uint32_t fire_depth_ = 0;   // recursion guard (cascades, TRIGGER_EVENT)
+    const StoryNotification* firing_ = nullptr;  // mcx6: firing_notification()
     uint32_t reset_depth_ = 0;  // RESET_BRANCH depth limit 3 (§4.5)
 };
 

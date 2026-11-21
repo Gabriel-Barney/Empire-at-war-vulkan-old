@@ -21,15 +21,21 @@ add_library(alamo::ai ALIAS alamo_ai)
 target_include_directories(alamo_ai PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
 target_link_libraries(alamo_ai PUBLIC alamo_galactic alamo_data alamo_core alamo_engine_flags
                                PRIVATE alamo_objects)
-# q6: the galactic seed's force roles use galactic::galactic_unit_kind (galactic_rules.cpp, in alamo_galactic_sim, which
-# exists when data, objects and commands are configured; without it the seed keeps its own tag rule).
+# The AI save codec (src/ai_save_io.hpp, not installed) for the tactical AI's save code (engine/ai/tactical): an internal
+# include directory, so its tactical_save_io.hpp reuses it instead of a copy.
+add_library(alamo_ai_save_io INTERFACE)
+target_include_directories(alamo_ai_save_io INTERFACE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+target_link_libraries(alamo_ai_save_io INTERFACE alamo_galactic alamo_core)
+# q6 / mcx1 t05: the galactic seed's force roles use galactic::galactic_dummy (galactic_rules.cpp, in alamo_galactic_sim,
+# which exists when data, objects and commands are configured, as in every full build); without it no type is a valid
+# starting force (there is no element-tag rule any more, D4).
 if(TARGET alamo_galactic_sim)
   target_link_libraries(alamo_ai PRIVATE alamo_galactic_sim)
-  target_compile_definitions(alamo_ai PRIVATE ALAMO_AI_HAVE_GALACTIC_SIM=1)
+  target_compile_definitions(alamo_ai PUBLIC ALAMO_AI_HAVE_GALACTIC_SIM=1)  # PUBLIC: the tests guard on it too
 endif()
 
 add_executable(alamo_ai_tests tests/test_ai.cpp)
-target_link_libraries(alamo_ai_tests PRIVATE alamo_ai alamo_objects Threads::Threads)
+target_link_libraries(alamo_ai_tests PRIVATE alamo_ai alamo_objects Threads::Threads alamo_test_support)
 # Coverage reports for the shipped equations go to <project>/logs/ai_perception_coverage_<game>.txt.
 target_compile_definitions(alamo_ai_tests PRIVATE "ALAMO_AI_LOG_DIR=\"${PROJECT_SOURCE_DIR}/logs\""
                                                   "ALAMO_AI_GOLDEN_DIR=\"${CMAKE_CURRENT_SOURCE_DIR}/tests/golden\"")
@@ -41,6 +47,11 @@ endif()
 if(TARGET alamo_jobs)
   target_link_libraries(alamo_ai_tests PRIVATE alamo_jobs)
   target_compile_definitions(alamo_ai_tests PRIVATE ALAMO_AI_HAVE_JOBS=1)
+endif()
+# cu5 t01: the seed options come from galactic::load_factions (alamo_galactic_sim).
+if(TARGET alamo_galactic_sim)
+  target_link_libraries(alamo_ai_tests PRIVATE alamo_galactic_sim)
+  target_compile_definitions(alamo_ai_tests PRIVATE ALAMO_AI_HAVE_GALACTIC_SIM=1)
 endif()
 add_test(NAME alamo_ai_tests COMMAND alamo_ai_tests)
 set_tests_properties(alamo_ai_tests PROPERTIES TIMEOUT 120)
@@ -60,8 +71,8 @@ if(TARGET alamo_lua AND TARGET alamo_lua_vm AND TARGET alamo_galactic_sim)
                                        src/galactic_ai_save.cpp)
   target_link_libraries(alamo_ai_galactic PUBLIC alamo_ai_lua alamo_ai alamo_galactic_sim alamo_lua alamo_objects
                                                  alamo_commands alamo_data alamo_engine_flags PRIVATE alamo_lua_vm)
-  add_executable(alamo_ai_galactic_tests tests/test_ai_galactic.cpp)
-  target_link_libraries(alamo_ai_galactic_tests PRIVATE alamo_ai_galactic Threads::Threads)
+  add_executable(alamo_ai_galactic_tests tests/test_ai_galactic.cpp tests/test_ai_galactic_part1.cpp tests/test_ai_galactic_part2.cpp tests/test_ai_galactic_part3.cpp)
+  target_link_libraries(alamo_ai_galactic_tests PRIVATE alamo_ai_galactic Threads::Threads alamo_test_support)
   target_compile_definitions(alamo_ai_galactic_tests PRIVATE
                              "ALAMO_AI_GOLDEN_DIR=\"${CMAKE_CURRENT_SOURCE_DIR}/tests/golden\""
                              "ALAMO_AI_LOG_DIR=\"${PROJECT_SOURCE_DIR}/logs\"")
@@ -70,6 +81,9 @@ if(TARGET alamo_lua AND TARGET alamo_lua_vm AND TARGET alamo_galactic_sim)
     target_compile_definitions(alamo_ai_galactic_tests PRIVATE ALAMO_AI_HAVE_VFS=1)
   endif()
   add_test(NAME alamo_ai_galactic_tests COMMAND alamo_ai_galactic_tests)
+  # mcx0 t05: alamo_ai_tests' perception coverage also checks the in-game resolver's token registry.
+  target_link_libraries(alamo_ai_tests PRIVATE alamo_ai_galactic)
+  target_compile_definitions(alamo_ai_tests PRIVATE ALAMO_AI_HAVE_GALACTIC_AI=1)
   set_tests_properties(alamo_ai_galactic_tests PROPERTIES TIMEOUT 900)
   # N1 save size guard: the whole FoC story campaign save, about twice the 2026-10-30 sizes (50 KB file, 334 KB of chunks).
   # The same guard holds late in the game (N1f t08, below); mid-battle story saves: alamo_game_save_tests "Story battle".

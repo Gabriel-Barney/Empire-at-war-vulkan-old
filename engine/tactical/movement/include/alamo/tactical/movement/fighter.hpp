@@ -22,7 +22,8 @@
 #include <vector>
 
 #include "alamo/core/bytes.hpp"
-#include "alamo/core/sim_crc.hpp"
+#include "alamo/core/frames.hpp"
+#include "alamo/core/sim_crc_fwd.hpp"
 #include "alamo/tactical/movement/common.hpp"
 #include "alamo/tactical/movement/space_path.hpp"
 
@@ -56,7 +57,7 @@ inline constexpr float kFighterTwoPi = 6.2831855f;
 // MovementConstants.
 inline constexpr float kSpaceIdleMovementSpeed = 0.0f;
 // lock(x) duration: int(float(FPS) x 10.0) = 300 frames (§4.5).
-inline constexpr uint32_t kFighterLockFrames = static_cast<uint32_t>(30.0f * 10.0f);
+inline constexpr uint32_t kFighterLockFrames = static_cast<uint32_t>(frames_trunc(30.0f * 10.0f));
 // Avoidance hold after an evasion (pack +0x2b4 = 15, §3.5).
 inline constexpr int32_t kFighterAvoidHold = 15;
 
@@ -68,6 +69,8 @@ float fighter_wrap360(float a);
 // §1.1 sin / cos with the tiny-angle shortcut: (bits(x) & 0x7F800000) < 0x1D000001 -> sin x = x, cos x = 1.
 float fighter_sin(float rad);
 float fighter_cos(float rad);
+// §3.2 s(x): 1 for x >= 0 (-0 included), -1 otherwise (NaN too).
+inline float fighter_sign(float x) { return x >= 0.0f ? 1.0f : -1.0f; }
 
 // §1.2 angles of a vector (0x20acd0), from A to B: yaw in [0, 360) (0 when x and y are equal), pitch =
 // -(atan2(dz, sqrt(dy^2 + dx^2)) x 57.295776), computed only when A.z != B.z or A.x != B.x (the retail quirk: a
@@ -244,7 +247,7 @@ inline constexpr float kParkingCellSize = 120.0f;
 // ---- per-unit state and squadrons ----------------------------------------------------------------------------------
 // A formation attack target (0x41a2e0). `id` = the target object: a squadron container registered with
 // MovementSystem::set_fighter_squad (a team: dogfight), a movement unit (position / radius read from it), or any other
-// object (`pos` / `radius` from the host). `point` = a bare point target (the legacy set_attack_target feed).
+// object (`pos` / `radius` from the host). `point` = a bare point target at `pos`.
 struct FighterTarget {
     ObjectId id = -1;
     bool point = false;

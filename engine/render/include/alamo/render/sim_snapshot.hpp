@@ -14,11 +14,9 @@
 //
 // Fade: 1 for live objects; 0 for objects destroyed this tick but not yet flushed (kSnapDying) - the
 // smooth mode fades them out over one tick, the original mode hides them.
-// Hardpoints: the sim does not spawn hardpoint sub-objects yet (engine/apps/sim map_spawn open item).
-// PROVISIONAL rule: a child attached to an object (ObjectStore::attach_parent) whose type name CRC is
-// one of the parent type's <HardPoints> names marks that hardpoint destroyed while it is dying or at
-// health <= 0. The render side keeps destroyed bits sticky (the game never repairs hardpoint visuals,
-// SPACE_AND_OPEN.md B.10).
+// Hardpoints: battle hardpoints are CombatSystem records, not objects; their destroyed bits come from
+// apply_hardpoint_source (r1b t02 removed the provisional attach-child rule). The render side keeps destroyed
+// bits sticky (the game never repairs hardpoint visuals, SPACE_AND_OPEN.md B.10).
 //
 // Interpolation (docs/re/MAIN_LOOP.md: the original renders once per loop iteration with NO
 // interpolation): InterpMode::Original (default, parity) draws the latest snapshot as is;
@@ -104,6 +102,17 @@ struct SnapshotTypeInfo {
     float stealth_color[4] = {1.0f, 1.0f, 1.0f, 1.0f};
     float cloak_color[4] = {1.0f, 1.0f, 1.0f, 1.0f};
     float stealth_time = 0.0f, cloak_time = 0.0f;
+    // vis1 t02 blob shadows (OBJECT_TYPES type +0x17bc..+0x17f0, docs/re/WEATHER_VISUALS.md §4): Blob_Shadow_Material_Name
+    // ("" = no blob), Blob_Shadow_Scale (width, height in world units; default 1, 1), Blob_Shadow_Intensity (default 1),
+    // Blob_Shadow_Below_Detail_Level (leading integer, default 0) and Blob_Shadow_Bone_Name ("" = the object position).
+    std::string blob_material;
+    float blob_size[2] = {1.0f, 1.0f};
+    float blob_intensity = 1.0f;
+    int32_t blob_below_detail = 0;
+    std::string blob_bone;
+    // mcx4 t15 (MCX4_T15_RE_ANSWERS "GameObjectType.Exclude_From_Distance_Fade", render set-up 0x3a4820 [M]): the type is
+    // not faded out with camera distance (props, skydomes): no Object_Fade_End cull for its instances.
+    bool no_distance_fade = false;
 };
 
 // Current _ALT index for a health fraction (SnapshotObject::alt), TACTICAL_GAPS §6.3 (0x3ac290) [H]: walk EVERY
@@ -112,6 +121,10 @@ struct SnapshotTypeInfo {
 // alt <= its highest ALT index (SimInstanceBuilder::applied_alt). Data quirk kept: thresholds "1" / alternates "3" shows
 // alt 3 at full health.
 int8_t damage_alt_index(const SnapshotTypeInfo& t, float health_fraction);
+
+// Text of a tag on a type: the merged typed view when the tag is a GameObjectType field, else the raw store along the
+// variant chain (own value first). Shared with the galactic snapshot (R2).
+std::string type_text(const objects::GameObjectTypes& types, objects::TypeIndex t, std::string_view tag);
 
 class SnapshotTypeTable {
 public:
@@ -143,6 +156,17 @@ public:
         info_[t].ghost_initial_state = initial_state;
     }
     void set_max_speed(objects::TypeIndex t, float v) { info_[t].max_speed = v; }
+    // vis1 t02 (tests / hosts): the type's blob shadow fields.
+    void set_blob_shadow(objects::TypeIndex t, std::string material, float width, float height, int32_t below_detail,
+                         std::string bone = {}, float intensity = 1.0f) {
+        SnapshotTypeInfo& i = info_[t];
+        i.blob_material = std::move(material);
+        i.blob_size[0] = width;
+        i.blob_size[1] = height;
+        i.blob_below_detail = below_detail;
+        i.blob_bone = std::move(bone);
+        i.blob_intensity = intensity;
+    }
     void set_spin_away_explosion(objects::TypeIndex t, std::string name) { info_[t].spin_away_explosion = std::move(name); }
     void set_projectile_render(objects::TypeIndex t, int32_t custom_render, float width, float length, uint8_t slot_col = 0,
                                uint8_t slot_row = 0) {
@@ -206,7 +230,6 @@ struct SnapshotObject {
     objects::ObjectId id = objects::kNoObjectId;
     objects::TypeIndex type = objects::kNone;
     int32_t owner = -1;
-    objects::ObjectId attach_parent = objects::kNoObjectId;  // id of the attach parent (hardpoints), none otherwise
     Vec3 position{};
     Vec3 facing{1, 0, 0};
     float health = 0.0f;
@@ -240,6 +263,12 @@ struct SnapshotObject {
     // 0x4eb020), no surface FX / foot plants play (surface type 0x11); the host also drops its radar blip, mutes its sounds
     // and skips it in the mouse pick. Presentation only, not in digest().
     bool script_hidden = false;
+    // bkx1 t05 (b0019 / b0020, BKX1_RENDER_RE §1): the engine glow inputs of a space unit with a non-fighter locomotor
+    // (apply_battle_state): kEngineGlow* bits (hardpoints.hpp), the timed engine disable's frames left (0 = none or
+    // permanent) and speed / effective max speed. Presentation only, not in digest().
+    uint8_t engine_flags = 0;
+    uint32_t engine_timer_frames = 0;
+    float engine_speed_ratio = 0.0f;
 };
 // R5 stealth (ABILITIES_HARDPOINTS §3.7, TACTICAL_GAPS §2.3 Force_Cloak): while applied, meshes named BASEMESH are hidden
 // and STEALTH meshes shown. Set by apply_battle_state (AbilitySystem::is_stealthed or an active STEALTH (48) /
@@ -269,7 +298,9 @@ struct SnapshotEffect {
     // R5 Lua GameObjectWrapper.Attach_Particle_Effect(type [, bone]) (lua::ParticleEffectRequest): seq + 1 of the request
     // (0 = not a Lua effect; one system per request, keyed by it) and the bone the system follows ("" = the root).
     uint32_t lua_seq = 0;
-    std::string bone{};
+    std::string bone{};  // vis1 t06: may list candidates, comma separated (the first the model has)
+    // vis1 t06: an ability one-shot (ability_fx.hpp): its occurrence number (0 = none; one system per occurrence).
+    uint32_t fx_seq = 0;
 };
 // R4: SnapshotEffect::percent of an active unit ability's Particle_Effect (128 + ability type 0..75).
 inline constexpr uint8_t kEffectAbilityBase = 128;
@@ -354,6 +385,10 @@ struct SnapshotJamming {
     // ascending id. Their radar blip is dropped like a jammed one.
     std::vector<objects::ObjectId> stealthed;
     bool is_stealthed(objects::ObjectId id) const { return std::binary_search(stealthed.begin(), stealthed.end(), id); }
+    // vis1 t08 (ABILITY_PARTICLES §8): the owners of an applied Force_Healing with a Heal_Range_Blob_Material, ascending id:
+    // radius = Heal_Range, blob_material / blob_color = the special's (allied / show_to_enemies unused). Drawn only under
+    // a selected owner of the local player (render::heal_range_blobs).
+    std::vector<SnapshotJammer> heal_blobs;
 };
 
 // ---- R5 ability beams (ABILITY_VISUALS §2, §4, §6 finding 1; presentation only; filled by apply_battle_beams /
@@ -385,8 +420,12 @@ struct SimSnapshot {
     std::vector<SnapshotFootPlant> foot_plants;  // R5: this tick's foot plants (event order)
     std::vector<SnapshotAbilityEvent> ability_events;  // R5: changes against the previous snapshot (ascending id, type)
     std::vector<SnapshotProjectile> projectiles;  // live projectiles (ascending serial; apply_battle_projectiles)
-    std::vector<SnapshotBeam> beams;              // R5: ability beams (ascending owner id, then kind; apply_battle_beams)
+    std::vector<SnapshotBeam> beams;              // R5: ability beams (ascending owner id, then kind; apply_battle_beams;
+                                                  // vis1 t08 drain bolts appended after them)
     SnapshotJamming jamming;                      // R5: sensor jamming (apply_battle_jamming)
+    // vis1 t08: world-placed sim effects (Base_Shield_Penetration_Particle at the dome contact; apply_battle_ability_fx),
+    // synced with the decoration effects (keys (id << 8) | 2).
+    std::vector<SimWorldEffect> world_effects;
     uint32_t store_objects = 0;                // objects in the store (incl. not drawable / dying)
     const SnapshotObject* find(objects::ObjectId id) const;  // binary search, null if absent
     // Ordered digest of every field (thread-determinism tests).
@@ -434,7 +473,7 @@ std::vector<SnapshotEffect> snapshot_lua_effects(const RequestRange& requests, c
     return out;
 }
 // Destroyed hardpoints from a source that knows them per (object, HardPoints index) - the battle's CombatSystem, whose
-// hardpoints are flat sub-records (no sub-objects for the PROVISIONAL rule): OR'd into snap.hardpoint_destroyed for
+// hardpoints are flat sub-records: written into snap.hardpoint_destroyed for
 // every object with `count(id)` == its type's hardpoint count (other counts: a different list, left alone).
 void apply_hardpoint_source(SimSnapshot& snap, const std::function<uint32_t(objects::ObjectId)>& count,
                             const std::function<bool(objects::ObjectId, uint32_t)>& destroyed);
@@ -547,7 +586,7 @@ void set_snapshot_projectiles(SimSnapshot& snap, const ViewRange& views, std::sp
     }
     sort_snapshot_projectiles(snap);
 }
-#if defined(ALAMO_SIM_HAVE_BATTLES) && defined(ALAMO_SIM_HAVE_FOG)
+#ifdef ALAMO_SIM_HAVE_BATTLES
 // R5: the battle's fog of war for `local_player` (FogOfWar::render_view copied into snap.fog; null when the battle has
 // no fog or the player no grid) and kSnapFogHidden on every object TacticalBattle::fog_object_hidden(local, id, false)
 // reports hidden, or that is an enemy (not FogOfWar::allied) of the local player and AbilitySystem::is_stealthed (FOG_OF_WAR
@@ -672,6 +711,7 @@ struct InterpolatedFrame {
     std::vector<SnapshotProjectile> projectiles;
     std::vector<SnapshotBeam> beams;  // the current snapshot's (R5 ability beams)
     SnapshotJamming jamming;  // the current snapshot's (R5)
+    std::vector<SimWorldEffect> world_effects;  // the current snapshot's (vis1 t08)
 };
 
 // Frame view between prev (may be null) and curr at `alpha` in [0, 1] (clamped; non-finite -> 1).

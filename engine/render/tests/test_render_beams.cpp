@@ -29,17 +29,13 @@
 #include "alamo/rhi/rhi.hpp"
 #include "alamo/tactical/abilities/ability_system.hpp"
 #include "alamo/vfs/vfs.hpp"
+#include "alamo/test/support.hpp"
+#include "alamo/render/test/gpu.hpp"
+#include "renderer_core.hpp"  // REF3 t07: RendererCore inspection points (src/, target alamo_render_internal)
 
 using namespace alamo;
 
-static int g_fail = 0;
-#define CHECK(c)                                                     \
-    do {                                                             \
-        if (!(c)) {                                                  \
-            std::printf("FAIL %s:%d: %s\n", __FILE__, __LINE__, #c); \
-            ++g_fail;                                                \
-        }                                                            \
-    } while (0)
+using ::alamo::test::g_fail;
 #define CHECK_NEAR(a, b, eps)                                                                                          \
     do {                                                                                                               \
         const double va_ = static_cast<double>(a), vb_ = static_cast<double>(b);                                       \
@@ -49,21 +45,7 @@ static int g_fail = 0;
         }                                                                                                              \
     } while (0)
 
-static std::string env_or_empty(const char* name) {
-#ifdef _MSC_VER
-    char* v = nullptr;
-    size_t len = 0;
-    std::string out;
-    if (_dupenv_s(&v, &len, name) == 0 && v) {
-        out = v;
-        std::free(v);
-    }
-    return out;
-#else
-    const char* v = std::getenv(name);
-    return v ? std::string(v) : std::string();
-#endif
-}
+using ::alamo::test::env_or_empty;
 
 using render::Float3;
 static std::span<const uint8_t> bytes_of(const std::string& s) {
@@ -426,6 +408,58 @@ static void test_frame_resolution() {
     CHECK(render::beams_from_frame(f, &styles, bone).size() == 1);  // only the zap (fixed end) remains
 }
 
+// vis1 t08 (ABILITY_PARTICLES §5): Drain_Life bolts - one record per victim (own key), the far end at Drain_Target_Bone_Name
+// when the victim's model has it (else centre + z adjust), and a style without a texture draws its lightning only.
+static void test_drain_beams() {
+    render::InterpolatedFrame f;
+    f.objects = {obj(10, 0, 0, 0, 0, 0), obj(20, 1, 600, 0, 0, 1), obj(30, 1, 600, 500, 0, 1)};
+    const render::BeamBoneFn bone = [](const render::SnapshotObject& o, std::string_view name, Vec3& out) {
+        if (o.id == 10 && name == "HP_Drain") out = {4, 0, 20};
+        else if (o.id == 20 && name == "B_Chest") out = {601, 0, 9};
+        else return false;
+        return true;
+    };
+    render::SnapshotBeam d;
+    d.kind = render::kBeamDrain;
+    d.owner = 10;
+    d.end_z_adjust = 6.0f;
+    d.style.texture.clear();
+    d.style.lightning = "Tractor_Beam";
+    d.style.start_bone = "HP_Drain";
+    d.style.end_bone = "B_Chest";
+    render::SnapshotBeam d2 = d;
+    d.target = 20;
+    d2.target = 30;
+    f.beams = {d, d2};
+    CHECK(render::beam_key(d) != render::beam_key(d2));
+    const std::vector<render::BeamInstance> out = render::beams_from_frame(f, nullptr, bone);
+    CHECK(out.size() == 2);
+    if (out.size() == 2) {
+        CHECK(out[0].continuous && out[0].start.x == 4.0f && out[0].start.z == 20.0f && out[0].end.x == 601.0f && out[0].end.z == 9.0f);
+        CHECK(out[1].end.y == 500.0f && out[1].end.z == 6.0f);  // no B_Chest: centre + Ranged_Target_Z_Adjust
+    }
+    // geometry: bolts only, no ribbon / dots; without a lightning effect nothing is drawn
+    const render::LightningLibrary lib = render::LightningLibrary::builtin();
+    render::BeamAnimator an(1u);
+    an.set_lightning(&lib);
+    for (uint64_t k = 0; k < 20; ++k) an.step(k, out);
+    render::OrbitCamera cam;
+    cam.distance = 900.0f;
+    const render::ViewMatrices view = render::make_view(cam, 640, 360, 10.0f, 7000.0f);
+    render::BeamGeometry geo;
+    geo.build(an.draws(), view);
+    CHECK(geo.ribbons == 0 && geo.dots == 0 && geo.skipped == 0 && geo.bolts >= 2);
+    for (const render::BeamGeometry::Batch& b : geo.batches) CHECK(!b.texture.empty());
+    std::vector<render::BeamInstance> bare = out;
+    for (render::BeamInstance& b : bare) b.style.lightning.clear();
+    render::BeamAnimator an2(1u);
+    an2.set_lightning(&lib);
+    an2.step(0, bare);
+    render::BeamGeometry g2;
+    g2.build(an2.draws(), view);
+    CHECK(g2.ribbons == 0 && g2.bolts == 0 && g2.skipped == 2 && g2.vertices.empty());
+}
+
 static void test_snapshot_fields() {
     render::SimSnapshot a, b;
     a.objects = {obj(1, 0, 0, 0, 0, 0), obj(2, 0, 100, 0, 0, 1)};
@@ -750,42 +784,8 @@ static void test_apply_beams() {
 }
 
 // ------------------------------------------------------------------------------------------------ GPU
-struct Gpu {
-    rhi::Context ctx;
-    rhi::Allocator alloc;
-    rhi::Uploader up;
-    rhi::FrameRing ring;
-};
-struct Offscreen {
-    rhi::Image color, depth;
-    rhi::Buffer readback;
-    uint32_t w = 0, h = 0;
-    bool create(Gpu& g, uint32_t width, uint32_t height) {
-        w = width;
-        h = height;
-        rhi::ImageDesc cd;
-        cd.format = rhi::Format::RGBA8;
-        cd.width = w;
-        cd.height = h;
-        cd.mips = 1;
-        cd.usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT;
-        rhi::ImageDesc dd = cd;
-        dd.format = rhi::Format::D32F;
-        dd.usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT;
-        return g.alloc.create_image(cd, color) && g.alloc.create_image(dd, depth) &&
-               g.alloc.create_buffer(static_cast<VkDeviceSize>(w) * h * 4, VK_BUFFER_USAGE_TRANSFER_DST_BIT, rhi::MemoryUsage::Readback,
-                                     readback);
-    }
-    void destroy(Gpu& g) {
-        g.alloc.destroy(color);
-        g.alloc.destroy(depth);
-        g.alloc.destroy(readback);
-    }
-    std::vector<uint8_t> pixels() const {
-        const auto* p = static_cast<const uint8_t*>(readback.mapped());
-        return std::vector<uint8_t>(p, p + static_cast<size_t>(w) * h * 4);
-    }
-};
+using Gpu = render::test::GpuCore;
+using Offscreen = render::test::OffscreenWithDepth;  // alamo/render/offscreen.hpp
 
 static bool render_frame(Gpu& g, render::Renderer& r, Offscreen& o, const render::ViewMatrices& vm, render::DrawStats& stats,
                          const float* clear) {
@@ -860,7 +860,7 @@ static void test_beams_gpu(Gpu& g, const std::string& src_dir) {
         if (files->read("Data\\XML\\LightningEffectTypes.xml", xml)) CHECK(lightning.load(xml));
     }
     CHECK(lightning.find("Tractor_Beam") && lightning.find("Piet_Energy_Weapon") && lightning.find("Leech_Shields"));
-    CHECK(rr.init_beams(tex, &lightning) && rr.beams_ready());
+    CHECK(rr.init_beams(tex, &lightning) && render::renderer_core(rr).beams_ready());
     Offscreen o;
     CHECK(o.create(g, 960, 540));
     render::OrbitCamera cam;
@@ -885,11 +885,11 @@ static void test_beams_gpu(Gpu& g, const std::string& src_dir) {
         rr.set_beams(beams, tick);  // the tractor / energy weapon animate over the loop; the zap lives 2 ticks
         CHECK(render_frame(g, rr, o, v, st, clear));
         done = k > 2 && st.beam_pending == 0 && st.beam_ribbons >= 3;
-        rr.pipelines().wait_idle();
+        rr.wait_pipelines();
         if (k > 2) ++tick;
     }
     std::printf("beams gpu: %u ribbons, %u dots, %u bolts, %u pending; %zu vertices, %zu batches\n", st.beam_ribbons, st.beam_dots, st.beam_bolts,
-                st.beam_pending, rr.last_beam_geometry().vertices.size(), rr.last_beam_geometry().batches.size());
+                st.beam_pending, render::renderer_core(rr).last_beam_geometry().vertices.size(), render::renderer_core(rr).last_beam_geometry().batches.size());
     CHECK(st.beam_ribbons >= 3 && st.beam_pending == 0 && st.beam_dots >= 14);
     const std::vector<uint8_t> px = o.pixels();
     CHECK(render::write_png_rgba(src_dir + "/logs/render_beams.png", o.w, o.h, [&] {
@@ -938,6 +938,7 @@ int main() {
     test_animation();
     test_geometry_build();
     test_frame_resolution();
+    test_drain_beams();  // vis1 t08
     test_snapshot_fields();
     test_apply_beams();
     const bool strict = render::setup_validation_env(src_dir);

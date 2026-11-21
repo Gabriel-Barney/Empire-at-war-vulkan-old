@@ -27,8 +27,7 @@ bool CommandPipeline::replay_from_save(const CommandRecording* rec, const SavePo
     if (!rec) return fail("no recording");
     const SchedulerConfig& c = sched_.config();
     const SchedulerConfig& rc = rec->config;
-    if (rc.mode != c.mode || rc.turn != c.turn || rc.max_players != c.max_players || rc.late != c.late)
-        return fail("recording scheduler config (mode / turn / max_players / late policy) differs from the loaded one");
+    if (rc.max_players != c.max_players) return fail("recording scheduler max_players differs from the loaded one");
     const uint64_t next = sched_.next_tick();
     if (rec->from_save) {
         if (!(*rec->from_save == loaded))
@@ -63,7 +62,7 @@ bool CommandPipeline::read(ByteReader& r) {
     return ok && r.ok();
 }
 
-SubmitResult CommandPipeline::submit(uint8_t player, CommandSource source, CommandPayload payload) {
+SubmitResult CommandPipeline::submit(uint16_t player, CommandSource source, CommandPayload payload) {
     if (replay_) {
         SubmitResult r;
         r.status = RejectReason::NotAllowed;
@@ -72,16 +71,8 @@ SubmitResult CommandPipeline::submit(uint8_t player, CommandSource source, Comma
     return sched_.submit(player, source, std::move(payload));
 }
 
-SubmitResult CommandPipeline::receive(Command cmd) {
-    if (replay_) {
-        SubmitResult r;
-        r.status = RejectReason::NotAllowed;
-        return r;
-    }
-    return sched_.receive(std::move(cmd));
-}
-
-RejectReason CommandPipeline::execute_direct(uint64_t tick, uint8_t player, CommandSource source, const EventData& event) {
+RejectReason CommandPipeline::execute_direct(uint64_t tick, uint16_t player, CommandSource source, const EventData& event) {
+    if (player >= kMaxPlayerSlots) return RejectReason::InvalidPlayer;  // mcx5: not encodable (13-bit ids); nothing posted
     Command c;
     c.header.player = player;
     c.header.source = source;
@@ -119,7 +110,6 @@ const CommandBatch& CommandPipeline::begin_tick(uint64_t tick) {
         r.tick = tick;
         r.header = c.header;
         r.type = c.payload.type_id();
-        if (c.payload.type() == EventType::FrameSync) sched_.set_max_ahead(c.payload.u("max_ahead"));
         r.reason = handler_ ? handler_(tick, c) : RejectReason::Unhandled;
         bus_.post(r);
     }

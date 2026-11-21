@@ -11,9 +11,12 @@ namespace {
 
 inline bool is_space(char c) { return c == ' ' || c == '\t' || c == '\r' || c == '\n' || c == '\v' || c == '\f'; }
 
+// Unlike XML 1.0, a digit may start an element name: the original loads `<80s_Visor_Man>` / `<181st>` root elements
+// and the types inside them (modc t14 probe, docs/re/MODC_LOADER.md section 3). So "<5" is markup, "< 5" stays text.
 inline bool is_name_start(char c) {
     const auto u = static_cast<unsigned char>(c);
-    return (u >= 'a' && u <= 'z') || (u >= 'A' && u <= 'Z') || u == '_' || u == ':' || u >= 0x80;
+    return (u >= 'a' && u <= 'z') || (u >= 'A' && u <= 'Z') || (u >= '0' && u <= '9') || u == '_' || u == ':' ||
+           u >= 0x80;
 }
 
 inline bool is_name_char(char c) {
@@ -146,7 +149,10 @@ public:
             p_ += 3;
         else if (n >= 2 && ((static_cast<unsigned char>(p_[0]) == 0xFF && static_cast<unsigned char>(p_[1]) == 0xFE) ||
                             (static_cast<unsigned char>(p_[0]) == 0xFE && static_cast<unsigned char>(p_[1]) == 0xFF))) {
-            fatal(0, "UTF-16 text is not supported");
+            // mcx1 t04 (MCX1_RE_ANSWERS Q5): the original never decodes UTF-16 either; it fails the file's XML header
+            // check and drops the file. The port drops it the same way (each loader then handles a failed file as the
+            // original does), with a message that says how to fix it.
+            fatal(0, "UTF-16 text is not read (the original game drops UTF-16 XML files too); save the file as UTF-8 or ANSI");
             return;
         }
         doc_.nodes_.reserve(buf.size() / 48 + 8);
@@ -186,7 +192,13 @@ public:
         }
         uint32_t roots = 0;
         for (uint32_t c = doc_.nodes_[0].first_child; c; c = doc_.nodes_[c].next_sibling) ++roots;
-        if (roots > 1) warn(begin_ + doc_.nodes_[doc_.nodes_[0].last_child].offset, "more than one top-level element");
+        // mcx1 t04 (xml_extra_root; MCX1_RE_ANSWERS Q4): the original shows "file has multiple root nodes" and drops the
+        // whole file; the port keeps the first root and reports the rest (docs/MOD_COMPAT_DESIGN.md §7.1, [port]
+        // docs/PHASE4.md "mcx1").
+        if (roots > 1)
+            warn(begin_ + doc_.nodes_[doc_.nodes_[doc_.nodes_[0].first_child].next_sibling].offset,
+                 "more than one top-level element (xml_extra_root): only the first is read; the original game drops the "
+                 "whole file");
         doc_.ok_ = true;
     }
 
@@ -425,7 +437,7 @@ XmlDocument XmlDocument::parse(std::string_view bytes, std::string file) {
     return d;
 }
 
-XmlDocument XmlDocument::parse(const std::vector<uint8_t>& bytes, std::string file) {
+XmlDocument XmlDocument::parse(std::span<const uint8_t> bytes, std::string file) {
     return parse(std::string_view(reinterpret_cast<const char*>(bytes.data()), bytes.size()), std::move(file));
 }
 
@@ -501,12 +513,6 @@ std::string_view XmlNode::attribute(std::string_view attr_name, std::string_view
     for (const XmlAttribute* a = attributes_begin(); a != attributes_end(); ++a)
         if (iequals(a->name, attr_name)) return a->value;
     return fallback;
-}
-
-bool XmlNode::has_attribute(std::string_view attr_name) const {
-    for (const XmlAttribute* a = attributes_begin(); a != attributes_end(); ++a)
-        if (iequals(a->name, attr_name)) return true;
-    return false;
 }
 
 XmlChildRange XmlNode::children(std::string_view filter) const {

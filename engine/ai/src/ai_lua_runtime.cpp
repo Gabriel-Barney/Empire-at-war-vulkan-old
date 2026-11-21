@@ -7,6 +7,7 @@
 #include "alamo/core/file_provider.hpp"
 #include "alamo/core/sim_crc.hpp"
 #include "alamo/lua/ai_bridge.hpp"
+#include "alamo/lua/script_loader.hpp"
 
 namespace alamo::ai {
 
@@ -18,11 +19,8 @@ lua::LuaVm* ScriptEvaluators::vm(PlanScriptRuntime& runtime, const FileProvider&
     if (it != vms_.end()) return it->second.vm.get();
     if (missing_.count(key)) return nullptr;
     const std::string path = "Data\\Scripts\\Evaluators\\" +std::string(name) + ".lua";
-    std::vector<uint8_t> bytes;
     std::string err;
-    std::unique_ptr<lua::LuaVm> v;
-    if (files.read(path, bytes))
-        v = runtime.make_vm(std::string(name), std::string(reinterpret_cast<const char*>(bytes.data()), bytes.size()), path, &err);
+    std::unique_ptr<lua::LuaVm> v = runtime.make_vm_from_file(files, std::string(name), path, &err);
     if (!v) {
         missing_.insert(key);
         if (!err.empty()) errors.push_back("evaluator " + std::string(name) + ": " + err);
@@ -155,10 +153,21 @@ std::unique_ptr<lua::LuaVm> PlanScriptRuntime::make_vm(const std::string& name, 
     return build_vm(name, chunk, chunk_name, err);
 }
 
+std::unique_ptr<lua::LuaVm> PlanScriptRuntime::make_vm_from_file(const FileProvider& files, const std::string& name,
+                                                                  const std::string& path, std::string* err, bool* found) {
+    std::vector<uint8_t> bytes;
+    const bool ok = files.read(path, bytes);
+    if (found) *found = ok;
+    if (!ok) return nullptr;
+    return make_vm(name, std::string(reinterpret_cast<const char*>(bytes.data()), bytes.size()), path, err);
+}
+
 std::unique_ptr<lua::LuaVm> PlanScriptRuntime::build_vm(const std::string& name, const std::string& chunk,
-                                                         const std::string& chunk_name, std::string* err) const {
+                                                         const std::string& chunk_name, std::string* err,
+                                                         bool legacy_require) const {
     lua::LuaVmOptions opt;
     opt.script_name = name;
+    opt.legacy_require = legacy_require;
     lua::LuaHost host = setup_.host ? setup_.host() : lua::LuaHost{};
     host.files = read_cache_->wrap(host.files);
     auto vm = std::make_unique<lua::LuaVm>(host, opt);
@@ -168,6 +177,32 @@ std::unique_ptr<lua::LuaVm> PlanScriptRuntime::build_vm(const std::string& name,
         if (err) *err = name + ": " + e;
         return nullptr;
     }
+    return vm;
+}
+
+std::unique_ptr<lua::LuaVm> PlanScriptRuntime::build_load_vm(const std::string& source, const AiDefinitions& defs,
+                                                              PlanDefinition& def, bool* def_ok, std::vector<std::string>* diag,
+                                                              bool legacy_require) const {
+    const std::string& path = def.file;
+    std::string err;
+    std::unique_ptr<lua::LuaVm> vm = build_vm(def.name, source, path, &err, legacy_require);
+    if (!vm) {
+        if (diag) diag->push_back(err);
+        return nullptr;
+    }
+    lua::set_bool_global(*vm, "PlanDefinitionLoad", true);
+    if (!vm->call("Base_Definitions", &err)) {
+        if (diag) diag->push_back(path + ": Base_Definitions: " + err);
+        return nullptr;
+    }
+    for (uint32_t f = 0; f < std::size(kPlanFolders); ++f) {
+        const std::string folder = kPlanFolders[f];
+        if (path.size() > folder.size() && ai_iequal(std::string_view(path).substr(0, folder.size()), folder) &&
+            path.find('\\', folder.size()) == std::string::npos)
+            def.folder = f;
+    }
+    *def_ok = read_plan_definition(*vm, defs, def, diag);
+    if (*def_ok) lua::clear_script_logs(*vm);
     return vm;
 }
 
@@ -195,28 +230,9 @@ size_t PlanScriptRuntime::load(const FileProvider& files, const std::vector<std:
             b.read = true;
             b.name = file_base_name(path);
             b.source.assign(reinterpret_cast<const char*>(bytes.data()), bytes.size());
-            std::string err;
-            b.vm = build_vm(b.name, b.source, path, &err);
-            if (!b.vm) {
-                b.diag.push_back(err);
-                continue;
-            }
-            lua::set_bool_global(*b.vm, "PlanDefinitionLoad", true);
-            if (!b.vm->call("Base_Definitions", &err)) {
-                b.diag.push_back(path + ": Base_Definitions: " + err);
-                b.vm.reset();
-                continue;
-            }
             b.def.name = b.name;
             b.def.file = path;
-            for (uint32_t f = 0; f < std::size(kPlanFolders); ++f) {
-                const std::string folder = kPlanFolders[f];
-                if (path.size() > folder.size() && ai_iequal(std::string_view(path).substr(0, folder.size()), folder) &&
-                    path.find('\\', folder.size()) == std::string::npos)
-                    b.def.folder = f;
-            }
-            b.def_ok = read_plan_definition(*b.vm, defs, b.def, &b.diag);
-            if (b.def_ok) lua::clear_script_logs(*b.vm);
+            b.vm = build_load_vm(b.source, defs, b.def, &b.def_ok, &b.diag, false);
         }
     });
     size_t loaded = 0;
@@ -298,13 +314,20 @@ void PlanScriptRuntime::take_vms(std::vector<std::unique_ptr<lua::LuaVm>>& out) 
     }
 }
 
-void PlanScriptRuntime::restore_pools(std::vector<std::vector<std::unique_ptr<lua::LuaVm>>> pools, size_t created) {
+void PlanScriptRuntime::restore_pools(std::vector<std::vector<std::unique_ptr<lua::LuaVm>>> pools, size_t created,
+                                      std::vector<std::unique_ptr<lua::LuaVm>> pristine_from) {
     for (size_t i = 0; i < entries_.size(); ++i) {
         Entry& e = entries_[i];
         std::vector<std::unique_ptr<lua::LuaVm>> next = i < pools.size() ? std::move(pools[i]) : decltype(e.free){};
         std::unique_ptr<lua::LuaVm> kept;  // the pristine VM, while no null entry has taken it
-        for (std::unique_ptr<lua::LuaVm>& vm : e.free)
-            if (vm && vm.get() == e.pristine) kept = std::move(vm);
+        if (i < pristine_from.size() && pristine_from[i]) {  // a pre-mcx6 save's pristine VM (legacy_pristine)
+            kept = std::move(pristine_from[i]);
+            e.pristine = kept.get();
+            e.digest_known = false;
+        } else {
+            for (std::unique_ptr<lua::LuaVm>& vm : e.free)
+                if (vm && vm.get() == e.pristine) kept = std::move(vm);
+        }
         bool named = false;
         for (std::unique_ptr<lua::LuaVm>& slot : next)
             if (!slot && kept) {
@@ -325,18 +348,36 @@ const lua::LuaVm* PlanScriptRuntime::pristine(uint32_t plan) const {
     return plan < entries_.size() ? entries_[plan].pristine : nullptr;
 }
 
+namespace {
+uint64_t vm_digest(const lua::LuaVm& vm) {
+    ByteWriter w;
+    vm.write(w);
+    StateHasher h;
+    h.bytes(w.bytes().data(), w.size());
+    return h.digest();
+}
+}  // namespace
+
 uint64_t PlanScriptRuntime::pristine_digest(uint32_t plan) const {
     if (plan >= entries_.size() || !entries_[plan].pristine) return 0;
     const Entry& e = entries_[plan];
     if (!e.digest_known) {
-        ByteWriter w;
-        e.pristine->write(w);
-        StateHasher h;
-        h.bytes(w.bytes().data(), w.size());
-        e.digest = h.digest();
+        e.digest = vm_digest(*e.pristine);
         e.digest_known = true;
     }
     return e.digest;
+}
+
+std::unique_ptr<lua::LuaVm> PlanScriptRuntime::legacy_pristine(uint32_t plan, const AiDefinitions& defs, uint64_t digest) const {
+    if (plan >= entries_.size()) return nullptr;
+    const Entry& e = entries_[plan];
+    PlanDefinition def;
+    def.name = e.name;
+    def.file = e.file;
+    bool def_ok = false;
+    std::unique_ptr<lua::LuaVm> vm = build_load_vm(e.source, defs, def, &def_ok, nullptr, true);
+    if (!vm || !def_ok || vm_digest(*vm) != digest) return nullptr;
+    return vm;
 }
 
 void PlanScriptRuntime::release(uint32_t plan, std::unique_ptr<lua::LuaVm> vm) {
@@ -360,6 +401,32 @@ void append_script_errors(const lua::LuaVm& vm, const std::string& prefix, std::
         if (m.starts_with("SCRIPT ERROR")) out.push_back(prefix + m);
 }
 
+std::unique_ptr<lua::LuaVm> start_free_store_vm(PlanScriptRuntime& runtime, const FileProvider& files, const std::string& script,
+                                                lua::AiScriptHost* host, int32_t script_id, bool galactic, int32_t player,
+                                                const std::function<void(lua::LuaVm&)>& before_thread,
+                                                std::vector<std::string>* diagnostics) {
+    // mcx6 t07 (LUA_API.md "Script lookup and require"): a name from XML loads whichever LUA_PATH entry exists first
+    // (NAME.lua then NAME.lc in the install folder, then in each script root in order), .lc included.
+    std::vector<uint8_t> bytes;
+    const std::string path = lua::read_script(files, script, bytes);
+    std::string err;
+    std::unique_ptr<lua::LuaVm> vm =
+        path.empty() ? nullptr : runtime.make_vm(script, std::string(reinterpret_cast<const char*>(bytes.data()), bytes.size()), path, &err);
+    if (!vm) {
+        if (diagnostics) diagnostics->push_back(!path.empty() ? err : "Data\\Scripts\\FreeStore\\" + script + ".lua: not found");
+        return nullptr;
+    }
+    lua::attach_ai_host(*vm, host, script_id);
+    vm->call("Base_Definitions", &err);
+    lua::set_free_store_global(*vm, script_id, galactic);
+    lua::set_player_global(*vm, "PlayerObject", player);
+    lua::set_number_global(*vm, "LastService", 0.0);
+    lua::set_number_global(*vm, "LastUnitService", 0.0);
+    if (before_thread) before_thread(*vm);
+    vm->create_thread("main");
+    return vm;
+}
+
 std::vector<std::string> list_plan_files(const std::function<std::vector<std::string>(std::string_view)>& list) {
     std::vector<std::string> out;
     for (const char* folder : kPlanFolders) {
@@ -370,7 +437,8 @@ std::vector<std::string> list_plan_files(const std::function<std::vector<std::st
         for (std::string& f : files)
             if (f.size() > n && f.find('\\', n) == std::string::npos && f.find('/', n) == std::string::npos)
                 direct.push_back(std::move(f));
-        sort_plan_files(direct);
+        // mcx3 t13 (MCX4_GAL2_RE_ANSWERS Q6 / UI.md §9.2): the plan scan 0x4e7e30 loads in the find's order, which the
+        // lister keeps (a Vfs lists loose files, then MEG records in stored order), so no re-sort here.
         for (std::string& f : direct) out.push_back(std::move(f));
     }
     return out;

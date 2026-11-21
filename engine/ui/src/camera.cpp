@@ -16,6 +16,11 @@ float tactical_fov_x(float fov_degrees, float aspect) {
     return 2.0f * std::atan(std::tan(0.5f * f) * 0.75f * 16.0f / 9.0f);
 }
 
+float galactic_fov_x(float fov_x_4_3, float aspect) {
+    if (aspect <= 4.0f / 3.0f + 1e-4f) return fov_x_4_3;
+    return 2.0f * std::atan(std::tan(0.5f * fov_x_4_3) * aspect * 0.75f);
+}
+
 float Spline::eval(float t, float fallback) const {
     const size_t n = x.size() < y.size() ? x.size() : y.size();
     if (n == 0) return fallback;
@@ -584,7 +589,7 @@ void TacticalCameraController::update(const InputState& in, const Bindings& keys
                       (in.frame().mouse_inside || dragging);
     const ButtonState& db = in.button(in.button(Button::Middle).down ? Button::Middle : Button::Right);
     float tx = 0, ty = 0;
-    scroll_target(in, keys, s_, t_, edge, push, db.drag.x0, db.drag.y0, tx, ty);
+    if (!scroll_locked_) scroll_target(in, keys, s_, t_, edge, push, db.drag.x0, db.drag.y0, tx, ty);  // ui2 t06: SCROLL_LOCK
     scroll_smooth(tx, ty, dt, s_, scroll_vx_, scroll_vy_);
     if (scroll_vx_ != 0.0f || scroll_vy_ != 0.0f) {
         const float k = 3e-4f * dist_.value * dt;  // world speed = S x 3e-4 x distance
@@ -727,7 +732,7 @@ void GalacticCameraController::update(const InputState& in, const Bindings& keys
     const bool push = !t_.absolute_scrolling && dragging_;
     const bool edge = !(t_.absolute_scrolling && dragging_) && !in.button(Button::Left).down && (f.mouse_inside || dragging_);
     float tx = 0, ty = 0;
-    scroll_target(in, keys, s_, t_, edge, push, b.drag.x0, b.drag.y0, tx, ty);
+    if (!scroll_locked_) scroll_target(in, keys, s_, t_, edge, push, b.drag.x0, b.drag.y0, tx, ty);  // ui2 t06: SCROLL_LOCK
     scroll_smooth(tx, ty, dt, s_, scroll_vx_, scroll_vy_);
     if (scroll_vx_ != 0.0f || scroll_vy_ != 0.0f) pan(scroll_vx_ * dt, -scroll_vy_ * dt);
     // Wheel = planet zoom (§5); [port: Gabriel] the zoom keys act as one notch per press.
@@ -741,10 +746,12 @@ void GalacticCameraController::update(const InputState& in, const Bindings& keys
 
 float GalacticCameraController::fov_deg() const { return fov_deg_ > 0.0f ? fov_deg_ : kGalacticFovX / kDegToRad; }
 
-CameraParams GalacticCameraController::params(float /*aspect*/) const {
+CameraParams GalacticCameraController::params(float aspect) const {
     const Pose p = blended();
     CameraParams cp = make_params(p.look, 0.0f, p.pitch, p.pullback);
-    cp.fov_x = fov_deg_ > 0.0f ? fov_deg_ * kDegToRad : kGalacticFovX;  // fixed for every aspect (B.8); [port: Gabriel] setting
+    // B.8 keeps this horizontal FOV at every aspect; [port: Gabriel 2026-11-13] Hor+: it is the 4:3 value and wider windows
+    // widen it (galactic_fov_x), so 16:9 / 21:9 / 32:9 keep 4:3's vertical view. [port: Gabriel] the FOV setting likewise.
+    cp.fov_x = galactic_fov_x(fov_deg_ > 0.0f ? fov_deg_ * kDegToRad : kGalacticFovX, aspect);
     cp.znear = kGalacticNear;
     cp.zfar = kGalacticFar;
     cp.galactic = true;

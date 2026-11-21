@@ -76,7 +76,7 @@ Every leaf fails when the evaluator has no planet object.
 | TargetPoliticalControl | 0x65f000 | 0 | 0x400 | influence record of behaviour 3 (vf+0x98): v = (int)\|control\| / GC+0xF0; negated when the record's player ≠ Self [H; M Self] | none |
 | TargetPlayerID | 0x65e980 | 0 | 1 | player id of the same influence record (−1 if none) [H] | — |
 | StarbaseLevel / …Unnormalized | 0x65ea30 / 0x65eab0 | 0 / 0 | vis | D+0x148 / GC+0xF4; unnormalised = D+0x148 | — |
-| GroundbaseLevel / …Unnormalized | 0x65c1a0 / 0x65c220 | 0 | vis | D+0x130 / GC+0xF8 | — |
+| GroundbaseLevel / …Unnormalized | 0x65c1a0 / 0x65c220 | 0 | vis | D+0x130 / GC+0xF8. Writer: recount 0x4bdaa0 = live DUMMY_GROUND_STRUCTURE objects in D's ground-structure list (D+0x150), clamped 0..5; queued structures never count (A2M_R2_RE_A §1) [H] | — |
 | MaxStarbaseLevel / …Unn | 0x65e490 / 0x65e4f0 | 0 | vis | 0x372780: D+0x238 (type +0x668 without D) / GC+0xF4 | — |
 | MaxGroundbaseLevel / …Unn | 0x65e3e0 / 0x65e440 | 0 | vis | 0x372400 (D: 0x4b7eb0; else min(5, type+0x92C)) / GC+0xF8 | — |
 | MaxStructureSlots / …Unn | 0x65e540 / 0x65e5a0 | 0 / 0 | vis / 0x200 | D+0x230 (type+0x92C) / GC+0xFC | normalised fails if GC+0xFC = 0 |
@@ -109,7 +109,9 @@ Every leaf fails when the evaluator has no planet object.
 | BlackMarketMinimumAbilityPrice | 0x65e5e0 | 6 | vis | min price of those abilities (×(+0x28) when above tech) + type float +0x800; none → 1e18 + modifier | as above |
 | BlackMarketPriceModifier | 0x65b7d0 | −1 | vis | type float +0x800 | — |
 | IsHumanControlled | 0x65e290 | 0 | vis | owner player (planet +0x58) human flag (+0x62) | — |
-| HasIndigenousUnits, StoryTrigger, DistanceToNearestFriendly, connectivity, BuildQueue*, IsBuilding | various | — | — | not used by shipped galactic eqs; not read | — |
+| HasIndigenousUnits | 0x65c4e0 | −1 | vis | over the planet type's `Potential_Indigenous_Power` list (type +0x20C8, 0x18-byte entries: unit type +8, power int +0x10; repeated tags appended). No `Parameter_Type`: 1.0 if the list has any entry, else 0.0. Otherwise each name is looked up as a type (0x407c00; an unknown name gives none and matches nothing) and the value is 1.0 if any entry's type is one of them. No owner, side or fog test [H, mcx8 t07] | fails only without a planet object |
+| StoryTrigger | 0x65eb10 | 0 | vis | as the player root (0x6e08e0, §3) with the planet's game object as the flag's target: 1.0 if 0x4dd530(system, `Parameter_Name`, planet) (a TRIGGER_AI that named this planet in Param3, STORYB_T10_TRIGGER_AI §3.2); never clears [H] | fails if `Parameter_Name` absent |
+| DistanceToNearestFriendly, connectivity, BuildQueue*, IsBuilding | various | — | — | not used by shipped galactic eqs; not read | — |
 | **Markup** | 0x64dc50 (base 0x64dc60, every evaluator) | 0 | vis | evaluator double +0x80, accumulated by Lua `Apply_Markup` (0x69d110, re-apply subtracts the old value) [H leaf, M writer]; default 0 | — |
 | **Hints.X** | sub-evaluator 0x6deca0 (HintPerceptualEvaluator, evaluate 0x6dee80) | none | — | value of hint X for this planet from the campaign's `Markup_Filename` file (Data/XML/AI/GalacticMarkup/*), else the hint-set default (`Galactic_Hints` in HintSets: Chokepoint, OffenseDelayGround/Space, PriorityTarget = 0.0) via 0x4dd6d0 | **fails** if X is in neither (e.g. `Hints.High_Ground` in galactic) |
 | Owner.X | sub 0x6df710 / 0x6df790 | — | — | Owner → the owning player's evaluator, rebound on 0x1A [M] | — |
@@ -189,6 +191,7 @@ nested evaluation that fails fails the token.
 | IsCampaignGame | 0x6e1ff0 | −1 | mode type 0 (galactic) → 1.0; else 1.0 if 0x28aa00 finds a parent campaign |
 | IsStoryCampaign | 0x6e20e0 | −1 | global byte 0x140b303c2 |
 | IsLandControlGame | 0x6e2060 | −1 | GameModeManager +0x20 == 4 |
+| InterventionsEnabled | 0x6e1fb0 | 0 | registered by the base Game evaluator 0x6e2170, so galactic and tactical Game roots both have it. Reads the global game-settings flags 0x140b154bc (copied from the campaign's advanced options at campaign start, 0x957a0): flag 0x20 clear → 1.0; flag 0x20 set → (flag 0x10 ? float 1.0 : 0.0). Never fails [H]. The flags come from the advanced options dialog (0xeb1c0): 1 `IDC_ALLOW_HEROES`, 2 `IDC_ALLOW_STARTING_UNIT_PURCHASE`, 4 `IDC_ALLOW_SUPER_WEAPONS`, 8 `IDC_PRE_BUILT_BASES`, 0x10 random events, 0x20 "an option was changed" (set by every checkbox / slider event, cleared by `IDC_DEFAULTS_BUTTON` and after the copy) [H]. In FoC the dialog clears 0x10 at open and greys `IDC_ALLOW_RANDOM_EVENTS` (no handler sets 0x10) [M: no other writer of 0x10 found by text search], so any changed option gives 0.0 and `Are_Interventions_Disabled` turns the Interventions goals off |
 | PlanetsCorruptedUnnormalized / PlanetsCorrupted | 0x66e2c0 / 0x66e220 | 7 | count of target-list planets with D+0x2F4 ≠ −1; normalised by the target-list size |
 | EnemyForce/FriendlyForce.{Ground,Space}TotalUnnormalized | 0x6e3680 / 0x6e3a00 → 0x6e3a10 | 30 | §0 (Σ planets, params dropped) |
 | …PerTargetMax{Ground,Space}Force | 0x6e39e0 / 0x6e39f0 → 0x6e36a0 | 30 | max over planets |
@@ -227,12 +230,30 @@ registered on planets.)
 - `Game.TIMELINE`, `ISCAMPAIGNGAME`, `ISLANDCONTROLGAME`, `ISSETUPPHASE`: real flags (§4). `Game.<side>.X` ignores params.
 - Caches: lifetimes above are part of the behaviour (e.g. force totals 15 s, Game totals 30 s).
 
-**Registered and used by shipped galactic eqs but missing in the port:** `Self.GrossIncomeNBPTM`,
-`Self.GrossIncomeNBTF`, `Self.MaxStarbaseLevelUnnormalized`, `Self.StoryTrigger`, `Self.HomePlanet.Type.Token`,
-`Human.SpaceDefendedPlanets`, `Human.GroundDefendedPlanets`, `Target.OpenGroundCompanySlots`,
-`Target.BlackMarketAbilitiesAvailable`, `Target.BlackMarketMinimumAbilityPrice`, `Target.BlackMarketPriceModifier`,
-`Target.EnemyForce.HasSpaceUnitsBitfield`, `Target.EnemyForce.HasGroundUnitsBitfield`,
-`Target.FriendlyForce.HasGroundUnitsBitfield`, `Target.EnemyForce.AntiStealthEffectiveness`, `Target.Type.Token`.
+**Used by shipped equations but not evaluated by the port** (regenerated 2026-11-17, mcx0 t05; all three implemented
+2026-11-18, mcx8 t07, see the end of this list) (from
+`alamo_mod_check` report v4 `ai.token_coverage` on base FoC; it replaces the hand list of 2026-10-30, whose paths are all
+evaluated now). The port's coverage is the token path registry next to the handlers (`engine/ai/src/galactic_ai_tokens.cpp`,
+`GalacticSimTokenResolver::path_registered`, checked against the handlers by `test_token_registry`) plus the tactical
+leaf tables (`TacticalTokenResolver::path_implemented`), each for the equations that run in its mode (an equation a
+template of that mode names, and what it names in turn; other equations count with either). Base FoC, 381 equations,
+187 distinct paths:
+- `Game.InterventionsEnabled` (1 equation, `Are_Interventions_Disabled`, a galactic template's equation,
+  `Data\XML\AI\PerceptualEquations\InterventionEquations.xml`): the tactical leaf table has it, the galactic registry
+  does not;
+- `Variable_Target.HasIndigenousUnits` (1 equation, `Intervention_Trigger_Indigenous_Revolt`,
+  `Data\XML\AI\PerceptualEquations\InterventionEquations.xml`);
+- `Variable_Target.StoryTrigger` (1 equation, `Helper_Trap_Land_Check_Galactic_Flags`,
+  `Data\XML\AI\PerceptualEquations\SandboxEventEquations.xml`).
+
+mcx8 t07 (2026-11-18) read all three [H] (§1, §4): retail registers `HasIndigenousUnits` and `StoryTrigger` on the planet
+evaluator 0x65f7b0 and `InterventionsEnabled` on the base Game evaluator 0x6e2170, so none is retail-equivalent; the port now
+evaluates them (`kTargetPaths` / `kGamePaths`, `test_mcx8_t07_tokens`). Port notes: `HasIndigenousUnits` is not cached
+(lifetime −1 over type data: same value), and list entries whose unit type does not resolve are dropped at load [M: whether
+retail's converter keeps them as null entries, which only the no-parameter form would see, is not read]; `InterventionsEnabled` is the host's `GalacticAiConfig::interventions_enabled` =
+not (advanced options accepted and random events off) [port: the port's flag is "the dialog was accepted", retail's 0x20 is
+"a control was changed"], kept across a save by the key `spec.interventions_off`; the tactical Game leaf still answers 0.0 (no shipped tactical equation reads it). Rerun
+`alamo_mod_check --json` on base FoC to refresh this list.
 
 ## 6. Extra questions
 
@@ -280,7 +301,8 @@ registered on planets.)
 3. Bodies not read: GrossIncome sum tail (0x667fb0), NetIncome (0x66a420), 0x66a730, Maintenance (0x669110/0x669420),
    AverageStarbase/Groundbase (0x666df0), BaseIncomeNBTD/IncomeNBTD, bitfield/antistealth details, HomePlanet/Owner/Type
    sub-evaluators.
-4. Meaning of the planet-type list +0x20C8 added to enemy ground totals, and of 0x3a9760 in HasSpaceForce.
+4. ~~Meaning of the planet-type list +0x20C8 added to enemy ground totals~~: it is `Potential_Indigenous_Power` (mcx8 t07,
+   §1 HasIndigenousUnits; the port's enemy GroundTotalUnnormalized does not add it yet). Open: 0x3a9760 in HasSpaceForce.
 5. 0x6136b0 (AI CreditsUnnormalized) — total of budget pools vs player credits.
 6. ~~Cache key: 0x5f3e60 hashes the binding set; whether the hash includes Self (so Human-rooted and Self-rooted leaves
    share entries) is [M] (AI_TACTICAL_PERCEPTION §1.2).~~ Resolved (q6 t18, 2026-11-04): the key is the parameter
@@ -1008,6 +1030,38 @@ Read again: 0x6c5de0 (requirement), 0x5f1990 (list), 0x72ac70 / 0x6bff00 (satisf
   113 / 33 / 2 before, 413 / 237 / 66 / 3 after (item 1 alone 602 / 407 / 158 / 3, item 2 alone 332 / 105 / 25 / 2,
   item 3-4 rounding alone and the §9.5 budget alone: no change); `fail Contrast` proposals 166 -> 80. With
   `--human Empire`: 225 / 72 / 30 / 0 -> 586 / 403 / 85 / 0, `fail Contrast` 12 -> 2.
+
+### 9.8a The same contrast rules in tactical modes (ref5 t05, 2026-11-20) [H unless tagged]
+
+Read from the decompiled output (`re_reference/`, 0x72b940, 0x72b6a0, 0x6c5de0, 0x5f1d00) for roadmap ref5 t05: do the
+rules of §9.8 and q2f t09 also hold when a land or space PotentialPlan is solved? Yes; none of them tests the mode.
+- **Pair filter 0x72b6a0.** No pair counts when P = power(T) x health ≤ 0. A pair counts only when w > 0 **and** R > 0.
+  Both tests come before the mode flag. The mode flag (argument 10) is "PP mode ≠ galactic (PP+0x198 ≠ 0) or the
+  candidate has a free unit". When it is set, only the tolerance / pop-cap test is skipped. So in tactical modes a pair
+  needs P > 0, w > 0 and R > 0, and nothing else.
+- **Which lists 0x72b940 scores.** The main list is scored only when rec+0xB0 (a non-escort team) is set. The escort list
+  is scored when 0x140b3a525 (an escort list exists) is set and either rec+0xB1 or 0x140b3a528 is set. The score is the
+  better of the two. Contained units (+0x60, 0x72b3e0) are added only when PP+0x198 = 0 (galactic).
+- **The gate after v ≤ 0.** The gate is `(0x140b3a528 && rec+0xB0) || (0x140b3a529 && rec+0xB1)`, the plan-wide
+  flags (§9.8 item 2). The "still allowed" checks run in this order:
+  1. MinimumCost + AdditionalCost ≤ gross.
+  2. The main list's untyped totals (key 0, remaining > 0), each found by its layer byte (byte ≠ 0 → rec+0x90, else
+     rec+0x91). This check runs only with 0x528 && rec+0xB0.
+  3. The escort list's untyped totals, the same way. This check runs only with 0x525 && 0x529 && rec+0xB1.
+  4. RequiredCategories.
+  5. The team minimums.
+
+  None of the checks depends on the mode.
+- **Tolerance and scale.** 0x6c5de0 computes the tolerance T in float for every mode. Tactical builds its lists with
+  0x5f1d00 (main, and escort when a TF is an EscortForce), not 0x5f1990. Its typed-row scale is
+  `((double)Max + (double)(float)(f x PFCA)) x (double)multiplier`. The multiplier is the difficulty entry's tactical
+  contrast factor (+0x3c, then +0x38, one per mode) [M which offset belongs to which mode]. The rounding is the same
+  as galactic §9.8 item 3.
+- **Satisfied test.** 0x6bff00 / 0x72ac70 is the same float test as §9.8 item 4. It is called with T (0x140b3a544)
+  in both modes.
+- Not read here: the tactical ×2 on a positive v. The decompile drops the return value; AI_GALACTIC_2 §1.4 keeps it.
+
+Port status: `engine/ai/tactical/src/tactical_pp.cpp` ContrastM (ref5 t05 slice 2).
 
 ## 9c. Galactic AI follow-up (q6 roadmap t18, 2026-11-04)
 

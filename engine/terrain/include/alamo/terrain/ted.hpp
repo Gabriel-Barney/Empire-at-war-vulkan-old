@@ -33,8 +33,14 @@ constexpr float kVertexSpacing = 20.0f;         // world units between grid vert
 constexpr float kHeightScale = 0.048828125f;    // raw s16 height -> world units (1/20.48)
 constexpr uint32_t kPatchQuads = 31;            // quads per patch side
 constexpr uint32_t kPatchVerts = 32;            // vertices per patch side
+// mcx5 t03 (MCX5_RE_ANSWERS Q2.3 [H]): retail's material table grows with the records; its only 64 is the
+// renderer's per-patch array (0x1b62a0), which ids >= 64 overrun. The port keeps 64 slots and clamps ids.
+// limit: retail MCX5_RE_ANSWERS Q2.3 (render per-patch array, 0x1b62a0)
 constexpr uint32_t kMaterialSlots = 64;
-constexpr uint32_t kMaxGridVerts = 31 * 64 + 1; // reader cap (vanilla max 373); larger -> error
+// mcx5 t03 (MCX5_RE_ANSWERS Q2.1 [H]): retail bounds neither side (heap-sized buffers; a side >= 65536 hangs its
+// u16 cell fill). The port allocates from the vertex payload, so this only keeps size products in signed 32 bits.
+// limit: guard 31 * 256 + 1 = 7937 per side (vanilla max 373; w * h * 16 < 2^31); larger -> error
+constexpr uint32_t kMaxGridVerts = 31 * 256 + 1;
 
 // Cell passability bits (CellPassabilityType, 1.5).
 enum PassabilityBits : uint32_t {
@@ -85,7 +91,7 @@ struct Environment {
     float bloom_strength = 1.0f, bloom_cutoff = 0.9f, bloom_size = 0.25f;  // 23, 24, 28
     float wind_direction_deg = 0.0f, wind_speed = 2.0f;           // 2B, 2C
     // --- additions ---
-    uint32_t field_13 = 1;                                        // 13 (clamped >= 0; reader unknown)
+    uint32_t field_13 = 1;                                        // 13 weather type (>= 0; CU8F_T03_T05_RE §2.2)
     float skydome_scale[2] = {1, 1};                              // 1B, 1C (1 when the name is empty)
     float skydome_angle_deg[2][2] = {{0, 0}, {0, 0}};             // [0] = 1D,1F  [1] = 1E,20 (degrees)
     float lightning_intensity = 0.0f;                             // 21
@@ -237,6 +243,15 @@ struct Terrain {
     std::vector<uint8_t> brightness;        // used only when header.use_vertex_brightness
     bool legacy_vertices = false;           // came from child 1 (brightness forced 0xFF)
     std::array<TerrainMaterial, kMaterialSlots> materials{};
+    // mcx5 t03 (MCX5_RE_ANSWERS Q2.3 [H]): material records past slot 63, in file order. Retail's table grows to hold
+    // every record and its sim reads (surface type, 0x38e0c0) index it by the raw byte; only the renderer stops at 64.
+    // cell_surface_type reads these; the render / mesh paths keep the 64 slots.
+    std::vector<TerrainMaterial> extra_materials;
+    // The material record of id m (slot or extra), null past the table.
+    const TerrainMaterial* material_record(uint32_t m) const {
+        if (m < kMaterialSlots) return &materials[m];
+        return m - kMaterialSlots < extra_materials.size() ? &extra_materials[m - kMaterialSlots] : nullptr;
+    }
     WaterScroll water_scroll[2];            // child 7, child 8
     std::vector<TerrainDecal> decals;       // child 6 (DECORATIONS.md 4.1; only UM11 in vanilla)
     std::vector<TerrainTrack> tracks;       // child 9 (DECORATIONS.md 5.1; 23 FoC maps)
@@ -250,6 +265,23 @@ struct Terrain {
     // Height of the rendered surface at world (wx, wy): linear over the mesh triangle containing
     // the point (diagonal (0,0)-(1,1) of each quad), clamped to the map.
     float sample_height(float wx, float wy) const;
+    // mov3 t08 (MOVEMENT §3.6 "Terrain height 0x135140", MOV2_RE_QUESTIONS Q6 [H]): the gameplay heightmap height - bilinear
+    // over the grid cell: i = floor(wx / 20), j = floor(wy / 20), the fractions taken before any clamp, each corner index
+    // clamped on its own (outside the map: the edge height); blended along y on columns i and i + 1, then along x.
+    float sample_height_bilinear(float wx, float wy) const;
+    // trn1 (docs/re/TRN1_TERRAIN_GAMEPLAY.md §1): the gameplay surface type of a world point.
+    // cell_surface_type: the TEM `surface_type` (mini 14) of the material at the grid vertex nearest (wx, wy) - indices
+    //   floor(w / 20 + 0.5) clamped to the grid, no water test (0x133b10 + material +0x84; Get_Damage_Multiplier's cover
+    //   test). 0 for a material slot past the table.
+    // under_water: the map has a water plane and the terrain height at (wx, wy) (sample_height_bilinear, mov3 t08) is below
+    //   the water height - 0.5 (the literal of 0x5efe50 and of the Destroy_When_Stunned_Over_Water test; local water
+    //   patches [M] are not modelled).
+    // water_surface_type: 4 water, 8 lava, 7 ice (table 0x140a123c8), 0 without a water plane.
+    // surface_type_at: water_surface_type when under_water, else cell_surface_type (SurfaceFX 0x5efe50).
+    uint32_t cell_surface_type(float wx, float wy) const;
+    bool under_water(float wx, float wy) const;
+    uint32_t water_surface_type() const;
+    uint32_t surface_type_at(float wx, float wy) const;
 };
 
 // ---------------------------------------------------------------- 0x102: objects (1.6)
@@ -271,6 +303,20 @@ struct ObjectPlacement {
     std::vector<std::string> attachments;  // 0x4BA child names that are not "NONE" (hardpoint slots)
     uint32_t attachment_slots = 0;         // number of 0x4BA children
     std::vector<RawMini> owner_raw;        // 0x476/1 minis
+    // 0x482 (TERRAIN_WATER_POST 1.6): the object's hint (marker) name, leaf child 0 mini 01 (NUL-terminated);
+    // empty = the object has no 0x482 chunk. Lua Find_Hint / Get_Hint read it.
+    std::string hint;
+    // 0x46E (docs/re/Q6_T30_FIND_HINT_ORDER.md 3): the object's marker name (MarkerDataPack), same layout as 0x482 (leaf
+    // child 0 mini 01); shipped maps mostly store an empty name. has_marker_name = the chunk exists.
+    std::string marker_name;
+    bool has_marker_name = false;
+    // 0x459/0x4B7 (same doc 3): extra behaviours the loader attaches to the placed object, one 0x4B8 leaf each: mini 00 the
+    // behaviour's name CRC (alamo::name_crc of the XML name; every shipped entry is HINT), minis 01..03 kept as stored [L].
+    struct ExtraBehavior {
+        uint32_t name_crc = 0;
+        std::vector<RawMini> raw;  // every 0x4B8 mini as stored
+    };
+    std::vector<ExtraBehavior> extra_behaviors;
 };
 
 // ---------------------------------------------------------------- 0x10B: AI zones (cheap decode)

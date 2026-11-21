@@ -24,14 +24,8 @@ Mat34 to_mat(const alamo::Mat34& m) {
 
 Float3 to_f3(const alamo::Vec3& v) { return {v.x, v.y, v.z}; }
 
-// "EI_TROOPER" -> "DATA\ART\MODELS\EI_TROOPER.ALO"; names with a separator are only normalised.
-std::string model_path(std::string_view name) {
-    std::string n = normalize_path(name);
-    if (n.find('\\') == std::string::npos) n = "DATA\\ART\\MODELS\\" + n;
-    const size_t slash = n.find_last_of('\\');
-    if (n.find('.', slash == std::string::npos ? 0 : slash) == std::string::npos) n += ".ALO";
-    return n;
-}
+// "EI_TROOPER" -> "DATA\ART\MODELS\EI_TROOPER.ALO", the same rule as assets::model_path.
+std::string model_path(std::string_view name) { return with_default_dir_ext(name, "Data\\Art\\Models\\", ".alo"); }
 
 std::string model_dir(std::string_view model) {
     const std::string p = model_path(model);
@@ -139,7 +133,7 @@ bool Clip::visible(uint32_t track, uint32_t frame) const {
 
 bool parse_clip(std::span<const uint8_t> bytes, std::string_view name, Clip& out, std::string* error) {
     try {
-        const ala::Animation a = ala::parse(bytes);
+        const ala::Animation a = ala::parse(bytes, alamo::ParseOptions{true, nullptr});  // mcx2 t03: retail-equivalent salvage (ala.hpp)
         if (!(a.fps == a.fps)) throw std::runtime_error("fps is NaN");
         const std::vector<std::array<int16_t, 4>> defaults = default_rotations(bytes);
         Clip c;
@@ -150,6 +144,7 @@ bool parse_clip(std::span<const uint8_t> bytes, std::string_view name, Clip& out
         c.bone_count = a.num_bones;
         const size_t nf = a.num_frames;
         const size_t vis_bytes = (nf + 7) / 8;
+        // limit: guard ALA decode: raw block element count, refuses
         constexpr size_t kMaxRawElements = size_t(64) << 20;  // guard against absurd block indexing
         c.tracks.reserve(a.bones.size());
         for (size_t i = 0; i < a.bones.size(); ++i) {

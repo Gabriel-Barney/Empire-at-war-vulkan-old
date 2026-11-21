@@ -14,7 +14,9 @@
 #include <vector>
 
 #include "alamo/core/file_provider.hpp"
+#include "alamo/core/hash.hpp"
 #include "alamo/video/video.hpp"
+#include "alamo/video/bink_header.hpp"
 #if defined(ALAMO_VIDEO_HAVE_VFS)
 #include "alamo/vfs/vfs.hpp"
 #endif
@@ -42,16 +44,7 @@ void check(bool ok, const char* what) {
     }
 }
 
-// ---- minimal PNG writer (stored deflate) -----------------------------------------------------------------
-uint32_t crc32(const uint8_t* p, size_t n, uint32_t c = 0) {
-    c = ~c;
-    for (size_t i = 0; i < n; ++i) {
-        c ^= p[i];
-        for (int k = 0; k < 8; ++k) c = (c >> 1) ^ (0xEDB88320u & (0u - (c & 1u)));
-    }
-    return ~c;
-}
-
+// ---- minimal PNG writer (stored deflate; chunk CRC = alamo::crc32, CRC-32/IEEE as PNG needs) ------------
 void put32(std::vector<uint8_t>& v, uint32_t x) {
     v.push_back(static_cast<uint8_t>(x >> 24));
     v.push_back(static_cast<uint8_t>(x >> 16));
@@ -64,7 +57,7 @@ void chunk(std::vector<uint8_t>& out, const char* type, const std::vector<uint8_
     std::vector<uint8_t> td(type, type + 4);
     td.insert(td.end(), data.begin(), data.end());
     out.insert(out.end(), td.begin(), td.end());
-    put32(out, crc32(td.data(), td.size()));
+    put32(out, alamo::crc32(td.data(), td.size()));
 }
 
 bool write_png(const std::string& path, const uint8_t* rgba, int w, int h) {
@@ -131,6 +124,96 @@ void test_yuv() {
     const uint8_t a[4] = {10, 20, 30, 40};
     auto al = conv(128, 128, 128, true, a);
     check(al[3] == 10 && al[7] == 20 && al[11] == 30 && al[15] == 40, "yuv alpha plane");
+}
+
+// ui5 t12 (docs/re/AUDIO.md §3.4): caption timing - window (prev, cur], first in text-id order, duration 0 -> 120, none ->
+// next step, expiry at start + duration, a hidden ("[TBL]") caption neither shows nor replaces; Movies.xml parsing.
+void test_captions() {
+    using alamo::video::CaptionTrack;
+    using alamo::video::MovieCaption;
+    CaptionTrack t;
+    t.reset({{"TEXT_A", 10, 5}, {"TEXT_B", 10, 0}, {"TEXT_C", 30, -1}, {"TEXT_TBL", 40, 50}});
+    const auto all = [](std::string_view) { return true; };
+    t.step(1, 9, all);
+    check(t.text_id().empty(), "caption: none before its frame");
+    t.step(9, 10, all);
+    check(t.text_id() == "TEXT_A", "caption: frame in (prev, cur], first in id order");
+    t.step(10, 14, all);
+    check(t.text_id() == "TEXT_A", "caption: shown for its duration");
+    t.step(14, 15, all);
+    check(t.text_id().empty(), "caption: ends at start + duration");
+    t.step(15, 30, all);
+    check(t.text_id() == "TEXT_C", "caption: a later caption");
+    t.step(30, 31, all);
+    check(t.text_id().empty(), "caption: no Caption_Duration ends at the next step");
+    t.reset({{"TEXT_B", 10, 0}, {"TEXT_TBL", 20, 50}});
+    t.step(1, 10, all);
+    t.step(10, 20, [](std::string_view id) { return id != "TEXT_TBL"; });
+    check(t.text_id() == "TEXT_B", "caption: a hidden caption does not replace the shown one");
+    t.step(20, 129, all);
+    check(t.text_id() == "TEXT_B", "caption: duration 0 = 120 frames (still on at 129)");
+    t.step(129, 130, all);
+    check(t.text_id().empty(), "caption: duration 0 = 120 frames (gone at 130)");
+    // Only the first match in id order counts: a hidden one ([TBL]) blocks a later match in the same window.
+    t.reset({{"TEXT_A", 5, 10}, {"TEXT_B", 5, 10}});
+    t.step(0, 5, [](std::string_view id) { return id != "TEXT_A"; });
+    check(t.text_id().empty(), "caption: a hidden first match shows nothing, no fallback to the next");
+    // A loop restarts the track: the shown caption goes, frame 5 matches again on the next pass.
+    t.step(0, 5, all);
+    const uint64_t before = t.serial();
+    t.restart();
+    check(t.text_id().empty() && t.serial() != before, "caption: restart clears the shown caption");
+    t.step(0, 5, all);
+    check(t.text_id() == "TEXT_A", "caption: shows again after a restart");
+#if defined(ALAMO_VIDEO_HAVE_MOVIE_DB)
+    const char* xml = R"(<Movies><Movie Name="Win"><Movie_File>w.bik</Movie_File>
+        <Caption_Frame> TEXT_Z, 60 </Caption_Frame><Caption_Duration> TEXT_Z, 150 </Caption_Duration>
+        <Caption_Frame>TEXT_A,99</Caption_Frame><Caption_Frame> broken </Caption_Frame></Movie>
+        <Movie Name="Plain"><Movie_File>p.bik</Movie_File></Movie></Movies>)";
+    const std::vector<uint8_t> bytes(xml, xml + std::strlen(xml));
+    const alamo::data::XmlDocument doc = alamo::data::XmlDocument::parse(bytes, "Movies.xml");
+    const std::vector<alamo::video::MovieEntry> db = alamo::video::parse_movies(doc.root());
+    check(db.size() == 2 && db[0].captions.size() == 2 && db[1].captions.empty(), "Movies.xml captions parsed");
+    if (db.size() == 2 && db[0].captions.size() == 2) {
+        const MovieCaption& a = db[0].captions[0];
+        const MovieCaption& z = db[0].captions[1];
+        check(a.text_id == "TEXT_A" && a.frame == 99 && a.duration == -1 && z.text_id == "TEXT_Z" && z.frame == 60 && z.duration == 150,
+              "captions in text-id order with their durations");
+    }
+    check(db.size() == 2 && db[1].text_crawl_name.empty() && db[1].text_crawl_start_frame == 0 && db[1].text_crawl_end_frame == -1,
+          "no text crawl by default");
+    // storyb t13: the movie's crawl fields and StarWars3DTextCrawl.xml (English first, then the language's own fields).
+    const char* mxml = R"(<Movies><Movie Name="Intro"><Movie_File>t.bik</Movie_File><Text_Crawl_Name> UW_CRAWL </Text_Crawl_Name>
+        <Text_Crawl_Start_Frame>250</Text_Crawl_Start_Frame></Movie></Movies>)";
+    const std::vector<uint8_t> mb(mxml, mxml + std::strlen(mxml));
+    const alamo::data::XmlDocument mdoc = alamo::data::XmlDocument::parse(mb, "Movies.xml");
+    const std::vector<alamo::video::MovieEntry> mdb = alamo::video::parse_movies(mdoc.root());
+    check(mdb.size() == 1 && mdb[0].text_crawl_name == "UW_CRAWL" && mdb[0].text_crawl_start_frame == 250 &&
+              mdb[0].text_crawl_end_frame == -1, "Movies.xml Text_Crawl_Name / Text_Crawl_Start_Frame");
+    const char* cxml = R"(<StarWars3DTextScroll>
+        <TextScroll name="Other"><Data_Specifications language="English"><Font_Size>9</Font_Size></Data_Specifications></TextScroll>
+        <TextScroll name="UW_Crawl">
+          <Data_Specifications language="English"><Model_Name>W_TextScroll.alo</Model_Name><Fadein_End_Frame>60</Fadein_End_Frame>
+            <Text_IDs>TEXT_A, TEXT_B,TEXT_C</Text_IDs><Font_Name>Arial Bold</Font_Name><Font_Size>52</Font_Size>
+            <Font_Stretch_Factor>1.5</Font_Stretch_Factor><Has_Header>Yes</Has_Header><Header_Text_IDs>TEXT_H</Header_Text_IDs>
+            <Header_Font_Size>100</Header_Font_Size></Data_Specifications>
+          <Data_Specifications language="Russian"><Font_Size>10</Font_Size><Text_IDs>TEXT_R</Text_IDs></Data_Specifications>
+        </TextScroll></StarWars3DTextScroll>)";
+    const std::vector<uint8_t> cb(cxml, cxml + std::strlen(cxml));
+    const alamo::data::XmlDocument cdoc = alamo::data::XmlDocument::parse(cb, "StarWars3DTextCrawl.xml");
+    const std::vector<alamo::video::TextCrawlSpec> en = alamo::video::parse_text_crawls(cdoc.root());
+    const std::vector<alamo::video::TextCrawlSpec> ru = alamo::video::parse_text_crawls(cdoc.root(), "Russian");
+    const alamo::video::TextCrawlSpec* e = alamo::video::find_text_crawl(en, mdb.empty() ? "" : mdb[0].text_crawl_name);
+    const alamo::video::TextCrawlSpec* r = alamo::video::find_text_crawl(ru, "uw_crawl");
+    check(en.size() == 2 && e && e->model_name == "W_TextScroll.alo" && e->fadein_end_frame == 60 && e->fadein_start_frame == -1 &&
+              e->text_ids == std::vector<std::string>{"TEXT_A", "TEXT_B", "TEXT_C"} && e->font_name == "Arial Bold" &&
+              e->font_size == 52 && e->font_stretch_factor == 1.5f && e->has_header &&
+              e->header_text_ids == std::vector<std::string>{"TEXT_H"} && e->header_font_size == 100,
+          "text crawl: English fields, case-insensitive find");
+    check(r && r->font_size == 10 && r->text_ids == std::vector<std::string>{"TEXT_R"} && r->font_name == "Arial Bold" &&
+              r->header_font_size == 100, "text crawl: a language's fields over English");
+    check(!alamo::video::find_text_crawl(en, "Missing"), "text crawl: unknown name");
+#endif
 }
 
 bool test_runtime() {
@@ -473,7 +556,7 @@ void test_real_data() {
         std::vector<uint8_t> xml;
         check(vfs->read("Data\\XML\\Movies.xml", xml), "Movies.xml reads");
         const alamo::data::XmlDocument doc =
-            alamo::data::XmlDocument::parse(std::string_view(reinterpret_cast<const char*>(xml.data()), xml.size()), "Movies.xml");
+            alamo::data::XmlDocument::parse(xml, "Movies.xml");
         const std::vector<MovieEntry> db = parse_movies(doc.root());
         size_t alpha_entries = 0, alpha_ok = 0, alpha_open = 0;
         const MovieEntry* sample_alpha = nullptr;
@@ -490,6 +573,25 @@ void test_real_data() {
                     alpha_open, alpha_ok);
         check(db.size() > 20 && alpha_entries > 10, "Movies.xml parsed (Alpha entries present)");
         check(alpha_open > 0 && alpha_ok == alpha_open, "every Alpha movie decodes an alpha plane");
+        {  // storyb t13: every movie's text crawl names a scroll of StarWars3DTextCrawl.xml with text and a model
+            std::vector<uint8_t> cx;
+            check(vfs->read("Data\\XML\\StarWars3DTextCrawl.xml", cx), "StarWars3DTextCrawl.xml reads");
+            const alamo::data::XmlDocument cdoc = alamo::data::XmlDocument::parse(cx, "StarWars3DTextCrawl.xml");
+            const std::vector<alamo::video::TextCrawlSpec> crawls = alamo::video::parse_text_crawls(cdoc.root());
+            size_t with_crawl = 0, resolved = 0;
+            for (const MovieEntry& m : db) {
+                if (m.text_crawl_name.empty()) continue;
+                ++with_crawl;
+                const alamo::video::TextCrawlSpec* c = alamo::video::find_text_crawl(crawls, m.text_crawl_name);
+                if (c && !c->text_ids.empty() && !c->model_name.empty() && c->font_size > 0) ++resolved;
+                else std::printf("  crawl %s of movie %s: unresolved\n", m.text_crawl_name.c_str(), m.name.c_str());
+            }
+            const MovieEntry* intro = find_movie(db, "Star_Wars_Intro");
+            std::printf("text crawls: %zu scrolls, %zu movies with a crawl, %zu resolved\n", crawls.size(), with_crawl, resolved);
+            check(crawls.size() >= 6 && with_crawl >= 3 && resolved == with_crawl, "every movie text crawl resolves");
+            check(intro && intro->text_crawl_name == "A_Long_Time_Ago" && intro->text_crawl_start_frame == 0,
+                  "Star_Wars_Intro crawls A_Long_Time_Ago from frame 0");
+        }
         const MovieEntry* logo = find_movie(db, "Logo1");
         check(logo && !logo->alpha && logo->file.find("LucasArtsLogo") != std::string::npos, "Logo1 entry (no Alpha)");
         check(find_movie(db, "pirate_loop2") != nullptr && find_movie(db, "pirate_loop2")->alpha, "find_movie by file name");
@@ -523,8 +625,31 @@ void test_real_data() {
 
 }  // namespace
 
+// mcx2 t05 / t08: the port's own Bink header probe (no FFmpeg).
+void test_bink_header() {
+    std::vector<uint8_t> h(alamo::video::kBinkHeaderBytes, 0);
+    h[0] = 'B'; h[1] = 'I'; h[2] = 'K'; h[3] = 'i';
+    h[20] = 0x80; h[21] = 2;  // width 640
+    h[24] = 0xE0; h[25] = 1;  // height 480
+    h[8] = 25;
+    auto b = alamo::video::probe_bink_header(h);
+    check(b && !b->bink2 && b->revision == 'i' && b->width == 640 && b->height == 480 && b->frames == 25, "b && !b->bink2 && b->revision == 'i' && b->width == 640 && b->height == 480 && b->frames =");
+    check(b && alamo::video::bink_unsupported_reason(*b).empty(), "b && alamo::video::bink_unsupported_reason(*b).empty()");
+    h[0] = 'K'; h[1] = 'B'; h[2] = '2'; h[3] = 'j';
+    b = alamo::video::probe_bink_header(h);
+    check(b && b->bink2 && alamo::video::bink_unsupported_reason(*b).find("Bink 2") != std::string::npos, "b && b->bink2 && alamo::video::bink_unsupported_reason(*b).find('Bink 2') != std::string::");
+    std::string err;
+    check(!alamo::video::BinkDecoder::open_memory(h, {}, &err) && err.find("KB2j") != std::string::npos, "!alamo::video::BinkDecoder::open_memory(h, {}, &err) && err.find('KB2j') != std::string::n");
+    h.resize(10);
+    check(!alamo::video::probe_bink_header(h), "!alamo::video::probe_bink_header(h)");
+    h.assign(64, 'x');
+    check(!alamo::video::probe_bink_header(h), "!alamo::video::probe_bink_header(h)");
+}
+
 int main() {
     test_yuv();
+    test_bink_header();
+    test_captions();
     if (test_runtime()) {
 #if defined(ALAMO_VIDEO_HAVE_VFS)
         test_real_data();

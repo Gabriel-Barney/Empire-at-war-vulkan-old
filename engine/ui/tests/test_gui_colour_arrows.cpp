@@ -1,7 +1,7 @@
 // alamo_ui_colour_arrows_tests (p4ui t03, CPU): colour combos draw the item text in the item colour (docs/re/UI.md
 // §3.7.1: no filled box, glyph through the control font, centred / left-justified field text, trailing characters
-// dropped when too wide), the lobby's one-glyph colour items, the tech-tree arrow art, icon tints, the battle-end
-// arrows and the fleet summary dividers (§3.7.2).
+// dropped when too wide), the tech-tree arrow art, icon tints, the battle-end arrows and the fleet summary dividers
+// (§3.7.2).
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
@@ -12,26 +12,20 @@
 #include "alamo/data/xml.hpp"
 #include "alamo/ui/gui_dialog.hpp"
 #include "alamo/ui/gui_info_screens.hpp"
-#include "alamo/ui/gui_lobby.hpp"
 #include "alamo/ui/gui_resource.hpp"
 #include "alamo/ui/gui_screens.hpp"
 #include "alamo/ui/hud_font.hpp"
+#include "alamo/test/support.hpp"
 
 using namespace alamo;
 using namespace alamo::ui;
 
-static int g_fail = 0;
-#define CHECK(c)                                                     \
-    do {                                                             \
-        if (!(c)) {                                                  \
-            std::printf("FAIL %s:%d: %s\n", __FILE__, __LINE__, #c); \
-            ++g_fail;                                                \
-        }                                                            \
-    } while (0)
+using ::alamo::test::g_fail;
 
 namespace {
 
-// Trimmed copies of the shipped dialogs (same ids), plus two plain test combos in the LAN lobby.
+// Trimmed copies of the shipped dialogs (same ids), plus two plain test combos in the LAN lobby one (only a host for the
+// generic combo / list box draw tests; the lobby screens themselves were removed with multiplayer).
 const char* kRc = R"RC(
 IDD_LAN_LOBBY_DIALOG DIALOGEX 0, 0, 955, 701
 STYLE DS_SETFONT | DS_MODALFRAME | DS_CENTER | WS_POPUP
@@ -246,6 +240,32 @@ void test_list_box_colours() {
     for (Rgba8 col : {kRed, kBlue}) CHECK(!any_colour(list_quads(dl, HudList::Alpha), col));
 }
 
+// UI.md §3.7.3 (modc t38): a row wider than the list box drops trailing characters until it fits; the glyphs keep their
+// width (no squeeze) and the item keeps its whole text.
+void test_list_box_long_row() {
+    Fix f;
+    GuiDialog* d = f.gui.open("IDD_LAN_LOBBY_DIALOG");
+    if (!d) {
+        CHECK(false);
+        return;
+    }
+    clear_other_combos(*d, "");
+    GuiControl* l = d->get("IDC_PLAYER_LIST");
+    const GuiRect lr = d->control_rect(static_cast<size_t>(d->find("IDC_PLAYER_LIST")));
+    l->items = {U"A"};
+    const std::vector<HudQuad> one = list_quads(f.draw(), HudList::Text);
+    CHECK(one.size() == 1);
+    const float glyph_w = one.empty() ? 0.0f : one[0].max.x - one[0].min.x;
+    const std::u32string long_row(400, U'A');
+    l->items = {long_row};
+    const std::vector<HudQuad> text = list_quads(f.draw(), HudList::Text);
+    CHECK(!text.empty() && text.size() < long_row.size());
+    const Bounds b = bounds(text);
+    CHECK(b.x1 <= lr.max.x && b.x0 >= lr.min.x);
+    for (const HudQuad& q : text) CHECK(std::fabs((q.max.x - q.min.x) - glyph_w) < 0.01f);
+    CHECK(l->items[0] == long_row);
+}
+
 void test_combo_field_text() {
     Fix f;
     GuiDialog* d = f.gui.open("IDD_LAN_LOBBY_DIALOG");
@@ -292,53 +312,12 @@ void test_combo_field_text() {
     }
 }
 
-void test_lobby_glyph_items() {
-    Fix f;
-    LobbyScreens lob;
-    lob.init(f.gui);
-    // Without palette values the combos keep their text items.
-    StagingState st;
-    st.host = true;
-    st.colors = {U"Red", U"Blue", U"Green"};
-    st.factions = {U"Rebel", U"Empire"};
-    st.teams = {U"1"};
-    st.maps = {U"Kuat"};
-    st.map = 0;
-    StagingSlot ai;
-    ai.state = SlotState::AI;
-    ai.color = 1;
-    st.slots = {ai};
-    CHECK(lob.show_staging(st));
-    GuiDialog* s = f.gui.find(dlg::kLanStaging);
-    CHECK(s && s->get("IDC_PLAYER_COLOR_0")->items.size() == 3 && s->get("IDC_PLAYER_COLOR_0")->items[0] == U"Red" &&
-          s->get("IDC_PLAYER_COLOR_0")->item_colors.empty());
-    // With values: one U+25A0 per palette entry, the selection stays the colour index.
-    st.color_values = {kRed, kBlue, kGreen};
-    CHECK(lob.show_staging(st));
-    s = f.gui.find(dlg::kLanStaging);
-    const GuiControl* pc = s ? s->get("IDC_PLAYER_COLOR_0") : nullptr;
-    CHECK(pc && pc->items.size() == 3 && pc->items[0] == U"■" && pc->items[1] == U"■" && pc->items[2] == U"■" &&
-          pc->selected == 1 && pc->item_colors.size() == 3 && pc->item_colors[1] == kBlue);
-    // LAN lobby colour select: U+2588.
-    lob.set_colors({U"Red", U"Blue"}, 1, {kRed, kBlue});
-    lob.show_lan_lobby();
-    const GuiDialog* l = f.gui.find(dlg::kLanLobby);
-    const GuiControl* lc = l ? l->get("IDC_LAN_COLOR_SELECT") : nullptr;
-    CHECK(lc && lc->items.size() == 2 && lc->items[0] == U"█" && lc->selected == 1 && lc->item_colors.size() == 2);
-    lob.set_colors({U"Red", U"Blue", U"Green"}, 2, {kRed, kBlue, kGreen});  // refresh while open
-    lc = f.gui.find(dlg::kLanLobby)->get("IDC_LAN_COLOR_SELECT");
-    CHECK(lc->items.size() == 3 && lc->items[2] == U"█" && lc->selected == 2);
-    lob.set_colors({U"Red", U"Blue"}, 0);  // no values: text items again
-    lc = f.gui.find(dlg::kLanLobby)->get("IDC_LAN_COLOR_SELECT");
-    CHECK(lc->items.size() == 2 && lc->items[0] == U"Red" && lc->item_colors.empty());
-}
-
 void test_tech_tree_arrows() {
     Fix f;
     InfoScreens is;
     is.init(f.gui);
     TechTreeInfo tt;
-    tt.faction = TechFaction::Empire;
+    tt.dialog = "IDD_TECH_TREE_EMPIRE";
     tt.item = [](std::string_view type, TechTreeItem& out) {
         out.icon = "i_tech.tga";
         out.state = type == "Locked_Unit" ? TechState::Locked : type == "Researched_Unit" ? TechState::Researched : TechState::Available;
@@ -391,8 +370,8 @@ void test_fleet_dividers() {
     InfoScreens is;
     is.init(f.gui);
     SummaryInfo sm;
-    sm.fleets.push_back({"i_planet.tga", U"Kuat", {}});
-    sm.fleets.push_back({"i_planet.tga", U"Hoth", {}});
+    sm.fleets.push_back({"i_planet.tga", U"Kuat", {}, {}});
+    sm.fleets.push_back({"i_planet.tga", U"Hoth", {}, {}});
     is.set_summary(sm);
     CHECK(is.show_info(InfoPage::SummaryFleets));
     const GuiDialog* d = f.gui.find(dlg::kSummaryFleets);
@@ -405,7 +384,7 @@ void test_fleet_dividers() {
     CHECK(d1 && !d1->visible);
     CHECK(!d->get("IDC_PLANET_ICON2")->visible);
     // a third row makes the second divider appear
-    sm.fleets.push_back({"i_planet.tga", U"Endor", {}});
+    sm.fleets.push_back({"i_planet.tga", U"Endor", {}, {}});
     is.set_summary(sm);
     CHECK(is.show_info(InfoPage::SummaryFleets));
     d = f.gui.find(dlg::kSummaryFleets);
@@ -417,8 +396,8 @@ void test_fleet_dividers() {
 int main() {
     test_colour_combo_text();
     test_list_box_colours();
+    test_list_box_long_row();
     test_combo_field_text();
-    test_lobby_glyph_items();
     test_tech_tree_arrows();
     test_battle_end_arrows();
     test_fleet_dividers();

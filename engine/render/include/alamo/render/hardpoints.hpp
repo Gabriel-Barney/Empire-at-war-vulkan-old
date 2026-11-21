@@ -14,7 +14,11 @@
 // Subtree = the sub-object's bone is the target bone or a descendant, walking parents up to but not including
 // bone 0 (bone 0 never matches). Writes overwrite the bit (an ALO-hidden mesh can be shown); last write wins.
 // Not reversible in the game; DUMMY_ART and Is_Destroyable = No hardpoints never change visuals.
-// Model_To_Attach is never hidden or replaced by destruction (only by a subtree that contains its bone).
+// Model_To_Attach removal (B.10 answer 4, step (f) 0x3a5700, before the visibility changes; r1b t03): a destroyed
+// hardpoint with a Model_To_Attach erases the FIRST remaining sub-object named like that file's stem (upper-cased,
+// cut at ".ALO"; case-insensitive) in sub-object order - meshes, proxies, then the attachment slots in HardPoints
+// order. Usually its own slot; with several hardpoints attaching the same model, the first copy still present.
+// An erased sub-object stays hidden whatever later effects show.
 //
 // Threading: HardpointVisibility is written on the frame thread only, between Renderer builds. Its mask()
 // storage never moves after init(), so an Instance::mesh_hidden span taken from it stays valid; the
@@ -95,6 +99,9 @@ struct HardpointLayout {
     std::vector<HardpointEffect> effects;  // per hardpoint
     std::vector<int32_t> attach_bone;      // per hardpoint: owner bone of Attachment_Bone (-1: none / not found)
     std::vector<std::string> attach_model; // per hardpoint: Model_To_Attach ("" none)
+    // Per hardpoint: the sub-objects its destruction may erase, in lookup order (the first not yet erased goes);
+    // empty when it has no Model_To_Attach or never changes visuals.
+    std::vector<std::vector<uint32_t>> removes;
 };
 using HardpointLayoutPtr = std::shared_ptr<const HardpointLayout>;
 
@@ -148,9 +155,42 @@ private:
     void recompute();
     size_t hardpoint_count_ = 0;
     std::vector<uint32_t> order_;  // destroyed hardpoints in destruction order
-    std::vector<uint8_t> overrides_, mask_;
+    std::vector<uint8_t> overrides_, mask_, erased_;
     HardpointLayoutPtr layout_;
     bool ready_ = false;
 };
+
+// bkx1 t05 (b0019 / b0020, docs/re/BKX1_RENDER_RE.md §1 [H]): the model's particle groups switched by the engine state. A
+// group is the particle proxies whose name starts with a fixed prefix (case-insensitive, prefix length only: "pe" also
+// matches "pem*", not "pte*"): pe = the engine glow, pte = the turbo engines, pi = the ion-stun effect. 0 = none.
+inline constexpr uint8_t kGlowPe = 1, kGlowPte = 2, kGlowPi = 4;
+// SnapshotObject::engine_flags: a SimpleSpace-locomotor unit / its engines off / ion-stunned (apply_battle_state)
+inline constexpr uint8_t kEngineGlowUnit = 1, kEngineGlowOff = 2, kEngineGlowIonStun = 4;
+uint8_t particle_glow_group(std::string_view proxy_name);
+// mcx6 t05 (BKX1_RENDER_RE §1.1, Lua Show_Emitter 0x581120 -> 0x265ae0): all 8 particle prefix groups of the model wrapper,
+// bit i = the proxy name starts with prefix i (pe, pte, pi, pgw, pas, pptw, pem, prs; case-insensitive, prefix length only,
+// so "pem*" is in groups 0 and 6).
+uint8_t particle_emitter_groups(std::string_view proxy_name);
+// The SimpleSpace locomotor's per-service glow rule (0x626420, §1.2 / §1.5) and the death / ion-stun switches (§1.3) for
+// one unit. Inputs: SnapshotObject engine flags (kEngineGlow*), the timed disable's frames left (0 = none), v / V and
+// TURBO active. G = pte while TURBO is active, else pe; the other group is hidden.
+//   engines off, no timer (destroyed engine hard point, indefinite disable) -> G hidden;
+//   engines off, timed (energy-pool ion drain) -> G shown, tint = (n x 0.5 + 0.5) x 0.2 snapped, n in [-1, 1] a fixed
+//     per-frame value of x = 2 x frames left ([port] a hash lattice: retail's noise table 0x140a45f20 is not used), and
+//     1.0 over 0.1 s on the last frame (frames left = 1);
+//   engines on -> G shown, tint = clamp(0.8 v / V + 0.2, 0, 1) snapped;
+//   ion stun (behaviour 0x45) -> pi shown, else pi hidden ([port]: retail hides it at the stun's end; before the first
+//     stun it keeps the model's flag); dying -> pe and pte hidden.
+// show bits mean "not hidden by this rule" ([port] only pi is un-hidden: pe / pte stay under the hard-point mask, so
+// the B.10 Engine_Particles subtree rule keeps them hidden after the engine hard point dies).
+struct EngineGlow {
+    bool applies = false;  // a unit with the SimpleSpace glow rule
+    uint8_t hide = 0, show = 0;
+    uint8_t tint_group = 0;  // the group the tint applies to (G)
+    float tint = -1.0f;      // colour RGBA brightness (SystemScalar::Color), < 0 = none
+    float tint_seconds = 0.0f;
+};
+EngineGlow engine_glow(uint8_t engine_flags, uint32_t timer_frames, float speed_ratio, bool turbo, bool dying);
+float engine_glow_flicker(uint32_t timer_frames);  // the timed-disable tint, in [0, 0.2]
 
 }  // namespace alamo::render

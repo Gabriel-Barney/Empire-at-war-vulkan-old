@@ -4,7 +4,8 @@
 //
 // PROVISIONAL (interim; replaced by the S3 state when it lands):
 //   * players: the factions named by AI_Player_Control, then Home_Location, then Starting_Forces, in
-//     first-appearance order, plus a "Neutral" player if none is named; every non-neutral faction
+//     first-appearance order, plus a neutral player (options.neutral_faction) if no listed faction is neutral; every
+//     non-neutral faction
 //     is an AI player (headless AI-vs-AI); relation = friendly only to itself;
 //   * planet owner: the faction of the first ground force / structure listed at the planet, else of
 //     the starbase, else of the first space force, else the neutral player (GALACTIC_ECONOMY.md 4.1
@@ -22,11 +23,18 @@
 #include "alamo/ai/galactic_perception.hpp"
 #include "alamo/core/galaxy.hpp"
 
+namespace alamo::galactic {
+struct FactionRules;
+}
+
 namespace alamo::data {
 struct CampaignDef;
 }
 namespace alamo::objects {
 class GameObjectTypes;
+}
+namespace alamo {
+class FileProvider;
 }
 
 namespace alamo::ai {
@@ -41,23 +49,28 @@ struct ForceType {
 };
 using ForceTypeLookup = std::function<ForceType(std::string_view type_name)>;
 
-// From the typed object database (engine/objects). Layer: SpaceUnit / Squadron / StarBase /
-// SpaceProp -> space; GroundCompany / GroundInfantry / GroundVehicle / structures -> ground;
-// HeroCompany / UniqueUnit and others -> space if the type (or a HeroCompany's first Company_Units
-// member) has a CategoryMask token among Fighter, Bomber, Corvette, Frigate, Capital, SpaceHero,
-// else ground. PROVISIONAL classification. `types` must outlive the lookup.
-// q6: a type takes the galactic role rule (galactic::galactic_unit_kind: DUMMY_* behaviour first, then the tag table)
-// unless its tag is one where the seed's table above and the galactic tag table disagree (GroundBase, HeroCompany,
-// HeroUnit, UniqueUnit, SpaceProp: the rule above, so vanilla seeds do not change); mod tags take their behaviour's role.
+// From the typed object database (engine/objects): the galactic role rule (mcx1 t05, D4; galactic::galactic_dummy, the
+// first DUMMY_* behaviour of the generic Behavior list in retail's order; MCX1_RE_ANSWERS Q7.2), never the element tag.
+// StarBase -> starbase (space), structures -> ground, starships and squadrons -> space, companies -> ground; a type with
+// no DUMMY_* behaviour is not a valid starting force. `types` must outlive the lookup.
 ForceTypeLookup make_force_type_lookup(const objects::GameObjectTypes& types);
-// One type (index into `types`; invalid for an out-of-range index). legacy = the seed's tag rule alone (tests).
-ForceType force_type_of(const objects::GameObjectTypes& types, uint32_t type, bool legacy = false);
+// One type (index into `types`; invalid for an out-of-range index or a type with no galactic role, mcx1 t05).
+ForceType force_type_of(const objects::GameObjectTypes& types, uint32_t type);
 
+// modc t03: the faction facts come from the data (seed_options_from_factions), never from faction names. Unset
+// functions = no faction is neutral / benefits from corruption.
 struct CampaignSeedOptions {
-    std::function<bool(std::string_view faction)> is_neutral;            // default: "Neutral"
-    std::function<bool(std::string_view faction)> benefits_from_corruption;  // default: "Underworld"
+    std::function<bool(std::string_view faction)> is_neutral;                // Is_Neutral
+    std::function<bool(std::string_view faction)> benefits_from_corruption;  // Benefits_From_Corruption
+    // The player added when no listed faction is neutral: the data's first Is_Neutral faction ([port] a placeholder
+    // name that matches no faction when the data has none).
+    std::string neutral_faction = "(no neutral faction)";
     bool fog = true;  // false: GalacticSnapshot::fog_disabled and planet_auto_reveal
 };
+// The options of a campaign seed from the faction definitions (galactic::load_factions: Data\XML\FactionFiles.xml and
+// the files it names, list order; the first definition of a name counts): Is_Neutral, Benefits_From_Corruption and the
+// first Is_Neutral faction, names compared case-insensitively. No factions: the defaults above.
+CampaignSeedOptions seed_options_from_factions(const std::vector<galactic::FactionRules>& factions);
 
 struct CampaignSeed {
     GalacticSnapshot snapshot;

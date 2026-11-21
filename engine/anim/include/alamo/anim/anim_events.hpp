@@ -1,13 +1,13 @@
 // R3 animation events (docs/re/AUDIO.md §5 / §6.2: Data\XML\AnimationSFXMaps.txt, AnimSFXMapper 0x4770a0).
-// Each line: `SOUND <clip> <time ms> <SFX event>` or `SURFACE <clip> <time ms> <SurfaceFX> <bone>` (tab / space
+// Each line: `SOUND <clip> <time> <SFX event>` or `SURFACE <clip> <time> <SurfaceFX> <bone>` (tab / space
 // separated; `;`, `#`, `//` comment lines). <clip> is the ALA file stem (e.g. ei_trooper_move_00). SURFACE rows are
 // the foot plants (INFANTRY_FOOT_PLANT on B_Foot_L / B_Foot_R), body impacts of death clips, etc.
 //
-// Firing rule [port] (AUDIO.md tags the timing [M]): an event fires when the primary slot's clip time
-// (frame / fps x 1000 ms) passes its time during one sim advance, half-open [before, after); a loop wrap fires
-// [before, end) then [0, after) with end = (count - 1) / fps; a clip started this tick starts at its start frame
-// (frame 0 fires its 0 ms events on the first advance). Events never feed back into the sim (visual / audio
-// output only), so they are not part of any CRC.
+// Firing rule (AUDIO.md §9.4, 0x4770a0 / 0x4775d0): the time column is the file integer / 100 in animation frames
+// [H for / 100, M for the frame unit]; an event fires when the primary slot's clip frame passes it during one sim
+// advance, half-open (before, after]; a loop wrap fires every row with t > before or t <= after, so a row at 0 fires
+// only on a wrap. [port] Set_Animation's "fire skipped events" start (rows in (0, start] at once) is not modelled.
+// Events never feed back into the sim (visual / audio output only), so they are not part of any CRC.
 #pragma once
 #include <cstdint>
 #include <map>
@@ -20,7 +20,7 @@ namespace alamo::anim {
 struct AnimEventDef {
     enum class Kind : uint8_t { Sound = 0, Surface = 1 };
     Kind kind = Kind::Surface;
-    uint32_t time_ms = 0;
+    uint32_t time = 0;  // the file value: / 100 = animation frames (§9.4)
     std::string name;  // SFX event / SurfaceFX name
     std::string bone;  // SURFACE: bone name ("" for SOUND)
 };

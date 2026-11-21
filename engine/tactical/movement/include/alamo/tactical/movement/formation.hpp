@@ -7,20 +7,21 @@
 // split_into_formations (§4.2 step 2): seed = remaining member nearest the bucket centroid (ties
 //   keep the earlier); Solo seeds stay alone; otherwise members join while the grouping rule passes
 //   (Standard recruits Standard; SameOrder needs SameOrder with an equal FormationOrder), the
-//   `compatible` callback agrees (same locomotor kind, zone connectivity) and the candidate is
-//   within the recruitment distance (60 infantry not in a team, else 100) of the nearest member.
+//   `compatible` callback agrees (the host's tests: same locomotor kind, the seed and the candidate both
+//   zone-connected to the destination) and the candidate is within the recruitment distance (60 infantry not in a
+//   team, else 100) of the nearest member (3-D, mov2 t03), which the `reach` callback (seed, candidate, d_min) then
+//   tests: a straight passable line candidate -> seed, or a path <= 1.4 x d_min (MOVEMENT §4.2 step 2 item 7 test 12
+//   [H]). Teams: a candidate on a team already in the formation joins at once (test 1). Movement masks need not agree: a formation's class is
+//   the 0x4779e0 class of the members' mask intersection (MovementSystem), so infantry and vehicles share formations.
 //   With `double_click_speed_ratio` > 0 (order flag 0x80, P1_DOUBLE_CLICK_MOVE.md §4.2) a candidate with a non-zero
 //   max speed s_c is also rejected when max(s_c, s_seed) / min(s_c, s_seed) > the ratio (DoubleClickMoveMaxSpeedRatio;
 //   symmetric; a zero-speed seed rejects every moving candidate); rejected units seed later formations, so the
-//   selection splits into speed bands. PROVISIONAL [M]: the engagement and path-length tests are not modelled.
-// large_hover_formation_order (P1_DOUBLE_CLICK_MOVE.md §4.3, 0x439360): the index order of the LargeHover formations
-//   of one order: without 0x80 by centroid projection on the move direction, descending (front to back); with 0x80
-//   by formation speed, descending (fastest first). Ties keep creation order (stable [port]). The retail layout of
-//   these formations around the group centroid is not modelled.
-// layout_formation (§4.3): ranks (Hero first; ascending max speed, slowest in front; speeds within
-//   tolerance T are one rank, T starting at 0 and growing by 15 while >= 4 ranks remain, cap 4 steps
-//   [L]; equal speeds by case-insensitive type name, then object id - the stable replacement of the
-//   retail unstable std::sort, §7), rows built front to back (a row = one rank, candidates ordered by
+//   selection splits into speed bands. PROVISIONAL [M]: the engagement-distance test is not modelled.
+// layout_formation (§4.3): ranks (Hero first; then the rank key ascending: the attack range 0x3749d0 (§4.3
+//   "Correction, s78n t19" [H]), so the shortest range goes in front; keys within tolerance T are one rank, T (in key
+//   units) starting at 0 and growing by 15 while >= 4 ranks remain, cap 4 steps [L]; equal keys by case-insensitive
+//   type name, then object id - the stable replacement of the retail unstable std::sort, §7. Space formations
+//   use the same key since bkm1 t05 (b0037); RankKey::MaxSpeed has no game caller), rows built front to back (a row = one rank, candidates ordered by
 //   forward projection descending, taken while the cumulative width <= 2 * half-width, overflow
 //   returned to the front, kept members re-sorted by lateral projection so units keep their
 //   left/right order), lateral placement gap = (2hw - sum widths) / (count + 1), rows stepping back
@@ -46,6 +47,9 @@ struct FormationMember {
     ObjectId id = 0;
     V2 pos;
     float max_speed = 0.0f;
+    // s78n t26 review round 2 (MOVEMENT §4.3 correction [H]): the rank key, Get attack range 0x3749d0 (TACTICAL_COMBAT
+    // §2: the active ability's range, else Targeting_Max_Attack_Distance x the deployed / garrisoned multipliers)
+    float attack_range = 0.0f;
     float radius = 10.0f;
     float spacing = 0.0f;           // FormationSpacing (cells)
     bool hero = false;
@@ -54,29 +58,46 @@ struct FormationMember {
     int32_t order = 0;               // FormationOrder
     int32_t collision_class = -1;
     bool team_member = false;
+    // mov2 t03 (MOVEMENT §4.2 step 2 item 7 [H]): the height (the recruitment distance d_min is 3-D) and the parent team
+    // (-1: none; Unit::team). A seed's team goes on a joined-teams list; a candidate on a listed team joins at once (test
+    // 1), a candidate with a team needs a seed with one (test 7), and a joining candidate's team is listed.
+    float z = 0.0f;
+    ObjectId team = -1;
+    // s78n t25.2 (MOVEMENT §4.2 item 6): an attack order's solo seed (in max range, melee, or within r + E_r +
+    // Solo_Attack_Range of the target) recruits nobody, as a Solo seed
+    bool solo_attack = false;
+    // s78n t25 fix (MOVEMENT §4.2 item 6 / item 4 first bullet): otherwise a short-range seed (d < E_r x
+    // Short_Range_Attack_Formation_Coefficient) recruits only units of its own exact type (bkm1 t04, §4.2 step 2 item 7
+    // test 3; it recruited nobody before)
+    bool short_range_attack = false;
+    // bkm1 t04 (b0036, MOVEMENT §4.2 step 2 item 7 test 9 [H]): E = the engagement range 0x4f6e40 (a move: the attack
+    // range; an attack: LandAttackUnit::engage) and K = min(E, Targeting_Min_Attack_Distance), 0 under a guard block. A
+    // candidate C joins seed S only when K(C) <= E(S) and K(S) <= E(C).
+    float engage = 0.0f;
+    float min_engage = 0.0f;
 };
 
 std::vector<std::vector<uint32_t>> kmeans_buckets(std::span<const FormationMember> m, float max_formation_area,
                                                   uint32_t max_iterations = 16);
 
 using CompatibleFn = std::function<bool(uint32_t seed, uint32_t candidate)>;
+// mov2 t03 (§4.2 step 2 item 7 test 12 [H]): (seed, candidate, d_min = the 3-D distance from the candidate to the nearest
+// current member): the terrain line from the candidate to the seed, or a path candidate -> seed <= 1.4 x d_min (unset:
+// passes)
+using ReachFn = std::function<bool(uint32_t seed, uint32_t candidate, float d_min)>;
 std::vector<std::vector<uint32_t>> split_into_formations(std::span<const FormationMember> m, std::span<const uint32_t> bucket,
                                                          const MovementConstants& k, const CompatibleFn& compatible = {},
-                                                         float double_click_speed_ratio = 0.0f);
+                                                         float double_click_speed_ratio = 0.0f, const ReachFn& reach = {});
 
-struct FormationKey {
-    float speed = 0.0f;  // formation speed (slowest member)
-    V2 centroid;
-};
-// Returns indices into `f` in index order (position = the formation's +0x22c index).
-std::vector<uint32_t> large_hover_formation_order(std::span<const FormationKey> f, V2 move_dir, bool fastest_first);
 
 // Rank order (front to back) and per-member rank, for `members` (indices into m).
 struct RankedMember {
     uint32_t member;
     uint32_t rank;
 };
-std::vector<RankedMember> rank_members(std::span<const FormationMember> m, std::span<const uint32_t> members);
+enum class RankKey : uint8_t { AttackRange = 0, MaxSpeed = 1 };
+std::vector<RankedMember> rank_members(std::span<const FormationMember> m, std::span<const uint32_t> members,
+                                       RankKey key = RankKey::AttackRange);
 
 struct Slot {
     uint32_t member = 0;
@@ -85,12 +106,23 @@ struct Slot {
     uint32_t row = 0;
 };
 // Slots in front-to-back, left-to-right order.
+// `half_width` > 0 (cells) replaces the computed half-width (s78p: the corridor squeeze's narrower packs, F +0xe0[k]).
 std::vector<Slot> layout_formation(std::span<const FormationMember> m, std::span<const uint32_t> members, V2 forward,
-                                   const MovementConstants& k);
+                                   const MovementConstants& k, RankKey key = RankKey::AttackRange, float half_width = 0.0f);
+// The layout's half-width +0x254 in cells (max(side x cell + 0.25, sqrt(max(1, area x 1.8)))).
+float formation_half_width(std::span<const FormationMember> m, std::span<const uint32_t> members, const MovementConstants& k);
 inline V2 formation_right(V2 forward) { return {forward.y, -forward.x}; }
 inline V2 slot_world(V2 destination, V2 forward, const Slot& s) {
     return destination + formation_right(forward) * s.lateral - forward * s.back;
 }
+
+// s78n t20 (MOVEMENT §4.3.1 item 4, 0x43d6a0): the offset from the pass centre of try k (0 .. 39) of one formation's
+// destination check. t = 0 at first and grows by 7.0 after each try with k mod 8 < 4, so t(k) = 7 x (4 x (k / 8) + k mod
+// 8) there and t - 28 = 28 x (k / 8) for k mod 8 = 4 .. 7. Tries k mod 8 < 4: t v; tries 4 .. 7: (t - 28) v + m x {(1, 0),
+// (0, 1), (-1, 0), (0, -1)} (world axes; m = min(HX + S, HY + S)). `first_unblocked` (the order's first formation, until
+// a try met impassable ground): the v term is halved and takes the factor +1 for even k, -0.75 for odd k - with v
+// pointing back along the final direction: 0, 2.625 beyond, 7 short, 7.875 beyond, four sideways, 14 short, ...
+V2 destination_try_offset(uint32_t k, bool first_unblocked, V2 v, float m);
 
 // Side-error correction while moving as a group (§4.4): steer by (error -+ 0.1) / 30 when
 // |error| > FormationMinimumSideError, else 0.
@@ -99,5 +131,37 @@ inline float formation_side_correction(float error, float min_err = 0.1f, float 
     if (error < -min_err) return (error + min_err) / max_err;
     return 0.0f;
 }
+
+// mcx4 t11 (MCX4_T11_T12_RE_ANSWERS §B2, the group move 0x2a7b80 [H]): Snap_Movement_Orders_To_Center. A land position
+// order (kind 1) scans every object of the game mode (`objects`, the mode's list order: the host passes only the objects
+// whose type has the flag) and takes the nearest one whose 3-D distance to the order point (p, pz) is <= its radius
+// (0x397780; a later object replaces the pick only when strictly nearer). Returns its index, -1 = none (the point stays).
+// mcx4 t11 (MCX4_T11_T12_RE_ANSWERS §B4, 0x411980 / 0x421cc0 / 0x559350 [H]): the final-facing rotation of a land formation
+// with an ordered facing. With the formation path `path` (>= 2 points) and the order's facing f (degrees; kNoFacing:
+// none): psi = wrap(f - heading(last segment)) (degrees, (-180, 180]); |psi| < FinalFormationFacingMinimumAngle -> no
+// rotation. Else full = psi in radians; R = sqrt(2) x (half_width x 0.5 x 20) (half_width = the layout half-width 0x41a740,
+// cells); L = the path length, v = the formation speed (0x41b2a0); L != 0 and v > 0: budget = ((FinalFormationFacingDelta
+// Coefficient x v) / R) x (L / v) (the turn the formation makes while it walks); budget < |full| -> start = sign(full) x
+// (|full| - budget) (the part applied at once), else 0; rate = ((full - start) / L) x 1.2 (radians per unit of arc).
+// The member slot offsets (depth, lateral) are rotated by r(s) = start + rate x s, never past full (rotation_at).
+struct FinalFacing {
+    float full = 0.0f;   // F +0x24c (radians)
+    float start = 0.0f;  // F +0x248
+    float rate = 0.0f;   // F +0x250
+    bool on() const { return full != 0.0f || start != 0.0f || rate != 0.0f; }
+    float rotation_at(float s) const {
+        const float r = rate * s + start;
+        return rate >= 0.0f ? (r <= full ? r : full) : (full <= r ? r : full);
+    }
+};
+FinalFacing final_formation_facing(std::span<const V2> path, float facing_deg, float half_width, float speed,
+                                   const MovementConstants& k);
+
+struct SnapCenter {
+    V2 pos;
+    float z = 0.0f;
+    float radius = 0.0f;
+};
+int32_t snap_order_center(V2 p, float pz, std::span<const SnapCenter> objects);
 
 }  // namespace alamo::tactical::movement

@@ -38,20 +38,8 @@ void EventBus::unsubscribe(SubscriberId id) {
     subs_.erase(std::remove_if(subs_.begin(), subs_.end(), [id](const Sub& s) { return s.id == id; }), subs_.end());
 }
 
-void EventBus::open_lanes(size_t n) {
-    lanes_.clear();
-    lanes_.resize(n);
-}
-
-void EventBus::merge_lanes() {
-    for (auto& l : lanes_) {
-        for (auto& e : l.events_) queue_.events_.push_back(std::move(e));
-    }
-    lanes_.clear();
-}
-
 // N1 layout (v1): u32 version | u32 n, per event: u8 kind (0 CommandResult, 1 SimEvent), then
-//   CommandResult: u64 tick | u8 player | u8 source | u32 sequence | u64 issue_tick | u64 scheduled_tick
+//   CommandResult: u64 tick | u8 player | u8 source (command.hpp source byte: bits 2-6 hold player id bits 8-12) | u32 sequence | u64 issue_tick | u64 scheduled_tick
 //                  | u16 type | u16 reason
 //   SimEvent:      u64 tick | u32 kind | u64 subject | u64 other | i64 value
 void EventBus::write(ByteWriter& w) const {
@@ -59,7 +47,7 @@ void EventBus::write(ByteWriter& w) const {
     w.u32(kSaveVersion).u32(static_cast<uint32_t>(evs.size()));
     for (const Event& e : evs) {
         if (const auto* c = std::get_if<CommandResult>(&e)) {
-            w.u8(0).u64(c->tick).u8(c->header.player).u8(static_cast<uint8_t>(c->header.source));
+            w.u8(0).u64(c->tick).u8(static_cast<uint8_t>(c->header.player & 0xFFu)).u8(source_byte(c->header.source, c->header.player, false));
             w.u32(c->header.sequence).u64(c->header.issue_tick).u64(c->header.scheduled_tick);
             w.u16(c->type).u16(static_cast<uint16_t>(c->reason));
         } else {
@@ -80,8 +68,9 @@ bool EventBus::read(ByteReader& r) {
         if (kind == 0) {
             CommandResult c;
             c.tick = r.u64();
-            c.header.player = r.u8();
-            c.header.source = static_cast<CommandSource>(r.u8());  // diagnostic: kept as posted
+            const uint8_t player_low = r.u8();
+            bool queued = false;  // never set in a CommandResult
+            if (!split_source_byte(r.u8(), player_low, c.header.source, c.header.player, queued)) return false;
             c.header.sequence = r.u32();
             c.header.issue_tick = r.u64();
             c.header.scheduled_tick = r.u64();

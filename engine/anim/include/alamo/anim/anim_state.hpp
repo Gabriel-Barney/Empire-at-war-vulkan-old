@@ -58,11 +58,18 @@ inline constexpr float kLuaPlayBlendSeconds = 0.33f; // Lua GameObject.Play_Anim
 enum class SlotMode : uint8_t { OneShot = 0, Loop = 1, Finished = 2 };
 enum Slot : uint8_t { kPrimary = 0, kPrevious = 1, kOverlay = 2, kSlotCount = 3 };
 
-// Unknown .bss blend-time globals (§A.7, doc §C item 1). [port] 0 = hard cut, as the RE doc recommends
-// until a capture settles them (G1 capture paused).
+// Blend-time globals (§A.7, doc §C item 1). [port] 0 = hard cut while the host sets none.
+// - idle_blend_seconds: the .bss global 0x140b39930 (idle behaviour, type change), value unknown.
+// - The rest are GameConstants fields (MCX4_T11_T12_RE_ANSWERS §S / §B4, GC base 0x140b15800); the battle passes the
+//   loaded values (TacticalBattle::set_animation -> SimAnimation::set_locomotor_blends). FoC values in brackets.
 struct AnimTunables {
-    float idle_blend_seconds = 0.0f;  // 0x140b39930 (idle behaviour, type change)
-    float move_blend_seconds = 0.0f;  // 0x140b16d18 (WalkLocomotor)
+    float idle_blend_seconds = 0.0f;              // 0x140b39930 (idle behaviour, type change)
+    float move_blend_seconds = 0.0f;              // MoveBlendTime (+0x1518 = 0x140b16d18; 0.5): WalkLocomotor 0x61f840
+    float idle_walk_blend_seconds = 0.0f;         // IdleWalkBlendTime (+0x1510; 0.5): walker stop 0x61f510, team 0x62c420
+    float crouch_idle_walk_blend_seconds = 0.0f;  // CrouchIdleWalkBlendTime (+0x1514; 0.5): team stop into Idle Crouch
+    float team_move_blend_seconds = 0.0f;         // TeamMoveBlendTime (+0x1520; 0.2): team member idle / turn -> move
+    float team_crouch_move_blend_seconds = 0.0f;  // TeamCrouchMoveBlendTime (+0x1524; 0.5): the same into a crouch clip
+    float infantry_turn_blend_seconds = 0.0f;     // InfantryTurnBlendTime (+0x1528; 0.2): cap of the TURNL / TURNR blend
 };
 
 struct PlayRequest {
@@ -107,7 +114,7 @@ public:
     explicit AnimWorld(AnimTunables tunables = {}) : tunables_(tunables) {}
 
     const AnimTunables& tunables() const { return tunables_; }
-    void set_tunables(const AnimTunables& t) { tunables_ = t; }
+    void set_tunables(const AnimTunables& t) { tunables_ = t; }  // configuration: not hashed, not saved
 
     // ---- membership ----
     // Model created (§A.7 first row). `model` must outlive the world (or the row). `rng`: synced for
@@ -133,17 +140,16 @@ public:
     PlayResult switch_preserving_phase(ObjectId id, int32_t type, uint32_t index, bool loop, float blend, float speed, uint64_t frame);
     void set_frozen(ObjectId id, bool frozen);  // object +0x3a7: advance skipped [L]
     bool frozen(ObjectId id) const;
-    // Berserker ability active (§A.4 item 1): play() rewrites requests other than Attack / Attack Idle / Idle to a
-    // looping SpinMove and leaves a running spin alone until it is within 2 frames of its end. The caller (the
-    // battle, from AbilitySystem::is_active(BERSERKER)) keeps the flag current.
+    // Berserker ability active (§A.4 item 1, r3h t03): play() ignores Idle / Attack / Attack Idle requests while a
+    // SpinMove runs short of its end (frame < count - 2 - speed) and otherwise turns them into SpinMove (speed 1, frame
+    // 1, the request's index / loop / blend); other requests play unchanged (retail ends the ability first: the host's
+    // job). The caller (the battle, from AbilitySystem::is_active(BERSERKER)) keeps the flag current.
     void set_berserker(ObjectId id, bool active);
     bool berserker(ObjectId id) const;
 
     // ---- per-frame advance (object Service step 6) ----
     // Advances every unfrozen row to t = frame / 30. Pure per row: run through `pf` with per-index outputs.
     void advance(uint64_t frame, const ParallelFor& pf = serial_for, uint32_t grain = 256);
-    // One row (the Service path when objects are serviced one by one).
-    void advance_one(ObjectId id, uint64_t frame);
 
     // ---- queries (behaviours) ----
     SlotView slot(ObjectId id, Slot s = kPrimary) const;
@@ -151,7 +157,7 @@ public:
     SlotMode current_mode(ObjectId id) const { return slot(id).mode; }  // 0x395660
     bool crossfading(ObjectId id) const;
     float crossfade_weight(ObjectId id) const;  // 1 when no fade
-    bool frame_changed(ObjectId id) const;      // primary frame moved in the last advance (pose dirty)
+    float crossfade_duration(ObjectId id) const;  // the running fade's blend seconds; 0 when no fade
     bool near_end(ObjectId id) const;           // object +0x74 bit 3 is CLEAR once frame >= count - 2.5
     bool locked(ObjectId id) const;
     // Frame count / fps of the current clip (0 when none).
@@ -193,8 +199,8 @@ public:
     void register_crc(CrcRegistry& registry, const std::string& name = "anim") const;
 
     // ---- N1 save / load (contract: alamo/core/save_file.hpp; src/anim_save.cpp) ----
-    // Layout: u32 version (1), u32 row count, then per row in ascending id: i32 id, bool has-model, u32
-    // name_crc(model->model) (0 without a model), f64 last time, bool frozen / lock / frame-changed / near-end /
+    // Layout: u32 version (2), u32 row count, then per row in ascending id: i32 id, bool has-model, u32
+    // name_crc(model->model) (0 without a model), f64 last time, bool frozen / lock / near-end /
     // berserker, u64 idle timer, the three slots (primary, previous, overlay: i32 type, u32 variant, u8 mode, f32
     // frame, f32 speed, bool timed, f32 timed remaining), then the crossfade (bool active, f32 duration, f32
     // remaining, f32 weight). Floats as bit patterns. Not saved: the tunables (configuration) and the model
@@ -205,7 +211,7 @@ public:
     // field come back as saved: nothing is re-drawn). False and unchanged on bad data; reads its own fields only
     // (the owner checks done()).
     // N1 stage 2: the host does NOT re-create the saved rows after read (SimAnimation restores its max_seen so
-    // sync() skips them) and keeps calling set_tunables() as for a new game.
+    // sync() skips them).
     void write(ByteWriter& w) const;
     bool read(ByteReader& r, const std::function<const AnimModel*(ObjectId id)>& model_of);
 
@@ -225,7 +231,7 @@ private:
     std::vector<const AnimModel*> model_;
     std::vector<uint32_t> model_crc_;  // name_crc(model->model), 0 without a model
     std::vector<double> last_time_;
-    std::vector<uint8_t> frozen_, lock_, frame_changed_, near_end_, berserk_;
+    std::vector<uint8_t> frozen_, lock_, near_end_, berserk_;
     std::vector<uint64_t> idle_timer_;
     // Per slot.
     std::vector<int32_t> type_[kSlotCount];

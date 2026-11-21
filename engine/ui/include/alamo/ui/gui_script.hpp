@@ -11,8 +11,9 @@
 // GUI_Text_Color 5 (string, float x4).
 // [port] meanings where the strings stop: GUI_Button_Icon argument 2 = the icon texture (other arguments ignored);
 // Blink / Flash argument 2 = on / off (the two trailing arguments ignored); colours are 0..1 floats when every channel is
-// <= 1, else 0..255; Play_Anim records the animation name and loop flag (argument 3) - frame animation is not drawn;
-// an unknown component name is an error (returned, nothing applied).
+// <= 1, else 0..255; Play_Anim records the animation name and loop flag (argument 3) and starts the component's
+// Can_Animate frame animation (HudButtons::draw / anim_frame; a component without Can_Animate has no frames, so nothing
+// is drawn); an unknown component name is an error (returned, nothing applied).
 #pragma once
 #include <cstdint>
 #include <span>

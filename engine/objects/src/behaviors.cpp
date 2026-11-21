@@ -56,10 +56,12 @@ const NameId kNames[] = {
 
 struct NameIndex {
     std::unordered_map<std::string, BehaviorTypeId> by_name;  // lookup only
+    std::unordered_map<uint32_t, BehaviorTypeId> by_crc;      // lookup only (map1 t04: .ted chunk 0x4B8 ids)
     std::string_view canonical[kBehaviorTypeCount] = {};
     NameIndex() {
         for (const NameId& n : kNames) {
             by_name.emplace(normalize_name(n.name), n.id);
+            by_crc.emplace(name_crc(n.name), n.id);
             if (canonical[n.id].empty()) canonical[n.id] = n.name;
         }
         canonical[0x01] = "LOCOMOTOR";
@@ -76,6 +78,12 @@ const NameIndex& names() {
 BehaviorTypeId behavior_type_id(std::string_view xml_name) {
     const auto& m = names().by_name;
     const auto it = m.find(normalize_name(xml_name));
+    return it == m.end() ? kNoBehavior : it->second;
+}
+
+BehaviorTypeId behavior_type_id_from_crc(uint32_t crc) {
+    const auto& m = names().by_crc;
+    const auto it = m.find(crc);
     return it == m.end() ? kNoBehavior : it->second;
 }
 
@@ -127,7 +135,7 @@ uint32_t computed_behavior_interval(BehaviorTypeId id, const BehaviorIntervalCon
         const float v = static_cast<float>(cfg.fps) * multiplier * secs + 0.5f;
         if (!(v >= 1.0f)) return 0;  // negative, NaN or < 1 truncate to 0
         if (v >= 4294967040.0f) return 0xFFFFFF00u;
-        return static_cast<uint32_t>(v);
+        return static_cast<uint32_t>(v);  // frame-cast-ok: range-guarded above
     };
     switch (id) {
         case beh::Shielded: return rounded(cfg.shield_recharge_interval_secs);

@@ -7,6 +7,7 @@
 #   jobs      - job system / thread pool + deterministic fixed-step tick
 #   galactic  - planet graph, re-entrant A* fleet pathing, AI all-pairs (FW reference + parallel)
 #   apps      - alamo_headless host (+ Phase 3 viewer)
+#   test_support - header-only CHECK harness, env / data-root / file helpers and ParallelFor pool for the test exes
 # Phase 3 (Vulkan 1.3 renderer):
 #   assets    - ALO/ALA/texture loading into GPU-ready CPU data (no Vulkan)
 #   rhi       - Vulkan 1.3 backend: runtime vulkan-1 loader, device, swapchain, memory, sync
@@ -62,12 +63,40 @@ add_library(alamo_engine_flags INTERFACE)
 if(MSVC)
   # /fp:precise + no FMA contraction keeps float results identical between builds (lockstep CRC).
   target_compile_options(alamo_engine_flags INTERFACE /W4 /fp:precise /utf-8 /permissive-)
+  # Off-by-default MSVC warnings that stand in for clang's -Wconversion family per change, since clang checks nightly
+  # only (docs/DECISIONS.md, "Clang runs nightly only"; backlog b0547): signed/unsigned conversion (C4365) and
+  # comparison (C4388), int to float (C5219), narrowing to smaller ints and bit fields (C4242, C4254), sign extension
+  # (C4826), int to bool (C4800), constant-range checks (C4287, C4296), non-virtual destructors (C4265) and unhandled
+  # enum cases (C4062). C++ only (the vendored C sources keep /W4); angle-bracket includes (the STL, the SDK) are
+  # external and stay quiet, the engine's own headers are all quoted.
+  target_compile_options(alamo_engine_flags INTERFACE
+    "$<$<COMPILE_LANGUAGE:CXX>:/w44365;/w44388;/w45219;/w44242;/w44254;/w44826;/w44800;/w44287;/w44296;/w44265;/w44062>"
+    "$<$<COMPILE_LANGUAGE:CXX>:/external:anglebrackets;/external:W0>")
 else()
   target_compile_options(alamo_engine_flags INTERFACE -Wall -Wextra -Wpedantic -ffp-contract=off)
 endif()
 target_compile_features(alamo_engine_flags INTERFACE cxx_std_20)
 
 find_package(Threads REQUIRED)
+
+# Shared precompiled header (roadmap bo1 t02). alamo_pch is a tiny static library that owns the PCH; every engine target
+# created below reuses it (CMAKE_PRECOMPILE_HEADERS_REUSE_FROM), so the standard headers are parsed once per tree instead of
+# once per target (the loop at the end of this file points every target at it). -DALAMO_PCH=OFF builds without it. A target whose flags differ (vendored Lua) opts out in its own file.
+# Default: ON only when no compiler cache is active. sccache cannot cache a compile that uses /Fp (measured 2026-11-13:
+# 519 of ~880 compiles uncacheable), so with the cache on the PCH costs more in cross-tree cache hits than it saves.
+if(CMAKE_CXX_COMPILER_LAUNCHER)
+  set(_alamo_pch_default OFF)
+else()
+  set(_alamo_pch_default ON)
+endif()
+option(ALAMO_PCH "Use the shared precompiled header (engine/pch)" ${_alamo_pch_default})
+if(ALAMO_PCH)
+  add_library(alamo_pch STATIC pch/pch_host.cpp)
+  target_include_directories(alamo_pch PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/core/include)
+  target_link_libraries(alamo_pch PRIVATE alamo_engine_flags Threads::Threads)
+  target_precompile_headers(alamo_pch PRIVATE pch/pch.hpp)
+  set(CMAKE_PRECOMPILE_HEADERS_REUSE_FROM alamo_pch)
+endif()
 
 # Test tiers: tests that take more than a few seconds carry the ctest label "slow". The inner loop runs the fast tier
 # (ctest -LE slow, what build_agent.cmd / build_module.cmd do by default); the gate scripts run everything. Call from the
@@ -120,12 +149,113 @@ function(alamo_add_worker_count_check name)
   foreach(_w IN LISTS _wc_WORKERS)
     add_test(NAME ${name}_w${_w} COMMAND ${_wc_COMMAND} --workers ${_w} --golden ${_crc} ${_wc_CHECK_ARGS})
     set_tests_properties(${name}_w${_w} PROPERTIES FIXTURES_REQUIRED ${name}_w0 ${_props})
+    set_property(TEST ${name}_w${_w} APPEND PROPERTY LABELS determinism)
   endforeach()
+  # flaky_retry.py never retries a determinism check (wr3 t05)
+  set_property(TEST ${name} APPEND PROPERTY LABELS determinism)
   set(${name}_CRC ${_crc} PARENT_SCOPE)
 endfunction()
 
-foreach(m core vfs data jobs galactic objects anim commands tactical lua ai assets rhi shaderxlat materials terrain render ui audio video apps)
-  if(m IN_LIST ALAMO_ENGINE_MODULES AND EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/${m}/CMakeLists.txt)
-    add_subdirectory(${m})
+# Header-only test support (CU4). Not in ALAMO_ENGINE_MODULES (a cached list), so existing build trees get it too.
+add_subdirectory(test_support)
+
+function(_alamo_collect_targets dir out)
+  get_property(_t DIRECTORY ${dir} PROPERTY BUILDSYSTEM_TARGETS)
+  get_property(_s DIRECTORY ${dir} PROPERTY SUBDIRECTORIES)
+  foreach(_d IN LISTS _s)
+    _alamo_collect_targets(${_d} _sub)
+    list(APPEND _t ${_sub})
+  endforeach()
+  set(${out} ${_t} PARENT_SCOPE)
+endfunction()
+
+# Module list and its dependencies (wr3 t06, 2026-11-21). Every "Cannot open include file" failure of 2026-11-14 to 21
+# (54 records) came from a module list that left out a module another one links (core, ai for apps, assets for terrain)
+# or held a name that is not a module (game, tactical_combat, a PowerShell --%), which used to be dropped silently; a
+# link to a missing alamo_* target then counts as a plain library file and the include directories are just absent.
+# Now an unknown name stops the configure, and the modules that configured targets link (unconditional links only; an
+# if(TARGET ...) link stays off as before) are added until nothing is missing.
+set(_alamo_modules core vfs data jobs galactic objects anim commands tactical lua ai assets rhi shaderxlat materials terrain render ui audio video apps)
+foreach(m IN LISTS ALAMO_ENGINE_MODULES)
+  if(NOT m IN_LIST _alamo_modules)
+    set(_hint "")
+    foreach(k IN LISTS _alamo_modules)
+      string(FIND "${m}" "${k}" _pos)
+      if(_pos EQUAL 0)
+        set(_hint " (did you mean ${k}? sub-libraries such as ${m} are part of their module)")
+      endif()
+    endforeach()
+    if(m STREQUAL "game" OR m STREQUAL "headless")
+      set(_hint " (alamo_${m} is built by the apps module)")
+    endif()
+    message(FATAL_ERROR "ALAMO_ENGINE_MODULES: '${m}' is not an engine module${_hint}. Modules: ${_alamo_modules}")
   endif()
 endforeach()
+# Targets whose name does not start with their module's name.
+set(_alamo_target_module_vma rhi)
+set(_alamo_target_module_vulkan_headers rhi)
+set(_alamo_target_module_miniaudio audio)
+set(_alamo_wanted ${ALAMO_ENGINE_MODULES})
+set(_alamo_added "")
+set(_alamo_dep_added "")
+foreach(_round RANGE 30)
+  set(ALAMO_ENGINE_MODULES ${_alamo_added} ${_alamo_wanted})  # what later-added modules see in IN_LIST checks
+  foreach(m IN LISTS _alamo_modules)
+    if(m IN_LIST _alamo_wanted AND NOT m IN_LIST _alamo_added AND EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/${m}/CMakeLists.txt)
+      list(APPEND _alamo_added ${m})
+      add_subdirectory(${m})
+    endif()
+  endforeach()
+  _alamo_collect_targets(${CMAKE_CURRENT_SOURCE_DIR} _alamo_have)
+  set(_alamo_wanted "")
+  set(_alamo_unknown "")
+  foreach(_t IN LISTS _alamo_have)
+    get_target_property(_l1 ${_t} LINK_LIBRARIES)
+    get_target_property(_l2 ${_t} INTERFACE_LINK_LIBRARIES)
+    foreach(_lib IN LISTS _l1 _l2)
+      if(_lib MATCHES "^alamo_([a-z0-9_]+)$" AND NOT TARGET ${_lib})
+        set(_name ${CMAKE_MATCH_1})
+        set(_mod "${_alamo_target_module_${_name}}")
+        if(NOT _mod)
+          foreach(k IN LISTS _alamo_modules)
+            if(_name STREQUAL k OR _name MATCHES "^${k}_")
+              set(_mod ${k})
+            endif()
+          endforeach()
+        endif()
+        if(_mod AND NOT _mod IN_LIST _alamo_added)
+          list(APPEND _alamo_wanted ${_mod})
+        else()
+          list(APPEND _alamo_unknown "${_t} links ${_lib}")
+        endif()
+      endif()
+    endforeach()
+  endforeach()
+  list(REMOVE_DUPLICATES _alamo_wanted)
+  if(NOT _alamo_wanted)
+    break()
+  endif()
+  list(APPEND _alamo_dep_added ${_alamo_wanted})
+endforeach()
+set(ALAMO_ENGINE_MODULES ${_alamo_added})
+if(_alamo_dep_added)
+  message(STATUS "ALAMO_ENGINE_MODULES: added for links: ${_alamo_dep_added}")
+endif()
+if(_alamo_unknown)
+  list(REMOVE_DUPLICATES _alamo_unknown)
+  message(FATAL_ERROR "Links to alamo_* targets that no configured module defines: ${_alamo_unknown}. The module that defines it was configured without what that target needs: add those modules to the list, or use all.")
+endif()
+
+# Point every engine library / executable at the shared PCH (roadmap bo1 t02). Done here, after all subdirectories, so no
+# module file needs to know about it. Targets that opted out (DISABLE_PRECOMPILE_HEADERS) or already have their own PCH stay.
+if(ALAMO_PCH)
+  _alamo_collect_targets(${CMAKE_CURRENT_SOURCE_DIR} _alamo_all_targets)
+  foreach(_t IN LISTS _alamo_all_targets)
+    get_target_property(_type ${_t} TYPE)
+    get_target_property(_off ${_t} DISABLE_PRECOMPILE_HEADERS)
+    get_target_property(_own ${_t} PRECOMPILE_HEADERS)
+    if(NOT _t STREQUAL alamo_pch AND NOT _off AND NOT _own AND _type MATCHES "^(STATIC_LIBRARY|EXECUTABLE|OBJECT_LIBRARY)$")
+      set_property(TARGET ${_t} PROPERTY PRECOMPILE_HEADERS_REUSE_FROM alamo_pch)
+    endif()
+  endforeach()
+endif()

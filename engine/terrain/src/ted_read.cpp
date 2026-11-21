@@ -3,6 +3,7 @@
 #include <cmath>
 #include <cstring>
 
+#include "alamo/core/ascii.hpp"
 #include "alamo/core/file_provider.hpp"
 #include "alamo/terrain/ted.hpp"
 
@@ -160,6 +161,32 @@ uint8_t Terrain::material_at(int64_t x, int64_t y) const {
     y = std::clamp<int64_t>(y, 0, height - 1);
     return material[static_cast<size_t>(y) * width + static_cast<size_t>(x)];
 }
+uint32_t Terrain::cell_surface_type(float wx, float wy) const {
+    if (width == 0 || height == 0 || !std::isfinite(wx) || !std::isfinite(wy)) return 0;
+    const auto index = [](float w, uint32_t n) {
+        const float f = std::floor(w / kVertexSpacing + 0.5f);
+        if (!(f > 0.0f)) return int64_t{0};
+        const auto top = static_cast<float>(n - 1);
+        return static_cast<int64_t>(f < top ? f : top);
+    };
+    const TerrainMaterial* r = material_record(material_at(index(wx, width), index(wy, height)));
+    return r ? r->surface_type : 0u;  // past the table: 0 [port] (retail reads past its end, Q2.3 [M])
+}
+bool Terrain::under_water(float wx, float wy) const {
+    if (header.water_type == WaterType::None) return false;
+    return sample_height_bilinear(wx, wy) < header.water_height - 0.5f;
+}
+uint32_t Terrain::water_surface_type() const {
+    switch (header.water_type) {
+        case WaterType::Water: return 4;
+        case WaterType::Lava: return 8;
+        case WaterType::Ice: return 7;
+        default: return 0;
+    }
+}
+uint32_t Terrain::surface_type_at(float wx, float wy) const {
+    return under_water(wx, wy) ? water_surface_type() : cell_surface_type(wx, wy);
+}
 float Terrain::sample_height(float wx, float wy) const {
     if (width < 2 || height < 2 || !std::isfinite(wx) || !std::isfinite(wy)) return 0.0f;
     const float maxx = static_cast<float>(width - 1), maxy = static_cast<float>(height - 1);
@@ -174,6 +201,21 @@ float Terrain::sample_height(float wx, float wy) const {
     // Triangles (0,0)(1,0)(1,1) when fx >= fy, else (0,0)(1,1)(0,1).
     if (fx >= fy) return h00 + fx * (h10 - h00) + fy * (h11 - h10);
     return h00 + fy * (h01 - h00) + fx * (h11 - h01);
+}
+
+float Terrain::sample_height_bilinear(float wx, float wy) const {
+    if (width < 1 || height < 1 || !std::isfinite(wx) || !std::isfinite(wy)) return 0.0f;
+    constexpr float kInv = 1.0f / kVertexSpacing;  // heightmap +0xa0, the reciprocal of the spacing
+    const float gx = std::floor(wx * kInv), gy = std::floor(wy * kInv);
+    const float tx = wx * kInv - gx, ty = wy * kInv - gy;
+    // [port] indices far outside the map saturate (raw_height clamps every corner to the grid either way)
+    const auto index = [](float g) { return static_cast<int64_t>(std::clamp(g, -1.0e9f, 1.0e9f)); };
+    const int64_t i = index(gx), j = index(gy);
+    const float h00 = height_at(i, j), h01 = height_at(i, j + 1);
+    const float h10 = height_at(i + 1, j), h11 = height_at(i + 1, j + 1);
+    const float a = h00 + (h01 - h00) * ty;  // column i along y
+    const float b = h10 + (h11 - h10) * ty;  // column i + 1
+    return a + (b - a) * tx;
 }
 
 float CameraBlock::f32_or(uint8_t id, float fallback) const {
@@ -229,7 +271,7 @@ bool parse_map_info(std::span<const uint8_t> leaf, MapInfo& mi, Ctx& c) {
         switch (m.id) {
         case 0x00: mini_u32(m, mi.format); break;
         case 0x01: mini_u32(m, mi.map_type); break;
-        case 0x02: case 0x03: case 0x04: case 0x05: case 0x06: case 0x07: mini_u32(m, mi.counts[m.id - 0x02]); break;
+        case 0x02: case 0x03: case 0x04: case 0x05: case 0x06: case 0x07: mini_u32(m, mi.counts[static_cast<size_t>(m.id - 0x02)]); break;
         case 0x08: mi.name_key = mini_utf16(m); break;
         case 0x09: mi.planet_name = mini_utf16(m); break;
         case 0x0A: mi.text_0a = mini_utf16(m); break;
@@ -529,7 +571,7 @@ bool parse_terrain(std::span<const uint8_t> node, Terrain& t, Ctx& c) {
         if (k.id == 0 && !k.has_children && !parse_terrain_header(k.payload, t.header, c)) return false;
     const TerrainHeader& h = t.header;
     if (h.width < 2 || h.height < 2) return c.fail("terrain header: grid smaller than 2x2");
-    if (h.width > kMaxGridVerts || h.height > kMaxGridVerts) return c.fail("terrain header: grid larger than 1985 vertices");
+    if (h.width > kMaxGridVerts || h.height > kMaxGridVerts) return c.fail("terrain header: grid larger than 7937 vertices (kMaxGridVerts guard)");
     // Allocation is driven by the payload, never by the header alone: the vertex data must hold
     // every header vertex before the grid is allocated (a 48-byte file must not allocate 30 MB).
     const uint64_t need = static_cast<uint64_t>(h.width) * h.height * 4;
@@ -559,10 +601,11 @@ bool parse_terrain(std::span<const uint8_t> node, Terrain& t, Ctx& c) {
             uint32_t slot = 0;
             for (const ChunkView& r : sub) {
                 if (r.id != 3 || r.has_children) continue;
-                if (slot >= kMaterialSlots) break;
                 TerrainMaterial m;
                 if (!decode_terrain_material(r.payload, m)) return c.fail("malformed TEM material record");
-                t.materials[slot++] = std::move(m);
+                if (slot < kMaterialSlots) t.materials[slot] = std::move(m);
+                else t.extra_materials.push_back(std::move(m));  // mcx5 t03: retail keeps every record (Q2.3)
+                ++slot;
             }
             break;
         }
@@ -625,6 +668,17 @@ bool parse_object(std::span<const uint8_t> node, ObjectPlacement& o, Ctx& c) {
                             if (!n.empty() && n != "NONE") o.attachments.push_back(std::move(n));
                         }
                     }
+                } else if (s.id == 0x4B7 && s.has_children) {  // map1 t04: extra behaviours (Q6_T30 3)
+                    if (!read_chunks(s.payload, sub2)) return c.fail("object behaviours 0x4B7: malformed");
+                    for (const ChunkView& b : sub2) {
+                        if (b.id != 0x4B8 || b.has_children) continue;
+                        if (!read_minis(b.payload, minis)) return c.fail("object behaviour 0x4B8: malformed");
+                        ObjectPlacement::ExtraBehavior e;
+                        e.raw = copy_minis(minis);
+                        for (const MiniView& m : minis)
+                            if (m.id == 0x00) mini_u32(m, e.name_crc);
+                        o.extra_behaviors.push_back(std::move(e));
+                    }
                 }
             }
         } else if (k.id == 0x476 && k.has_children) {
@@ -633,6 +687,23 @@ bool parse_object(std::span<const uint8_t> node, ObjectPlacement& o, Ctx& c) {
                 if (s.id != 1 || s.has_children) continue;
                 if (!read_minis(s.payload, minis)) return c.fail("object owner 0x476/1: malformed");
                 o.owner_raw = copy_minis(minis);
+            }
+        } else if (k.id == 0x482 && k.has_children) {  // hint name (TERRAIN_WATER_POST 1.6)
+            if (!read_chunks(k.payload, sub)) return c.fail("object hint 0x482: malformed");
+            for (const ChunkView& s : sub) {
+                if (s.id != 0 || s.has_children) continue;
+                if (!read_minis(s.payload, minis)) return c.fail("object hint 0x482/0: malformed");
+                for (const MiniView& m : minis)
+                    if (m.id == 0x01) o.hint = mini_string(m);
+            }
+        } else if (k.id == 0x46E && k.has_children) {  // map1 t04: marker name, the layout of 0x482 (Q6_T30 3)
+            if (!read_chunks(k.payload, sub)) return c.fail("object marker name 0x46E: malformed");
+            o.has_marker_name = true;
+            for (const ChunkView& s : sub) {
+                if (s.id != 0 || s.has_children) continue;
+                if (!read_minis(s.payload, minis)) return c.fail("object marker name 0x46E/0: malformed");
+                for (const MiniView& m : minis)
+                    if (m.id == 0x01) o.marker_name = mini_string(m);
             }
         }
     }
@@ -849,10 +920,7 @@ bool parse_ted(std::span<const uint8_t> bytes, MapData& out, std::string* error,
 
 std::string map_path(std::string_view name) {
     std::string n(name);
-    std::string up = n;
-    for (char& ch : up)
-        if (ch >= 'a' && ch <= 'z') ch = static_cast<char>(ch - 'a' + 'A');
-    const bool has_ext = up.size() > 4 && up.compare(up.size() - 4, 4, ".TED") == 0;
+    const bool has_ext = n.size() > 4 && ascii_iends_with(n, ".TED");
     if (!has_ext) n += ".TED";
     if (n.find_first_of("\\/") == std::string::npos) n = "DATA\\ART\\MAPS\\" + n;
     return alamo::normalize_path(n);

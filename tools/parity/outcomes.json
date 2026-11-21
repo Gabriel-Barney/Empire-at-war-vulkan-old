@@ -1,0 +1,72 @@
+{
+ "_doc": "AI-vs-AI outcome sweeps (ref4 t04): parity_harness.py outcome --scenario ID runs alamo_headless with args plus --seed s for s = 1..seeds and judges the share of seeds (outcome_sweep.py has the keys). Thresholds sit below the measured share so that one seed's battle moving is not a failure (docs/DECISIONS.md 'Parity tiers', 'Outcome tests over seeds'); a share falling under them is. Measured on dev 262a47b1 (2026-11-19, MSVC, workers 0). Change a threshold only with the new measurement and its reason in why, like a golden. The first five are ctests (engine/apps/CMakeLists.txt, alamo_headless_outcome_<id>, label slow).",
+ "foc_space": {
+  "args": ["--skirmish-ai", "foc", "--ticks", "16000", "--workers", "0", "--quiet", "--expect-battle-end"],
+  "seeds": 16,
+  "min_end_share": 0.5625,
+  "end_frames": [3000, 15999],
+  "why": "FoC space skirmish (_MP_SPACE_KUAT), Empire vs Rebel AI, must reach a decisive outcome (S7 t09). Re-baselined by cmb3 t07 (2026-11-20, default taken, Gabriel may reverse): the old 16/16 (6544-11129 frames, need 14) was measured while no shield regenerated in space (the port's base-power gate; retail has none, TACTICAL_COMBAT 3.7). With retail regeneration 11/16 end inside alamo_headless's [port] 14400-frame battle limit, 9278-12707 frames; the other five (seeds 2 5 10 13 16) end decisively at 15506-27437 frames when that limit is raised (3 Empire, 2 Rebel wins), so none stalls. 9 of 16 must."
+ },
+ "foc_station": {
+  "args": ["--skirmish-ai", "foc-station", "--ticks", "20000", "--workers", "0", "--quiet", "--expect-battle-end"],
+  "seeds": 12,
+  "min_end_share": 0.5,
+  "end_frames": [3000, 19999],
+  "why": "An AI defender with a Level 2 station against a far larger fleet (t41 / t48): the battle ends, the defender does not retreat while its station stands (alamo_headless's own check), no Lua error outside retail's (the host refuses them in foc-station). Measured 9/12 end (seeds 5, 7, 12 slow sieges), 7705-12770 frames (Rebel, all destroyed); 6 of 12 must."
+ },
+ "foc_land_campaign": {
+  "args": ["--skirmish-ai", "foc-land-campaign", "--ticks", "20000", "--workers", "0", "--quiet", "--expect-battle-end",
+           "--fail-on-lua-errors"],
+  "seeds": 12,
+  "min_end_share": 0.5,
+  "end_frames": [1500, 19999],
+  "why": "The campaign-rules land invasion (Utapau) ends with a winner and proposes the Script_ land goals (alamo_headless's own check). Measured 9/12 end (8, 9, 11 reach the cap), 9138-13377 frames (Empire); 6 of 12 must. Ends as early as 2241 were seen (a1j, Rebel retreats), so the floor is 1500."
+ },
+ "foc_land_full": {
+  "args": ["--skirmish-ai", "foc-land", "--ticks", "36000", "--workers", "0", "--quiet", "--fail-on-lua-errors"],
+  "seeds": 6,
+  "why": "FoC land skirmish (_MP_LAND_UTAPAU), Empire vs Rebel AI, the whole 36000 ticks with no Lua error outside retail's; no end needed (b0422, Gabriel 2026-11-15: AI against AI has no retail counterpart). Measured 0/6 end, one retail-documented Lua error (seed 5)."
+ },
+ "foc_land_empire_underworld": {
+  "args": ["--skirmish-ai", "foc-land", "--ai", "Empire,Underworld", "--ticks", "70000", "--workers", "0", "--quiet",
+           "--fail-on-lua-errors", "--report-fielded"],
+  "seeds": 10,
+  "fielded": [
+   {"label": "Empire walkers", "types": ["AT_ST_Walker", "AT_AA_Walker", "AT_AT_Walker", "SPMAT_Walker"], "min_seeds": 8,
+    "min_walked": 1000,
+    "why": "tst2 t04 (b0188): the Walk_Transition units the scenario exists for. Measured 2026-11-20 (tst2, clang, workers 0): 10/10 seeds field them, 17000-140000 walked in all; 8 of 10 must"},
+   {"label": "Destroyer droids", "types": ["Destroyer_Droid", "Destroyer_Droid_Attack"], "min_seeds": 3, "min_walked": 1000,
+    "why": "tst2 t04 (b0188): the Underworld droids the scenario exists for (the old pinned seed 4 test fielded them). Measured 2026-11-20: 6/10 seeds (1, 2, 3, 5, 8, 9), 29000-352000 walked; 3 of 10 must"}
+  ],
+  "why": "bkm2 t05 (b0047): land movement with Empire walkers and Underworld droids, the whole 70000 ticks with no Lua error outside retail's; no end needed (b0422). Measured 0/10 end; the MDU race in seeds 2-5, 9, 10, no other non-retail error. About 190-280 s a seed. tst2 t04: --report-fielded and the fielded checks make sure the walkers and droids are fielded and walk (re-measured 2026-11-20: 1/10 end, MDU race in seeds 4, 6, 9, 10). mdu1 (2026-11-21): the MDU race was a port ordering bug (DEPLOY's leave and adopt queued after the activation), fixed; its known_lua entry is gone."
+ },
+ "skai_exit_rebel": {
+  "args": ["--skirmish-ai", "foc-land", "--map", "_MP_LAND_UTAPAU", "--human", "Empire", "--ai", "Rebel", "--ticks", "36000",
+           "--workers", "0", "--quiet"],
+  "seeds": 10,
+  "max_lua_seeds": 10,
+  "retail": [["20261108-220755 (SKAI_T06_LAND_RUNS s1)", null], ["20261112-095520 (s6)", null], ["20261116-012157 (s8)", null],
+             ["20261116-062402 (s9)", 27265]],
+  "why": "skai exit test (docs/DECISIONS.md 'skai exit test as a tier-2 distribution', Gabriel 2026-11-16; formerly tools/probe_mod/q2_traces/analysis/skai_exit.py, which judged no Lua errors): the Rebel AI against an idle human Empire on Utapau, end rate (Fisher) and end frames against the retail runs in retail (run id under tools/probe_mod/q2_traces/out, end frame or null). A new retail run of this lobby goes into retail. Not a ctest (36000 ticks x 10 seeds): run by hand."
+ },
+ "skai_exit_empire": {
+  "args": ["--skirmish-ai", "foc-land", "--map", "_MP_LAND_UTAPAU", "--human", "Underworld", "--ai", "Empire", "--ticks",
+           "36000", "--workers", "0", "--quiet"],
+  "seeds": 10,
+  "max_lua_seeds": 10,
+  "retail": [["20261114-210208 (B0418_UTAPAU_AI_RUNS)", null], ["20261116-005957 (SKAI_T15_PLAN_RETEST)", 25707],
+             ["20261116-065045 (B1)", null], ["20261116-071736 (B2)", 23746], ["20261116-074211 (B3)", 26522],
+             ["20261116-133939 (skai-a; palace falls 28196, trace ends 28404)", 28196],
+             ["20261116-171531 (skai-a hook run; palace falls 22544, trace ends 22752)", 22544]],
+  "why": "skai exit test, the Empire AI against an idle human Underworld on Utapau (see skai_exit_rebel)."
+ },
+ "skai_exit_underworld": {
+  "args": ["--skirmish-ai", "foc-land", "--map", "_MP_LAND_UTAPAU", "--human", "Empire", "--ai", "Underworld", "--ticks",
+           "36000", "--workers", "0", "--quiet"],
+  "seeds": 10,
+  "max_lua_seeds": 10,
+  "retail": [["20261114-212910 (B0418_UTAPAU_AI_RUNS)", null],
+             ["20261116-140323 (skai-a; command center falls 28391, trace ends ~28599)", 28391], ["20261116-142451 (skai-a)", null]],
+  "why": "skai exit test, the Underworld AI against an idle human Empire on Utapau (see skai_exit_rebel)."
+ }
+}

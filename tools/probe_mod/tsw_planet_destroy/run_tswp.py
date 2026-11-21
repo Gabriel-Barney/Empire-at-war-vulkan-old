@@ -21,8 +21,10 @@ import time
 sys.dont_write_bytecode = True
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
+sys.path.insert(0, os.path.join(os.path.dirname(HERE), 'common'))
 import build_mod  # noqa: E402
 import cleanup_tswp  # noqa: E402
+import launch_foc as foc  # noqa: E402  (common/launch_foc.py: the one place a kit starts StarWarsG.exe)
 
 STEPS = r'''
 ==========================================================================================================
@@ -94,7 +96,7 @@ def main():
                 input('Start the game yourself, play, quit it, then press Enter here... ')
         else:
             note('launching StarWarsG.exe MODPATH=Mods\\%s' % build_mod.MOD_NAME)
-            subprocess.run([exe, 'MODPATH=Mods\\' + build_mod.MOD_NAME], cwd=corruption)
+            foc.start(a.game, ['MODPATH=Mods\\' + build_mod.MOD_NAME], windowed=False)
             time.sleep(2)
             while running():
                 time.sleep(2)

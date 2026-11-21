@@ -9,8 +9,10 @@
 
 #include "alamo/core/hash.hpp"
 #include "alamo/core/sim_crc.hpp"
+#include "alamo/data/values.hpp"
 #include "alamo/objects/game_object_types.hpp"
 #include "alamo/objects/type_fields.hpp"
+#include "alamo/render/hardpoints.hpp"
 #include "alamo/render/map_scene.hpp"
 #include "alamo/render/sim_beams.hpp"
 #include "alamo/sim/sim_host.hpp"
@@ -32,8 +34,8 @@ using objects::ObjectHandle;
 using objects::ObjectId;
 using objects::TypeIndex;
 
-// Text of a tag on a type: the merged typed view when the tag is a GameObjectType field, else the raw store
-// along the variant chain (own value first).
+}  // namespace
+
 std::string type_text(const GameObjectTypes& types, TypeIndex t, std::string_view tag) {
     if (objects::find_type_field(tag) != 0xFFFFFFFFu) return std::string(types.get_string(t, tag));
     const objects::ObjectTypeDatabase& raw = types.raw();
@@ -43,6 +45,8 @@ std::string type_text(const GameObjectTypes& types, TypeIndex t, std::string_vie
     }
     return {};
 }
+
+namespace {
 
 // Tokens of a list tag: the typed view's list when the tag is a typed list field, else the text (typed or raw store)
 // split at commas / whitespace.
@@ -87,20 +91,19 @@ bool parse_float(std::string_view s, float& v) {
     return r.ec == std::errc{} && std::isfinite(v);
 }
 
-bool yes_text(const std::string& s) {
-    return !s.empty() && (s[0] == 'y' || s[0] == 'Y' || s[0] == 't' || s[0] == 'T' || s == "1");
+bool yes_text(const std::string& s) { return data::parse_type_bool(s); }
+
+// The leading integer of a text, 0 when it has none (vis1 t02: Blob_Shadow_Below_Detail_Level "99r" reads 99).
+int32_t leading_int(std::string_view s) {
+    while (!s.empty() && (s.front() == ' ' || s.front() == '	')) s.remove_prefix(1);
+    int32_t v = 0;
+    const auto r = std::from_chars(s.data(), s.data() + s.size(), v);
+    return r.ec == std::errc{} ? v : 0;
 }
 
 bool finite(float f) { return std::isfinite(f); }
 
 float length3(const Vec3& v) { return std::sqrt(v.x * v.x + v.y * v.y + v.z * v.z); }
-
-std::string upper_ascii(std::string_view s) {
-    std::string u(s);
-    for (char& c : u)
-        if (c >= 'a' && c <= 'z') c = static_cast<char>(c - 'a' + 'A');
-    return u;
-}
 
 }  // namespace
 
@@ -155,6 +158,18 @@ void SnapshotTypeTable::build(const GameObjectTypes& types, objects::ModeKind mo
         ti.surface_fx = type_tokens(types, t, "SurfaceFX_Name");
         ti.scorch_mark = type_text(types, t, "Explosion_Scorch_Mark");
         ti.spin_away_explosion = type_text(types, t, "Spin_Away_On_Death_Explosion");
+        {  // vis1 t02: blob shadow fields (defaults of the type constructor: size 1 x 1, intensity 1, level 0)
+            ti.blob_material = type_text(types, t, "Blob_Shadow_Material_Name");
+            float v = 0.0f;
+            const std::vector<std::string> sz = type_tokens(types, t, "Blob_Shadow_Scale");
+            for (size_t k = 0; k < 2 && k < sz.size(); ++k)
+                if (parse_float(sz[k], v)) ti.blob_size[k] = v;
+            if (parse_float(type_text(types, t, "Blob_Shadow_Intensity"), v)) ti.blob_intensity = v;
+            ti.blob_below_detail = leading_int(type_text(types, t, "Blob_Shadow_Below_Detail_Level"));
+            ti.blob_bone = type_text(types, t, "Blob_Shadow_Bone_Name");
+            // ledger: consumes GameObjectType.Exclude_From_Distance_Fade
+            ti.no_distance_fade = types.get_bool(t, "Exclude_From_Distance_Fade") || yes_text(type_text(types, t, "Exclude_From_Distance_Fade"));
+        }
         {  // projectile laser bolts (Projectile_Custom_Render / _Width / _Length)
             float v = 0.0f;
             if (parse_float(type_text(types, t, "Projectile_Custom_Render"), v)) ti.projectile_custom_render = static_cast<int32_t>(v);
@@ -207,6 +222,10 @@ void SnapshotTypeTable::build(const GameObjectTypes& types, objects::ModeKind mo
         // but never show in the base game (fixpass_capture C2_space_*: no flag at the start positions; playtest V3). The drawing
         // rule itself is not traced. In_Background markers (Death_Star_Position: a backdrop model) stay drawn.
         const bool marker = types.get_bool(t, "Is_Marker") || yes_text(type_text(types, t, "Is_Marker"));
+        // storyb t16 [port]: a SKY_DOME object (the battle's environment sky dome, STORYB_T16_SKY_DOME) is drawn by the map
+        // scene from the environment (MapScene skydomes), so its store object adds no snapshot model.
+        static const objects::BehaviorTypeId kSkyDome = objects::behavior_type_id("SKY_DOME");
+        const bool sky_dome = kSkyDome != objects::kNoBehavior && types.has_behavior(t, objects::BehaviorSet::Union, kSkyDome);
         terrain::ResolvedType rt;
         if (resolver && resolver->resolve(ti.name_crc, space, rt)) {
             ti.model = laser ? std::string() : rt.model_name;
@@ -215,6 +234,7 @@ void SnapshotTypeTable::build(const GameObjectTypes& types, objects::ModeKind mo
             ti.lod_bias = ri.lod_bias;
             ti.in_background = ri.in_background;
             if (marker && !ti.in_background) ti.model.clear();
+            if (sky_dome) ti.model.clear();
             ti.has_no_colorization = ri.has_no_colorization;
             ti.no_colorization = ri.no_colorization;
             for (const std::string& h : ri.hardpoints) ti.hardpoint_crcs.push_back(alamo::name_crc(h));
@@ -235,18 +255,19 @@ void SnapshotTypeTable::build(const GameObjectTypes& types, objects::ModeKind mo
         const std::string bg = type_text(types, t, "In_Background");
         ti.in_background = yes_text(bg);
         if (marker && !ti.in_background) ti.model.clear();
+        if (sky_dome) ti.model.clear();
         const auto& hp_names = types.hardpoint_names();
         for (uint32_t h : types.hardpoints(t))
             if (h < hp_names.size()) ti.hardpoint_crcs.push_back(alamo::name_crc(hp_names[h]));
     }
     by_name_.clear();
     by_name_.reserve(info_.size());
-    for (TypeIndex t = 0; t < info_.size(); ++t) by_name_.emplace_back(upper_ascii(info_[t].name), t);
+    for (TypeIndex t = 0; t < info_.size(); ++t) by_name_.emplace_back(ascii_upper(info_[t].name), t);
     std::stable_sort(by_name_.begin(), by_name_.end(), [](const auto& a, const auto& b) { return a.first < b.first; });
 }
 
 TypeIndex SnapshotTypeTable::find(std::string_view name) const {
-    const std::string key = upper_ascii(name);
+    const std::string key = ascii_upper(name);
     const auto it = std::lower_bound(by_name_.begin(), by_name_.end(), key, [](const auto& e, const std::string& k) { return e.first < k; });
     return it != by_name_.end() && it->first == key ? it->second : objects::kNone;
 }
@@ -290,7 +311,6 @@ uint64_t SimSnapshot::digest() const {
         h.i32(o.id);
         h.u32(o.type);
         h.i32(o.owner);
-        h.i32(o.attach_parent);
         for (float f : {o.position.x, o.position.y, o.position.z, o.facing.x, o.facing.y, o.facing.z, o.health, o.health_fraction,
                         o.lod_bias, o.fade, o.team_color.x, o.team_color.y, o.team_color.z, o.team_color.w})
             h.f32(f);
@@ -343,6 +363,7 @@ uint64_t SimSnapshot::digest() const {
     }
     for (const SnapshotEffect& e : effects) {
         h.u32(e.lua_seq);
+        h.u32(e.fx_seq);  // vis1 t06
         h.u32(static_cast<uint32_t>(e.bone.size()));
         if (!e.bone.empty()) h.bytes(e.bone.data(), e.bone.size());
     }
@@ -377,6 +398,17 @@ uint64_t SimSnapshot::digest() const {
         h.u32(static_cast<uint32_t>(jamming.stealthed.size()));
         for (const objects::ObjectId id : jamming.stealthed) h.i32(id);
     }
+    if (!jamming.heal_blobs.empty()) {  // vis1 t08 (hashed only when present)
+        h.u32(static_cast<uint32_t>(jamming.heal_blobs.size()));
+        for (const SnapshotJammer& j : jamming.heal_blobs) {
+            h.i32(j.id);
+            h.i32(j.owner);
+            h.f32(j.radius);
+            h.u32(static_cast<uint32_t>(j.blob_material.size()));
+            if (!j.blob_material.empty()) h.bytes(j.blob_material.data(), j.blob_material.size());
+            for (float v : j.blob_color) h.f32(v);
+        }
+    }
     h.u32(static_cast<uint32_t>(beams.size()));  // R5 ability beams
     for (const SnapshotBeam& b : beams) {
         h.u8(b.kind);
@@ -391,6 +423,16 @@ uint64_t SimSnapshot::digest() const {
         h.bytes(b.style.color, 4);
         h.i32(b.style.frames);
         h.u8(b.style.mode);
+    }
+    if (!world_effects.empty()) {  // vis1 t08 (hashed only when present)
+        h.u32(static_cast<uint32_t>(world_effects.size()));
+        for (const SimWorldEffect& w : world_effects) {
+            h.u64(w.key);
+            h.u32(static_cast<uint32_t>(w.asset.size()));
+            if (!w.asset.empty()) h.bytes(w.asset.data(), w.asset.size());
+            h.i32(w.owner);
+            for (float v : {w.position.x, w.position.y, w.position.z, w.facing.x, w.facing.y, w.facing.z, w.intensity}) h.f32(v);
+        }
     }
     h.u8(fog ? 1 : 0);
     if (fog) {
@@ -429,6 +471,7 @@ void build_snapshot(const objects::ObjectStore& store, uint64_t tick, uint64_t m
     out.ability_events.clear();
     out.projectiles.clear();
     out.beams.clear();
+    out.world_effects.clear();
     const std::span<const ObjectHandle> all = store.all_objects();
     out.store_objects = static_cast<uint32_t>(all.size());
     const auto n = static_cast<uint32_t>(all.size());
@@ -444,8 +487,6 @@ void build_snapshot(const objects::ObjectStore& store, uint64_t tick, uint64_t m
             o.id = store.id(h);
             o.type = store.type(h);
             o.owner = store.owner(h);
-            const ObjectHandle ap = store.attach_parent(h);
-            o.attach_parent = (ap && store.exists(ap)) ? store.id(ap) : objects::kNoObjectId;
             o.position = store.position(h);
             o.facing = store.facing(h);
             o.health = store.health(h);
@@ -475,22 +516,7 @@ void build_snapshot(const objects::ObjectStore& store, uint64_t tick, uint64_t m
         o.hardpoint_first = hp;
         hp += o.hardpoint_count;
     }
-    out.hardpoint_destroyed.assign(hp, 0);
-    // Pass 3 (store order): destroyed hardpoint sub-objects (PROVISIONAL rule, see the header).
-    for (uint32_t i = 0; i < n; ++i) {
-        const SnapshotObject& c = tmp[i];
-        if (c.attach_parent == objects::kNoObjectId || !table.valid(c.type)) continue;
-        if ((c.flags & kSnapDying) == 0 && c.health > 0.0f) continue;
-        const SnapshotObject* p = out.find(c.attach_parent);
-        if (!p || !table.valid(p->type)) continue;
-        const std::vector<uint32_t>& crcs = table[p->type].hardpoint_crcs;
-        const uint32_t child_crc = table[c.type].name_crc;
-        for (uint32_t k = 0; k < crcs.size() && k < p->hardpoint_count; ++k)
-            if (crcs[k] == child_crc) {
-                out.hardpoint_destroyed[p->hardpoint_first + k] = 1;
-                break;
-            }
-    }
+    out.hardpoint_destroyed.assign(hp, 0);  // filled by apply_hardpoint_source (the battle's combat states)
 }
 
 bool capture_snapshot(const sim::SimHost& host, const SnapshotTypeTable& table, SimSnapshot& out, const ParallelFor& pf,
@@ -507,9 +533,7 @@ bool capture_snapshot(const sim::SimHost& host, const SnapshotTypeTable& table, 
 
 void set_snapshot_effects(SimSnapshot& snap, std::span<const SnapshotEffect> effects) {
     snap.effects.clear();
-    for (const SnapshotEffect& e : effects)
-        if (!e.asset.empty() && snap.find(e.id)) snap.effects.push_back(e);
-    std::stable_sort(snap.effects.begin(), snap.effects.end(), [](const SnapshotEffect& a, const SnapshotEffect& b) { return a.id < b.id; });
+    append_snapshot_effects(snap, effects);
 }
 
 void append_snapshot_effects(SimSnapshot& snap, std::span<const SnapshotEffect> effects) {
@@ -519,8 +543,9 @@ void append_snapshot_effects(SimSnapshot& snap, std::span<const SnapshotEffect> 
 }
 
 // R1: the combat source is authoritative for the objects it tracks (same hardpoint count as the type's list): their
-// bits are its destroyed states, replacing the PROVISIONAL attach-child rule of build_snapshot; objects it does not
-// track keep the provisional bits. (The instance builder keeps destroyed hardpoints sticky: B.10, no repair visuals.)
+// bits are its destroyed states; objects it does not track keep none (r1b t02: the provisional attach-child rule is
+// gone - battle hardpoints are combat records, not objects). (The instance builder keeps destroyed hardpoints sticky:
+// B.10, no repair visuals.)
 void apply_hardpoint_source(SimSnapshot& snap, const std::function<uint32_t(ObjectId)>& count,
                             const std::function<bool(ObjectId, uint32_t)>& destroyed) {
     if (!count || !destroyed) return;
@@ -568,18 +593,21 @@ void set_snapshot_hardpoint_events(SimSnapshot& snap, std::span<const SnapshotHa
     }
 }
 
-void apply_fog_hidden(SimSnapshot& snap, const std::function<bool(const SnapshotObject&)>& hidden) {
+namespace {
+// Sets or clears flag `bit` on every object by `pred` (a null predicate clears it everywhere).
+template <typename Bit>
+void mark_flag(SimSnapshot& snap, Bit bit, const std::function<bool(const SnapshotObject&)>& pred) {
     for (SnapshotObject& o : snap.objects) {
-        const bool h = hidden && hidden(o);
-        o.flags = static_cast<uint8_t>(h ? (o.flags | kSnapFogHidden) : (o.flags & ~kSnapFogHidden));
+        const bool on = pred && pred(o);
+        o.flags = static_cast<uint8_t>(on ? (o.flags | bit) : (o.flags & ~bit));
     }
 }
+}  // namespace
+
+void apply_fog_hidden(SimSnapshot& snap, const std::function<bool(const SnapshotObject&)>& hidden) { mark_flag(snap, kSnapFogHidden, hidden); }
 
 void apply_contained(SimSnapshot& snap, const std::function<bool(const SnapshotObject&)>& contained) {
-    for (SnapshotObject& o : snap.objects) {
-        const bool c = contained && contained(o);
-        o.flags = static_cast<uint8_t>(c ? (o.flags | kSnapContained) : (o.flags & ~kSnapContained));
-    }
+    mark_flag(snap, kSnapContained, contained);
 }
 
 void apply_script_hidden(SimSnapshot& snap, const std::function<bool(const SnapshotObject&)>& hidden) {
@@ -661,7 +689,14 @@ void apply_battle_projectiles(const sim::TacticalBattle& battle, SimSnapshot& sn
     for (size_t i = 0; i < descs.size(); ++i) types[i] = table.find(descs[i].name);
     std::vector<tactical::combat::ProjectileView> views;
     views.reserve(combat.projectile_count());
-    for (size_t i = 0; i < combat.projectile_count(); ++i) views.push_back(combat.projectile(i));
+    // trl2 t08 (MCX4_T10_RE_ANSWERS §3): a shot held by Projectile_Appearance_Delay_Frames (spawn frame after this one) is
+    // hidden until it appears (0x39d6a0 on the new projectile [M: hides the model]).
+    const uint32_t now = battle.frame();
+    for (size_t i = 0; i < combat.projectile_count(); ++i) {
+        const tactical::combat::ProjectileView v = combat.projectile(i);
+        if (v.spawn_frame > now) continue;
+        views.push_back(v);
+    }
     set_snapshot_projectiles(snap, views, types);
 }
 
@@ -692,6 +727,23 @@ void apply_battle_state(const sim::TacticalBattle& battle, SimSnapshot& snap, co
         }
         if (stealth_applied) o.flags = static_cast<uint8_t>(o.flags | kSnapStealthMeshes);
         else if (stealth_broken) o.stealth_time = kStealthBreakFade;
+    }
+    // bkx1 t05 (b0019 / b0020, BKX1_RENDER_RE §1.2): the engine glow inputs of every space unit with a locomotor other than
+    // the fighters' (the SimpleSpace service runs for corvettes, frigates, capitals and transports): engines off (a
+    // destroyed engine hard point or a disable), the timed disable's frames left, ion stun, v / V.
+    if (battle.is_space()) {
+        const tactical::movement::MovementSystem& mv = battle.movement();
+        for (SnapshotObject& o : snap.objects) {
+            const int32_t on = battle.engines_online(o.id);
+            if (on < 0 || !mv.has_unit(o.id)) continue;
+            const tactical::movement::UnitView v = mv.view(o.id);
+            if (v.locomotor == tactical::movement::LocomotorKind::Fighter) continue;
+            o.engine_flags = static_cast<uint8_t>(kEngineGlowUnit | (on == 0 ? kEngineGlowOff : 0) |
+                                                  (combat.ion_stunned(o.id, battle.frame()) ? kEngineGlowIonStun : 0));
+            const uint32_t re = battle.engines().reenable_frame(o.id);
+            o.engine_timer_frames = on == 0 && re > battle.frame() ? re - battle.frame() : 0u;
+            o.engine_speed_ratio = v.max_speed > 0.0f ? v.speed / v.max_speed : 0.0f;
+        }
     }
     // R4: Particle_Effect of active unit abilities (resolved through the type table).
     if (table) {
@@ -830,7 +882,8 @@ void apply_beam_zaps(const tactical::abilities::AbilitySystem& ab, const tactica
             const float reach = 2.0f * p->speed + 2.0f;
             bool hit = false;
             for (const tactical::combat::HitEvent& e : combat.hit_events()) {
-                if (e.shooter != p->shooter || e.projectile_desc != p->desc) continue;
+                // tru1 t08: a commanded detonation's event is the zap itself (its lifetime particle), not a hit
+                if (e.commanded || e.shooter != p->shooter || e.projectile_desc != p->desc) continue;
                 const float ex = e.position.x - at.x, ey = e.position.y - at.y, ez = e.position.z - at.z;
                 if (ex * ex + ey * ey + ez * ez <= reach * reach) {
                     hit = true;
@@ -900,7 +953,7 @@ void apply_battle_jamming(const sim::TacticalBattle& battle, int32_t local_playe
 }
 #endif
 
-#if defined(ALAMO_SIM_HAVE_BATTLES) && defined(ALAMO_SIM_HAVE_FOG)
+#ifdef ALAMO_SIM_HAVE_BATTLES
 void apply_battle_fog(const sim::TacticalBattle& battle, int32_t local_player, SimSnapshot& snap) {
     const tactical::fog::FogOfWar* fog = battle.fog();
     if (!fog) {
@@ -995,6 +1048,7 @@ void interpolate(const SimSnapshot* prev, const SimSnapshot& curr, float alpha, 
     out.projectiles.assign(curr.projectiles.begin(), curr.projectiles.end());
     out.beams.assign(curr.beams.begin(), curr.beams.end());
     out.jamming = curr.jamming;
+    out.world_effects.assign(curr.world_effects.begin(), curr.world_effects.end());
     if (mode == InterpMode::Original || !prev || alpha >= 1.0f) return;
     {  // projectiles: both ascend by serial
         size_t k = 0;

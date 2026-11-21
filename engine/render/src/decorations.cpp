@@ -1,10 +1,10 @@
 // alamo_render - terrain decorations and fog of war on the GPU (docs/re/DECORATIONS.md; CPU side in
 // engine/terrain decorations.hpp / fow.hpp). See world.hpp for what draws where.
 #include <algorithm>
-#include <cctype>
 #include <cmath>
 #include <cstring>
 
+#include "alamo/core/ascii.hpp"
 #include "alamo/core/log.hpp"
 #include "alamo/render/convert.hpp"
 #include "alamo/render/world.hpp"
@@ -103,13 +103,13 @@ void align_to(std::vector<uint8_t>& v, size_t a) {
 // ----------------------------------------------------------------------------------------- setup
 
 bool WorldRenderer::init_decorations(const terrain::TerrainMesh& mesh, const WorldDecorations& d, std::string* error) {
-    Renderer& r = *r_;
+    RendererCore& r = *r_;
     auto fail = [&](const std::string& why) {
         if (error) *error = why;
         return false;
     };
-    deco_cache_ = std::make_unique<Renderer::XConstCache>();
-    fow_cache_ = std::make_unique<Renderer::XConstCache>();
+    deco_cache_ = std::make_unique<XConstCache>();
+    fow_cache_ = std::make_unique<XConstCache>();
     deco_time_ = 0.0f;
     if (r.desc_.effects) {
         for (uint32_t m = 0; m < terrain::kRenderModeCount; ++m) {
@@ -380,13 +380,8 @@ bool WorldRenderer::build_dynamic(const rhi::Frame& frame, std::vector<DecoDraw>
     };
     auto tex_of = [&](const std::string& name) {
         if (name.empty()) return -1;
-        std::string k = name;
-        for (char& c : k) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
-        for (int t : slot_textures_) {
-            std::string n = textures_[static_cast<size_t>(t)].name;
-            for (char& c : n) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
-            if (n == k) return t;
-        }
+        for (int t : slot_textures_)
+            if (ascii_iequals(textures_[static_cast<size_t>(t)].name, name)) return t;
         return -1;
     };
     // Type 2: dynamic tracks.
@@ -477,7 +472,7 @@ bool WorldRenderer::build_dynamic(const rhi::Frame& frame, std::vector<DecoDraw>
 
 // ----------------------------------------------------------------------------------- renderer side
 
-uint32_t Renderer::ff_geometry_draws(rhi::Frame& frame, VkCommandBuffer cmd, const ViewMatrices& view, std::span<const FfGeoDraw> draws,
+uint32_t RendererCore::ff_geometry_draws(rhi::Frame& frame, VkCommandBuffer cmd, const ViewMatrices& view, std::span<const FfGeoDraw> draws,
                                      uint32_t* pipeline_binds) {
     if (draws.empty()) return 0;
     const size_t n = draws.size();
@@ -547,7 +542,7 @@ uint32_t Renderer::ff_geometry_draws(rhi::Frame& frame, VkCommandBuffer cmd, con
     for (size_t i = 0; i < n; ++i) {
         const FfGeoDraw& d = draws[i];
         materials::PsoKey key = d.pass->pso[0];
-        key.render_pass = rp_scene_;
+        key.render_pass = rp_world_;  // [port] MSAA: the pass being recorded
         key.vertex_layout = d.layout;
         const materials::Program prog = materials::ff_program(materials::ff_inputs_for_layout(d.layout));
         if (prog.vs) key.vs_id = prog.vs->id;
@@ -581,7 +576,7 @@ uint32_t Renderer::ff_geometry_draws(rhi::Frame& frame, VkCommandBuffer cmd, con
     return drawn;
 }
 
-void Renderer::world_draw_decorations(rhi::Frame& frame, VkCommandBuffer cmd, const ViewMatrices& view, uint32_t width,
+void RendererCore::world_draw_decorations(rhi::Frame& frame, VkCommandBuffer cmd, const ViewMatrices& view, uint32_t width,
                                       uint32_t height) {
     WorldRenderer& w = *world_;
     if (w.options_.space) return;  // space: only the FOW plane (background pass)
@@ -669,7 +664,7 @@ void Renderer::world_draw_decorations(rhi::Frame& frame, VkCommandBuffer cmd, co
         PostSpec ps;
         ps.fx = w.prim_fx_[m];
         ps.pass = pass;
-        ps.render_pass = rp_scene_;
+        ps.render_pass = rp_world_;  // [port] MSAA: the pass being recorded (prepass or main scene)
         ps.width = width;
         ps.height = height;
         ps.view = &dv;
@@ -703,7 +698,7 @@ void Renderer::world_draw_decorations(rhi::Frame& frame, VkCommandBuffer cmd, co
     PostSpec ps;
     ps.fx = w.fow_fx_;
     ps.pass = w.fow_pass_;
-    ps.render_pass = rp_scene_;
+    ps.render_pass = rp_world_;  // [port] MSAA: the pass being recorded (prepass or main scene)
     ps.width = width;
     ps.height = height;
     ps.view = &dv;
@@ -720,7 +715,7 @@ void Renderer::world_draw_decorations(rhi::Frame& frame, VkCommandBuffer cmd, co
         if (!box_outside(dv.view_proj, w.patches_[pi].bounds) && w.fow_patch_[pi].second > 0) vis.push_back(pi);
     if (vis.empty()) return;
     GeoState g;
-    Renderer::XConstCache& cc = *w.fow_cache_;
+    XConstCache& cc = *w.fow_cache_;
     cc.generation = ++w.draw_generation_;
     const WorldRenderer::ConstRegion reg = translated_state(ps, nullptr, g) ? w.const_region(frame, g.int_bool) : WorldRenderer::ConstRegion{};
     const VkDescriptorSet tex = reg.ptr ? frame.descriptors(0).allocate(std_layouts_.textures()) : VK_NULL_HANDLE;
@@ -747,7 +742,7 @@ void Renderer::world_draw_decorations(rhi::Frame& frame, VkCommandBuffer cmd, co
     }
 }
 
-void Renderer::world_draw_water_tracks(rhi::Frame& frame, VkCommandBuffer cmd, const ViewMatrices& view, uint32_t width,
+void RendererCore::world_draw_water_tracks(rhi::Frame& frame, VkCommandBuffer cmd, const ViewMatrices& view, uint32_t width,
                                        uint32_t height) {
     (void)width;
     (void)height;
@@ -789,7 +784,7 @@ void Renderer::world_draw_water_tracks(rhi::Frame& frame, VkCommandBuffer cmd, c
     ds.pending += static_cast<uint32_t>(ff.size()) - n;
 }
 
-void Renderer::world_draw_space_fow(rhi::Frame& frame, VkCommandBuffer cmd, const ViewMatrices& view, uint32_t width, uint32_t height) {
+void RendererCore::world_draw_space_fow(rhi::Frame& frame, VkCommandBuffer cmd, const ViewMatrices& view, uint32_t width, uint32_t height) {
     (void)width;
     (void)height;
     WorldRenderer& w = *world_;

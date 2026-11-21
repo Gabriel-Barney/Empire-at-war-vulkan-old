@@ -9,6 +9,8 @@
 #include <algorithm>
 
 #include "alamo/galactic/campaign.hpp"
+#include "alamo/core/frames.hpp"
+#include "alamo/core/sim_crc.hpp"
 
 namespace alamo::galactic {
 
@@ -25,7 +27,7 @@ float level_value(const std::vector<float>& list, int8_t type) {
 
 // (int)((float)FPS x secs), truncation (cvttss2si).
 uint32_t transition_frames(float seconds) {
-    return static_cast<uint32_t>(static_cast<int32_t>(static_cast<float>(econ::kFramesPerSecond) * seconds));
+    return static_cast<uint32_t>(frames_trunc(static_cast<float>(econ::kFramesPerSecond) * seconds));
 }
 
 }  // namespace
@@ -197,6 +199,12 @@ bool GalacticSim::begin_corruption_gain(PlanetIndex planet, int8_t type, int32_t
     if (!valid_planet(planet) || !planets_[planet].is_planet) return false;
     if (!begin_gain_raw(planet, seconds, type, corrupting_player)) return false;
     rebuild_corruption_pairs(planet);
+    GalacticEvent ev;  // wrapper 0x3f6810 raises the notification at the start of the transition
+    ev.kind = GalacticEventKind::CorruptionStarted;
+    ev.planet = planet;
+    ev.player = corrupting_player;
+    ev.value = 1;
+    emit(ev);
     return true;
 }
 
@@ -204,6 +212,11 @@ bool GalacticSim::begin_corruption_removal(PlanetIndex planet, float seconds) {
     if (!valid_planet(planet) || !planets_[planet].is_planet) return false;
     if (!begin_removal_raw(planet, seconds)) return false;
     rebuild_corruption_pairs(planet);
+    GalacticEvent ev;  // wrapper 0x3f6770
+    ev.kind = GalacticEventKind::CorruptionStarted;
+    ev.planet = planet;
+    ev.value = 0;
+    emit(ev);
     return true;
 }
 
@@ -225,6 +238,9 @@ void GalacticSim::complete_corruption(PlanetIndex planet) {
     rebuild_corruption_pairs(planet);  // 2.
     if (old != p.corruption) {          // 3. corruption-changed notification, 5. 0x3f9690 (unlocks)
         corruption_unlocks(planet, old, old_player);
+        // mcx4 t09 (MCX4_T09_RE_ANSWERS Q1): 0x3f9690's credit bonus goes to P = the first Benefits_From_Corruption
+        // player (0x2948d0), not the planet owner; a removal (new none) pays nothing.
+        pay_corruption_bonus(planet, p.corruption, first_corruption_player());
         GalacticEvent ev;
         ev.kind = GalacticEventKind::CorruptionChanged;
         ev.planet = planet;
@@ -246,6 +262,72 @@ void GalacticSim::rebuild_corruption_pairs(PlanetIndex planet) {
     p.corruption_pairs = {level_value(c.particle_brightness_per_level, cur), level_value(c.particle_brightness_per_level, eff),
                           level_value(c.particle_scale_per_level, cur),      level_value(c.particle_scale_per_level, eff),
                           level_value(c.particle_energy_per_level, cur),     level_value(c.particle_energy_per_level, eff)};
+}
+
+// ---- mcx4 t09: the fleet visibility vote (MCX4_GAL2_RE_ANSWERS Q3, 0x433090) [H] ---------------------------------------
+// Presentation only: no rule reads it. Steps 1-10 of Q3 with the local player L, owner O.
+bool GalacticSim::fleet_visible_to_local(uint32_t fleet) const {
+    if (local_player_ == kNoPlayer) return true;  // 1. the vote only means something for L
+    if (fleet >= fleets_.size() || !fleets_[fleet].alive) return false;  // 2. [port] no fleet data / contained fleet
+    const FleetState& f = fleets_[fleet];
+    // 3. [port] the player +0x368 "sees everything" flag is 0 in a fresh game and is not modelled.
+    if (f.owner == local_player_) return true;
+    const auto type_of = [this](ObjectHandle h) -> const TypeInfo* {
+        if (!store_->exists(h)) return nullptr;
+        const auto t = static_cast<uint32_t>(store_->type(h));
+        return t < rules_->types.size() ? &rules_->types[t] : nullptr;
+    };
+    const bool fleet_hidden = hidden(f.object);
+    // 4. the current hop's destination (0x4329c0, path[index + 1]) [M] held by L.
+    if (!fleet_hidden && !f.path.empty() && valid_planet(f.to) && planets_[f.to].owner == local_player_) return true;
+    // 5. a Super content ([port] one level: fleet members, not a transport's cargo).
+    for (const ObjectHandle u : f.contents)
+        if (const TypeInfo* ti = type_of(u); ti && ti->super) return true;
+    if (fleet_hidden) return false;  // 6. (7. the mode is galactic here)
+    // The match condition of step 9. An AI owner: the fleet data's destination planet (+0x50; the path's end, the orbit
+    // planet without a path) [M] is revealed. Otherwise: the path planet at the hop's start or the one before it.
+    const auto revealed_at = [this](PlanetIndex p) { return valid_planet(p) && planets_[p].revealed; };
+    bool match = false;
+    if (valid_player(f.owner) && players_[static_cast<size_t>(f.owner)].ai) {
+        match = revealed_at(f.path.empty() ? f.planet : f.path.back());
+    } else if (!f.path.empty() && f.path_index >= 1 && f.path_index - 1 < f.path.size()) {
+        const uint32_t i = f.path_index - 1;  // the port's index is the hop target's
+        match = revealed_at(f.path[i]) || (i > 0 && revealed_at(f.path[i - 1]));
+    }
+    if (!match) return false;  // every candidate in range would only "go on"
+    // 8 / 9. the candidates: L's revealers (types with Hyperspace_Fleet_Reveal_Range > 0), then, with a
+    // Benefits_From_Corruption player, every Bribery planet whoever owns it. A candidate whose corruption type is 0
+    // (Intimidation) is skipped (the "!= 0" test); a non-planet has none (-1). Range: Bribery_Fleet_Reveal_Range for a
+    // type-5 planet, else the type's own; squared float distance, strict. [port] a unit stands at its fleet's or
+    // planet's position.
+    constexpr int8_t kIntimidation = 0, kBribery = 5;
+    const auto in_range = [&f](const Vec3& c, float r) {
+        const float dx = f.position.x - c.x, dy = f.position.y - c.y, dz = f.position.z - c.z;
+        return dx * dx + dy * dy + dz * dz < r * r;
+    };
+    const float bribery_r = rules_->constants.bribery_fleet_reveal_range;
+    const auto unit_reveals = [&](ObjectHandle u, const Vec3& at) {
+        const TypeInfo* ti = type_of(u);
+        return ti && store_->owner(u) == local_player_ && ti->fleet_reveal_range > 0.0f && in_range(at, ti->fleet_reveal_range);
+    };
+    for (const FleetState& g : fleets_)
+        if (g.alive && g.owner == local_player_)
+            for (const ObjectHandle u : g.contents)
+                if (unit_reveals(u, g.position)) return true;
+    for (const PlanetState& p : planets_) {
+        if (!p.is_planet) continue;
+        if (p.owner == local_player_ && p.type < rules_->types.size() && rules_->types[p.type].fleet_reveal_range > 0.0f &&
+            p.corruption != kIntimidation)
+            if (in_range(p.position, p.corruption == kBribery ? bribery_r : rules_->types[p.type].fleet_reveal_range)) return true;
+        for (const ObjectHandle u : p.surface)
+            if (unit_reveals(u, p.position)) return true;
+        for (const ObjectHandle u : p.structures)
+            if (unit_reveals(u, p.position)) return true;
+    }
+    if (first_corruption_player() != kNoPlayer)
+        for (const PlanetState& p : planets_)
+            if (p.is_planet && p.corruption == kBribery && in_range(p.position, bribery_r)) return true;
+    return false;
 }
 
 // ---- CRC ---------------------------------------------------------------------------------------------------------------

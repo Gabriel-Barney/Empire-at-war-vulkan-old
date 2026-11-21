@@ -122,7 +122,9 @@ So the galactic AI does not run during a tactical battle. [H]
 
    Then reset the countdown from slot 11.
 
-   **Active humans** are players with both +0x62 and +0x180 set (0x294b80). [M]
+   **Active humans** are players with both +0x62 (`Is_Human`) and +0x180 (active; cleared only by `PlayerListClass::Deactivate` 0x2940c0) set (0x294b80). [H]
+
+   **Players** = the whole PlayerList (0x140a16fd0), which `Create_Default_Players` 0x293390 fills with one player per faction of the faction table (FoC: 8), so HotM with a human gives 20 / 7 -> cap 3. **First pass:** Init 0x6ca1f0 seeds evalsLastPass (+0x188) with sources x max(1, targets) and computes the first quota from it; the seed is not cleared, so the quota after pass 1 comes from seed + pass-1 evaluations (passes 1 and 2 run at the cap). evalsLastPass counts `Evaluate` calls (candidates past proposability, `Applies` and slot 9). A pass of E evaluations at quota q takes floor(E/q) + 1 frames. (2026-11-12, A2M_R2_RE_A §2) [H]
 - **Effect:** a full proposal pass is spread to finish in about 5 s (150 frames) of game time. A commit follows each pass, and then the difficulty sleep applies. [H]
 
 **Wall clock.** The original AI scheduling is **frame-driven**. No QueryPerformanceCounter or timeGetTime call reaches a decision path. [H]
@@ -275,7 +277,7 @@ This is hysteresis favouring incumbents.
 2. Sort each active per-category vector by effective desire, descending. std::sort (0x720eb0): insertion sort up to 32 elements, so stable; unstable above that.
 3. Sort category ids (global list order) by normalized budget weight (cat+0x3c). The direction is probably descending. [M]
 4. For each category in that order, each active goal with a PotentialPlan gets 0x6c0be0. That queues production for PP units that need building, once per PP (§1.9.3).
-5. Sort each proposed category and truncate it to `extension + |active(cat)|` (0x721b60). `extension` = the int at +0xE8 of the **AIPlayerType** (goal system +0x80 → +0x28 → +0x28 → +0x30), not of a template: the XML tag `GoalSetExtensionSize` (AIPlayerType parser 0x60f840: `atoi`, then unsigned `min(v, 5)`), default **2** (AIPlayerType ctor 0x60f400, a 0xF0-byte object). No shipped AI player file sets the tag, so every vanilla AI keeps 2. (The AI template, ctor 0x6709a0, has an unordered_map bucket mask at +0xE8, which is why "template" was a misreading.) [H, q2f t09]
+5. Sort each proposed category and truncate it to `extension + |active(cat)|` (0x721b60). `extension` = the int at +0xE8 of the **AIPlayerType** (0x721b60: the proposed set's +0x80, i.e. its goal system, → +0x28 → +0x28 → +0x30; Resolve: goal system +0x28 → +0x28 → +0x30; SKAI_T15_RESOLVE_HOOK_RE §5), not of a template: the XML tag `GoalSetExtensionSize` (AIPlayerType parser 0x60f840: `atoi`, then unsigned `min(v, 5)`), default **2** (AIPlayerType ctor 0x60f400, a 0xF0-byte object). No shipped AI player file sets the tag, so every vanilla AI keeps 2. (The AI template, ctor 0x6709a0, has an unordered_map bucket mask at +0xE8, which is why "template" was a misreading.) [H, q2f t09]
 6. Run Resolve_Category for each category in sorted order. Then clear the proposed set.
 
 **Resolve_Category(cat)** [H unless noted]
@@ -287,7 +289,9 @@ Notation: A = active vector, P = proposals, `limit = extension + |A|` (extension
    - the budget cannot fund it (0x6129c0);
    - effective desire ≤ 0 and it is replaceable;
    - it has a plan that is invalid (0x6c47c0), unless the template flag +0x60→+0xa8 is set;
-   - **galactic only:** AllowedTime < ETA and it is replaceable. ETA = 0x525200 (AI_GALACTIC_2 §3.4 "Goal production time", read 2026-11-02 [H]) + elapsed (NOW − created)/FPS.
+   - **galactic only:** AllowedTime < ETA and it is replaceable. ETA = 0x525200 (AI_GALACTIC_2 §3.4 "Goal production time", read 2026-11-02 [H]) + elapsed (NOW − created)/FPS, the elapsed term only when 0x525200 > 0 (A2F_RE_READS §1.4).
+
+   A maintenance drop records **no** learning outcome (no activation failure, no goal failure) [H]; maintenance also runs on the kept set after step 3 and on A when the filtered proposals are empty (A2M_R2_RE_A §3).
 
    Survivors get their plan refreshed (0x6c2d60) and are re-added to the budget. "Replaceable" (0x692740) means: no running plan, or the plan has not called `Set_As_Goal_System_Removable(false)`.
 2. **Filter P.** Keep proposals whose target still Applies, then sort P.
@@ -298,7 +302,7 @@ Notation: A = active vector, P = proposals, `limit = extension + |A|` (extension
 5. **Greedy phase.** While the category's available credits (cat+0x44) > 0, take Pool[0]. **Stop** on the first of:
    - +0x2a0 non-empty, type disabled, or type excluded;
    - the goal is already kept or active;
-   - the plan cannot be activated (0x6c4a50) or the budget cannot fund it (records an activation failure);
+   - the plan cannot be activated (0x6c4a50) or the budget cannot fund it (records an activation failure; 0x58a5d0 records nothing when the type's `Activation_Tracking_Duration` is 0, the default);
    - `0 < AllowedTime < ETA` (records an activation failure);
    - the goal is Is_Like `lastOld`;
    - |Keep| ≥ limit.
@@ -375,6 +379,8 @@ Goals and plans with no template entry stay at −1, i.e. off. In particular, **
 **Add goal** (0x610d30): the need is first taken from available credits; any shortfall is converted into a required income rate over the horizon, taken from the available rate. [H arithmetic]
 
 **Can fund** (0x6129c0): `max(horizon, lastDt) × availRate + avail ≥ need`. [H]
+
+**Accept-time fund test** (0x6139f0, slot 10 only; corrected a2m r3, `A2M_R3_RE_A.md` §1.1): it reads the **pool P (+0x4c) and income rate I (+0x50)**, not A / R: horizon = goal ETA, or Time_Limit when it is not −1 and ≤ ETA, then at least the budget period (+0x70); pass when `max(horizon × I + P, 0) ≥ goal cost`. A goal with a budget record uses that record instead; a switched-off budget always passes. The A / R test above is used at commit, resolve and maintenance. [H]
 
 **Per-tick update** (0x614340, from 0x4b2ef0, galactic only; dt from the game clock) [H/L]:
 - Rates are redistributed by weight and goals accrue their share.

@@ -1,10 +1,13 @@
 // P4 sim (owner: galactic agent): loader of the special-system tables (special_data.hpp, docs/re/P4_SIM_SYSTEMS.md).
+#include <algorithm>
 #include <map>
 #include <memory>
 
 #include "alamo/core/hash.hpp"
+#include "alamo/core/ascii.hpp"
 #include "alamo/data/game_database.hpp"
 #include "alamo/data/xml.hpp"
+#include "alamo/data/xml_values.hpp"
 #include "alamo/galactic/galactic_rules.hpp"
 #include "alamo/objects/game_object_types.hpp"
 #include "alamo/objects/type_fields.hpp"
@@ -13,28 +16,21 @@ namespace alamo::galactic {
 
 namespace {
 
-std::string_view trim(std::string_view s) {
-    while (!s.empty() && (s.front() == ' ' || s.front() == '\t' || s.front() == '\r' || s.front() == '\n')) s.remove_prefix(1);
-    while (!s.empty() && (s.back() == ' ' || s.back() == '\t' || s.back() == '\r' || s.back() == '\n')) s.remove_suffix(1);
-    return s;
-}
-
-bool ieq(std::string_view a, std::string_view b) {
-    if (a.size() != b.size()) return false;
-    for (size_t i = 0; i < a.size(); ++i) {
-        char x = a[i], y = b[i];
-        if (x >= 'A' && x <= 'Z') x = static_cast<char>(x - 'A' + 'a');
-        if (y >= 'A' && y <= 'Z') y = static_cast<char>(y - 'A' + 'a');
-        if (x != y) return false;
-    }
-    return true;
-}
-
-float to_f(std::string_view s) { return static_cast<float>(objects::c_atof(trim(s))); }
+float to_f(std::string_view s) { return static_cast<float>(objects::c_atof(ascii_trim(s))); }
 
 std::vector<float> float_list(std::string_view s) {
     std::vector<float> out;
     for (std::string_view t : objects::split_type_list(s)) out.push_back(static_cast<float>(objects::c_atof(t)));
+    return out;
+}
+
+// mcx1 t03: the shared data-class rule for a list field: every occurrence appends (TBD / empty skipped).
+std::string joined(data::XmlNode n, std::string_view tag) {
+    std::string out;
+    for (std::string_view v : data::xml_values::texts(n, tag)) {
+        if (!out.empty()) out += ',';
+        out += v;
+    }
     return out;
 }
 
@@ -49,15 +45,31 @@ void note(std::vector<std::string>* diag, std::string msg) {
 }
 
 SpecialAbilityClass class_of(std::string_view tag) {
-    if (ieq(tag, "Black_Market_Ability")) return SpecialAbilityClass::BlackMarket;
-    if (ieq(tag, "Galactic_Sabotage_Ability")) return SpecialAbilityClass::Sabotage;
-    if (ieq(tag, "Hack_Super_Weapon_Ability")) return SpecialAbilityClass::Hack;
-    if (ieq(tag, "Corruption_Ability")) return SpecialAbilityClass::Corruption;
-    if (ieq(tag, "Planet_Income_Bonus_Ability")) return SpecialAbilityClass::IncomeBonus;
-    if (ieq(tag, "Planet_Income_Gambling_Ability")) return SpecialAbilityClass::IncomeGambling;
-    if (ieq(tag, "Slicer_Ability")) return SpecialAbilityClass::Slicer;
-    if (ieq(tag, "System_Spy_Ability")) return SpecialAbilityClass::SystemSpy;
+    if (ascii_iequals(tag, "Black_Market_Ability")) return SpecialAbilityClass::BlackMarket;
+    if (ascii_iequals(tag, "Galactic_Sabotage_Ability")) return SpecialAbilityClass::Sabotage;
+    if (ascii_iequals(tag, "Hack_Super_Weapon_Ability")) return SpecialAbilityClass::Hack;
+    if (ascii_iequals(tag, "Corruption_Ability")) return SpecialAbilityClass::Corruption;
+    if (ascii_iequals(tag, "Planet_Income_Bonus_Ability")) return SpecialAbilityClass::IncomeBonus;
+    if (ascii_iequals(tag, "Planet_Income_Gambling_Ability")) return SpecialAbilityClass::IncomeGambling;
+    if (ascii_iequals(tag, "Slicer_Ability")) return SpecialAbilityClass::Slicer;
+    if (ascii_iequals(tag, "System_Spy_Ability")) return SpecialAbilityClass::SystemSpy;
+    if (ascii_iequals(tag, "Reduce_Production_Price_Ability")) return SpecialAbilityClass::ReducePrice;
+    if (ascii_iequals(tag, "Reduce_Production_Time_Ability")) return SpecialAbilityClass::ReduceTime;
+    // galab (docs/re/GALAB_ABILITIES_RE.md)
+    if (ascii_iequals(tag, "Remove_Corruption_Ability")) return SpecialAbilityClass::RemoveCorruption;
+    if (ascii_iequals(tag, "Planet_Destruction_Ability")) return SpecialAbilityClass::PlanetDestruction;
+    if (ascii_iequals(tag, "Siphon_Credits_Ability")) return SpecialAbilityClass::SiphonCredits;
+    if (ascii_iequals(tag, "Galaxy_Wide_Upgrade_Ability")) return SpecialAbilityClass::GalaxyWideUpgrade;
+    if (ascii_iequals(tag, "Reduce_Technology_Price_Ability")) return SpecialAbilityClass::ReduceTechPrice;
+    if (ascii_iequals(tag, "Political_Transition_Bonus_Ability")) return SpecialAbilityClass::PoliticalTransition;
+    if (ascii_iequals(tag, "Neutralize_Hero_Ability")) return SpecialAbilityClass::NeutralizeHero;
+    if (ascii_iequals(tag, "Hero_Protection_Ability")) return SpecialAbilityClass::HeroProtection;
+    if (ascii_iequals(tag, "Political_Control_Protection_Ability")) return SpecialAbilityClass::PoliticalProtection;
     return SpecialAbilityClass::Other;
+}
+
+bool is_galab(SpecialAbilityClass c) {
+    return c >= SpecialAbilityClass::RemoveCorruption && c <= SpecialAbilityClass::PoliticalProtection;
 }
 
 // GRC 2.3.1: System_Spy_Ability See_* flags -> VisibilityLevelType bits (0x70fd20). A spy never grants bit 0.
@@ -82,7 +94,7 @@ SpecialAbilityDef parse_ability(const objects::ObjectTypeDatabase& raw, objects:
     a.cls = class_of(a.tag);
     for (uint32_t i = 0; i < fc.attr_count[f]; ++i) {
         const objects::XmlAttr& at = raw.attributes()[fc.attr_begin[f] + i];
-        if (ieq(at.name, "Name")) a.name = std::string(trim(at.value));
+        if (ascii_iequals(at.name, "Name")) a.name = std::string(ascii_trim(at.value));
     }
     a.name_crc = special_name_crc(a.name);
     bool have_style = false, have_halt = false;
@@ -90,48 +102,77 @@ SpecialAbilityDef parse_ability(const objects::ObjectTypeDatabase& raw, objects:
     for (objects::FieldIndex g = f + 1; g < fc.size() && fc.depth[g] > fc.depth[f]; ++g) {
         if (fc.parent[g] != f) continue;
         const std::string_view tag = raw.tag_name(g);
-        const std::string_view v = trim(fc.text[g]);
+        const std::string_view v = ascii_trim(fc.text[g]);
         if (v.empty()) continue;  // empty value = no-op (OBJECT_TYPES field rule)
-        if (ieq(tag, "Activation_Style")) {
+        if (ascii_iequals(tag, "Activation_Style")) {
             a.style = parse_activation_style(v);
             have_style = a.style != ActivationStyle::None;
-        } else if (ieq(tag, "Initially_Enabled")) a.initially_enabled = objects::parse_type_bool(v);
-        else if (ieq(tag, "Causes_Despawn")) a.causes_despawn = objects::parse_type_bool(v);
-        else if (ieq(tag, "Min_Respawn_Time")) a.min_respawn = to_f(v);
-        else if (ieq(tag, "Max_Respawn_Time")) a.max_respawn = to_f(v);
-        else if (ieq(tag, "Must_Be_Bought_On_Black_Market")) a.must_be_bought = objects::parse_type_bool(v);
-        else if (ieq(tag, "Min_Respawn_Times")) bm_min = float_list(v);
-        else if (ieq(tag, "Max_Respawn_Times")) bm_max = float_list(v);
-        else if (ieq(tag, "Price_Modifier")) a.price_modifier = to_f(v);
-        else if (ieq(tag, "Tech_Level_Adjustment")) a.tech_level_adjustment = static_cast<int32_t>(to_f(v));
-        else if (ieq(tag, "Can_Reduce_Ground_Base_Level")) a.sabotage_can[0] = objects::parse_type_bool(v);
-        else if (ieq(tag, "Can_Reduce_Starbase_Level")) a.sabotage_can[1] = objects::parse_type_bool(v);
-        else if (ieq(tag, "Can_Cancel_Production")) a.sabotage_can[2] = objects::parse_type_bool(v);
-        else if (ieq(tag, "Can_Destroy_Special_Structure")) a.sabotage_can[3] = objects::parse_type_bool(v);
-        else if (ieq(tag, "Can_Halt_Credit_Production")) a.sabotage_can[4] = objects::parse_type_bool(v);
-        else if (ieq(tag, "Duration_Of_Credit_Halt")) {
+        } else if (ascii_iequals(tag, "Initially_Enabled")) a.initially_enabled = objects::parse_type_bool(v);
+        else if (ascii_iequals(tag, "Causes_Despawn")) a.causes_despawn = objects::parse_type_bool(v);
+        else if (ascii_iequals(tag, "Min_Respawn_Time")) a.min_respawn = to_f(v);
+        else if (ascii_iequals(tag, "Max_Respawn_Time")) a.max_respawn = to_f(v);
+        else if (ascii_iequals(tag, "Must_Be_Bought_On_Black_Market")) a.must_be_bought = objects::parse_type_bool(v);
+        else if (ascii_iequals(tag, "Min_Respawn_Times")) bm_min = float_list(v);
+        else if (ascii_iequals(tag, "Max_Respawn_Times")) bm_max = float_list(v);
+        else if (ascii_iequals(tag, "Price_Modifier")) a.price_modifier = to_f(v);
+        else if (ascii_iequals(tag, "Tech_Level_Adjustment")) a.tech_level_adjustment = static_cast<int32_t>(to_f(v));
+        else if (ascii_iequals(tag, "Can_Reduce_Ground_Base_Level")) a.sabotage_can[0] = objects::parse_type_bool(v);
+        else if (ascii_iequals(tag, "Can_Reduce_Starbase_Level")) a.sabotage_can[1] = objects::parse_type_bool(v);
+        else if (ascii_iequals(tag, "Can_Cancel_Production")) a.sabotage_can[2] = objects::parse_type_bool(v);
+        else if (ascii_iequals(tag, "Can_Destroy_Special_Structure")) a.sabotage_can[3] = objects::parse_type_bool(v);
+        else if (ascii_iequals(tag, "Can_Halt_Credit_Production")) a.sabotage_can[4] = objects::parse_type_bool(v);
+        else if (ascii_iequals(tag, "Duration_Of_Credit_Halt")) {
             a.halt_duration = to_f(v);
             have_halt = true;
-        } else if (ieq(tag, "Sabotage_Cost_Increase_Factor")) a.cost_increase_factor = to_f(v);
-        else if (ieq(tag, "Percentage_Income_Modifier")) a.income_percentage = to_f(v);
-        else if (ieq(tag, "Absolute_Income_Modifier")) a.income_absolute = to_f(v);
-        else if (ieq(tag, "Additional_Multiplier_On_Mining_Colonies")) a.mining_multiplier = to_f(v);
-        else if (ieq(tag, "Specific_Mod_Source_Text")) a.source_text = std::string(v);
-        else if (ieq(tag, "Evaluation_Interval_In_Secs")) a.evaluation_interval = to_f(v);
-        else if (ieq(tag, "Min_Income_Modifier")) a.min_income_modifier = to_f(v);
-        else if (ieq(tag, "Max_Income_Modifier")) a.max_income_modifier = to_f(v);
-        else if (ieq(tag, "Chance_To_Win")) a.chance_to_win = to_f(v);
-        else if (ieq(tag, "Min_Respawn_Time_Per_Tech_Level")) a.slice_min_respawn = float_list(v);
-        else if (ieq(tag, "Max_Respawn_Time_Per_Tech_Level")) a.slice_max_respawn = float_list(v);
-        else if (ieq(tag, "Chance_Modifier_By_Base_Level")) a.chance_by_base_level = PiecewiseCurve::parse(v);
-        else if (ieq(tag, "Chance_Modifier_By_Planet_Difficulty")) a.chance_by_difficulty = PiecewiseCurve::parse(v);
-        else if (ieq(tag, "Cost_Multiplier_By_Planet_Tech_Availability")) a.cost_by_tech_availability = PiecewiseCurve::parse(v);
-        else if (ieq(tag, "Chance_Affinity_Modifier")) a.chance_affinity = to_f(v);
-        else if (ieq(tag, "Cost_Affinity_Modifier")) a.cost_affinity = to_f(v);
-        else if (ieq(tag, "Duration_In_Secs")) a.spy_duration = to_f(v);
+        } else if (ascii_iequals(tag, "Sabotage_Cost_Increase_Factor")) a.cost_increase_factor = to_f(v);
+        else if (ascii_iequals(tag, "Percentage_Income_Modifier")) a.income_percentage = to_f(v);
+        else if (ascii_iequals(tag, "Absolute_Income_Modifier")) a.income_absolute = to_f(v);
+        else if (ascii_iequals(tag, "Additional_Multiplier_On_Mining_Colonies")) a.mining_multiplier = to_f(v);
+        else if (ascii_iequals(tag, "Specific_Mod_Source_Text")) a.source_text = std::string(v);
+        else if (ascii_iequals(tag, "Evaluation_Interval_In_Secs")) a.evaluation_interval = to_f(v);
+        else if (ascii_iequals(tag, "Min_Income_Modifier")) a.min_income_modifier = to_f(v);
+        else if (ascii_iequals(tag, "Max_Income_Modifier")) a.max_income_modifier = to_f(v);
+        else if (ascii_iequals(tag, "Chance_To_Win")) a.chance_to_win = to_f(v);
+        else if (ascii_iequals(tag, "Min_Respawn_Time_Per_Tech_Level")) a.slice_min_respawn = float_list(v);
+        else if (ascii_iequals(tag, "Max_Respawn_Time_Per_Tech_Level")) a.slice_max_respawn = float_list(v);
+        else if (ascii_iequals(tag, "Chance_Modifier_By_Base_Level")) a.chance_by_base_level = PiecewiseCurve::parse(v);
+        else if (ascii_iequals(tag, "Chance_Modifier_By_Planet_Difficulty")) a.chance_by_difficulty = PiecewiseCurve::parse(v);
+        else if (ascii_iequals(tag, "Cost_Multiplier_By_Planet_Tech_Availability")) a.cost_by_tech_availability = PiecewiseCurve::parse(v);
+        else if (ascii_iequals(tag, "Chance_Affinity_Modifier")) a.chance_affinity = to_f(v);
+        else if (ascii_iequals(tag, "Cost_Affinity_Modifier")) a.cost_affinity = to_f(v);
+        else if (ascii_iequals(tag, "Duration_In_Secs")) a.spy_duration = to_f(v);
+        else if (ascii_iequals(tag, "Price_Reduction_Percentage") || ascii_iequals(tag, "Time_Reduction_Percentage")) a.production_reduction = to_f(v);
+        else if (ascii_iequals(tag, "Stacking_Category")) a.stacking_category = static_cast<int32_t>(to_f(v));
+        else if (ascii_iequals(tag, "Galaxy_Wide")) a.galaxy_wide = objects::parse_type_bool(v);
+        else if (ascii_iequals(tag, "Corruption_Removal_Cost_Multiplier")) a.removal_cost_multiplier = to_f(v);
+        else if (ascii_iequals(tag, "Corruption_Removal_Time_In_Secs")) a.removal_seconds = to_f(v);
+        else if (ascii_iequals(tag, "Min_Siphon_Percentage")) a.siphon_min = to_f(v);
+        else if (ascii_iequals(tag, "Max_Siphon_Percentage")) a.siphon_max = to_f(v);
+        else if (ascii_iequals(tag, "Siphon_Duration_In_Cycles")) a.siphon_cycles = static_cast<int32_t>(to_f(v));
+        else if (ascii_iequals(tag, "Space_Upgrade_Type")) a.space_upgrade_name = std::string(v);
+        else if (ascii_iequals(tag, "Land_Upgrade_Type")) a.land_upgrade_name = std::string(v);
+        else if (ascii_iequals(tag, "Cost_Mod_By_Base_Level")) a.cost_by_base_level = PiecewiseCurve::parse(v);
+        else if (ascii_iequals(tag, "Cost_Mod_By_Previous_Neutralizations")) a.cost_by_neutralizations = PiecewiseCurve::parse(v);
+        else if (ascii_iequals(tag, "Cost_Mod_By_Planetary_Corruption_Level")) a.cost_by_corruption = PiecewiseCurve::parse(v);
+        else if (ascii_iequals(tag, "General_Minor_Hero_Cost_Mod")) a.minor_cost_mod = to_f(v);
+        else if (ascii_iequals(tag, "General_Major_Hero_Cost_Mod")) a.major_cost_mod = to_f(v);
+        else if (ascii_iequals(tag, "Owner_Respawn_Time_In_Secs") || ascii_iequals(tag, "Target_Respawn_Time_In_Secs")) {
+            const std::vector<float> pair = float_list(v);  // "min, max"
+            const float lo = pair.empty() ? 0.0f : pair[0];
+            const float hi = pair.size() < 2 ? lo : pair[1];
+            if (ascii_iequals(tag, "Owner_Respawn_Time_In_Secs")) {
+                a.owner_respawn_min = lo;
+                a.owner_respawn_max = hi;
+            } else {
+                a.target_respawn_min = lo;
+                a.target_respawn_max = hi;
+            }
+        } else if (ascii_iequals(tag, "Can_Neutralize_Minor_Heroes")) a.can_neutralize_minor = objects::parse_type_bool(v);
+        else if (ascii_iequals(tag, "Can_Neutralize_Major_Heroes")) a.can_neutralize_major = objects::parse_type_bool(v);
+        else if (ascii_iequals(tag, "Neutralization_Cost_Multiplier")) a.protection_multiplier = to_f(v);
         else if (a.cls == SpecialAbilityClass::SystemSpy) {
             for (const SpyFlag& sf : kSpyFlags)
-                if (ieq(tag, sf.tag)) {
+                if (ascii_iequals(tag, sf.tag)) {
                     if (objects::parse_type_bool(v)) a.spy_mask |= sf.bits;
                     else a.spy_mask &= ~sf.bits;
                 }
@@ -224,22 +265,176 @@ SpecialAbilityDef parse_ability(const objects::ObjectTypeDatabase& raw, objects:
         }
         break;
     }
+    case SpecialAbilityClass::ReducePrice:
+    case SpecialAbilityClass::ReduceTime:
+        // A2K_T01_BUILD_COST_RE 1.3 [H] (0x70af70): the fraction must be < 1.0, else 1.0 with an error; the only allowed
+        // Activation_Style is Galactic_Automatic (anything else is forced to it with an error). [port] The same rules
+        // for the time class (same class family, not traced separately).
+        if (a.production_reduction >= 1.0f) {
+            note(diag, "galactic: " + a.name + ": production reduction >= 1.0 set to 1.0");
+            a.production_reduction = 1.0f;
+        }
+        if (have_style && a.style != ActivationStyle::GalacticAutomatic)
+            note(diag, "galactic: " + a.name + ": production ability needs Galactic_Automatic");
+        a.style = ActivationStyle::GalacticAutomatic;
+        break;
+    // galab post-load rules (docs/re/GALAB_ABILITIES_RE.md) [H].
+    case SpecialAbilityClass::RemoveCorruption:
+        // 0x5b17f0: a negative multiplier -> 1.0 (0 is kept); a time <= 0 -> 10.0. The style stays as written
+        // (Ground_Activated in every FoC entry).
+        if (a.removal_cost_multiplier < 0.0f) a.removal_cost_multiplier = 1.0f;
+        if (a.removal_seconds <= 0.0f) a.removal_seconds = 10.0f;
+        break;
+    case SpecialAbilityClass::PlanetDestruction:
+        if (!have_style) a.style = ActivationStyle::GroundActivated;  // ctor 0x7075d0: style 6
+        break;
+    case SpecialAbilityClass::SiphonCredits:
+        // 0x70e9e0: each percentage outside 0..1 is clamped into it (error logged); Ground_Activated only; cycles < 1 -> 1.
+        if (a.siphon_min < 0.0f || a.siphon_min > 1.0f) {
+            note(diag, "galactic: " + a.name + ": Min_Siphon_Percentage outside 0-1");
+            a.siphon_min = std::clamp(a.siphon_min, 0.0f, 1.0f);
+        }
+        if (a.siphon_max < 0.0f || a.siphon_max > 1.0f) {
+            note(diag, "galactic: " + a.name + ": Max_Siphon_Percentage outside 0-1");
+            a.siphon_max = std::clamp(a.siphon_max, 0.0f, 1.0f);
+        }
+        if (a.style != ActivationStyle::GroundActivated) {
+            note(diag, "galactic: " + a.name + ": Siphon_Credits_Ability needs Ground_Activated");
+            a.style = ActivationStyle::GroundActivated;
+        }
+        if (a.siphon_cycles < 1) {
+            note(diag, "galactic: " + a.name + ": Siphon_Duration_In_Cycles must be > 0");
+            a.siphon_cycles = 1;
+        }
+        break;
+    case SpecialAbilityClass::GalaxyWideUpgrade:
+    case SpecialAbilityClass::ReduceTechPrice:
+        // 0x6ffae0 / 0x70c260: Galactic_Automatic only (anything else is forced to it, Causes_Despawn cleared); a price
+        // reduction >= 1.0 -> 1.0 with an error.
+        if (have_style && a.style != ActivationStyle::GalacticAutomatic)
+            note(diag, "galactic: " + a.name + ": only Galactic_Automatic is supported");
+        a.style = ActivationStyle::GalacticAutomatic;
+        a.causes_despawn = false;
+        if (a.cls == SpecialAbilityClass::ReduceTechPrice && a.production_reduction >= 1.0f) {
+            note(diag, "galactic: " + a.name + ": Price_Reduction_Percentage must be < 1.0");
+            a.production_reduction = 1.0f;
+        }
+        break;
+    case SpecialAbilityClass::PoliticalTransition:
+        // ctor 0x709590: Galactic_Automatic; post-load 0x709b50: Time_Reduction_Percentage outside [0, 1) -> 0.
+        if (!have_style) a.style = ActivationStyle::GalacticAutomatic;
+        if (a.production_reduction < 0.0f || a.production_reduction >= 1.0f) {
+            note(diag, "galactic: " + a.name + ": Time_Reduction_Percentage must be >= 0.0 and < 1.0");
+            a.production_reduction = 0.0f;
+        }
+        break;
+    case SpecialAbilityClass::NeutralizeHero: {
+        // ctor 0x615b70: Ground_Activated. Post-load 0x617f70: a curve with fewer than 2 points gets its default; a
+        // General_*_Cost_Mod <= 0 -> 1.0 (error logged); neither Can_Neutralize flag set -> a warning only.
+        if (!have_style) a.style = ActivationStyle::GroundActivated;
+        const auto fix_curve = [&](PiecewiseCurve& c, float x1, const char* what) {
+            if (c.x.size() >= 2) return;
+            note(diag, "galactic: " + a.name + ": " + what + " needs at least 2 points");
+            c = PiecewiseCurve{{0.0f, x1}, {1.0f, 1.0f}};
+        };
+        fix_curve(a.cost_by_base_level, 5.0f, "Cost_Mod_By_Base_Level");
+        fix_curve(a.cost_by_neutralizations, 1000.0f, "Cost_Mod_By_Previous_Neutralizations");
+        fix_curve(a.cost_by_corruption, 1000.0f, "Cost_Mod_By_Planetary_Corruption_Level");
+        if (a.minor_cost_mod <= 0.0f) {
+            note(diag, "galactic: " + a.name + ": General_Minor_Hero_Cost_Mod must be > 0");
+            a.minor_cost_mod = 1.0f;
+        }
+        if (a.major_cost_mod <= 0.0f) {
+            note(diag, "galactic: " + a.name + ": General_Major_Hero_Cost_Mod must be > 0");
+            a.major_cost_mod = 1.0f;
+        }
+        if (!a.can_neutralize_minor && !a.can_neutralize_major)
+            note(diag, "galactic: " + a.name + ": can neutralize neither minor nor major heroes");
+        break;
+    }
+    case SpecialAbilityClass::HeroProtection:
+        if (!have_style) a.style = ActivationStyle::GalacticAutomatic;  // ctor 0x703090: style 3
+        break;
+    case SpecialAbilityClass::PoliticalProtection:
+        if (!have_style) a.style = ActivationStyle::GalacticAutomatic;  // ctor 0x7090a0: style 3
+        break;
     case SpecialAbilityClass::Other: break;
     }
     return a;
 }
 
-std::vector<std::string_view> list_or_split(const objects::GameObjectTypes& types, objects::TypeIndex t, std::string_view tag) {
+// a2m r2: one Bounty_On_Faction_Ability element (BountyAbilityDef). Target names resolve through the loaded factions.
+BountyAbilityDef parse_bounty_ability(const objects::ObjectTypeDatabase& raw, objects::FieldIndex f, const GalacticRules& rules) {
+    const objects::FieldColumns& fc = raw.fields();
+    BountyAbilityDef a;
+    for (uint32_t i = 0; i < fc.attr_count[f]; ++i) {
+        const objects::XmlAttr& at = raw.attributes()[fc.attr_begin[f] + i];
+        if (ascii_iequals(at.name, "Name")) a.name = std::string(ascii_trim(at.value));
+    }
+    for (objects::FieldIndex g = f + 1; g < fc.size() && fc.depth[g] > fc.depth[f]; ++g) {
+        if (fc.parent[g] != f) continue;
+        const std::string_view tag = raw.tag_name(g);
+        const std::string_view v = ascii_trim(fc.text[g]);
+        if (v.empty()) continue;
+        if (ascii_iequals(tag, "Bounty_Percentage_Amount")) a.percentage = to_f(v);
+        else if (ascii_iequals(tag, "Stacking_Category")) a.stacking_category = static_cast<int32_t>(to_f(v));
+        else if (ascii_iequals(tag, "Apply_To_All_Allies")) a.apply_to_all_allies = objects::parse_type_bool(v);
+        else if (ascii_iequals(tag, "Target_Faction_Names")) {
+            a.target_factions.clear();
+            for (std::string_view n : objects::split_type_list(v)) {
+                const uint32_t fi = rules.find_faction(n);
+                if (fi != kNoIndex && std::find(a.target_factions.begin(), a.target_factions.end(), fi) == a.target_factions.end())
+                    a.target_factions.push_back(fi);
+            }
+        }
+    }
+    return a;
+}
+
+// The applicable set of a production ability (0x48d070 inputs): Applicable_Unit_Categories (GameObjectCategoryType mask,
+// "All" = every bit), Applicable_Unit_Types and Excluded_Unit_Types (resolved type names; unknown names are dropped).
+void parse_production_targets(const objects::GameObjectTypes& types, objects::FieldIndex f, SpecialAbilityDef& a,
+                              std::vector<std::string>* diag) {
+    const objects::ObjectTypeDatabase& raw = types.raw();
+    const objects::FieldColumns& fc = raw.fields();
+    const auto names = [&](std::string_view v) {
+        std::vector<uint32_t> out;
+        for (std::string_view n : objects::split_type_list(v)) {
+            const objects::TypeIndex r = types.resolve_name(ascii_trim(n));
+            if (r != objects::kNone) out.push_back(r);
+            else note(diag, "galactic: " + a.name + ": unknown type " + std::string(ascii_trim(n)));
+        }
+        return out;
+    };
+    for (objects::FieldIndex g = f + 1; g < fc.size() && fc.depth[g] > fc.depth[f]; ++g) {
+        if (fc.parent[g] != f) continue;
+        const std::string_view tag = raw.tag_name(g);
+        const std::string_view v = ascii_trim(fc.text[g]);
+        if (v.empty()) continue;
+        if (ascii_iequals(tag, "Applicable_Unit_Categories")) {
+            const auto m = types.enums().get(objects::EnumId::GameObjectCategory).convert(v);
+            if (m) a.applicable_categories = static_cast<uint64_t>(*m);
+            else note(diag, "galactic: " + a.name + ": unknown Applicable_Unit_Categories " + std::string(v));
+        } else if (ascii_iequals(tag, "Applicable_Unit_Types")) a.applicable_types = names(v);
+        else if (ascii_iequals(tag, "Excluded_Unit_Types")) a.excluded_types = names(v);
+    }
+}
+
+// The tag's words; a tag the type data keeps as one string is split here. Takes a handle, or the name of a corruption
+// slot's tag (Corruption_<slot>_..., built per slot).
+template <class Tag>
+std::vector<std::string_view> list_or_split(const objects::GameObjectTypes& types, objects::TypeIndex t, const Tag& tag) {
     const std::span<const std::string_view> l = types.get_list(t, tag);
     std::vector<std::string_view> out(l.begin(), l.end());
     if (out.empty()) out = objects::split_type_list(types.get_string(t, tag));
     return out;
 }
 
-std::vector<uint32_t> type_list(const objects::GameObjectTypes& types, objects::TypeIndex t, std::string_view tag) {
+template <class Tag>
+std::vector<uint32_t> type_list(const objects::GameObjectTypes& types, objects::TypeIndex t, const Tag& tag) {
     std::vector<uint32_t> out;
     for (std::string_view n : list_or_split(types, t, tag)) {
-        const objects::TypeIndex r = types.resolve_name(trim(n));
+        const objects::TypeIndex r = types.resolve_name(ascii_trim(n));
         if (r != objects::kNone) out.push_back(r);
     }
     return out;
@@ -260,28 +455,28 @@ void load_items(const FileProvider& provider, GalacticRules& out, std::vector<st
     }
     for (data::XmlNode n : doc.root().children()) {  // every child, name not checked (vanilla Item, TR BlackMarketItem)
         BlackMarketItemDef d;
-        d.name = std::string(trim(n.attribute("Name")));
+        d.name = std::string(ascii_trim(n.attribute("Name")));
         d.name_crc = special_name_crc(d.name);
         auto f = [&](std::string_view tag, float fallback) {
-            const std::string_view v = n.child_text(tag);
+            const std::string_view v = data::xml_values::text(n, tag);
             return v.empty() ? fallback : to_f(v);
         };
         d.uncommon_price_multiplier = f("Uncommon_Price_Multiplier", 0.0f);
-        const std::string_view fac = n.child_text("Faction");
+        const std::string_view fac = data::xml_values::text(n, "Faction");
         if (!fac.empty()) {
-            d.faction = out.find_faction(trim(fac));
+            d.faction = out.find_faction(ascii_trim(fac));
             if (d.faction == kNoIndex) note(diag, "galactic: black market item " + d.name + ": unknown faction " + std::string(fac));
         }
         d.tech_level = static_cast<int32_t>(f("Tech_Level", 1.0f));
-        d.ability_names = name_list(n.child_text("Ability_Names"));
+        d.ability_names = name_list(joined(n, "Ability_Names"));
         for (const std::string& a : d.ability_names) d.ability_crcs.push_back(special_name_crc(a));  // no upper-casing [H]
         d.base_cost = static_cast<int32_t>(f("Base_Cost_Credits", 0.0f));
         d.tutorial_tech_level = static_cast<int32_t>(f("Tutorial_Tech_Level", 0.0f));
         d.tutorial_base_cost = static_cast<int32_t>(f("Tutorial_Base_Cost_Credits", 0.0f));
-        d.icon = std::string(n.child_text("Icon_Name"));
-        d.localized_name = std::string(n.child_text("Localized_Name"));
-        d.localized_description = std::string(n.child_text("Localized_Description"));
-        for (const std::string& u : name_list(n.child_text("Used_By_Units"))) d.used_by_units.push_back(u);
+        d.icon = std::string(data::xml_values::text(n, "Icon_Name"));
+        d.localized_name = std::string(data::xml_values::text(n, "Localized_Name"));
+        d.localized_description = std::string(data::xml_values::text(n, "Localized_Description"));
+        for (const std::string& u : name_list(joined(n, "Used_By_Units"))) d.used_by_units.push_back(u);
         out.special.items.push_back(std::move(d));
     }
 }
@@ -294,9 +489,9 @@ ActivationStyle parse_activation_style(std::string_view text) {
     static constexpr const char* kNames[] = {"Global_Automatic", "Combat_Automatic", "Galactic_Automatic", "Space_Automatic",
                                              "Ground_Automatic", "Ground_Activated", "Hero_Detected",      "Combat_Imminent",
                                              "Special_Attack",   "Take_Damage",      "User_Input",         "Skirmish_Automatic"};
-    const std::string_view t = trim(text);
+    const std::string_view t = ascii_trim(text);
     for (uint8_t i = 0; i < 12; ++i)
-        if (ieq(t, kNames[i])) return static_cast<ActivationStyle>(i + 1);
+        if (ascii_iequals(t, kNames[i])) return static_cast<ActivationStyle>(i + 1);
     return ActivationStyle::None;
 }
 
@@ -309,6 +504,13 @@ uint32_t SpecialRules::find_item(uint32_t crc) const {
     for (size_t i = 0; i < items.size(); ++i)
         if (items[i].name_crc == crc) return static_cast<uint32_t>(i);
     return kNoIndex;
+}
+
+bool SpecialRules::production_applies(const SpecialAbilityDef& a, uint32_t t, uint64_t categories) {
+    if (std::find(a.excluded_types.begin(), a.excluded_types.end(), t) != a.excluded_types.end()) return false;
+    if (std::find(a.applicable_types.begin(), a.applicable_types.end(), t) != a.applicable_types.end()) return true;
+    if (a.applicable_categories == ~uint64_t{0}) return true;  // "All": every type [port choice, RE open point 3]
+    return (a.applicable_categories & categories) != 0;
 }
 
 uint32_t SpecialRules::find_item_by_name(std::string_view name) const {
@@ -325,84 +527,159 @@ void load_special_rules(const FileProvider& provider, const data::GameDatabase& 
     const data::GameConstants& g = db.constants();
     s.default_hero_respawn_time = g.get_float("Default_Hero_Respawn_Time", s.default_hero_respawn_time);
     s.hack_cost = g.get_float("Hack_Super_Weapon_Cost", s.hack_cost);
-    if (auto t = g.get("Hack_Super_Weapon_Required_Type"); t && !trim(*t).empty()) s.hack_required_type = out.find_type(trim(*t));
-    if (auto t = g.get("Hack_Super_Weapon_Particle_Effect")) s.hack_particle = std::string(trim(*t));
-    if (auto t = g.get("Sabotage_Particle_Effect")) s.sabotage_particle = std::string(trim(*t));
+    if (auto t = g.get("Hack_Super_Weapon_Required_Type"); t && !ascii_trim(*t).empty()) s.hack_required_type = out.find_type(ascii_trim(*t));
+    if (auto t = g.get("Hack_Super_Weapon_Particle_Effect")) s.hack_particle = std::string(ascii_trim(*t));
+    if (auto t = g.get("Sabotage_Particle_Effect")) s.sabotage_particle = std::string(ascii_trim(*t));
     if (auto t = g.get("Activated_Black_Market_Ability_Names")) s.activated_black_market = name_list(*t);
     if (auto t = g.get("Activated_Sabotage_Ability_Names")) s.activated_sabotage = name_list(*t);
     if (auto t = g.get("Activated_Corrupt_Planet_Ability_Names")) s.activated_corrupt = name_list(*t);
     if (auto t = g.get("Activated_Hack_Super_Weapon_Ability_Names")) s.activated_hack = name_list(*t);
+    if (auto t = g.get("Activated_Slice_Ability_Names")) s.activated_slice = name_list(*t);  // mcx4 t09 (Q6)
+    if (auto t = g.get("Activated_Neutralize_Hero_Ability_Names")) s.activated_neutralize_hero = name_list(*t);
+    if (auto t = g.get("Activated_Siphon_Credits_Ability_Names")) s.activated_siphon_credits = name_list(*t);
+    if (auto t = g.get("Activated_System_Spy_Ability_Names")) s.activated_system_spy = name_list(*t);
+    if (auto t = g.get("Activated_Destroy_Planet_Ability_Names")) s.activated_destroy_planet = name_list(*t);
+    if (auto t = g.get("Activated_Remove_Corruption_Ability_Names")) s.activated_remove_corruption = name_list(*t);
     load_items(provider, out, diagnostics);
 
     // Per-type fields and abilities (type index order; each sub-object element parsed once).
     const objects::ObjectTypeDatabase& raw = types.raw();
     const size_t n = types.size();
     s.types.assign(n, TypeSpecial{});
-    std::map<objects::FieldIndex, uint32_t> parsed;  // lookup only
+    std::map<objects::FieldIndex, uint32_t> parsed, parsed_production, parsed_bounty, parsed_galab;  // lookup only
     for (objects::TypeIndex t = 0; t < n; ++t) {
         TypeSpecial& ts = s.types[t];
-        for (objects::FieldIndex f : types.get_sub_objects(t, "Abilities")) {
+        for (objects::FieldIndex f : types.sub_objects(t, objects::tags::Abilities)) {
             // OI galactic (STRATEGIC_GAPS 1.4 / 2.2): the galactic stealth / detection / planet destruction entries.
             const std::string_view tag = raw.tag_name(f);
-            if (ieq(tag, "Galactic_Stealth_Ability")) {
+            {  // mcx4 t09: every entry's Name (Q6)
+                const objects::FieldColumns& fa = raw.fields();
+                for (uint32_t i = 0; i < fa.attr_count[f]; ++i) {
+                    const objects::XmlAttr& at = raw.attributes()[fa.attr_begin[f] + i];
+                    if (ascii_iequals(at.name, "Name")) ts.ability_entry_names.emplace_back(ascii_trim(at.value));
+                }
+            }
+            if (ascii_iequals(tag, "Galactic_Stealth_Ability")) {
                 if (parse_ability(raw, f, nullptr).initially_enabled) ts.galactic_stealth = true;
-            } else if (ieq(tag, "Planet_Destruction_Ability")) {
+                const objects::FieldColumns& fc = raw.fields();
+                for (objects::FieldIndex c = f + 1; c < fc.size() && fc.depth[c] > fc.depth[f]; ++c)
+                    if (fc.parent[c] == f && ascii_iequals(raw.tag_name(c), "Evade_Detection_Chance"))
+                        ts.evade_detection_chance = std::clamp(to_f(fc.text[c]), 0.0f, 1.0f);  // Q11: 0x3a86d0 clamps
+            } else if (ascii_iequals(tag, "Planet_Destruction_Ability")) {
                 if (t < out.types.size()) out.types[t].planet_destruction = true;
-            } else if (ieq(tag, "Detect_Hero_Ability") || ieq(tag, "Hero_Detection_Ability")) {  // [M] tag name
+            } else if (ascii_iequals(tag, "Detect_Hero_Ability") || ascii_iequals(tag, "Hero_Detection_Ability")) {  // [M] tag name
                 ts.detection_chance = 0.0f;
                 const objects::FieldColumns& fc = raw.fields();
                 for (objects::FieldIndex c = f + 1; c < fc.size() && fc.depth[c] > fc.depth[f]; ++c)
-                    if (fc.parent[c] == f && ieq(raw.tag_name(c), "Detection_Chance")) ts.detection_chance = to_f(fc.text[c]);
+                    if (fc.parent[c] == f && ascii_iequals(raw.tag_name(c), "Detection_Chance")) ts.detection_chance = to_f(fc.text[c]);
             }
-            if (class_of(tag) == SpecialAbilityClass::Other) continue;
+            if (ascii_iequals(tag, "Bounty_On_Faction_Ability")) {  // a2m r2
+                auto bit = parsed_bounty.find(f);
+                if (bit == parsed_bounty.end()) {
+                    bit = parsed_bounty.emplace(f, static_cast<uint32_t>(s.bounty.size())).first;
+                    s.bounty.push_back(parse_bounty_ability(raw, f, out));
+                }
+                ts.bounty.push_back(bit->second);
+                continue;
+            }
+            const SpecialAbilityClass cls = class_of(tag);
+            if (cls == SpecialAbilityClass::Other) continue;
+            if (is_galab(cls)) {  // galab: own table, so the `abilities` indices stay unchanged
+                auto git = parsed_galab.find(f);
+                if (git == parsed_galab.end()) {
+                    SpecialAbilityDef a = parse_ability(raw, f, diagnostics);
+                    const auto resolve = [&](const std::string& name) {
+                        if (name.empty()) return kNoIndex;
+                        const objects::TypeIndex r = types.resolve_name(ascii_trim(name));
+                        if (r == objects::kNone) note(diagnostics, "galactic: " + a.name + ": unknown type " + name);
+                        return r == objects::kNone ? kNoIndex : static_cast<uint32_t>(r);
+                    };
+                    a.space_upgrade = resolve(a.space_upgrade_name);
+                    a.land_upgrade = resolve(a.land_upgrade_name);
+                    git = parsed_galab.emplace(f, static_cast<uint32_t>(s.galab.size())).first;
+                    s.galab.push_back(std::move(a));
+                }
+                ts.galab.push_back(git->second);
+                ts.trigger_order.push_back(kGalabRef | git->second);
+                continue;
+            }
+            if (cls == SpecialAbilityClass::ReducePrice || cls == SpecialAbilityClass::ReduceTime) {
+                auto pit = parsed_production.find(f);
+                if (pit == parsed_production.end()) {
+                    SpecialAbilityDef a = parse_ability(raw, f, diagnostics);
+                    parse_production_targets(types, f, a, diagnostics);
+                    if (!a.initially_enabled) continue;
+                    pit = parsed_production.emplace(f, static_cast<uint32_t>(s.production.size())).first;
+                    s.production.push_back(std::move(a));
+                }
+                ts.production.push_back(pit->second);
+                continue;
+            }
             auto it = parsed.find(f);
             if (it == parsed.end()) {
                 it = parsed.emplace(f, static_cast<uint32_t>(s.abilities.size())).first;
                 s.abilities.push_back(parse_ability(raw, f, diagnostics));
             }
             ts.abilities.push_back(it->second);
+            ts.trigger_order.push_back(it->second);
         }
-        for (objects::TypeIndex m : types.get_type_refs(t, "Company_Units"))
+        for (objects::TypeIndex m : types.get_type_refs(t, objects::tags::Company_Units))
             if (m != objects::kNone) ts.members.push_back(m);
-        ts.sabotage_cost = types.get_int(t, "Sabotage_Cost_Credits");
-        ts.tutorial_sabotage_cost = types.get_int(t, "Tutorial_Sabotage_Cost_Credits");
-        ts.planet_vigilance = objects::parse_type_bool(types.get_string(t, "Planet_Vigilance")) || types.get_bool(t, "Planet_Vigilance");
-        ts.mining_colony = types.get_bool(t, "Planet_Is_Mining_Colony");
-        ts.slice_difficulty = to_f(types.get_string(t, "Planet_Slice_Difficulty_Rating"));  // REMAINING_GAPS 1.1
-        ts.tech_availability = to_f(types.get_string(t, "Planet_Tech_Availability_Rating"));
-        ts.slice_affinity = type_list(types, t, "Planet_Slice_Affinity_Types");
-        ts.slice_cost = to_f(types.get_string(t, "Slice_Cost_Credits"));
-        ts.black_market_modifier = to_f(types.get_string(t, "Planet_Black_Market_Modifier"));
-        ts.destroy_when_prereq = types.get_bool(t, "Destroy_When_Used_As_Corruption_Prereq");
-        ts.generic_hero = types.get_bool(t, "Is_Generic_Hero");
-        ts.named_hero = types.get_bool(t, "Is_Named_Hero");
+        ts.sabotage_cost = types.get(t, objects::tags::Sabotage_Cost_Credits);
+        ts.tutorial_sabotage_cost = types.get(t, objects::tags::Tutorial_Sabotage_Cost_Credits);
+        ts.planet_vigilance = objects::parse_type_bool(types.get_string(t, objects::tags::Planet_Vigilance)) || types.get(t, objects::tags::Planet_Vigilance);
+        ts.mining_colony = types.get(t, objects::tags::Planet_Is_Mining_Colony);
+        ts.slice_difficulty = to_f(types.get(t, objects::tags::Planet_Slice_Difficulty_Rating));  // REMAINING_GAPS 1.1
+        ts.tech_availability = to_f(types.get(t, objects::tags::Planet_Tech_Availability_Rating));
+        ts.slice_affinity = type_list(types, t, objects::tags::Planet_Slice_Affinity_Types);
+        ts.slice_cost = to_f(types.get(t, objects::tags::Slice_Cost_Credits));
+        ts.black_market_modifier = to_f(types.get(t, objects::tags::Planet_Black_Market_Modifier));
+        ts.destroy_when_prereq = types.get(t, objects::tags::Destroy_When_Used_As_Corruption_Prereq);
+        ts.generic_hero = types.get(t, objects::tags::Is_Generic_Hero);
+        ts.named_hero = types.get(t, objects::tags::Is_Named_Hero);
+        ts.corruption_removal_cost = types.get(t, objects::tags::Planet_Corruption_Removal_Base_Cost);  // galab §1 (T +0x804)
+        ts.prevents_minor_siphons = types.get(t, objects::tags::Prevents_Minor_Credit_Siphons);         // galab §3 (T +0x63)
+        ts.neutralization_cost = types.get(t, objects::tags::Neutralization_Cost);                     // galab §7 (T +0x1FBC)
+        ts.neutralizable_by_minor = types.get(t, objects::tags::Can_Be_Neutralized_By_Minor_Heroes);   // T +0x7B
+        ts.neutralizable_by_major = types.get(t, objects::tags::Can_Be_Neutralized_By_Major_Heroes);   // T +0x7C
         {
-            const std::string_view prev = trim(types.get_string(t, "Prev_Level_Base"));
+            const std::string_view prev = ascii_trim(types.get(t, objects::tags::Prev_Level_Base));
             if (!prev.empty()) {
                 const objects::TypeIndex r = types.resolve_name(prev);
                 if (r != objects::kNone) ts.prev_level_base = r;
             }
         }
         {
-            const std::vector<std::string_view> text = list_or_split(types, t, "Text_ID");
+            const std::vector<std::string_view> text = list_or_split(types, t, objects::tags::Text_ID);
             if (!text.empty()) ts.text_crc = special_name_crc(text.front());
         }
         if (t < out.types.size() && out.types[t].kind == UnitKind::Planet)
             for (uint32_t slot = 1; slot <= 3; ++slot) {
                 const std::string p = "Corruption_" + std::to_string(slot) + "_";
-                if (trim(types.get_string(t, p + "Type")).empty()) continue;
+                if (ascii_trim(types.get_string(t, p + "Type")).empty()) continue;
                 CorruptionChoiceDef c;
                 c.slot = slot;
                 c.type = static_cast<int8_t>(types.get_enum(t, p + "Type"));
                 c.credit_cost = to_f(types.get_string(t, p + "Credit_Cost"));
+                {  // stored as a float field: rounded half up (bkc1 t07: get_int now truncates a float field)
+                    const float f = types.get_float(t, p + "Credit_Cost");
+                    c.credit_cost_rounded = f > 0.0f ? static_cast<int32_t>(f + 0.5f) : types.get_int(t, p + "Credit_Cost");
+                }
                 c.required_unit_types = type_list(types, t, p + "Required_Unit_Type");
                 c.required_unit_count = types.get_int(t, p + "Required_Unit_Count");
-                if (!trim(types.get_string(t, p + "Required_Mission_Type")).empty())
+                if (!ascii_trim(types.get_string(t, p + "Required_Mission_Type")).empty())
                     c.required_mission = static_cast<int8_t>(types.get_enum(t, p + "Required_Mission_Type"));
                 c.required_mission_count = types.get_int(t, p + "Required_Mission_Count");
                 c.required_planets = type_list(types, t, p + "Required_Planets");
-                if (const std::string_view u = trim(types.get_string(t, p + "Success_Unlock_Unit_Type")); !u.empty())
+                if (const std::string_view u = ascii_trim(types.get_string(t, p + "Success_Unlock_Unit_Type")); !u.empty())
                     if (const objects::TypeIndex r = types.resolve_name(u); r != objects::kNone) c.success_unlock = r;
+                c.success_credit_bonus = types.get_float(t, p + "Success_Credit_Bonus");
+                c.tactical_map = std::string(ascii_trim(types.get_string(t, p + "Tactical_Map_Name")));
+                c.tactical_plots = std::string(ascii_trim(types.get_string(t, p + "Tactical_Script_Name")));
+                const bool has_mode = !ascii_trim(types.get_string(t, p + "Tactical_Game_Mode")).empty();
+                const int32_t mode = types.get_enum(t, p + "Tactical_Game_Mode");  // Galactic 0, Land 1, Space 2
+                c.tactical_space = mode == 2;
+                c.tactical = has_mode && (mode == 1 || mode == 2) && !c.tactical_map.empty();
                 ts.corruption.push_back(std::move(c));
             }
     }
@@ -414,12 +691,26 @@ void load_special_rules(const FileProvider& provider, const data::GameDatabase& 
             bool all = true;
             for (uint32_t mt : ts.members) all = all && s.types[mt].galactic_stealth;
             ts.galactic_stealth = all;
+            if (all) ts.evade_detection_chance = s.types[ts.members.front()].evade_detection_chance;  // [port] first member's
         }
+        if (ts.ability_entry_names.empty())  // Q6: 0x2e6fe0 also asks the contained units (member order)
+            for (uint32_t mt : ts.members)
+                for (const std::string& nm : s.types[mt].ability_entry_names) ts.ability_entry_names.push_back(nm);
         const TypeSpecial& m = s.types[ts.members.front()];
-        if (ts.abilities.empty()) ts.abilities = m.abilities;
+        if (ts.abilities.empty() && ts.galab.empty()) {
+            ts.abilities = m.abilities;
+            ts.galab = m.galab;
+            ts.trigger_order = m.trigger_order;
+        }
+        if (ts.production.empty()) ts.production = m.production;
         ts.generic_hero = ts.generic_hero || m.generic_hero;
         ts.named_hero = ts.named_hero || m.named_hero;
         if (ts.text_crc == 0) ts.text_crc = m.text_crc;
+        if (ts.neutralization_cost == 0.0f) {  // galab §7: the hero's own values (the original reads the member)
+            ts.neutralization_cost = m.neutralization_cost;
+            ts.neutralizable_by_minor = ts.neutralizable_by_minor || m.neutralizable_by_minor;
+            ts.neutralizable_by_major = ts.neutralizable_by_major || m.neutralizable_by_major;
+        }
     }
     for (TypeSpecial& ts : s.types)
         for (uint32_t a : ts.abilities) {

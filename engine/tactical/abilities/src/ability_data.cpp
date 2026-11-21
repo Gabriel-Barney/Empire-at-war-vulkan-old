@@ -1,11 +1,13 @@
 #include "alamo/tactical/abilities/ability_data.hpp"
 
 #include <algorithm>
+#include <cmath>
 #include <initializer_list>
 
 #include "alamo/core/hash.hpp"
 #include "alamo/data/values.hpp"
 #include "alamo/data/xml.hpp"
+#include "alamo/data/xml_values.hpp"
 
 namespace alamo::tactical::abilities {
 
@@ -40,21 +42,53 @@ void note(std::vector<std::string>* diag, const data::XmlNode& e, std::string ms
     if (diag) diag->push_back(std::to_string(e.line()) + ": " + std::move(msg));
 }
 
+// mcx1 t02 / t03 (MCX1_RE_ANSWERS Q1 / Q2): the ability sub-objects read every direct child (nested elements are not
+// descended into), a repeated tag's last occurrence wins, an empty value changes nothing and TBD is converted like any
+// value (a TBD bool is true, a TBD number 0). Values convert by retail's rules: bool "1" or a first Y / T, atoi, atof.
+}  // namespace
+
+uint8_t light_effect_type_from_name(std::string_view name) {
+    std::string_view s = name;
+    while (!s.empty() && (s.front() == ' ' || s.front() == '\t' || s.front() == '\r' || s.front() == '\n')) s.remove_prefix(1);
+    while (!s.empty() && (s.back() == ' ' || s.back() == '\t' || s.back() == '\r' || s.back() == '\n')) s.remove_suffix(1);
+    if (s.size() == 1 && s[0] >= '0' && s[0] <= '6') return static_cast<uint8_t>(s[0] - '0');
+    static constexpr std::string_view kNames[] = {"None", "Color_Flash", "Linear_Pulse", "Smooth_Pulse", "Two_Way_Pulse",
+                                                  "Continuous_Smooth_Pulse"};
+    for (uint8_t i = 0; i < 6; ++i)
+        if (s.size() == kNames[i].size()) {
+            bool eq = true;
+            for (size_t k = 0; k < s.size() && eq; ++k) {
+                const auto lo = [](char c) { return c >= 'A' && c <= 'Z' ? static_cast<char>(c - 'A' + 'a') : c; };
+                eq = lo(s[k]) == lo(kNames[i][k]);
+            }
+            if (eq) return i;
+        }
+    return 0;
+}
+
+namespace {
+std::string_view last_text(const data::XmlNode& e, std::string_view tag) {
+    return data::xml_values::text(e, tag, data::xml_values::kAbility);
+}
 float f_or(const data::XmlNode& e, std::string_view tag, float fallback) {
-    const data::XmlNode c = e.child(tag);
-    return c ? data::parse_float_or(c.text_trimmed(), fallback) : fallback;
+    return data::xml_values::float_or(e, tag, fallback, data::xml_values::kAbility);
 }
 int32_t i_or(const data::XmlNode& e, std::string_view tag, int32_t fallback) {
-    const data::XmlNode c = e.child(tag);
-    return c ? data::parse_int_or(c.text_trimmed(), fallback) : fallback;
+    return data::xml_values::int_or(e, tag, fallback, data::xml_values::kAbility);
 }
 bool b_or(const data::XmlNode& e, std::string_view tag, bool fallback) {
-    const data::XmlNode c = e.child(tag);
-    return c ? data::parse_bool_or(c.text_trimmed(), fallback) : fallback;
+    return data::xml_values::bool_or(e, tag, fallback, data::xml_values::kAbility);
 }
-std::string s_or(const data::XmlNode& e, std::string_view tag) {
-    const data::XmlNode c = e.child(tag);
-    return c ? std::string(c.text_trimmed()) : std::string();
+std::string s_or(const data::XmlNode& e, std::string_view tag) { return std::string(last_text(e, tag)); }
+// A list field (type or bone-name lists): every occurrence appends (MCX1_RE_ANSWERS Q1: repeated list = append), joined
+// with a comma for data::split_list.
+std::string list_text(const data::XmlNode& e, std::string_view tag) {
+    std::string out;
+    for (std::string_view v : data::xml_values::texts(e, tag, data::xml_values::kAbility)) {
+        if (!out.empty()) out += ',';
+        out += v;
+    }
+    return out;
 }
 
 std::vector<int32_t> type_list(std::string_view text, const AbilityResolvers& r) {
@@ -71,19 +105,19 @@ bool is_projectile_name(std::string_view n, const AbilityResolvers& r) {
     return n.size() >= 4 && iequals(n.substr(0, 4), "Proj");  // [port] naming convention fallback
 }
 int32_t projectile_of(const data::XmlNode& e, std::string_view tag, const AbilityResolvers& r) {
-    const std::string_view n = data::trim(e.child_text(tag));
+    const std::string_view n = data::trim(last_text(e, tag));
     if (n.empty() || !r.projectile) return -1;
     return r.projectile(n);
 }
 int32_t object_of(const data::XmlNode& e, std::string_view tag, const AbilityResolvers& r) {
-    const std::string_view n = data::trim(e.child_text(tag));
+    const std::string_view n = data::trim(last_text(e, tag));
     if (n.empty() || !r.object_type) return -1;
     return r.object_type(n);
 }
 // First present tag of a list (classes spell the same field differently).
 float f_any(const data::XmlNode& e, std::initializer_list<std::string_view> tags, float fallback) {
     for (std::string_view t : tags)
-        if (const data::XmlNode c = e.child(t)) return data::parse_float_or(c.text_trimmed(), fallback);
+        if (const std::string_view v = last_text(e, t); !v.empty()) return data::xml_values::to_float(v);
     return fallback;
 }
 
@@ -91,7 +125,7 @@ void parse_class_fields(const data::XmlNode& e, SpecialAbilityDesc& s, const Abi
     // Activation_Chance: one value, or a flat (x, y) list read as a CubicInterpolator (§2.3.7, §3.3).
     {
         std::vector<float> v;
-        for (std::string_view t : data::split_list(e.child_text("Activation_Chance"))) {
+        for (std::string_view t : data::split_list(last_text(e, "Activation_Chance"))) {
             const auto f = data::parse_float(t);
             if (f) v.push_back(*f);
         }
@@ -107,7 +141,7 @@ void parse_class_fields(const data::XmlNode& e, SpecialAbilityDesc& s, const Abi
     s.damage_percentage = f_or(e, "Damage_Percentage", 0.0f);
     s.damage_interval = f_or(e, "Damage_Interval_In_Secs", 0.0f);
     if (r.damage) {
-        const std::string_view dt = data::trim(e.child_text("Damage_Type"));
+        const std::string_view dt = data::trim(last_text(e, "Damage_Type"));
         if (!dt.empty()) s.damage_type = r.damage(dt);
     }
     s.damage_range = f_any(e, {"Damage_Range", "Damage_Radius"}, 0.0f);
@@ -129,11 +163,15 @@ void parse_class_fields(const data::XmlNode& e, SpecialAbilityDesc& s, const Abi
     set_bonus(L::FireRate, f_or(e, "Fire_Rate_Bonus_Percentage", 0.0f));  // [M: the fire-rate field name]
     s.apply_to_all_allies = b_or(e, "Apply_To_All_Allies", false) || b_or(e, "Affects_All_Allies", false);
     s.reverse_logic = b_or(e, "Reverse_Application_Logic", false);
+    s.specific_faction = s_or(e, "Specific_Faction");  // s78n t04: Combat_Bonus +0x1a0 (resolved by AbilitySystem::set_host)
     s.fow_reveal_multiplier = f_or(e, "FOW_Reveal_Range_Multiplier", 1.0f);
     s.reinforcement_time_multiplier = f_or(e, "Reinforcement_Time_Multiplier", 1.0f);
     s.stealth_duration_multiplier = f_or(e, "Stealth_Duration_Multiplier", 1.0f);
     s.capture_time_multiplier = f_or(e, "Capture_Point_Time_Multiplier", 1.0f);
     s.reinforcement_deploy_multiplier = f_or(e, "Reinforcement_Deploy_Time_Multiplier", 1.0f);
+    s.base_shield_upgrade = b_or(e, "Base_Shield_Upgrade", false);  // tru1 t02
+    for (const int32_t t : type_list(list_text(e, "Additional_Garrison_Units"), r))  // tru3 t05
+        if (t >= 0) s.garrison_types.push_back(t);
     s.enable_bombing_runs = b_or(e, "Enable_Bombing_Runs", false);
     s.enable_bombardment = b_or(e, "Enable_Planetary_Bombardment", false);
     s.enable_special_weapons = b_or(e, "Enable_Special_Weapons", false);
@@ -146,6 +184,13 @@ void parse_class_fields(const data::XmlNode& e, SpecialAbilityDesc& s, const Abi
     s.berserker_damage = f_or(e, "Berserker_Damage", 0.0f);
     s.berserker_damage_range = f_or(e, "Berserker_Damage_Range", 0.0f);
     s.berserker_duration = f_or(e, "Berserker_Duration_In_Secs", 0.0f);
+    s.catch_dist = f_or(e, "Catch_Dist", 0.0f);  // cu8i t01: Saber_Throw
+    if (r.type_max_speed) {
+        const std::string_view saber = data::trim(last_text(e, "Saber_Name"));
+        if (!saber.empty()) s.saber_speed = std::max(0.0f, r.type_max_speed(saber));
+        if (!saber.empty() && r.type_max_flight_distance) s.saber_max_flight = std::max(0.0f, r.type_max_flight_distance(saber));
+        if (!saber.empty() && r.projectile) s.saber_projectile = r.projectile(saber);  // cu8k t01: the thrown saber's desc
+    }
     s.activation_time = f_or(e, "Activation_Time_In_Seconds", 0.0f);
     s.trigger_radius = f_or(e, "Trigger_Radius", 0.0f);
     for (std::string_view tag : {"Mine_Type", "Object_Type", "Contamination_Object_Name"})
@@ -159,6 +204,9 @@ void parse_class_fields(const data::XmlNode& e, SpecialAbilityDesc& s, const Abi
     s.toss_anim = s_or(e, "Grenade_Toss_Anim");
     if (s.toss_anim.empty()) s.toss_anim = s_or(e, "Toss_Anim");
     s.spawn_bone = s_or(e, "Spawn_Bone");  // S8 t06: Remote_Bomb toss bone (LOB_SOLVER §3.5)
+    if (s.spawn_bone.empty()) s.spawn_bone = s_or(e, "Spawn_Bone_Name");  // mcx4 t06: Spawn_Ability +0x198 (§14)
+    s.recharge_time_in_seconds = f_or(e, "Recharge_Time_In_Seconds", 1.0f);  // mcx4 t06: Spawn_Ability +0x194 (§14)
+    if (s.recharge_time_in_seconds < 0.0f) s.recharge_time_in_seconds = 0.0f;
     s.fuse_time = f_any(e, {"Grenade_Explode_Timer_In_Secs", "Detonation_Time_In_Secs"}, 0.0f);
     s.requires_direct_command = b_or(e, "Requires_Direct_Player_Command", false);
     s.max_targets = i_or(e, "Lightning_Max_Targets", i_or(e, "Max_Drain_Victims", i_or(e, "Max_Targets", 0)));
@@ -170,6 +218,7 @@ void parse_class_fields(const data::XmlNode& e, SpecialAbilityDesc& s, const Abi
     s.anim_speedup = f_or(e, "Attack_Animation_Speedup", 1.0f);
     s.right_to_left = b_or(e, "Apply_Damage_Right_To_Left", false);
     s.attack_anim = s_or(e, "Attack_Animation");
+    s.grabbed_anim = s_or(e, "Target_Grabbed_Animation");  // r3h t04: Eat (+0x1d0): the victim loops it while held
     s.anim_sub_index = i_or(e, "Attack_Animation_Subindex", i_or(e, "Attack_Anim_Sub_Index", 0));
     s.damage_frame = i_or(e, "Damage_Frame_Number", 0);
     s.begin_damage_frame = i_or(e, "Begin_Applying_Damage_Frame", 0);
@@ -178,8 +227,8 @@ void parse_class_fields(const data::XmlNode& e, SpecialAbilityDesc& s, const Abi
     s.health_per_victim = f_or(e, "Health_Per_Victim", 0.0f);
     s.fire_frame = i_or(e, "Fire_Frame", 0);
     s.face_target = b_or(e, "Face_Target", false);
-    s.turn_rate = f_or(e, "Turn_Rate", 0.0f);
-    s.firing_cone = f_or(e, "Firing_Cone", 0.0f);
+    s.turn_rate = f_or(e, "Turn_Rate", 10.0f);      // ctor 0x714e30 defaults (cu8f t06)
+    s.firing_cone = f_or(e, "Firing_Cone", 45.0f);
     s.fire_delay = f_or(e, "Fire_Delay", 0.0f);
     s.fire_continuation = f_or(e, "Fire_Continuation", 0.0f);
     s.damage_per_second = f_any(e, {"Damage_Per_Second", "Shield_Damage_Per_Second", "Shield_Drain_Per_Second"}, 0.0f);
@@ -190,17 +239,41 @@ void parse_class_fields(const data::XmlNode& e, SpecialAbilityDesc& s, const Abi
     s.damage_arc = f_or(e, "Damage_Arc_In_Degrees", 0.0f);
     s.distance_to_infect = f_or(e, "Distance_To_Infect", 0.0f);
     s.seconds_to_infect = f_or(e, "Seconds_To_Infect", 0.0f);
-    s.infection_categories = parse_category_mask(e.child_text("Infection_CategoryMask"), r);
+    s.infection_categories = parse_category_mask(last_text(e, "Infection_CategoryMask"), r);
     for (std::string_view tag : {"Ability_Name", "Special_Ability_Name"}) {
-        const std::string_view n = data::trim(e.child_text(tag));
+        const std::string_view n = data::trim(last_text(e, tag));
         if (!n.empty() && s.ability_name_crc == 0) s.ability_name_crc = name_crc(n);
     }
     s.weapon_index = i_or(e, "Weapon_Index", 0);
+    // mcx4 (MCX4_T10_RE_ANSWERS §15): Hack / Repair acting member, flame-thrower damage delay, Buzz_Droids pack values
+    // (negative ones read as 0, post-parse 0x71c670), Corrupt_Systems scatter radius.
+    s.team_member_type = object_of(e, "Team_Member_With_Ability", r);
+    s.flame_damage_delay = f_or(e, "Damage_Delay_In_Secs", 0.2f);
+    s.chase_radius = std::max(0.0f, f_or(e, "Chase_Radius", 0.0f));
+    s.own_damage_per_second = std::max(0.0f, f_or(e, "Own_Damage_Per_Second", 0.0f));
+    s.enemy_damage_per_second = std::max(0.0f, f_or(e, "Enemy_Damage_Per_Second", 0.0f));
+    s.inaccuracy_radius = f_or(e, "Inaccuracy_Radius", 0.0f);
     // Durations: the classes spell them Duration_In_Secs / Duration_In_Seconds / Fire_Time_In_Secs.
     if (s.duration_secs == 0.0f) s.duration_secs = f_any(e, {"Duration_In_Seconds", "Fire_Time_In_Secs", "Duration_Of_Infection"}, 0.0f);
 }
 
 }  // namespace
+
+SaberFlight saber_flight(float out_dist, float back_dist, float max_travel, float speed, float catch_dist) {
+    SaberFlight f;
+    if (!(speed > 0.0f)) return f;
+    const float ltot = std::max(0.0f, out_dist) + std::max(0.0f, back_dist);
+    const float b = max_travel > 0.0f ? max_travel : 3.0e38f;
+    const float kc = std::floor(std::max(0.0f, ltot - catch_dist) / speed) + 1.0f;
+    if (speed * kc < std::min(ltot, b)) {
+        f.catch_step = static_cast<uint32_t>(kc);
+        f.end = f.catch_step + 11u;  // SWORD_CATCH finishes at the 10th advance after its play tick, seen by the next update
+        return f;
+    }
+    const float kd = std::min(std::ceil(ltot / speed), std::ceil(b / speed));
+    f.end = std::max(1u, static_cast<uint32_t>(kd));  // epsilon 0 [M]
+    return f;
+}
 
 // ---- OI abilities: CubicInterpolator ----
 void CubicCurve::set(std::vector<std::pair<float, float>> pts) {
@@ -288,7 +361,7 @@ uint32_t parse_projectile_categories(std::string_view text) {
 bool parse_unit_ability(const data::XmlNode& e, UnitAbilityRecord& out, const AbilityResolvers& r,
                         std::vector<std::string>* diag) {
     out = UnitAbilityRecord{};
-    const std::string_view type_name = e.child_text("Type");
+    const std::string_view type_name = last_text(e, "Type");
     out.type = ability_type_from_name(type_name);
     if (out.type == 0) {
         note(diag, e, "unknown Unit_Ability Type '" + std::string(type_name) + "'");
@@ -299,14 +372,16 @@ bool parse_unit_ability(const data::XmlNode& e, UnitAbilityRecord& out, const Ab
     out.effective_radius = f_or(e, "Effective_Radius", 0.0f);
     out.recharge_seconds = f_or(e, "Recharge_Seconds", 0.0f);
     out.expiration_seconds = f_or(e, "Expiration_Seconds", 0.0f);
-    out.is_pulsing = b_or(e, "Is_Pulsing", false);
+    out.is_pulsing = b_or(e, "Is_Pulsing", false);  // no reader in the original [M] (cu8f t06): kept for the record only
     out.pulse_frequency_secs = f_or(e, "Pulse_Frequency_Secs", 0.0f);
     out.max_pulses = i_or(e, "Max_Number_Of_Pulses", 0);
     out.alternate_icon_name = s_or(e, "Alternate_Icon_Name");
+    out.alternate_name_text = s_or(e, "Alternate_Name_Text");                // mcx4 t14 (GUI only)
+    out.alternate_description_text = s_or(e, "Alternate_Description_Text");  // mcx4 t14 (GUI only)
     out.gui_activated_ability_name = s_or(e, "GUI_Activated_Ability_Name");
     out.gui_name_crc = out.gui_activated_ability_name.empty() ? 0u : name_crc(out.gui_activated_ability_name);
     out.spawned_object_type = s_or(e, "Spawned_Object_Type");
-    out.max_spawned_objects = i_or(e, "Max_Num_Spawned_Objects", 0);
+    out.max_spawned_objects = i_or(e, "Max_Num_Spawned_Objects", -1);  // [port] absent: no cap (cu8f t06)
     out.bomb_countdown_seconds = f_or(e, "Bomb_Countdown_Seconds", 0.0f);
     out.area_effect_decal_distance = f_or(e, "Area_Effect_Decal_Distance", 0.0f);
     for (data::XmlNode c : e.children("Projectile_Types_Override"))
@@ -327,7 +402,7 @@ bool parse_unit_ability(const data::XmlNode& e, UnitAbilityRecord& out, const Ab
         out.spawned_type = r.object_type ? r.object_type(out.spawned_object_type) : -1;
         if (is_projectile_name(out.spawned_object_type, r) && r.projectile) out.spawned_projectile = r.projectile(out.spawned_object_type);
     }
-    out.target_types = type_list(e.child_text("Target_Types"), r);
+    out.target_types = type_list(list_text(e, "Target_Types"), r);
     for (data::XmlNode c : e.children("Owner_Attachment_Bone"))  // REMAINING_GAPS §5.2
         for (std::string_view n : data::split_list(c.text_trimmed())) out.owner_attachment_bones.emplace_back(n);
     out.combat.range_override = f_or(e, "Targeting_Max_Attack_Distance", 0.0f);
@@ -337,7 +412,7 @@ bool parse_unit_ability(const data::XmlNode& e, UnitAbilityRecord& out, const Ab
     // <Mod_Multiplier>KIND_MULTIPLIER, value</Mod_Multiplier>, value with an optional trailing 'f'.
     for (data::XmlNode c : e.children("Mod_Multiplier")) {
         const auto pr = data::parse_pair(c.text_trimmed());
-        const uint8_t k = pr ? mod_kind_from_name(pr->first) : 0;
+        const uint8_t k = pr ? mod_kind_from_name(pr->first) : uint8_t{0};
         const auto v = pr ? data::parse_float(pr->second) : std::nullopt;
         if (k == 0 || !v) {
             note(diag, c, "bad Mod_Multiplier '" + std::string(c.text_trimmed()) + "'");
@@ -347,8 +422,8 @@ bool parse_unit_ability(const data::XmlNode& e, UnitAbilityRecord& out, const Ab
     }
     for (data::XmlNode c : e.children("Mod_Flag")) {
         const auto pr = data::parse_pair(c.text_trimmed());
-        const uint8_t k = pr ? mod_flag_from_name(pr->first) : 0;
-        const auto v = pr ? data::parse_bool(pr->second) : std::nullopt;
+        const uint8_t k = pr ? mod_flag_from_name(pr->first) : uint8_t{0};
+        const std::optional<bool> v = pr ? std::optional<bool>(data::xml_values::to_bool(pr->second)) : std::nullopt;
         if (k == 0 || k >= combat::kModFlagCount || !v) {
             note(diag, c, "bad Mod_Flag '" + std::string(c.text_trimmed()) + "'");
             continue;
@@ -375,15 +450,24 @@ SpecialAbilityDesc parse_special_ability(const data::XmlNode& e, const AbilityRe
     s.cls = special_class_from_tag(e.name());
     s.name = std::string(e.attribute("Name"));
     s.name_crc = s.name.empty() ? 0u : name_crc(s.name);
-    const std::string_view style = e.child_text("Activation_Style");
+    // mcx1 t10 (MCX1_RE_ANSWERS Q1, 0x48d340): without a Name attribute the original logs an error and parses no field
+    // of the ability (the object is still created); every shipped ability has one.
+    if (s.name.empty()) {
+        note(diag, e, "special ability <" + s.class_tag + "> has no Name attribute: none of its fields is read");
+        return s;
+    }
+    const std::string_view style = last_text(e, "Activation_Style");
     s.style = activation_style_from_name(style);
     if (!style.empty() && s.style == ActivationStyle::None) note(diag, e, "unknown Activation_Style '" + std::string(style) + "'");
     s.initially_enabled = b_or(e, "Initially_Enabled", true);
-    s.applicable_categories = parse_category_mask(e.child_text("Applicable_Unit_Categories"), r, diag);
-    s.applicable_types = type_list(e.child_text("Applicable_Unit_Types"), r);
-    s.excluded_types = type_list(e.child_text("Excluded_Unit_Types"), r);
+    s.applicable_categories = parse_category_mask(last_text(e, "Applicable_Unit_Categories"), r, diag);
+    s.applicable_types = type_list(list_text(e, "Applicable_Unit_Types"), r);
+    s.excluded_types = type_list(list_text(e, "Excluded_Unit_Types"), r);
     s.min_range = f_or(e, "Activation_Min_Range", 0.0f);
     s.max_range = f_or(e, "Activation_Max_Range", 0.0f);
+    s.cable_drop_phase = f_or(e, "Drop_Phase_Duration", 0.0f);  // r3g t04 (Cable_Ability)
+    s.cable_pull_phase = f_or(e, "Pull_Phase_Duration", 0.0f);
+    s.cable_paralyze_phase = f_or(e, "Paralyze_Phase_Duration", 0.0f);
     s.target_speed_decrease = f_or(e, "Target_Speed_Decrease_Percent", 0.0f);
     s.target_damage_increase = f_or(e, "Target_Damage_Increase_Percent", 0.0f);
     s.stacking_category = i_or(e, "Stacking_Category", 0);
@@ -391,27 +475,79 @@ SpecialAbilityDesc parse_special_ability(const data::XmlNode& e, const AbilityRe
     s.duration_secs = f_or(e, "Duration_In_Secs", 0.0f);
     s.force_sight_duration = f_or(e, "Force_Sight_Duration_In_Secs", 0.0f);  // fog follow-up
     s.stealth_transition_time = f_or(e, "Stealth_Transition_Time", 0.0f);
+    {  // mcx4 t15: the owner's and the target's light effect (0x48e4d0 / 0x48e880), every special ability
+        const auto light = [&e](LightEffectDesc& l, std::string_view type_tag, std::string_view color_tag, std::string_view color2_tag,
+                                std::string_view duration_tag, std::string_view pulses_tag) {
+            l.type = light_effect_type_from_name(last_text(e, type_tag));
+            float c[3];
+            if (data::parse_floats(last_text(e, color_tag), c, 3) == 3) std::copy(c, c + 3, l.color);
+            if (data::parse_floats(last_text(e, color2_tag), c, 3) == 3) std::copy(c, c + 3, l.color2);
+            l.duration = f_or(e, duration_tag, 0.0f);
+            l.pulses = i_or(e, pulses_tag, 1);
+        };
+        light(s.owner_light, "Owner_Light_Effect_Type",
+              "Owner_Light_Effect_Color",
+              "Owner_Light_Effect_Color2",
+              "Owner_Light_Effect_Duration",
+              "Owner_Light_Effect_Pulse_Count");
+        light(s.target_light, "Target_Light_Effect_Type",
+              "Target_Light_Effect_Color",
+              "Target_Light_Effect_Color2",
+              "Target_Light_Effect_Duration",
+              "Target_Light_Effect_Pulse_Count");
+    }
     s.must_be_bought_on_black_market = b_or(e, "Must_Be_Bought_On_Black_Market", false);
     s.defense_duration = f_or(e, "Defense_Duration_In_Secs", 0.0f);
     s.protection_radius = f_or(e, "Protection_Radius", 0.0f);
     s.zap_recharge = f_or(e, "Recharge_Time_In_Secs", 0.0f);
     s.dist_travelled = f_or(e, "Projectile_Dist_Travelled", 0.0f);
-    s.targeted_categories = parse_projectile_categories(e.child_text("Projectile_Types_Targeted"));
+    s.targeted_categories = parse_projectile_categories(last_text(e, "Projectile_Types_Targeted"));
     s.redirect_chance = f_or(e, "Redirect_Chance", 0.0f);
     s.block_chance = f_or(e, "Block_Chance", 0.0f);
     s.reaction_arc_deg = f_or(e, "Reaction_Arc_In_Degrees", 360.0f);
+    s.max_redirect_angle_deg = f_or(e, "Max_Projectile_Redirection_Angle_In_Degrees", 0.0f);  // mcx4 t23
+    s.turn_to_face_unblockable = b_or(e, "Turn_To_Face_Unblockable_Shots", false);
+    s.terminate_on_move = b_or(e, "Terminate_Effect_On_Move_Command", false);  // mcx4 (§13)
     s.absorb_chance = f_or(e, "Absorb_Chance", 0.0f);
+    s.damage_absorb_percentage = f_or(e, "Damage_Absorb_Percentage", 0.0f);  // mcx4 t06
+    if (s.damage_absorb_percentage < 0.0f || s.damage_absorb_percentage > 1.0f) s.damage_absorb_percentage = 0.0f;
+    s.damage_absorb_amount = f_or(e, "Damage_Absorb_Amount", 0.0f);
+    if (s.damage_absorb_amount < 0.0f) s.damage_absorb_amount = 0.0f;
     parse_class_fields(e, s, r);  // OI abilities (service_interval stays -1: per class)
+    // mcx4 (MCX4_T10_RE_ANSWERS §15, post-parse 0x71c670): Damage_Radius >= Chase_Radius is reported and the two swapped.
+    if (s.cls == SpecialClass::BuzzDroids && s.damage_range >= s.chase_radius) {
+        note(diag, e, "Buzz_Droids_Ability '" + s.name + "': Damage_Radius must be less than Chase_Radius (swapped)");
+        std::swap(s.damage_range, s.chase_radius);
+    }
     // R5 jamming visual (presentation only): Blob_* / Owner_Particle_* of Sensor_Jamming_Ability.
     if (s.cls == SpecialClass::SensorJamming) {
         s.blob_material = s_or(e, "Blob_Material_Name");
-        const std::vector<std::string_view> bc = data::split_list(e.child_text("Blob_Color"));
+        const std::vector<std::string_view> bc = data::split_list(last_text(e, "Blob_Color"));
         for (size_t k = 0; k < 4 && k < bc.size(); ++k)
             s.blob_color[k] = std::clamp(data::parse_float_or(bc[k], 255.0f) / 255.0f, 0.0f, 1.0f);
         s.show_blob_to_enemies = b_or(e, "Show_Blob_To_Enemies", false);
         s.owner_particle_effect = s_or(e, "Owner_Particle_Effect");
-        const std::vector<std::string_view> bones = data::split_list(e.child_text("Owner_Particle_Bone_Name"));
+        const std::string owner_bones = list_text(e, "Owner_Particle_Bone_Name");
+        const std::vector<std::string_view> bones = data::split_list(owner_bones);
         if (!bones.empty()) s.owner_particle_bone = std::string(bones.front());
+    }
+    // vis1 t06 (presentation only): the target / status particle names.
+    s.target_particle_effect = s_or(e, "Target_Particle_Effect");
+    const std::string target_bones = list_text(e, "Target_Particle_Bone_Name");
+    for (std::string_view b : data::split_list(target_bones)) s.target_particle_bones.emplace_back(b);
+    s.stunned_effect = s_or(e, "Stunned_Effect");
+    s.infection_particle = s_or(e, "Infection_Particle");
+    // vis1 t08 (presentation only): the Drain_Life lightning, the Force_Healing range blob.
+    if (s.cls == SpecialClass::DrainLife) {
+        s.drain_effect = s_or(e, "Drain_Effect_Name");
+        s.drain_source_bone = s_or(e, "Drain_Source_Bone_Name");
+        s.drain_target_bone = s_or(e, "Drain_Target_Bone_Name");
+    }
+    if (s.cls == SpecialClass::ForceHealing) {
+        s.blob_material = s_or(e, "Heal_Range_Blob_Material");
+        const std::vector<std::string_view> bc = data::split_list(last_text(e, "Blob_Color"));
+        for (size_t k = 0; k < 4 && k < bc.size(); ++k)
+            s.blob_color[k] = std::clamp(data::parse_float_or(bc[k], 255.0f) / 255.0f, 0.0f, 1.0f);
     }
     return s;
 }
@@ -425,13 +561,6 @@ std::vector<uint32_t> parse_special_abilities(const data::XmlNode& type_element,
             data.specials.push_back(parse_special_ability(e, r, diag));
         }
     return out;
-}
-
-const UnitAbilityRecord* find_record(const AbilityObjectDesc& d, uint8_t type) {
-    const UnitAbilityRecord* found = nullptr;
-    for (const UnitAbilityRecord& r : d.unit_abilities)
-        if (r.type == type) found = &r;  // later entries replace earlier ones
-    return found;
 }
 
 void link_combat_abilities(const AbilityObjectDesc& d, combat::CombatData& cd, combat::UnitDesc& ud) {

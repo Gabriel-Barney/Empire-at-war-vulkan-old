@@ -3,6 +3,7 @@
 // available" answers and the documented data fallbacks), GlobalValue (process store, tables, userdata refused, save /
 // load), LuaScriptWrapper across two VMs, the task-force delegation to the object bindings, the family table (no
 // duplicates) and the coverage (no unbound row left).
+#include <cmath>
 #include <cstdio>
 #include <cstring>
 #include <filesystem>
@@ -14,6 +15,7 @@
 
 #include "alamo/core/bytes.hpp"
 #include "alamo/core/file_provider.hpp"
+#include "alamo/core/host_fs.hpp"
 #include "alamo/core/log.hpp"
 #include "alamo/core/sim_crc.hpp"
 #include "alamo/core/sim_rng.hpp"
@@ -24,12 +26,14 @@
 #include "alamo/lua/object_bridge.hpp"
 #include "alamo/lua/script_gaps.hpp"
 #include "alamo/lua/script_remaining.hpp"
+#include "alamo/lua/story_model.hpp"
 #if ALAMO_LUA_PLAYERS
 #include "alamo/lua/players.hpp"
 #endif
 #include "alamo/objects/game_object_types.hpp"
 #include "alamo/objects/object_store.hpp"
 #include "alamo/objects/object_types.hpp"
+#include "alamo/test/support.hpp"
 #include "vm_internal.hpp"
 #if ALAMO_LUA_HAVE_COMMANDS
 #include <bit>
@@ -44,14 +48,7 @@ using namespace alamo::lua;
 namespace fs = std::filesystem;
 using objects::ObjectHandle;
 
-static int g_fail = 0;
-#define CHECK(c)                                                     \
-    do {                                                             \
-        if (!(c)) {                                                  \
-            std::printf("FAIL %s:%d: %s\n", __FILE__, __LINE__, #c); \
-            ++g_fail;                                                \
-        }                                                            \
-    } while (0)
+using ::alamo::test::g_fail;
 
 static std::string run(LuaVm& vm, const std::string& code) {
     std::string err;
@@ -117,10 +114,7 @@ static int32_t gid(LuaVm& vm, const char* name) {  // object id of a GameObjectW
 static bool last_message_has(LuaVm& vm, const char* text) {
     return !vm.messages().empty() && vm.messages().back().find(text) != std::string::npos;
 }
-static void write_file(const fs::path& p, const std::string& s) {
-    fs::create_directories(p.parent_path());
-    std::ofstream(p, std::ios::binary) << s;
-}
+using ::alamo::test::write_file;
 
 struct Db {
     fs::path root;
@@ -149,10 +143,13 @@ struct Db {
                    "<AI_Combat_Power>40</AI_Combat_Power><Projectile_Types>Laser_P</Projectile_Types>"
                    "<Energy_Capacity>250</Energy_Capacity><Tactical_Bribe_Cost>300</Tactical_Bribe_Cost></SpaceUnit>\n"
                    "<SpaceUnit Name=\"Fighter\"><CategoryMask>Fighter</CategoryMask><AI_Combat_Power>10</AI_Combat_Power></SpaceUnit>\n"
+                   // mcx8 t12: Can_Garrison needs a GARRISON_* host behaviour, a GARRISON_UNIT and free slots.
                    "<GroundStructure Name=\"Bunker\"><Garrison_Category>Infantry</Garrison_Category>"
+                   "<Behavior>GARRISON_STRUCTURE</Behavior><Num_Garrison_Slots>4</Num_Garrison_Slots>"
                    "<Property_Flags>CanContainGarrison | GarrisonCanFire</Property_Flags></GroundStructure>\n"
                    "<GroundStructure Name=\"Pad\"><Behavior>TACTICAL_BUILD_OBJECTS</Behavior></GroundStructure>\n"
-                   "<GroundInfantry Name=\"Trooper\"><Behavior>UNIT_AI</Behavior><CategoryMask>Infantry</CategoryMask>"
+                   "<GroundInfantry Name=\"Trooper\"><Behavior>UNIT_AI, GARRISON_UNIT</Behavior><Garrison_Value>1</Garrison_Value>"
+                   "<CategoryMask>Infantry</CategoryMask>"
                    "<Is_Valid_Target>Yes</Is_Valid_Target><Bribe_Modifier_On_Corrupted_Planets>1.5</Bribe_Modifier_On_Corrupted_Planets>"
                    "<Bribe_Modifier_On_Uncorrupted_Planets>0.5</Bribe_Modifier_On_Uncorrupted_Planets></GroundInfantry>\n"
                    "</R>");
@@ -385,6 +382,15 @@ static void test_fields(const Db& db) {
     CHECK(run(lv, "s = Are_On_Opposite_Sides_Of_Shield(Ship, Create_Position(5, 0, 0)); s4 = Are_On_Opposite_Sides_Of_Shield(Ship, Ship, P, true)") ==
           "");
     CHECK(gtrue(lv, "s") && gtrue(lv, "s4"));
+    // mcx8 t01: a region AI target (no game object) gives its position (AotCW's BusyTacticalFreeStore passes one).
+    {
+        FakeAi ai;
+        attach_ai_host(lv, &ai, 1);
+        set_ai_target_global(lv, "Region", 6);
+        CHECK(run(lv, "r = Are_On_Opposite_Sides_Of_Shield(Ship, Region)") == "" && gtrue(lv, "r") &&
+              !last_message_has(lv, "from parameter 2"));
+        attach_ai_host(lv, nullptr, -1);
+    }
     // Weather.
     CHECK(run(vm, "Force_Weather()") == "" && last_message_has(vm, "no weather system"));
     int forced = 0;
@@ -451,19 +457,20 @@ static void test_object_methods(const Db& db) {
     CHECK(run(vm, "Ship.Get_AI_Power_Vs_Unit(4)") == "" && last_message_has(vm, "Expected object or ai target."));
     CHECK(run(vm, "Ship.Get_Build_Pad_Contents()") == "" && last_message_has(vm, "is not a build pad"));
     // Build on a pad (no host): rules off -> the UC object is created and becomes the contents; rules on -> refused.
-    CHECK(run(vm, "Ship.Build('Fighter')") == "" && last_message_has(vm, "is not a valid build location"));
+    CHECK(run(vm, "Ship.Build('Fighter')") == "" && last_message_has(vm, "-- Object ") &&
+          last_message_has(vm, "is not a valid build location."));  // mcx8 t01: retail's text (0x5739c0)
     CHECK(run(vm, "Pad.Build('No_Such_Type')") == "" && last_message_has(vm, "unknown game object type No_Such_Type"));
     CHECK(run(vm, "r = Pad.Build('Fighter', true)") == "" && !gtrue(vm, "r") && !gnil(vm, "r") && last_message_has(vm, "game rules prevent"));
     CHECK(run(vm, "Pad.Build('Fighter', 1)") == "" && last_message_has(vm, "Expected boolean."));
     CHECK(run(vm, "Pad.Lock_Build_Pad_Contents(true)") == "" && last_message_has(vm, "cannot lock an empty build pad"));
     CHECK(run(vm, "r = Pad.Build('Fighter'); bc = Pad.Get_Build_Pad_Contents(); bn = bc.Get_Type().Get_Name()") == "");
-    CHECK(gtrue(vm, "r") && gstr(vm, "bn") == "Fighter");
+    CHECK(gtrue(vm, "r") && gstr(vm, "bn") == "FIGHTER");
     CHECK(run(vm, "Pad.Build('Fighter')") == "" && last_message_has(vm, "already has something built on it"));
     // Projectiles without the combat hook: the type's Projectile_Types.
     CHECK(run(vm, "pt = Ship.Get_All_Projectile_Types(); n = table.getn(pt); p1 = pt[1].Get_Name(); "
                   "cp = Ship.Get_Current_Projectile_Type().Get_Name(); none = table.getn(Pad.Get_All_Projectile_Types()); "
                   "cn = Pad.Get_Current_Projectile_Type()") == "");
-    CHECK(gnum(vm, "n") == 1.0 && gstr(vm, "p1") == "Laser_P" && gstr(vm, "cp") == "Laser_P" && gnum(vm, "none") == 0.0 && gnil(vm, "cn"));
+    CHECK(gnum(vm, "n") == 1.0 && gstr(vm, "p1") == "LASER_P" && gstr(vm, "cp") == "LASER_P" && gnum(vm, "none") == 0.0 && gnil(vm, "cn"));
     // State setters.
     const int loco = objects::behavior_type_id("STARSHIP_LOCOMOTOR");
     CHECK(run(vm, "Pad.Lock_Build_Pad_Contents(true); Ship.Enable_Behavior(" + std::to_string(loco) + ", false); Ship.Enable_Behavior(78, true); "
@@ -474,6 +481,8 @@ static void test_object_methods(const Db& db) {
     const RemainingObjectState* ts = e.bridge.find_remaining_state(e.store.id(trooper));
     CHECK(ps && ps->build_pad_locked && ss && !ss->dynamic_lod && ss->behaviors.size() == 1 && ss->behaviors.at(loco) == false &&
           ss->stickiness == 2.5f && ts && ts->prefer_ground == 1);
+    // cu8 t08: Enable_Behavior(id, false) disables the object's behaviour of that type (store counter, §2.6).
+    CHECK(e.store.behavior_disable_count(ship, e.store.behavior_index(ship, static_cast<objects::BehaviorTypeId>(loco))) == 1);
     CHECK(run(vm, "Ship.Set_Prefer_Ground_Over_Space(true)") == "" && last_message_has(vm, "missing Unit_AI behavior"));
     CHECK(run(vm, "Ship.Set_Prefer_Ground_Over_Space()") == "" && last_message_has(vm, "Missing required boolean parameter."));
     CHECK(run(vm, "Ship.Enable_Behavior('x', true)") == "" && last_message_has(vm, "Expected number."));
@@ -529,14 +538,14 @@ static void test_object_methods(const Db& db) {
                   "cp = Ship.Get_Current_Projectile_Type().Get_Name(); pw = Ship.Get_AI_Power_Vs_Unit(Bunker); "
                   "cf = Bunker.Can_Garrison_Fire(); cs = Ship.Can_Garrison_Fire(); Pad.Lock_Build_Pad_Contents(true)") == "");
     CHECK(gtrue(vm, "dv") && gtrue(vm, "od") && gnum(vm, "en") == 0.5 && !gnil(vm, "fb") && gnum(vm, "rd") == 30.0 && gnum(vm, "td") == 4.0 &&
-          gtrue(vm, "bc") && gstr(vm, "cp") == "Missile_P" && gnum(vm, "pw") == 80.0 && !gtrue(vm, "cf") && gtrue(vm, "cs") && locked);
+          gtrue(vm, "bc") && gstr(vm, "cp") == "MISSILE_P" && gnum(vm, "pw") == 80.0 && !gtrue(vm, "cf") && gtrue(vm, "cs") && locked);
     CHECK(goal.x == 20.0f && goal.y == 0.0f);
     goal = Vec3{99.0f, 0.0f, 0.0f};  // another move replaced the diversion
     CHECK(run(vm, "od = Ship.Is_On_Diversion()") == "" && !gtrue(vm, "od"));
     report = false;  // the host reports no goal after the move (it ended at once)
     CHECK(run(vm, "dv = Ship.Divert(Pad); has = Ship.Is_On_Diversion()") == "" && gtrue(vm, "dv") && !gtrue(vm, "has"));
     CHECK(run(vm, "pt = Ship.Get_All_Projectile_Types(); n = table.getn(pt); p1 = pt[1].Get_Name(); p3 = pt[3].Get_Name()") == "");
-    CHECK(gnum(vm, "n") == 3.0 && gstr(vm, "p1") == "Missile_P" && gstr(vm, "p3") == "Missile_P");  // duplicates kept
+    CHECK(gnum(vm, "n") == 3.0 && gstr(vm, "p1") == "MISSILE_P" && gstr(vm, "p3") == "MISSILE_P");  // duplicates kept
     // Locked movement.
     e.bridge.state(e.store.id(ship)).orders_locked = true;
     CHECK(run(vm, "dv = Ship.Divert(Pad)") == "" && !gtrue(vm, "dv") && last_message_has(vm, "has had its movement locked"));
@@ -567,7 +576,7 @@ static void test_player_methods(const Db& db) {
     e.hooks.give_random_sliceable_tech = [&db](int32_t) { return db.t("Fighter"); };
     e.hooks.type_obsolete = [](objects::TypeIndex, int32_t p) { return p == 0; };
     CHECK(run(vm, "t = P.Give_Random_Sliceable_Tech().Get_Name(); ob = Ship.Get_Type().Is_Obsolete(P)") == "");
-    CHECK(gstr(vm, "t") == "Fighter" && gtrue(vm, "ob"));
+    CHECK(gstr(vm, "t") == "FIGHTER" && gtrue(vm, "ob"));
     CHECK(run(vm, "Ship.Get_Type().Is_Obsolete()") == "" && last_message_has(vm, "Expected 1, got 0"));
     CHECK(run(vm, "Ship.Get_Type().Is_Obsolete(1)") == "" && last_message_has(vm, "Expected player"));
     // _ProduceObject (§1.9): argument checks; refused without a galactic sim.
@@ -601,7 +610,7 @@ static void test_task_forces(const Db& db) {
     e.global("T1", t1);
     CHECK(run(vm, "a = TF.Add_Force(Ship); n = TF.Get_Force_Count(); ty = TF.Get_Type_Of_Unit(2).Get_Name(); "
                   "t0 = TF.Get_Type_Of_Unit(0).Get_Name(); t9 = TF.Get_Type_Of_Unit(9); tn = TF.Get_Type_Of_Unit(-1)") == "");
-    CHECK(gnil(vm, "a") && gnum(vm, "n") == 3.0 && gstr(vm, "ty") == "Ship" && gstr(vm, "t0") == "Trooper" && gnil(vm, "t9") && gnil(vm, "tn"));
+    CHECK(gnil(vm, "a") && gnum(vm, "n") == 3.0 && gstr(vm, "ty") == "SHIP" && gstr(vm, "t0") == "TROOPER" && gnil(vm, "t9") && gnil(vm, "tn"));
     CHECK(run_stop(vm, "TF.Add_Force(3)").find("expected a GameObjectClass") != std::string::npos);
     CHECK(run_stop(vm, "TF.Get_Type_Of_Unit('x')").find("expected an integer index") != std::string::npos);
     // Opportunity-fire subscriptions: weapon hard-point types only.
@@ -711,6 +720,43 @@ static uint32_t payload_u32(const commands::EventData& e, size_t at) {
            (static_cast<uint32_t>(d[at + 3]) << 24);
 }
 #endif
+
+// ref5 t03: one position rule (detail::position_arg) in every binding family: a region AI target (6, a position with no
+// object) and a task force (3, its first live unit) are positions for the object family (Get_Distance), the script
+// helpers (Is_Point_In_Nebula, Are_On_Opposite_Sides_Of_Shield) and the story family (Add_Radar_Blip; no object
+// followed); an empty task force is not a position. The FogOfWar family: test_lua_fog.cpp.
+static void test_position_families(const Db& db) {
+    Env e(db, objects::ModeKind::Land);
+    LuaVm& vm = *e.vm;
+    FakeAi ai;
+    attach_ai_host(vm, &ai, 1);
+    StoryModel story;
+    attach_story(vm, &story);
+    const ObjectHandle ship = make(e.store, db.t("Ship"), 0, {0, 0, 0});
+    const ObjectHandle t1 = make(e.store, db.t("Trooper"), 0, {3, 4, 0});
+    ai.units = {t1};
+    set_task_force_global(vm, "TF", 3, AiTaskForceKind::Land);
+    set_ai_target_global(vm, "Region", 6);  // (7, 8, 9)
+    e.global("Ship", ship);
+    CHECK(run(vm, "d = Ship.Get_Distance(Region) dt = Ship.Get_Distance(TF)") == "" && !vm.exit_requested());
+    CHECK(std::abs(gnum(vm, "d") - std::sqrt(194.0)) < 1e-4 && std::abs(gnum(vm, "dt") - 5.0) < 1e-4);
+    CHECK(run(vm, "n = Is_Point_In_Nebula(Region) s = Are_On_Opposite_Sides_Of_Shield(Region, TF)") == "" && !vm.exit_requested());
+    CHECK(!gnil(vm, "n") && !gnil(vm, "s"));
+    CHECK(run(vm, "Add_Radar_Blip(Region, 'r') Add_Radar_Blip(TF, 't')") == "" && !vm.exit_requested());
+    CHECK(story.blips().size() == 2);
+    if (story.blips().size() == 2) {
+        const StoryBlip& r = story.blips()[0];
+        const StoryBlip& t = story.blips()[1];
+        CHECK(r.name == "r" && r.object_id == -1 && r.x == 7.0f && r.y == 8.0f && r.z == 9.0f);
+        CHECK(t.name == "t" && t.object_id == -1 && t.x == 3.0f && t.y == 4.0f);
+    }
+    ai.units.clear();
+    CHECK(run(vm, "Add_Radar_Blip(TF, 'x')") == "" && vm.exit_requested() && story.blips().size() == 2 &&
+          last_message_has(vm, "could not deduce a position from parameter 1"));
+    reset_script_threads(vm);
+    attach_story(vm, nullptr);
+    attach_ai_host(vm, nullptr, -1);
+}
 
 static void test_unit_order_targets(const Db& db) {
     Env e(db, objects::ModeKind::Land);
@@ -825,6 +871,19 @@ static void test_unit_order_targets(const Db& db) {
     CHECK(run(vm, "Ship.Lock_Current_Orders() r = 1 r = Ship.Attack_Move(Enemy)") == "" && gnil(vm, "r") && !vm.exit_requested());
     CHECK(last_message_has(vm, "is locked into existing orders"));
     CHECK(run(vm, "Ship.Unlock_Current_Orders()") == "");
+    {  // s78n t06 (HERO_CLASH §3.2 / §3.8): a hero in a clash - Unlock_Current_Orders is a script error that unlocks nothing,
+       // and the clash's lock refuses its orders
+        e.bridge.remaining = &e.hooks;
+        e.hooks.in_hero_clash = [ship](ObjectHandle h) { return h == ship; };
+        CHECK(run(vm, "Ship.Unlock_Current_Orders()") == "" &&
+              last_message_has(vm, "SCRIPT ERROR: GameObjectWrapper::Unlock_Current_Orders - object Ship is locked by a hero clash.  Cannot unlock.") &&
+              stopped());
+        CHECK(run(vm, "r = 1 r = Ship.Attack_Move(Enemy)") == "" && gnil(vm, "r") && last_message_has(vm, "is locked into existing orders"));
+        CHECK(run(vm, "T1.Unlock_Current_Orders()") == "" && last_message_has(vm, "Unlock_Current_Orders - object Trooper is not locked.") &&
+              !stopped());
+        e.hooks.in_hero_clash = nullptr;
+        e.bridge.remaining = nullptr;
+    }
     // Galactic-only order bindings refuse a tactical-only command in a galactic store (Attack_Target / Attack_Move).
     {
         Env g(db, objects::ModeKind::Galactic);
@@ -852,6 +911,15 @@ struct FakeTactical final : AiTacticalScriptHost {
     int32_t ambush = -1, ambush_calls = 0, ambush_target = -2, direction = -2;  // S7 t21 Prepare_Ambush
     double min_dist = 0.0, threat = 0.0;
     bool zone_path = false;
+    int32_t attack_pos_calls = 0, attack_pos_tf = -2;  // mcx6 t06
+    bool attack_pos_on = false;
+    std::vector<int32_t> released;
+    void tf_enable_attack_positioning(int32_t t, bool on) override {
+        ++attack_pos_calls;
+        attack_pos_tf = t;
+        attack_pos_on = on;
+    }
+    void tf_release_reinforcements(int32_t t) override { released.push_back(t); }
     int32_t tf_prepare_ambush(int32_t, const AiArg& t, int dir, double dist, double thr, bool zone, std::string* n) override {
         ++ambush_calls;
         ambush_target = t.target;
@@ -907,6 +975,13 @@ static void test_tactical_perception(const Db& db) {
           last_message_has(vm, "Parameter 1 is not a valid destination for TaskForce"));
     const size_t said = vm.messages().size();
     CHECK(run(vm, "m3 = TF.Move_To(P)") == "" && gnil(vm, "m3") && vm.messages().size() == said + 1);
+    // b0173 (B0173_RE_ANSWERS Q1 / Q2 row 6): the `Target` of a region goal is a GameObjectWrapper without an object: a
+    // userdata (truthy), and Move_To answers nil with no message (BuildMDUItem's Move_To(Target, threat)).
+    set_objectless_global(vm, "Target");
+    const size_t quiet = vm.messages().size();
+    CHECK(run(vm, "m4 = TF.Move_To(Target, 5); t4 = type(Target); same4 = Target == Target") == "" && gnil(vm, "m4") &&
+          vm.messages().size() == quiet);
+    CHECK(run(vm, "ok4 = (t4 == 'userdata') and same4") == "" && run(vm, "assert(ok4)") == "");
     // S7 t21 (§7.3.1): Prepare_Ambush argument checks (land: 4 or 5 arguments), then the host's status / error codes.
     CHECK(run(vm, "a1 = TF.Prepare_Ambush(AITarget, 'Left', 100)") == "" && gnil(vm, "a1") &&
           last_message_has(vm, "Invalid number of parameters"));
@@ -922,6 +997,30 @@ static void test_tactical_perception(const Db& db) {
     th.ambush = AiTacticalScriptHost::kAmbushTargetDead;
     CHECK(run(vm, "a7 = TF.Prepare_Ambush(AITarget, 'front', 250, 0.5)") == "" && gnil(vm, "a7") &&
           last_message_has(vm, "Target object is already dead") && th.direction == 0);
+    // mcx6 t06 (LUA_API.md "Task force: Enable_Attack_Positioning and Release_Reinforcements"): land 0x6eaa80 - exactly one
+    // argument (a nil counts), a boolean; the errors stop the script with retail's texts (two spaces after the full stop)
+    // and change nothing; no return value. The space method is retail's no-op 0x17d070 (no check, no message).
+    CHECK(run(vm, "e1 = TF.Enable_Attack_Positioning()") == "" && gnil(vm, "e1") && th.attack_pos_calls == 0 && vm.exit_requested() &&
+          last_message_has(vm, "SCRIPT ERROR: Enable_Attack_Positioning - Invalid number of parameters.  Expected 1, got 0"));
+    reset_script_threads(vm);
+    CHECK(run(vm, "TF.Enable_Attack_Positioning(true, true)") == "" && th.attack_pos_calls == 0 &&
+          last_message_has(vm, "Enable_Attack_Positioning - Invalid number of parameters.  Expected 1, got 2"));
+    CHECK(run(vm, "TF.Enable_Attack_Positioning(nil)") == "" && th.attack_pos_calls == 0 &&
+          last_message_has(vm, "SCRIPT ERROR: Enable_Attack_Positioning - Invalid type for parameter 1.  Expected boolean."));
+    const size_t typed = vm.messages().size();
+    CHECK(run(vm, "TF.Enable_Attack_Positioning(1)") == "" && th.attack_pos_calls == 0 && vm.messages().size() == typed + 1 &&
+          last_message_has(vm, "Invalid type for parameter 1.  Expected boolean."));
+    reset_script_threads(vm);
+    const size_t clean = vm.messages().size();
+    CHECK(run(vm, "e2 = TF.Enable_Attack_Positioning(true)") == "" && gnil(vm, "e2") && th.attack_pos_calls == 1 && th.attack_pos_tf == 3 &&
+          th.attack_pos_on && !vm.exit_requested() && vm.messages().size() == clean);
+    CHECK(run(vm, "TF.Enable_Attack_Positioning(false)") == "" && th.attack_pos_calls == 2 && !th.attack_pos_on);
+    set_task_force_global(vm, "STF", 4, AiTaskForceKind::Space);
+    CHECK(run(vm, "s1 = STF.Enable_Attack_Positioning(); STF.Enable_Attack_Positioning(1); STF.Enable_Attack_Positioning(true)") == "" &&
+          gnil(vm, "s1") && th.attack_pos_calls == 2 && !vm.exit_requested() && vm.messages().size() == clean);
+    // Release_Reinforcements (0x6e8a70, land and space): arguments ignored, no error path, nothing returned.
+    CHECK(run(vm, "r1 = TF.Release_Reinforcements(1, 'x'); STF.Release_Reinforcements()") == "" && gnil(vm, "r1") &&
+          th.released == (std::vector<int32_t>{3, 4}) && !vm.exit_requested() && vm.messages().size() == clean);
     attach_ai_tactical_host(vm, nullptr);
     const int32_t calls = th.calls;
     run(vm, "z = EvaluatePerception('Syn_Destroy_Desire', P, AITarget)");  // the players family's own path
@@ -1055,6 +1154,7 @@ int main() {
         test_player_methods(db);
         test_task_forces(db);
         test_unit_order_targets(db);  // q6 t03
+        test_position_families(db);  // ref5 t03
 #if ALAMO_LUA_PLAYERS
         test_tactical_perception(db);
 #endif

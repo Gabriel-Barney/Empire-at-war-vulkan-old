@@ -1,0 +1,372 @@
+{
+ "clusters": {
+  "aud8": {
+   "title": "AUD8 Audio system rules: music modes, 3D mods, volume restore, inactive window",
+   "node": "AUDIO",
+   "exit": "alamo_audio / alamo_game_audio_host tests: music mode 9/10/14 resume rules, 3D saturation / rolloff reset at mode shutdown, Master_Volume_Restore after an options preview, GUI SFX while inactive and galactic Play_SFX_Event positions follow AUDIO.md (each RE gap answered in docs/re first)",
+   "preset": "high",
+   "entries": [
+    "b0276",
+    "b0283",
+    "b0284",
+    "b0316",
+    "b0317",
+    "b0438",
+    "b0463",
+    "b0464"
+   ]
+  },
+  "aud9": {
+   "title": "AUD9 Audio triggers still unwired: HUD shield / pop-cap VO, object loops, capture bonus, cancel lines",
+   "node": "AUDIO",
+   "exit": "alamo_game_audio_host_tests start each listed HUD VO line, object loop and the planet capture bonus SFX on its retail trigger (triggers from docs/re)",
+   "preset": "re2ui",
+   "entries": [
+    "b0302",
+    "b0303",
+    "b0314",
+    "b0462",
+    "b0487"
+   ]
+  },
+  "gai4": {
+   "title": "GAI4 Underworld galactic AI timing leftovers (a2m)",
+   "node": "Q2F",
+   "exit": "parity_harness_hotm_galactic_seeds over 12 seeds: Underworld proposal cadence, windfall spending and Generate_Magic_Space_Defense timing inside the retail distribution; RE answers for the saboteur / slicer questions in docs/re",
+   "preset": "xhigh",
+   "entries": [
+    "b0007",
+    "b0008",
+    "b0010",
+    "b0111",
+    "b0112",
+    "b0119",
+    "b0120",
+    "b0124"
+   ]
+  },
+  "gai5": {
+   "title": "GAI5 Galactic and skirmish AI rule leftovers: hostile-fleet test, difficulty rescale, teams, routes",
+   "node": "Q2F",
+   "exit": "alamo_ai / game_session unit tests per rule (hostile fleet in orbit flag, Set_Difficulty hard-point rescale, staging default teams, IsConnectedTo routes) and the a2m test-coverage gaps closed; docs/re reconciled (b0129)",
+   "preset": "high",
+   "entries": [
+    "b0104",
+    "b0129",
+    "b0159",
+    "b0449",
+    "b0491",
+    "b0493",
+    "b0514"
+   ]
+  },
+  "gal2": {
+   "title": "GAL2 Galactic rules leftovers: bounty, scoring events, contested space, hero neutralize, buy list",
+   "node": "Q2F",
+   "exit": "galactic unit tests: auto-resolve bounty call site, GameScoring neutralized / player-quit events, Set_Check_Contested_Space, STORY_GENERIC hero_neutralized, skirmish buy-list heroes option and the start-structure threat-grid mask follow their docs/re specs",
+   "preset": "high",
+   "entries": [
+    "b0128",
+    "b0440",
+    "b0459",
+    "b0466",
+    "b0467",
+    "b0473",
+    "b0506"
+   ]
+  },
+  "cmb3": {
+   "title": "CMB3 Combat rule leftovers: fire trim, slot legs, shield regen, lobbing super weapon, gravity field",
+   "node": "MOVE",
+   "exit": "alamo_sim / combat unit tests per rule (hidden-object fire trim, 3-D slot legs, SHIELDED regen gate, FIRE_LOBBING_SUPERWEAPON, gravity field range, Redirect_Blaster arc, ShotEvent hardpoint saved) match their RE answers",
+   "preset": "high",
+   "entries": [
+    "b0169",
+    "b0196",
+    "b0199",
+    "b0439",
+    "b0451",
+    "b0452",
+    "b0454",
+    "b0511"
+   ]
+  },
+  "tru3": {
+   "title": "TRU3 Ability, shield and spawner rule leftovers",
+   "node": "ABIL",
+   "exit": "alamo_sim tests per rule: Base_Shield_Upgrade keys, AFFECTED_BY_SHIELD straddle until removal, gravity field presentation events, Indigenous_Spawn_Destruction_Reward, Garrison_Upgrade_Ability, Pad_Sell at battle start and Cinematic_Anim_* fields",
+   "preset": "high",
+   "entries": [
+    "b0450",
+    "b0453",
+    "b0455",
+    "b0456",
+    "b0474",
+    "b0509",
+    "b0510"
+   ]
+  },
+  "anm2": {
+   "title": "ANM2 Deploy and hangar animation leftovers",
+   "node": "ANIM",
+   "exit": "sim_anim / alamo_sim tests: deploy gates, DEPLOY_TROOPERS clips played on the animation world, Structure Hold looping, Spawn_Garrison_On_Load fly-out and l1 special-weapon registrations kept after map load",
+   "preset": "high",
+   "entries": [
+    "b0082",
+    "b0475",
+    "b0476",
+    "b0478",
+    "b0486"
+   ]
+  },
+  "mov3": {
+   "title": "MOV3 Movement rule leftovers and movement test gaps",
+   "node": "MOVE",
+   "exit": "alamo_sim / movement tests: SecondaryFacing snap, svs_pick_mover for speed-0 units, Begin_Turn_Towards_Distance reader, bilinear under-water height, and the bkm1 / bkm2 / bkr2 / bkm3 test scenes listed in the entries",
+   "preset": "high",
+   "entries": [
+    "b0165",
+    "b0166",
+    "b0174",
+    "b0191",
+    "b0192",
+    "b0202",
+    "b0398",
+    "b0504"
+   ]
+  },
+  "tai1": {
+   "title": "TAI1 Tactical AI tier-2 leftovers: re-tasking, Guard_Target rate, reachability, space TF methods",
+   "node": "AIVIEW",
+   "exit": "foc-land / foc-space skirmish AI over 12 seeds: idle-after-stop re-tasking, Guard_Target re-issue rate and Hold_Position proposals inside the retail range; land goal reachability skip and Enable_Attack_Positioning per AI_TACTICAL",
+   "preset": "xhigh",
+   "entries": [
+    "b0039",
+    "b0085",
+    "b0086",
+    "b0204",
+    "b0339",
+    "b0461"
+   ]
+  },
+  "map4": {
+   "title": "MAP4 Map placement and setup data leftovers",
+   "node": "MAP",
+   "exit": "map loader / battle start tests: Is_Neutral map units, pad occupant type, full Euler placements, mini 0x2B damage index, marker-kind match, 0x46E marker names, branched-map behaviour test and land loader leftovers per SKIRMISH_SETUP / TERRAIN_WATER_POST",
+   "preset": "high",
+   "entries": [
+    "b0426",
+    "b0427",
+    "b0428",
+    "b0429",
+    "b0430",
+    "b0434",
+    "b0483",
+    "b0484"
+   ]
+  },
+  "map5": {
+   "title": "MAP5 Map camera, fog and environment data",
+   "node": "MAP",
+   "exit": "render / game tests: battle start camera from the map's camera data and start_camera_focus, scene-fog block 0x100/2, old environment format 0x100/0-1 decoded, baked terrain for overview and reflection",
+   "preset": "re2ui",
+   "entries": [
+    "b0431",
+    "b0432",
+    "b0433",
+    "b0435",
+    "b0480"
+   ]
+  },
+  "rad1": {
+   "title": "RAD1 Radar: icon scale, land passability picture, galactic radar, asteroid fields",
+   "node": "UIART",
+   "exit": "alamo_ui / game tests: Radar_Icon_Scale / Rotate / Show_Facing applied, land radar passability from object footprints with whole-cell Obstacle marks, asteroid fields drawn per spec, galactic radar per an RE answer",
+   "preset": "re2ui",
+   "entries": [
+    "b0218",
+    "b0436",
+    "b0437",
+    "b0481",
+    "b0485"
+   ]
+  },
+  "ui6": {
+   "title": "UI6 HUD stand-ins and missing panels from the ui1 review",
+   "node": "UIART",
+   "exit": "Each listed stand-in replaced by the retail resource or behaviour (slice dialog, waypoint lines, campaign load dialog, shell art, galactic tooltips, special-ability rows, pathfinder pad, Neutralize_Hero panel) with a unit or smoke test",
+   "preset": "re2ui",
+   "entries": [
+    "b0217",
+    "b0219",
+    "b0220",
+    "b0221",
+    "b0228",
+    "b0229",
+    "b0230",
+    "b0465"
+   ]
+  },
+  "ui7": {
+   "title": "UI7 UI questions for the binary and retail shots",
+   "node": "UIART",
+   "exit": "docs/re answers for brackets / health bars, which single-player dialogs retail opens, selection-portrait clicks, playtest-3 guesses, credits roll, ui2 presentation questions, Droid Log colours and Holocron sort keys; each [port] guess then fixed or recorded",
+   "preset": "high",
+   "entries": [
+    "b0224",
+    "b0225",
+    "b0231",
+    "b0232",
+    "b0245",
+    "b0472",
+    "b0496",
+    "b0497"
+   ]
+  },
+  "ui8": {
+   "title": "UI8 Galactic map and HUD polish: planet map, invasion line, Holocron, cinematics, Select All",
+   "node": "UIART",
+   "exit": "ui4 / ui2 follow-ups behave as their specs say: planet-map retail capture items, drop-pad pulse, Land_Invasion_Commencing on each Land_Invade, Holocron statistics player list, ui2 cosmetic leftovers, Select All set",
+   "preset": "re2ui",
+   "entries": [
+    "b0161",
+    "b0470",
+    "b0494",
+    "b0498",
+    "b0499",
+    "b0515"
+   ]
+  },
+  "ui9": {
+   "title": "UI9 Test-build display defects (gchk)",
+   "node": "UIART",
+   "exit": "At 1080p and 4K 150 %: saved-games emblem drawn, Display dialog text fits, exclusive full screen restores on its monitor, planet panel text does not overlap, no stale tooltip under a menu, fleet header pad visible and rename shows at once",
+   "preset": "re2ui",
+   "entries": [
+    "b0442",
+    "b0443",
+    "b0444",
+    "b0445",
+    "b0446",
+    "b0447",
+    "b0448"
+   ]
+  },
+  "vis2": {
+   "title": "VIS2 Render rule leftovers: engine glow, particle bump alpha, bombard flash, selection circles, surface type",
+   "node": "UIART",
+   "exit": "render unit tests: engine glow tint and pe / pte groups per BKX1_RENDER_RE, blend mode 11 bump alpha, bombardment lighting flash, draped selection circles, under-water surface test with the 0.5 margin, shield penetration particle facing",
+   "preset": "re2ui",
+   "entries": [
+    "b0203",
+    "b0207",
+    "b0208",
+    "b0356",
+    "b0362",
+    "b0502",
+    "b0505",
+    "b0508"
+   ]
+  },
+  "lua1": {
+   "title": "LUA1 Lua API leftovers in story and AI scripts",
+   "node": "STORY",
+   "exit": "alamo_lua / story tests: TaskForce Move_To(taskforce) position, Point_Camera_At(ai_target), data-driven Play_Lightning_Effect length, BattleRequest::story_map kept in a galactic save",
+   "preset": "high",
+   "entries": [
+    "b0083",
+    "b0209",
+    "b0471",
+    "b0489"
+   ]
+  },
+  "tst2": {
+   "title": "TST2 Test and harness gaps that serve tier-1 / tier-2 groups",
+   "node": "PROC",
+   "exit": "Each listed test or harness gap closed: bkt1 coverage, s78o test scenes, liveness seeds with walkers / droids, retail-cadence tactical AI tests, ParityWorld object types, headless story Esc injection, Underworld infrastructure equations, rerunnable smoke_saveload",
+   "preset": "high",
+   "entries": [
+    "b0137",
+    "b0143",
+    "b0168",
+    "b0188",
+    "b0210",
+    "b0211",
+    "b0441",
+    "b0468"
+   ]
+  },
+  "port1": {
+   "title": "PORT1 Port feature follow-ups: fleet cohesion, fleet groups phases 2-3, fleet and ship names",
+   "node": "FLEETG",
+   "exit": "Each follow-up works off by default (focus exceptions, DECISIONS 'Fleet cohesion', 'Fleet groups', 'Fleet and ship names'): cohesion speed factors and slot waits, HUD toggle, group portraits / reinforcements, names on the galaxy map and in battle",
+   "preset": "high",
+   "entries": [
+    "b0252",
+    "b0253",
+    "b0254",
+    "b0255",
+    "b0256",
+    "b0260",
+    "b0261"
+   ]
+  }
+ },
+ "stay": {
+  "tier 3 (current focus: never a task)": [
+   "b0018",
+   "b0025",
+   "b0026",
+   "b0029",
+   "b0032",
+   "b0044",
+   "b0089",
+   "b0090",
+   "b0091",
+   "b0092",
+   "b0105",
+   "b0106",
+   "b0130",
+   "b0131",
+   "b0132",
+   "b0170",
+   "b0257",
+   "b0265",
+   "b0403",
+   "b0405",
+   "b0409",
+   "b0410",
+   "b0411",
+   "b0412",
+   "b0413",
+   "b0414",
+   "b0415",
+   "b0457",
+   "b0469",
+   "b0477",
+   "b0479",
+   "b0488",
+   "b0490",
+   "b0492",
+   "b0495",
+   "b0500",
+   "b0503",
+   "b0512",
+   "b0513",
+   "b0516",
+   "b0517"
+  ],
+  "Gabriel 2026-11-19 (mod system cleanup): stay S3 until a mod needs them": [
+   "b0383",
+   "b0385",
+   "b0501"
+  ],
+  "untiered process / tool items that serve no tier-1/2 exit": [
+   "b0009",
+   "b0404"
+  ],
+  "ask Gabriel: no splash screen in the port": [
+   "b0315"
+  ]
+ }
+}

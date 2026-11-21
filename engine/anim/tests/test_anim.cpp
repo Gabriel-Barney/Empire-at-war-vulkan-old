@@ -36,6 +36,7 @@
 #include "alamo/core/hash.hpp"
 #include "alamo/core/sim_crc.hpp"
 #include "alamo/core/sim_rng.hpp"
+#include "alamo/test/support.hpp"
 #ifdef ALAMO_ANIM_HAVE_JOBS
 #include "alamo/jobs/job_system.hpp"
 #endif
@@ -48,14 +49,7 @@ using alamo::SimRng;
 
 namespace {
 
-int g_fail = 0;
-#define CHECK(c)                                                                  \
-    do {                                                                          \
-        if (!(c)) {                                                               \
-            std::printf("FAIL %s:%d: %s\n", __FILE__, __LINE__, #c);              \
-            ++g_fail;                                                             \
-        }                                                                         \
-    } while (0)
+using ::alamo::test::g_fail;
 
 // ---- synthetic data -----------------------------------------------------------------------------------
 
@@ -1002,17 +996,18 @@ void test_events_and_locomotor() {
                                   &diag);
     CHECK(rows == 3 && diag.size() == 1 && map.clips() == 2);
     const auto* ev = map.find("DATA\\ART\\MODELS\\EI_TROOPER_MOVE_00.ALA");
-    CHECK(ev && ev->size() == 2 && (*ev)[0].bone == "B_Foot_R" && (*ev)[1].time_ms == 1032);
+    CHECK(ev && ev->size() == 2 && (*ev)[0].bone == "B_Foot_R" && (*ev)[1].time == 1032);
     CHECK(map.find("ei_trooper_die_00") && map.find("ei_trooper_die_00")->front().kind == AnimEventDef::Kind::Sound);
     std::vector<uint32_t> hit;
-    if (ev) {
-        crossed_events(*ev, 30.0f, 62, 0.0f, 1.0f, false, hit);  // [0, 33.3 ms): the 0 ms plant
-        CHECK(hit.size() == 1 && hit[0] == 0);
-        hit.clear();
-        crossed_events(*ev, 30.0f, 62, 30.0f, 31.0f, false, hit);  // [1000, 1033.3): 1032
+    if (ev) {  // AUDIO.md §9.4: time / 100 = frames (the plants at frames 0 and 10.32), half-open (before, after]
+        crossed_events(*ev, 30.0f, 62, 0.0f, 1.0f, false, hit);  // (0, 1]: the 0 plant does not fire on the first play
+        CHECK(hit.empty());
+        crossed_events(*ev, 30.0f, 62, 10.0f, 11.0f, false, hit);  // (10, 11]: 10.32
         CHECK(hit.size() == 1 && hit[0] == 1);
         hit.clear();
-        crossed_events(*ev, 30.0f, 62, 60.5f, 0.5f, true, hit);  // wrap at 61 frames: tail empty, then 0 ms
+        crossed_events(*ev, 30.0f, 62, 10.32f, 11.0f, false, hit);  // (10.32, 11]: not again
+        CHECK(hit.empty());
+        crossed_events(*ev, 30.0f, 62, 20.5f, 0.5f, true, hit);  // a wrap: t > 20.5 (none) or t <= 0.5 (the 0 plant)
         CHECK(hit.size() == 1 && hit[0] == 0);
         hit.clear();
         crossed_events(*ev, 30.0f, 62, 10.0f, 10.0f, false, hit);
@@ -1036,25 +1031,36 @@ void test_events_and_locomotor() {
                                   {kAnimFireDie, 1, 50, 30.0f, 2}},
                               -1);
     {
-        // Berserker: Move -> SpinMove loop; Attack passes; a running spin is left alone until near its end.
+        // r3h t03 (0x3a92f0): Berserker - Move plays as asked (retail ends the ability first: the host's job); Idle / Attack
+        // / Attack Idle become SpinMove at speed 1 from frame 1 (index, loop and blend of the request), and are ignored while
+        // a SpinMove runs short of its end (frame < count - 2 - speed = 17 for 20 frames at speed 1).
         AnimWorld w;
         w.create(1, m.get(), {}, nullptr, 0);
         w.set_berserker(1, true);
         PlayRequest mv;
         mv.type = kAnimMove;
         mv.speed = 2.0f;
-        CHECK(w.play(1, mv, nullptr, 0) == PlayResult::Played && w.current_type(1) == kAnimSpinMove && w.current_mode(1) == SlotMode::Loop &&
-              w.slot(1).speed == 1.0f);
-        CHECK(w.play(1, mv, nullptr, 1) == PlayResult::Locked);
-        for (uint64_t f = 1; f <= 16; ++f) w.advance(f);  // frame 16: 16 + 2 < 19, still running
-        CHECK(w.play(1, mv, nullptr, 16) == PlayResult::Locked);
-        w.advance(17);  // 17 + 2 >= 19: restartable
-        CHECK(w.play(1, mv, nullptr, 17) == PlayResult::Played && w.slot(1).frame == 0.0f);
+        CHECK(w.play(1, mv, nullptr, 0) == PlayResult::Played && w.current_type(1) == kAnimMove && w.slot(1).speed == 2.0f);
         PlayRequest atk;
         atk.type = kAnimAttack;
-        CHECK(w.play(1, atk, nullptr, 18) == PlayResult::Played && w.current_type(1) == kAnimAttack);
+        atk.speed = 2.0f;
+        CHECK(w.play(1, atk, nullptr, 1) == PlayResult::Played && w.current_type(1) == kAnimSpinMove &&
+              w.current_mode(1) == SlotMode::OneShot && w.slot(1).speed == 1.0f && w.slot(1).frame == 1.0f);
+        PlayRequest idle;
+        idle.type = kAnimIdle;
+        idle.loop = true;
+        CHECK(w.play(1, idle, nullptr, 1) == PlayResult::Locked);
+        for (uint64_t f = 2; f <= 16; ++f) w.advance(f);  // frame 16 < 17: still running
+        CHECK(w.slot(1).frame == 16.0f && w.play(1, idle, nullptr, 16) == PlayResult::Locked);
+        w.advance(17);  // frame 17 >= 17: near its end, restartable
+        CHECK(w.play(1, idle, nullptr, 17) == PlayResult::Played && w.current_type(1) == kAnimSpinMove &&
+              w.current_mode(1) == SlotMode::Loop && w.slot(1).frame == 1.0f);
+        PlayRequest spin;
+        spin.type = kAnimSpinMove;
+        spin.loop = true;
+        CHECK(w.play(1, spin, nullptr, 18) == PlayResult::Played && w.slot(1).frame == 0.0f);  // the ability's own play
         w.set_berserker(1, false);
-        CHECK(w.play(1, mv, nullptr, 19) == PlayResult::Played && w.current_type(1) == kAnimMove);
+        CHECK(w.play(1, atk, nullptr, 19) == PlayResult::Played && w.current_type(1) == kAnimAttack);
     }
     {
         // Visibility bits == the pose path's bits (toggling visibility clip, crossfade, overlay).
@@ -1078,6 +1084,116 @@ void test_events_and_locomotor() {
             same = same && w.local_pose(1, local, v1) && w.bone_visibility(1, v2) && v1 == v2;
         }
         CHECK(same);
+    }
+    {
+        // ledger: verifies GameConstants.WalkAnimationCutoff
+        // mcx4 t11 (MCX4_T11_T12_RE_ANSWERS §S, 0x61f840 [H]): WALKMOVE while speed < WalkAnimationCutoff (GC +0x1504 =
+        // 0x140b16d04, FoC 0.6) x max speed, else MOVE. At 0.55 x max: WALKMOVE with the FoC value, MOVE with a mod's 0.5.
+        AnimWorld w;
+        AnimBehaviors b;
+        SimRng rng(4);
+        LocomotorParams lp;
+        CHECK(lp.walk_speed_ratio == 0.6f);
+        for (ObjectId id = 1; id <= 2; ++id) w.create(id, m.get(), {}, nullptr, 0);
+        LocomotorInput in;
+        in.speed = 0.55f;
+        in.max_speed = 1.0f;
+        CHECK(b.service_locomotor(w, 1, lp, in, rng, 1) == 1 && w.current_type(1) == kAnimWalkMove);
+        lp.walk_speed_ratio = 0.5f;  // a mod's WalkAnimationCutoff
+        CHECK(b.service_locomotor(w, 2, lp, in, rng, 1) == 1 && w.current_type(2) == kAnimMove);
+        in.speed = 0.6f;  // exactly at the cutoff: not below it -> MOVE
+        lp.walk_speed_ratio = 0.6f;
+        b.service_locomotor(w, 2, lp, in, rng, 2);
+        CHECK(w.current_type(2) == kAnimMove);
+    }
+    {
+        // ledger: verifies GameConstants.MoveBlendTime
+        // ledger: verifies GameConstants.IdleWalkBlendTime
+        // ledger: verifies GameConstants.CrouchIdleWalkBlendTime
+        // ledger: verifies GameConstants.TeamMoveBlendTime
+        // ledger: verifies GameConstants.TeamCrouchMoveBlendTime
+        // mcx4 t11 (MCX4_T11_T12_RE_ANSWERS §B4 "Blend times" [H]): the blend seconds each locomotor play passes.
+        // Walker (0x61f840 / 0x61f510): MOVE from the idle blends MoveBlendTime (a Walk_Transition unit's MOVE 0), the
+        // stop back to the idle IdleWalkBlendTime. Team member (0x62c420): idle -> MOVE TeamMoveBlendTime, idle ->
+        // CROUCHMOVE TeamCrouchMoveBlendTime, MOVE -> CROUCHMOVE 0.4 s (.data 0x140a44308), MOVE -> idle
+        // IdleWalkBlendTime, CROUCHMOVE -> Idle Crouch CrouchIdleWalkBlendTime. Distinct values tell the fields apart.
+        AnimTunables tn;
+        tn.idle_blend_seconds = 0.7f;  // the idle behaviour's global: none of these plays uses it
+        tn.move_blend_seconds = 0.5f;
+        tn.idle_walk_blend_seconds = 0.3f;
+        tn.crouch_idle_walk_blend_seconds = 0.45f;
+        tn.team_move_blend_seconds = 0.2f;
+        tn.team_crouch_move_blend_seconds = 0.55f;
+        AnimWorld w(tn);
+        AnimBehaviors b;
+        SimRng rng(6);
+        LocomotorParams lp;
+        PlayRequest idle;  // a current clip to fade from (hard cut)
+        for (ObjectId id = 1; id <= 4; ++id) {
+            w.create(id, m.get(), {}, nullptr, 0);
+            w.play(id, idle, nullptr, 0);
+        }
+        LocomotorInput mv;
+        mv.speed = 1.0f;
+        mv.max_speed = 1.0f;
+        CHECK(b.service_locomotor(w, 1, lp, mv, rng, 1) == 1 && w.current_type(1) == kAnimMove && w.crossfade_duration(1) == 0.5f);
+        LocomotorInput wt = mv;  // Walk_Transition unit: MOVE after MOVESTART, no blend (0x61f840 type +0x35)
+        wt.wt_clip = kAnimMove;
+        wt.wt_rate = 1.0f;
+        CHECK(b.service_locomotor(w, 2, lp, wt, rng, 1) == 1 && w.current_type(2) == kAnimMove && !w.crossfading(2));
+        LocomotorInput tm = mv;
+        tm.team_member = true;
+        CHECK(b.service_locomotor(w, 3, lp, tm, rng, 1) == 1 && w.current_type(3) == kAnimMove && w.crossfade_duration(3) == 0.2f);
+        LocomotorInput tc = tm;
+        tc.crouched = true;
+        CHECK(b.service_locomotor(w, 4, lp, tc, rng, 1) == 1 && w.current_type(4) == kAnimCrouchMove && w.crossfade_duration(4) == 0.55f);
+        w.advance(30);  // every fade done
+        CHECK(!w.crossfading(1) && !w.crossfading(3));
+        LocomotorInput stop;
+        b.service_locomotor(w, 1, lp, stop, rng, 31);
+        CHECK(w.current_type(1) == kAnimIdle && w.crossfade_duration(1) == 0.3f);
+        LocomotorInput tstop;
+        tstop.team_member = true;
+        b.service_locomotor(w, 3, lp, tc, rng, 31);  // MOVE -> CROUCHMOVE: the crouch state changes
+        CHECK(w.current_type(3) == kAnimCrouchMove && w.crossfade_duration(3) == kTeamCrouchSwitchBlendSeconds);
+        w.advance(60);
+        b.service_locomotor(w, 3, lp, tstop, rng, 61);
+        CHECK(w.current_type(3) == kAnimIdle && w.crossfade_duration(3) == 0.3f);
+        tstop.crouched = true;
+        b.service_locomotor(w, 4, lp, tstop, rng, 61);
+        CHECK(w.current_type(4) == kAnimIdleCrouch && w.crossfade_duration(4) == 0.45f);
+    }
+    {
+        // ledger: verifies GameConstants.InfantryTurnBlendTime
+        // mcx4 t11 (MCX4_T11_T12_RE_ANSWERS §B4 "Blend times", 0x620190 / 0x62bef0 [H read, M angle]): the TURNL / TURNR
+        // blend = min(D / rate x 0.03333, InfantryTurnBlendTime), D = the error wrapped into [0, 360).
+        CHECK(infantry_turn_blend(30.0f, 10.0f, 0.2f) == (30.0f / 10.0f) * 0.03333f);  // 0.1 s < the cap
+        CHECK(infantry_turn_blend(90.0f, 10.0f, 0.2f) == 0.2f);                       // 0.3 s: capped
+        CHECK(infantry_turn_blend(-3.0f, 10.0f, 0.2f) == 0.2f);                       // right: D = 357 -> capped
+        CHECK(infantry_turn_blend(-3.0f, 10.0f, 2.0f) == (357.0f / 10.0f) * 0.03333f);
+        CHECK(infantry_turn_blend(30.0f, 0.0f, 0.2f) == 0.2f);                        // rate unknown: the cap
+        AnimTunables tn;
+        tn.move_blend_seconds = 0.5f;
+        tn.infantry_turn_blend_seconds = 0.25f;
+        AnimWorld w(tn);
+        AnimBehaviors b;
+        SimRng rng(7);
+        LocomotorParams lp;
+        PlayRequest idle;
+        for (ObjectId id = 1; id <= 2; ++id) {
+            w.create(id, m.get(), {}, nullptr, 0);
+            w.play(id, idle, nullptr, 0);
+        }
+        LocomotorInput t;
+        t.yaw_deg = 10.0f;
+        b.service_locomotor(w, 1, lp, t, rng, 1);  // records the yaw
+        b.service_locomotor(w, 2, lp, t, rng, 1);
+        t.yaw_deg = 14.0f;  // host gives no error / rate: the cap
+        CHECK(b.service_locomotor(w, 1, lp, t, rng, 2) == 1 && w.current_type(1) == kAnimTurnLeft && w.crossfade_duration(1) == 0.25f);
+        t.turn_error_deg = 15.0f;  // 15 deg left at 5 deg / frame: 3 frames
+        t.turn_rate_deg = 5.0f;
+        CHECK(b.service_locomotor(w, 2, lp, t, rng, 2) == 1 && w.current_type(2) == kAnimTurnLeft &&
+              w.crossfade_duration(2) == (15.0f / 5.0f) * 0.03333f);
     }
     {
         // Locomotor selection.
@@ -1131,18 +1247,23 @@ void test_events_and_locomotor() {
         CHECK(b.deploy(w, 3, false, 2.0f, dr, 1) && w.current_type(3) == kAnimDeploy && w.slot(3).speed == 2.0f &&
               w.slot(3).variant == static_cast<uint32_t>(dreplay.range_int(0, 1)) && w.crossfading(3));
         CHECK(b.deploy(w, 3, true, 1.5f, dr, 2) && w.current_type(3) == kAnimUndeploy && w.current_frame_count(3) == 40);
+        // s78n t26.1: a walk that ends deployed sets the Deploy clip on its last frame (variant 0, speed 1, no draw).
+        const SimRng before = dr;
+        CHECK(b.deploy_at_end(w, 3, 3) && w.current_type(3) == kAnimDeploy && w.slot(3).variant == 0 && w.slot(3).speed == 1.0f);
+        CHECK(w.slot(3).frame == static_cast<float>(w.current_frame_count(3) - 1) && dr.state() == before.state());
     }
     {
-        // Death type by damage kind (Damage_Fire -> FIRE_DIE when the model has it and the type sets none);
-        // explicit types win; spin-away: chance draw, no clip, removed after Spin_Away_On_Death_Time.
+        // r3g t07 (DeathBehavior 0x58cdb0): the death clip is the type's Specific_Death_Anim_Type only - a Damage_Fire
+        // kill of a model that has FIRE_DIE still plays Die (kind-specific clips come from death clones); explicit
+        // types win; spin-away: chance draw, no clip, removed after Spin_Away_On_Death_Time.
         AnimWorld w;
         AnimBehaviors b;
         SimRng rng(12);
         for (ObjectId id = 1; id <= 5; ++id) w.create(id, m.get(), {}, nullptr, 0);
         DeathParams dp;
-        CHECK(death_type_for_kind(7) == 62 && death_type_for_kind(14) == kAnimCrushed && death_type_for_kind(1) == kNoAnimType);
-        CHECK(b.begin_death(w, 1, dp, {}, rng, 0, 7) == DeathResult::Corpse && w.current_type(1) == 62 && b.corpse(1)->death_type == 62);
-        CHECK(b.begin_death(w, 2, dp, {}, rng, 0, 14) == DeathResult::Corpse && w.current_type(2) == kAnimDie);  // no CRUSHED clip
+        CHECK(m->variant_count(62) > 0);  // the model has FIRE_DIE
+        CHECK(b.begin_death(w, 1, dp, {}, rng, 0, 7) == DeathResult::Corpse && w.current_type(1) == kAnimDie && b.corpse(1)->death_type == kAnimDie);
+        CHECK(b.begin_death(w, 2, dp, {}, rng, 0, 14) == DeathResult::Corpse && w.current_type(2) == kAnimDie);
         DeathParams ex;
         ex.type_explicit = true;
         CHECK(b.begin_death(w, 3, ex, {}, rng, 0, 7) == DeathResult::Corpse && w.current_type(3) == kAnimDie);
@@ -1172,7 +1293,7 @@ void test_events_and_locomotor() {
 // ---- N1 save / load: AnimWorld + AnimBehaviors round trip ------------------------------------------------
 
 // Record sizes of the documented layouts (anim_state.hpp / anim_behaviors.hpp).
-constexpr size_t kAnimSaveRowBytes = 109;
+constexpr size_t kAnimSaveRowBytes = 108;
 constexpr size_t kAnimSaveEntryBytes = 55;  // + 8 per idle record (s78l t03)
 constexpr size_t kAnimSaveCorpseBytes = 77;
 
@@ -1376,11 +1497,11 @@ void test_save() {
         bad[8 + 17] = 2;  // row 0 frozen flag: not a bool
         CHECK(world_rejects(bad, model_of));
         bad = wb;
-        bad[8 + 30 + 8] = 3;  // row 0 primary slot mode: no SlotMode 3
+        bad[8 + 29 + 8] = 3;  // row 0 primary slot mode: no SlotMode 3
         CHECK(world_rejects(bad, model_of));
         bad = wb;
-        bad[8 + 30] = 0x77;  // row 0 primary type >= 119
-        bad[8 + 30 + 1] = 0x01;
+        bad[8 + 29] = 0x77;  // row 0 primary type >= 119
+        bad[8 + 29 + 1] = 0x01;
         CHECK(world_rejects(bad, model_of));
         bad = wb;
         std::memcpy(bad.data() + 8 + kAnimSaveRowBytes, bad.data() + 8, 4);  // row 1 id == row 0 id: not ascending
@@ -1687,7 +1808,6 @@ void test_death_plan() {
     }
 }
 
-
 // s78l t03 (TACTICAL_COMBAT slot 47 "s78l t03"): idle records, the moving gate, the presence idle type, IDLE-only service.
 void test_idle_records() {
     auto m = make_model(3, {{kAnimIdle, 2, 30, 30.0f, 2}, {kAnimMove, 1, 24, 30.0f, 2}, {kAnimAttack, 1, 12, 30.0f, 2},
@@ -1797,6 +1917,56 @@ void test_idle_records() {
     std::printf("idle records: aging / clear / gate / presence idle ok\n");
 }
 
+// bkx1 t04 (b0059, BKX1_RENDER_RE §2.1 / §2.2 [H]): the Walk_Transition clips follow the locomotor's state. MOVESTART (16)
+// and an end clip (17) start at the locomotor's frame and rate with no draw; MOVE after MOVESTART starts at the carry-over
+// frame with no draw (a plain MOVE start draws its frame); the end clip gives way to the idle when the locomotor stops;
+// a model without the clip keeps its current clip.
+void test_walk_transition_clips() {
+    const auto m = make_model(3, {{kAnimIdle, 1, 30, 30.0f, 2}, {kAnimMove, 1, 24, 30.0f, 2}, {16, 1, 12, 30.0f, 2}, {17, 1, 12, 30.0f, 2}});
+    const auto bare = make_model(3, {{kAnimIdle, 1, 30, 30.0f, 2}, {kAnimMove, 1, 24, 30.0f, 2}});
+    AnimWorld w;
+    AnimBehaviors b;
+    w.create(1, m.get(), {}, nullptr, 0);
+    w.create(2, bare.get(), {}, nullptr, 0);
+    SimRng rng(77);
+    LocomotorParams lp;
+    LocomotorInput in;
+    in.has_idle = false;
+    in.speed = 0.4f;
+    in.max_speed = 1.0f;
+    in.on_path = true;
+    in.wt_clip = 16;  // state 0x12: MOVESTART
+    in.wt_pos = 0.0f;
+    in.wt_rate = 1.5f;
+    uint32_t st = rng.state();
+    CHECK(b.service_locomotor(w, 1, lp, in, rng, 1) == 1 && w.current_type(1) == 16 && rng.state() == st);
+    CHECK(b.service_locomotor(w, 1, lp, in, rng, 2) == 0 && w.current_type(1) == 16);  // running: the rate only
+    in.wt_clip = kAnimMove;  // state 0x13: MOVE from the carry-over frame, no draw
+    in.wt_pos = 5.0f;
+    in.wt_rate = 1.0f;
+    CHECK(b.service_locomotor(w, 1, lp, in, rng, 3) == 1 && w.current_type(1) == kAnimMove && rng.state() == st);
+    in.wt_rate = 0.25f;  // walking: the MOVE clip runs at the locomotor's tracked rate f x V / S, not Movement_Animation_Speed
+    CHECK(b.service_locomotor(w, 1, lp, in, rng, 4) == 0 && w.current_type(1) == kAnimMove && w.slot(1).speed == 0.25f);
+    in.wt_clip = 17;  // state 0x14: the end clip, a hard cut
+    in.speed = 0.0f;
+    in.on_path = false;
+    in.wt_pos = 0.0f;
+    CHECK(b.service_locomotor(w, 1, lp, in, rng, 5) == 1 && w.current_type(1) == 17 && rng.state() == st);
+    in.wt_clip = -1;  // state 0x15 -> stopped: the idle
+    CHECK(b.service_locomotor(w, 1, lp, in, rng, 6) == 1 && w.current_type(1) == kAnimIdle);
+    // No MOVESTART clip: nothing changes, nothing drawn
+    in.wt_clip = 16;
+    in.speed = 0.4f;
+    in.on_path = true;
+    const int32_t before = w.current_type(2);
+    st = rng.state();
+    CHECK(b.service_locomotor(w, 2, lp, in, rng, 1) == 0 && w.current_type(2) == before && rng.state() == st);
+    // Without a transition clip a MOVE start draws its frame (the contrast to state 0x13)
+    in.wt_clip = -1;
+    CHECK(b.service_locomotor(w, 2, lp, in, rng, 2) == 1 && w.current_type(2) == kAnimMove && rng.state() != st);
+    std::printf("  walk transition clips: MOVESTART / MOVE carry-over / end clip / idle ok\n");
+}
+
 int main() {
     test_types();
     test_death_plan();
@@ -1807,6 +1977,7 @@ int main() {
     test_poses();
     test_determinism();
     test_behaviors();
+    test_walk_transition_clips();
     test_events_and_locomotor();
     test_save();
     test_idle_records();

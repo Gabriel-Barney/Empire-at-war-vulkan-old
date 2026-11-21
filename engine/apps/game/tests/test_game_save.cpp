@@ -20,26 +20,23 @@
 #include <cstdlib>
 #include <filesystem>
 #include <memory>
+#include <optional>
 #include <string>
 #include <vector>
 
+#include "alamo/core/compress.hpp"
 #include "alamo/core/file_provider.hpp"
+#include "alamo/core/host_fs.hpp"
 #include "alamo/core/sim_crc.hpp"
 #include "alamo/game/game_data.hpp"
 #include "alamo/game/game_session.hpp"
 #include "alamo/game/save_games.hpp"
+#include "alamo/test/support.hpp"
 
 using namespace alamo;
 namespace fs = std::filesystem;
 
-static int g_fail = 0;
-#define CHECK(c)                                                     \
-    do {                                                             \
-        if (!(c)) {                                                  \
-            std::printf("FAIL %s:%d: %s\n", __FILE__, __LINE__, #c); \
-            ++g_fail;                                                \
-        }                                                            \
-    } while (0)
+using ::alamo::test::g_fail;
 
 namespace {
 
@@ -501,6 +498,7 @@ game::SessionSpec skirmish_spec(const std::string& map) {
     s.skirmish.ai_faction = "Empire";
     s.seed = 5;
     s.animation = true;  // as the game runs it
+    s.skirmish_hop = true;  // skm1 t01: the save / load runs answer the galactic battle choice (the conflict scaffold)
     return s;
 }
 
@@ -547,11 +545,46 @@ int main(int argc, char** argv) {
         SaveFile f;
         game::SessionSpec s;
         CHECK(SaveFile::read_file(path, f, &err) && game::GameSession::spec_from_save(f, s, &err));
+        CHECK(s.interventions_enabled());  // mcx8 t07: default options, no spec.interventions_off key
         s.seed += 1;
         game::GameSession r(data, js, s);
         const bool ok = r.start_from_save(f, &err);
         std::printf("other seed: %s\n", ok ? "LOADED" : err.c_str());
         CHECK(!ok && err.find("seed") != std::string::npos);
+    }
+    // ref4 t01: the game chunk (v2) carries the host's presentation bytes (the App's StoryPresenter) through a save and a load;
+    // a session with no writer writes the loaded bytes back as they were; a v1 chunk (no presentation) still loads.
+    if (!path.empty()) {
+        SaveFile f;
+        game::SessionSpec s;
+        CHECK(SaveFile::read_file(path, f, &err) && game::GameSession::spec_from_save(f, s, &err));
+        game::GameSession r(data, js, s);
+        CHECK(r.start_from_save(f, &err));
+        CHECK(!r.take_loaded_presentation());  // saved without a writer
+        const std::vector<uint8_t> pres{1, 2, 3, 250};
+        r.set_presentation_writer([&pres](ByteWriter& w) { w.raw(pres); });
+        SaveFile f2, f3;
+        CHECK(r.save(f2, r.save_meta("pres", 0), &err));
+        game::GameSession r2(data, js, s);
+        CHECK(r2.start_from_save(f2, &err));
+        CHECK(r2.take_loaded_presentation() == std::optional<std::vector<uint8_t>>(pres) && !r2.take_loaded_presentation());
+        CHECK(r2.save(f3, r2.save_meta("pres", 0), &err));
+        CHECK(f2.find("game") && f3.find("game") && f2.find("game")->data == f3.find("game")->data);
+        SaveFile v1;  // the same save with a v1 game chunk: version 1, the fields before the presentation section
+        v1.tick = f2.tick;
+        v1.description = f2.description;
+        for (const SaveChunk& c : f2.chunks()) {
+            std::vector<uint8_t> d = c.data;
+            if (c.name == "game") {
+                d.resize(4 + 4 + 8);
+                d[0] = 1;
+            }
+            v1.add(c.name, c.version, std::move(d));
+        }
+        game::GameSession r3(data, js, s);
+        const bool v1_ok = r3.start_from_save(v1, &err);
+        std::printf("game chunk v1: %s\n", v1_ok ? "LOADED" : err.c_str());
+        CHECK(v1_ok && !r3.take_loaded_presentation());
     }
 #ifdef ALAMO_SIM_HAVE_ANIM
     // Animation on: the check either refuses (naming the chunk) or the save it offers loads.
@@ -790,10 +823,27 @@ int main(int argc, char** argv) {
         const std::string p = save_check(data, js, argv[0], dir, saves, c);
         CHECK(!p.empty());
         if (!p.empty()) {
-            constexpr uintmax_t kStoryBattleMaxBytes = 300000;  // 2026-10-31: 142916 bytes at battle tick 150
+            // 2026-10-31: 142916 bytes at battle tick 150, guard 300000. tst1 t07 (2026-11-17): 317988 bytes; the save
+            // grew with the systems saved since (object_scripts ~53 KB packed, scoring ~25 KB, battle.ai ~81 KB, battle.fog
+            // ~38 KB, story.lua ~63 KB; breakdown printed below) and crossed 300000 as lanes added saved state, no single
+            // jump. Guard raised to 400000 (about 25% over today's size) to keep catching runaway growth.
+            constexpr uintmax_t kStoryBattleMaxBytes = 400000;
             const uintmax_t size = fs::file_size(path_from_utf8(p), ec);
             std::printf("story battle save: %" PRIuMAX " bytes (guard %" PRIuMAX ")\n", size, kStoryBattleMaxBytes);
             CHECK(size > 0 && size <= kStoryBattleMaxBytes);
+            // tst1 t07: where the bytes are (the guard is on the packed file; each chunk packed on its own approximates
+            // its share), largest first, so a growth past the guard names its chunks.
+            SaveFile f;
+            if (SaveFile::read_file(p, f)) {
+                std::vector<const SaveChunk*> by_size;
+                for (const SaveChunk& ch : f.chunks()) by_size.push_back(&ch);
+                std::sort(by_size.begin(), by_size.end(), [](const SaveChunk* x, const SaveChunk* y) {
+                    return x->data.size() != y->data.size() ? x->data.size() > y->data.size() : x->name < y->name;
+                });
+                for (size_t i = 0; i < by_size.size() && i < 12; ++i)
+                    std::printf("  chunk %-28s v%-3u %8zu bytes, %7zu packed\n", by_size[i]->name.c_str(), by_size[i]->version,
+                                by_size[i]->data.size(), lz_compress(by_size[i]->data).size());
+            }
         }
     }
     remove_all_long(dir, ec);

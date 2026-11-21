@@ -6,6 +6,10 @@ rem Usage: build_asan.cmd [module list]   default "core;vfs;data;jobs;galactic;o
 rem Dir build-asan\, logs logs\asan_configure.txt / logs\asan_build.txt (finished when asan_configure.txt ends with BUILD_DONE).
 setlocal EnableDelayedExpansion
 cd /d "%~dp0"
+rem Tree name from tools\lint\build_trees.py (ref3 t03), the one place that names build trees.
+set "BT="
+for /f "delims=" %%t in ('""%~dp0toolchain\venv\Scripts\python.exe" -I "%~dp0tools\lint\build_trees.py" name main asan"') do set "BT=%%t"
+if not defined BT (echo %~nx0: no tree name from tools\lint\build_trees.py& exit /b 2)
 if not exist logs mkdir logs
 set TC=%~dp0toolchain
 set MODULES=core;vfs;data;jobs;galactic;objects;anim;commands;tactical;lua;ai
@@ -21,6 +25,8 @@ set CMAKE=%TC%\venv\Scripts\cmake.exe
 set CTEST=%TC%\venv\Scripts\ctest.exe
 call "%~dp0tools\test_env.cmd"
 call "%~dp0tools\cache_env.cmd"
+rem Which code this run builds (commit, worktree, source hash), copied into the build record with the outcome.
+python -I tools\lint\build_state.py begin %BT% --modules "!MODULES!" --tests all
 rem ALAMO_SANITIZE picks the sanitizers (default undefined). ASan on clang 20 (MSVC ABI) crashes in any catch handler
 rem (even a minimal try/catch) because the stack instrumentation touches the exception funclet frame; address,undefined also
 rem made UBSan report a false "member call on null pointer" in engine/jobs/tests/test_jobs.cpp:196. The same cause: both go
@@ -31,21 +37,22 @@ set SAN=-fsanitize=%ALAMO_SANITIZE% -fno-sanitize-recover=undefined -fno-omit-fr
 echo %ALAMO_SANITIZE%| findstr /c:address >nul && set SAN=!SAN! -mllvm -asan-stack=0
 > logs\asan_configure.txt (
   "%TC%\llvm\bin\clang++.exe" --version 2>&1
-  "%CMAKE%" -S . -B build-asan -G Ninja -DCMAKE_BUILD_TYPE=Release "-DCMAKE_MAKE_PROGRAM=%TC%\venv\Scripts\ninja.exe" "-DCMAKE_CXX_COMPILER=%TC%\llvm\bin\clang++.exe" "-DCMAKE_CXX_FLAGS=-Wconversion -Wshadow !SAN!" "-DCMAKE_EXE_LINKER_FLAGS=!SAN! -Wl,/IGNORE:4217" "-DALAMO_ENGINE_MODULES=!MODULES!" 2>&1
+  "%CMAKE%" -S . -B %BT% -G Ninja -DCMAKE_BUILD_TYPE=Release "-DCMAKE_MAKE_PROGRAM=%TC%\venv\Scripts\ninja.exe" "-DCMAKE_CXX_COMPILER=%TC%\llvm\bin\clang++.exe" "-DCMAKE_CXX_FLAGS=-Wconversion -Wshadow !SAN!" "-DCMAKE_EXE_LINKER_FLAGS=!SAN! -Wl,/IGNORE:4217" "-DALAMO_ENGINE_MODULES=!MODULES!" 2>&1
   echo configure exit !ERRORLEVEL!
 )
 > logs\asan_build.txt (
-  "%CMAKE%" --build build-asan 2>&1
+  "%CMAKE%" --build %BT% 2>&1
   echo build exit !ERRORLEVEL!
   echo === tests
   rem Per-tree temp dir, as in build_clang.cmd.
-  if not exist build-asan\tmp mkdir build-asan\tmp
-  set "TMP=%~dp0build-asan\tmp"
-  set "TEMP=%~dp0build-asan\tmp"
-  "%CTEST%" --test-dir build-asan --output-on-failure --output-junit "%~dp0build-asan\ctest_junit.xml" -j 4 2>&1
+  if not exist %BT%\tmp mkdir %BT%\tmp
+  set "TMP=%~dp0%BT%\tmp"
+  set "TEMP=%~dp0%BT%\tmp"
+  python -I tools\lint\test_slot.py -- "%CTEST%" --test-dir %BT% --output-on-failure --output-junit "%~dp0%BT%\ctest_junit.xml" -j 4 2>&1
   echo ctest exit !ERRORLEVEL!
-  python tools\lint\ctest_skips.py "%~dp0build-asan\ctest_junit.xml"
+  python tools\lint\ctest_skips.py "%~dp0%BT%\ctest_junit.xml"
 )
 echo BUILD_DONE>> logs\asan_configure.txt
-python tools\lint\build_summary.py logs\asan_configure.txt logs\asan_build.txt
-python roadmap-store\roadmap_store.py record-build clang-asan build-asan logs\asan_configure.txt logs\asan_build.txt
+python tools\lint\build_summary.py --state %BT%\build_state.json logs\asan_configure.txt logs\asan_build.txt
+set "ALAMO_BUILD_EXTRA=%~dp0%BT%\build_state.json"
+python -I tools\lint\record_build.py clang-asan %BT% logs\asan_configure.txt logs\asan_build.txt

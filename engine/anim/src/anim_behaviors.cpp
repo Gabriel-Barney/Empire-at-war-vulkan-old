@@ -1,6 +1,8 @@
 #include "alamo/anim/anim_behaviors.hpp"
+#include "alamo/core/frames.hpp"
 
 #include <algorithm>
+#include <cmath>
 
 #include "alamo/core/sim_crc.hpp"
 #include "alamo/core/sim_rng.hpp"
@@ -9,8 +11,8 @@ namespace alamo::anim {
 
 uint64_t seconds_to_frames(float seconds) {
     if (!(seconds > 0.0f)) return 0;
-    const float f = seconds * static_cast<float>(kSimTicksPerSecond);
-    return f >= 1.0e18f ? static_cast<uint64_t>(1000000000000000000ull) : static_cast<uint64_t>(f);
+    // ref4 t03: x86 truncation (alamo/core/frames.hpp); out of int32 range 0x80000000 frames, read unsigned.
+    return static_cast<uint32_t>(frames_trunc(seconds * static_cast<float>(kSimTicksPerSecond)));
 }
 
 int32_t flinch_type(float fx, float fy, float dx, float dy, bool attacking) {
@@ -220,27 +222,24 @@ bool is_move_family(int32_t t) {
     return t == kAnimMove || t == kAnimFireMove || t == kAnimWalkMove || t == kAnimCrouchMove || t == kAnimDeployedWalk;
 }
 
+bool is_walk_transition_clip(int32_t t) { return t >= 16 && t <= 20; }
+
+float infantry_turn_blend(float err_deg, float rate_deg_per_frame, float cap) {
+    // ledger: consumes GameConstants.InfantryTurnBlendTime (the cap: AnimTunables::infantry_turn_blend_seconds)
+    if (!(rate_deg_per_frame > 0.0f)) return cap;
+    float d = err_deg;  // 0x20b100: into [0, 360)
+    if (d >= 360.0f) d -= 360.0f;
+    else if (d < 0.0f) d += 360.0f;
+    const float t = (std::fabs(d) / rate_deg_per_frame) * 0.03333f;
+    return cap <= t ? cap : t;
+}
+
 int32_t default_idle_type(const AnimModel* m, const LocomotorInput& in, const IdleParams& idle) {
     // 0x395920: Idle Crouch when crouched, else the container's mapping when garrisoned, else the idle. [port] a
     // type without clips falls back to the plain idle.
     int32_t t = in.crouched ? kAnimIdleCrouch : (in.idle_type != kNoAnimType ? in.idle_type : idle.idle_type);
     if (m && m->variant_count(t) == 0) t = idle.idle_type;
     return t;
-}
-
-int32_t death_type_for_kind(uint8_t k) {
-    switch (k) {
-        case 2: return kAnimFwDie;
-        case 3: return kAnimFtkDie;
-        case 4: return kAnimFlDie;
-        case 7: return kAnimFireDie;
-        case 8: return kAnimCaDie;
-        case 11: return kAnimDeployedCaDie;
-        case 12: return kAnimDeployedDie;
-        case 14: return kAnimCrushed;
-        case 15: return kAnimEatenDie;
-        default: return kNoAnimType;
-    }
 }
 
 uint32_t AnimBehaviors::service_locomotor(AnimWorld& w, ObjectId id, const LocomotorParams& p, const LocomotorInput& in, SimRng& rng,
@@ -259,8 +258,17 @@ uint32_t AnimBehaviors::service_locomotor(AnimWorld& w, ObjectId id, const Locom
     e.last_yaw = in.yaw_deg;
     e.have_yaw = true;
     e.last_crouch = in.crouched;
-    const float move_blend = w.tunables().move_blend_seconds, idle_blend = w.tunables().idle_blend_seconds;
+    const AnimTunables& tn = w.tunables();
+    const float move_blend = tn.move_blend_seconds, idle_blend = tn.idle_blend_seconds;
     const int32_t cur = w.current_type(id);
+    // mcx4 t11 (MCX4_T11_T12_RE_ANSWERS §B4 "Blend times" [H]): a team member's blend into `next` (0x62c420): from an idle-
+    // or turn-like clip TeamMoveBlendTime (TeamCrouchMoveBlendTime into a crouch clip); else into an idle-like clip
+    // IdleWalkBlendTime (CrouchIdleWalkBlendTime into a crouch idle); else 0.2 s, 0.4 s when the CROUCHMOVE state changes.
+    const auto team_blend = [&](int32_t next) -> float {
+        if (is_idle_like(cur) || is_turn(cur)) return is_crouch(next) ? tn.team_crouch_move_blend_seconds : tn.team_move_blend_seconds;
+        if (is_idle_like(next)) return is_crouch(next) ? tn.crouch_idle_walk_blend_seconds : tn.idle_walk_blend_seconds;
+        return (cur == kAnimCrouchMove) == (next == kAnimCrouchMove) ? kTeamClipSwitchBlendSeconds : kTeamCrouchSwitchBlendSeconds;
+    };
     const bool moving = in.movable && in.speed > 0.0f;
     IdleParams ip = p.idle;
     ip.idle_type = default_idle_type(m, in, p.idle);
@@ -278,6 +286,26 @@ uint32_t AnimBehaviors::service_locomotor(AnimWorld& w, ObjectId id, const Locom
         }
         return plays + (service_idle(w, id, ip, in.target, rng, frame, crouch_changed && plays == 0) ? 1u : 0u);
     };
+    // bkx1 t04 (b0059, BKX1_RENDER_RE §2.1 / §2.2 [H]): the Walk_Transition clips follow the locomotor. MOVESTART (16, state
+    // 0x12) and the end clip (17..20, state 0x14) start when the locomotor starts them: variant 0 ([port] no variant draw,
+    // vanilla ships only _00), one-shot, at the locomotor's frame and rate; MOVESTART blends in over the move blend ([port]
+    // retail's blend global 0x140b39904 is unread), an end clip is a hard cut. A missing clip changes nothing (§2.3: the
+    // current clip stays).
+    if (is_walk_transition_clip(in.wt_clip)) {
+        if (cur == in.wt_clip) {
+            w.set_speed(id, in.wt_rate);
+            return then_idle(0);
+        }
+        if (m->variant_count(in.wt_clip) == 0) return then_idle(0);
+        PlayRequest r;
+        r.type = in.wt_clip;
+        r.index = 0;
+        r.loop = false;
+        r.blend_seconds = in.wt_clip == 16 ? move_blend : 0.0f;
+        r.speed = in.wt_rate;
+        r.start_frame = in.wt_pos;
+        return then_idle(w.play(id, r, nullptr, frame) == PlayResult::Played ? 1u : 0u);
+    }
     if (moving) {
         const float ratio = in.max_speed > 0.0f ? in.speed / in.max_speed : 1.0f;
         int32_t want = kAnimMove;
@@ -288,24 +316,33 @@ uint32_t AnimBehaviors::service_locomotor(AnimWorld& w, ObjectId id, const Locom
         if (m->variant_count(want) == 0) want = kAnimMove;
         if (m->variant_count(want) == 0) return then_idle(0);
         const float base = want == kAnimDeployedWalk ? p.deployed_walk_anim_speed : p.movement_anim_speed;
-        const float speed = base * std::max(ratio, p.min_move_ratio);
+        float speed = base * std::max(ratio, p.min_move_ratio);
+        // bkx1 t04 (MOVEMENT §3.5.2 C.1, BKX1_RENDER_RE §2.1): a Walk_Transition unit's MOVE clip is the locomotor's tracked
+        // clip, at its rate f x V / S, so the end clip it picks from that phase starts from the pose on screen.
+        if (want == kAnimMove && in.wt_clip == kAnimMove) speed = in.wt_rate;
         if (cur == want) {
             w.set_speed(id, speed);
             return then_idle(0);
         }
+        // mcx4 t11 (0x61f840 [H]): the walker's move clips blend MoveBlendTime, except a Walk_Transition unit's (its MOVE
+        // continues the MOVESTART pose) and Deployed_Walk (pack +0x2b3): blend 0; a team member's: team_blend.
+        const bool cut = in.wt_clip == kAnimMove || want == kAnimDeployedWalk;
+        const float blend = in.team_member ? team_blend(want) : (cut ? 0.0f : move_blend);
         if (is_move_family(cur)) {
-            w.switch_preserving_phase(id, want, 0, true, move_blend, speed, frame);
+            w.switch_preserving_phase(id, want, 0, true, blend, speed, frame);
             return then_idle(1);
         }
         PlayRequest r;
         r.type = want;
         r.index = 0;
         r.loop = true;
-        r.blend_seconds = move_blend;
+        r.blend_seconds = blend;
         r.speed = speed;
         const ClipRef* c = m->clip(want, 0);
         const uint32_t count = c && c->clip ? c->clip->frame_count : 0u;
-        if (count > 0) r.start_frame = static_cast<float>(rng.range_int(0, static_cast<int32_t>(count) - 1));  // synced
+        // bkx1 t04 (§2.1, state 0x13 [H]): MOVE after MOVESTART starts at the locomotor's carry-over frame int(+0xf4), no draw
+        if (in.wt_clip == kAnimMove && is_walk_transition_clip(cur)) r.start_frame = in.wt_pos;
+        else if (count > 0) r.start_frame = static_cast<float>(rng.range_int(0, static_cast<int32_t>(count) - 1));  // synced
         w.play(id, r, &rng, frame);
         return then_idle(1);
     }
@@ -318,16 +355,20 @@ uint32_t AnimBehaviors::service_locomotor(AnimWorld& w, ObjectId id, const Locom
             r.type = turn;
             r.index = 0;
             r.loop = false;
-            r.blend_seconds = move_blend;
+            // mcx4 t11 (0x620190 / 0x62bef0 [H]): min(time to turn, InfantryTurnBlendTime)
+            r.blend_seconds = infantry_turn_blend(in.turn_error_deg, in.turn_rate_deg, tn.infantry_turn_blend_seconds);
             r.speed = 1.0f;
             return then_idle(w.play(id, r, &rng, frame) == PlayResult::Played ? 1u : 0u);
         }
     }
-    if (is_move_family(cur)) {
+    if (is_move_family(cur) || is_walk_transition_clip(cur)) {  // bkx1 t04: also after an end clip (0x15 -> the idle, §2.2)
         PlayRequest r;  // stopped: back to the idle (then the idle behaviour); the records before this frame's aging
         r.type = presence_idle_type(m, id, ip, e.records);
         r.loop = p.idle.loop_idle;
-        r.blend_seconds = idle_blend;
+        // mcx4 t11 (0x61f510 / 0x62c420 [H]): from a move clip the walker's idle blends IdleWalkBlendTime, a team member's
+        // team_blend; after a Walk_Transition end clip (state 0x15, 0x61fc30) the .bss global 0x140b39908 ([port] the idle
+        // blend). [port M] the idle starts when the speed reaches 0, not the retail lead time before arrival.
+        r.blend_seconds = in.team_member ? team_blend(r.type) : (is_move_family(cur) ? tn.idle_walk_blend_seconds : idle_blend);
         r.speed = p.idle.idle_rate;
         w.play(id, r, &rng, frame);
         return then_idle(1);
@@ -346,6 +387,21 @@ bool AnimBehaviors::deploy(AnimWorld& w, ObjectId id, bool undeploy, float rate,
     return w.play(id, r, &rng, frame) == PlayResult::Played;
 }
 
+bool AnimBehaviors::deploy_at_end(AnimWorld& w, ObjectId id, uint64_t frame) {
+    if (is_corpse(id) || !w.contains(id)) return false;
+    const AnimModel* m = w.model(id);
+    const ClipRef* c = m ? m->clip(kAnimDeploy, 0) : nullptr;
+    if (!c || !c->clip) return false;
+    PlayRequest r;
+    r.type = kAnimDeploy;
+    r.index = 0;
+    r.loop = false;
+    r.blend_seconds = 0.2f;
+    r.speed = 1.0f;
+    r.start_frame = c->clip->frame_count > 0 ? static_cast<float>(c->clip->frame_count - 1) : 0.0f;
+    return w.play(id, r, nullptr, frame) == PlayResult::Played;
+}
+
 // ---- death / corpse ----------------------------------------------------------------------------------
 
 uint64_t one_shot_frames(uint32_t frame_count, float fps, float speed) {
@@ -356,6 +412,7 @@ uint64_t one_shot_frames(uint32_t frame_count, float fps, float speed) {
     const float dt = static_cast<float>(1.0 / kSimTicksPerSecond);
     const float step = fps * dt * speed;
     float f = 0.0f;
+    // limit: guard one-shot finish search bound (~6 days of sim time = never)
     constexpr uint64_t kCap = 1ull << 24;  // ~6 days of sim time: treated as never
     for (uint64_t n = 1; n <= kCap; ++n) {
         bool finished = false;
@@ -376,11 +433,8 @@ DeathPlan plan_death(const AnimModel* m, const DeathParams& p, uint8_t damage_ki
         d.lifetime = seconds_to_frames(p.spin_away_seconds);
         return d;
     }
-    int32_t type = p.type;
-    if (!p.type_explicit && m) {
-        const int32_t k = death_type_for_kind(damage_kind);
-        if (k != kNoAnimType && m->variant_count(k) > 0) type = k;
-    }
+    (void)damage_kind;  // r3g t07: the kind never picks the death clip (DeathBehavior 0x58cdb0 plays +0xd98 / +0xd9c)
+    const int32_t type = p.type;
     uint32_t index = p.index;
     const uint32_t count = m ? m->variant_count(type) : 0u;
     if (index == kRandomVariant) index = count > 0 ? static_cast<uint32_t>(rng.range_int(0, static_cast<int32_t>(count) - 1)) : 0u;

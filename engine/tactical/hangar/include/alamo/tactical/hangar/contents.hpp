@@ -7,9 +7,11 @@
 // each entry in order leaves S and joins S' (no eject effects). [L] the two contents-pack bytes +0x30 / +0x31 the
 // original copies are not modelled.
 //
-// TacticalProduction: the per-player tactical build queues. [port] One FIFO list per player; the first order of each
-// builder in a player's list counts down one frame per update() (the original's two queues at +0 / +0x18 and its exact
-// per-builder parallelism are not specified; this is the minimum the upgrade path needs). Build frames =
+// TacticalProduction: the per-player tactical build queues (build manager player +0x3a0, SKIRMISH_SETUP §7). mcx4 t04
+// (service 0x498170 [H]): two queues per player, picked by the type's Tactical_Production_Queue (+0xa30) minus 2 -
+// Tactical_Units (2) and Tactical_Upgrades (3); the head of each queue counts down one frame per update() whatever its
+// builder, and when it pops the next head starts at its full time. [port] One list per player in issue order, each
+// order carrying its queue index (the head of a queue = its first order in the list). Build frames =
 // int(seconds x FPS) with the seconds already multiplied by the host (Tactical_Build_Time_Seconds, the AI
 // Space_Build_Time_Multiplier, build-time modifiers list 10). retarget() is §1.2 steps 7 / 8 (0x497460): orders keep
 // their progress on the new builder.
@@ -40,6 +42,7 @@
 #include <cstdint>
 #include <span>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "alamo/tactical/combat/combat_system.hpp"
@@ -94,14 +97,16 @@ struct BuildOrder {
     uint32_t total_frames = 0;
     uint32_t frames_left = 0;
     uint32_t issued = 0;
+    uint8_t queue = 0;               // Tactical_Production_Queue - 2: 0 Tactical_Units, 1 Tactical_Upgrades (save v2)
 };
 
 class TacticalProduction {
 public:
     explicit TacticalProduction(uint32_t fps = combat::kDefaultFps) : fps_(fps ? fps : combat::kDefaultFps) {}
 
-    // Queues `type` at `builder` for `player`; build frames = int(seconds x FPS) (at least 1). Returns the order id.
-    uint32_t enqueue(int32_t player, ObjectId builder, int32_t type, float seconds, uint32_t frame);
+    // Queues `type` at `builder` for `player` in queue `q` (0 / 1, see BuildOrder::queue); build frames =
+    // int(seconds x FPS) (at least 1). Returns the order id.
+    uint32_t enqueue(int32_t player, ObjectId builder, int32_t type, float seconds, uint32_t frame, uint8_t q = 0);
     bool cancel(uint32_t order);
     // §1.2 steps 7 / 8 (0x497460): `player`'s orders at `old_builder` now belong to `new_builder` (progress kept).
     // Returns how many changed.
@@ -109,7 +114,7 @@ public:
     // The builder is gone: its orders (every player) are dropped and returned (issue order) [port].
     std::vector<BuildOrder> builder_removed(ObjectId builder);
 
-    // Once per frame: the first order of each builder in each player's list counts down; finished ones move to
+    // Once per frame: the head (first order) of each of a player's queues counts down; finished ones move to
     // completed() (players in index order, list order).
     void update(uint32_t frame);
     std::span<const BuildOrder> completed() const { return done_; }
@@ -118,6 +123,11 @@ public:
     std::span<const BuildOrder> queue(int32_t player) const;  // list order
     // Orders of `type` queued or in progress for `player` (build limits).
     uint32_t count_type(int32_t player, int32_t type) const;
+    // Orders queued or in progress in `player`'s queue `q` (the human Max_Build_Queue test).
+    uint32_t count_queue(int32_t player, uint8_t q) const;
+    // mcx4 t04: builds of `type` that `player` completed in this battle (completion 0x498f70 adds 1 to the player's lifetime
+    // count, 0x2821b0, before the builder is looked at). The host adds the galactic count for the lifetime build limits.
+    uint32_t built_count(int32_t player, int32_t type) const;
 
     void hash(StateHasher& h) const;
     void register_crc(CrcRegistry& registry, const std::string& prefix = "hangar") const;
@@ -128,10 +138,12 @@ public:
 
 private:
     std::vector<BuildOrder>& list(int32_t player);
+    void add_built(int32_t player, int32_t type);
     uint32_t fps_;
     uint32_t next_id_ = 1;
     std::vector<std::vector<BuildOrder>> players_;  // by player index
     std::vector<BuildOrder> done_;
+    std::vector<std::vector<std::pair<int32_t, uint32_t>>> built_;  // per player: (type, completed builds), first-build order
 };
 
 }  // namespace alamo::tactical::hangar

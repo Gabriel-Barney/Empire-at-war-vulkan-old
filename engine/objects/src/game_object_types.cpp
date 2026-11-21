@@ -1,10 +1,12 @@
 #include "alamo/objects/game_object_types.hpp"
 
 #include <algorithm>
+#include <cstdint>
 
 #include "alamo/core/hash.hpp"
 #include "alamo/core/log.hpp"
 #include "alamo/data/values.hpp"
+#include "alamo/data/xml_list.hpp"
 
 namespace alamo::objects {
 
@@ -41,6 +43,7 @@ const Def kDefaults[] = {
     {"Build_Max_Instances_Per_Planet", "-1"}, {"Tactical_Build_Cost_Campaign", "-1"},
     {"Space_Override_Population_Value", "-1"}, {"Land_Override_Population_Value", "-1"},
     {"Select_Box_Z_Adjust", "-1.0"}, {"Tactical_Sell_Percentage", "0.5"}, {"Spawned_Squadron_Delay_Seconds", "5.0"},
+    {"Ranged_Target_Z_Adjust", "6.0"},  // ref6 t01: type +0x4dc, constructor default 6.0 (LOB_SOLVER §1.1)
     {"Projectile_Fire_Pulse_Count", "1"}, {"Projectile_Fire_Pulse_Delay_Seconds", "1.0"},
     {"Projectile_Max_Flight_Distance", "50.0"}, {"Alternate_Max_Speed", "1.0"}, {"Alternate_Max_Rate_Of_Turn", "2.0"},
     {"Max_Thrust", "0.015"}, {"Max_Rate_Of_Roll", "2.0"}, {"Bank_Turn_Angle", "70.0"}, {"Max_Lift", "0.8"},
@@ -49,7 +52,7 @@ const Def kDefaults[] = {
     {"Dense_FOW_Reveal_Range_Multiplier", "0.5"},
     // Enums whose constructor value is -1 ("none"); kept as FieldValue::i = -1 with no name.
     {"MovementClass", "-1"}, {"Ship_Class", "-1"}, {"OccupationStyle", "-1"}, {"UnitCollisionClass", "-1"},
-    {"Weather_Category", "-1"}, {"Tactical_Production_Queue", "-1"}, {"Projectile_Category", "-1"},
+    {"Weather_Category", "-1"}, {"Tactical_Production_Queue", "-1"}, {"Projectile_Blast_Area_Dropoff_Tiers", "5"}, {"Projectile_Category", "-1"},
 };
 
 const FieldId kNoField = 0xFFFFFFFFu;
@@ -283,7 +286,7 @@ void GameObjectTypes::apply(State& s, FieldId f, std::string_view text, bool var
         case Conv::Vec3:
         case Conv::Float4:
         case Conv::Rgba: {
-            const size_t n = tf.conv == Conv::Float2 ? 2 : (tf.conv == Conv::Vec3 ? 3 : 4);
+            const size_t n = static_cast<size_t>(tf.conv == Conv::Float2 ? 2 : (tf.conv == Conv::Vec3 ? 3 : 4));
             const auto toks = split_type_list(text);
             for (size_t k = 0; k < n && k < toks.size(); ++k)
                 v.v[k] = tf.conv == Conv::Rgba ? static_cast<float>(c_atoi(toks[k])) : static_cast<float>(c_atof(toks[k]));
@@ -439,12 +442,12 @@ std::string_view GameObjectTypes::variant_name(TypeIndex t) const {
 
 TypeIndex GameObjectTypes::resolve_name(std::string_view name) const {
     if (name.empty() || iequals(name, "None")) return kNone;
-    return raw_->find(name);
+    return raw().find(name);
 }
 
 TypeIndex GameObjectTypes::variant_parent(TypeIndex t) const {
     const std::string_view n = variant_name(t);
-    return n.empty() ? kNone : raw_->find(n);
+    return n.empty() ? kNone : raw().find(n);
 }
 
 bool GameObjectTypes::try_resolve(TypeIndex t, uint8_t pass) {
@@ -627,29 +630,24 @@ void GameObjectTypes::after_pass() {
 }
 
 void GameObjectTypes::load_registries(const FileProvider& provider) {
+    // cu5 t02: the shared list walk. Every child element of the list's root is an entry (not only <File>), in list
+    // order; the listed documents stay alive in registry_docs_ (the tables keep views into them).
+    data::ListedXmlOptions list_options;
+    list_options.entry_tag = {};
+    list_options.visit_missing = true;
+    list_options.visit_unparsable = true;
     auto load_list = [&](std::string_view list, auto&& per_element) {
-        std::vector<uint8_t> bytes;
-        if (!provider.read(list, bytes)) return false;
-        auto doc = std::make_unique<data::XmlDocument>(data::XmlDocument::parse(bytes, std::string(list)));
-        if (!doc->ok()) return false;
-        const data::XmlDocument* ld = doc.get();
-        registry_docs_.push_back(std::move(doc));
-        for (data::XmlNode e = ld->root().first_child(); e; e = e.next_sibling()) {
-            const std::string_view name = data::trim(e.text());
-            if (name.empty()) continue;
-            std::string path = "Data\\XML\\";
-            path += name;
-            if (!provider.read(path, bytes)) {
-                warn("unable to open XML file '" + path + "' (skipped)");
-                continue;
+        const data::ListStatus st = data::for_each_listed_xml(provider, list, [&](data::ListedXmlFile& file) {
+            if (!file.doc) {
+                warn("unable to open XML file '" + file.entry.path + "' (skipped)");
+                return;
             }
-            auto fd = std::make_unique<data::XmlDocument>(data::XmlDocument::parse(bytes, path));
-            const data::XmlDocument* d = fd.get();
-            registry_docs_.push_back(std::move(fd));
-            if (!d->ok()) continue;
+            const data::XmlDocument* d = file.doc.get();
+            registry_docs_.push_back(std::move(file.doc));
+            if (!d->ok()) return;
             for (data::XmlNode n = d->root().first_child(); n; n = n.next_sibling()) per_element(n);
-        }
-        return true;
+        }, list_options);
+        return st == data::ListStatus::Ok;
     };
     // Last text of a direct child (scalars: last occurrence wins).
     auto last_child_text = [](data::XmlNode n, std::string_view tag) {
@@ -844,6 +842,11 @@ bool GameObjectTypes::build(const ObjectTypeDatabase& raw, const FileProvider* p
     return true;
 }
 
+const ObjectTypeDatabase& GameObjectTypes::empty_raw() {
+    static const ObjectTypeDatabase kEmpty;  // immutable after construction
+    return kEmpty;
+}
+
 const FieldValue* GameObjectTypes::value(TypeIndex t, FieldId f) const {
     if (t >= state_.size() || f >= defaults_.size()) return nullptr;
     return find(state_[t], f);
@@ -856,9 +859,34 @@ const FieldValue& GameObjectTypes::effective(TypeIndex t, FieldId f) const {
 }
 
 bool GameObjectTypes::get_bool(TypeIndex t, std::string_view tag) const { return effective(t, find_type_field(tag)).b; }
-int32_t GameObjectTypes::get_int(TypeIndex t, std::string_view tag) const { return effective(t, find_type_field(tag)).i; }
-float GameObjectTypes::get_float(TypeIndex t, std::string_view tag) const { return effective(t, find_type_field(tag)).f; }
-double GameObjectTypes::get_double(TypeIndex t, std::string_view tag) const { return effective(t, find_type_field(tag)).d; }
+// bkc1 t07 (b0126): the numeric getters read the slot the field's parser fills, so a caller does not need to know
+// which numeric kind the schema gives a tag. A float-parsed field (codes 0x8..0xb, e.g. Override_Bounty_SP with text
+// "50") read with get_int truncates toward zero, as a C float -> int cast; an int field read with get_float converts.
+// Before, get_int on a float field returned the unset int slot (0).
+int32_t GameObjectTypes::get_int(TypeIndex t, std::string_view tag) const {
+    const FieldId f = find_type_field(tag);
+    const FieldValue& v = effective(t, f);
+    if (f >= defaults_.size()) return v.i;
+    switch (type_fields()[f].conv) {
+        case Conv::Float:
+        case Conv::Float01: return static_cast<int32_t>(v.f);
+        case Conv::Double:
+        case Conv::Double01: return static_cast<int32_t>(v.d);
+        default: return v.i;
+    }
+}
+float GameObjectTypes::get_float(TypeIndex t, std::string_view tag) const {
+    const FieldId f = find_type_field(tag);
+    const FieldValue& v = effective(t, f);
+    if (f >= defaults_.size()) return v.f;
+    switch (type_fields()[f].conv) {
+        case Conv::Int32:
+        case Conv::Int8:
+        case Conv::UIntClamp100: return static_cast<float>(v.i);
+        case Conv::Double: return static_cast<float>(v.d);
+        default: return v.f;
+    }
+}
 int32_t GameObjectTypes::targeting_priority_set(TypeIndex t) const {
     return have_priority_sets_ && ids().priority_set != kNoField ? effective(t, ids().priority_set).i : -1;
 }

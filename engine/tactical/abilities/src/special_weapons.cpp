@@ -1,4 +1,6 @@
 #include "alamo/tactical/abilities/special_weapons.hpp"
+#include "alamo/core/frames.hpp"
+#include "alamo/tactical/abilities/x86_int.hpp"
 
 #include <algorithm>
 
@@ -35,7 +37,7 @@ const SpecialWeaponSystem::Pack* SpecialWeaponSystem::pack(ObjectId id) const {
 uint32_t SpecialWeaponSystem::recharge_frames(const SpecialWeaponDesc& d) const {
     // int(fps x recharge) (0x4ea3f0 [H]; 0x491770 uses the same getter [M]).
     const float f = static_cast<float>(cfg_.fps) * d.recharge_seconds;
-    return f > 0.0f ? static_cast<uint32_t>(f) : 0u;
+    return f > 0.0f ? static_cast<uint32_t>(frames_trunc(f)) : 0u;
 }
 
 void SpecialWeaponSystem::event(SwEventKind k, const Pack& p, uint32_t frame, int32_t value, ObjectId target, Vec3 point) {
@@ -186,7 +188,7 @@ bool SpecialWeaponSystem::restart(ObjectId id, uint32_t frame, float seconds) {
     const SpecialWeaponDesc& d = descs_[p->desc];
     p->start = frame;
     const float f = static_cast<float>(cfg_.fps) * seconds;
-    p->ready = seconds < 0.0f ? frame + recharge_frames(d) : frame + (f > 0.0f ? static_cast<uint32_t>(f) : 0u);
+    p->ready = seconds < 0.0f ? frame + recharge_frames(d) : frame + (f > 0.0f ? static_cast<uint32_t>(frames_trunc(f)) : 0u);
     p->ready_signalled = p->ready <= frame ? 1 : 0;
     return true;
 }
@@ -203,6 +205,17 @@ ObjectId SpecialWeaponSystem::tsw_target(ObjectId id) const {
     return p ? p->tsw_target : kNoObject;
 }
 
+float SpecialWeaponSystem::tsw_eta_seconds(ObjectId id, Vec3 position) const {
+    const Pack* p = pack(id);
+    if (!p || p->tsw != kTswArming || p->desc >= descs_.size()) return -1.0e30f;
+    const SpecialWeaponDesc& d = descs_[p->desc];
+    Vec3 dv = position - p->tsw_target_pos;
+    dv.z = 0.0f;
+    const float remaining = std::max(0.0f, length(dv) - d.tsw_attack_distance);
+    if (!(d.max_speed > 0.0f)) return -2.0f;
+    return remaining / d.max_speed / 30.0f - 2.0f;
+}
+
 void SpecialWeaponSystem::set_tsw_state(Pack& p, int32_t s, uint32_t frame) {
     if (p.tsw == s) return;
     p.tsw = s;
@@ -215,7 +228,7 @@ bool SpecialWeaponSystem::tsw_fire(ObjectId id, bool planet_ok, uint32_t frame) 
     const SpecialWeaponDesc& d = descs_[p->desc];
     set_tsw_state(*p, kTswPowerUp, frame);
     const float f = 30.0f * d.tsw_power_up_seconds;  // int(30 x seconds) [H]
-    p->countdown = f > 0.0f ? static_cast<int32_t>(f) : 0;
+    p->countdown = f > 0.0f ? trunc_i32(f) : 0;
     event(SwEventKind::TswFiring, *p, frame, 0, p->tsw_target);
     return true;
 }
@@ -286,18 +299,18 @@ void SpecialWeaponSystem::tsw_service(Pack& p, const SpecialWeaponDesc& d, uint3
         }
         case kTswReady: break;  // waits for tsw_fire
         case kTswPowerUp:
-            if (--p.countdown <= 0) set_tsw_state(p, kTswFire, frame);
+            if ((p.countdown = dec_wrap(p.countdown)) <= 0) set_tsw_state(p, kTswFire, frame);
             break;
         case kTswFire: set_tsw_state(p, kTswAttackAnim, frame); break;  // state 6: one service (TSW_PLANET_DESTROY §3)
         case kTswAttackAnim: {  // state 7: attack animation (anim 5) + SFXEvent_Fire, countdown, one service
             event(SwEventKind::TswAttackAnim, p, frame, 5, p.tsw_target);
             const float f = 30.0f * d.tsw_attack_anim_seconds;
-            p.countdown = f > 0.0f ? static_cast<int32_t>(f) : 0;
+            p.countdown = f > 0.0f ? trunc_i32(f) : 0;
             set_tsw_state(p, kTswAttackWait, frame);
             break;
         }
         case kTswAttackWait:
-            if (--p.countdown <= 0) set_tsw_state(p, kTswDestruction, frame);
+            if ((p.countdown = dec_wrap(p.countdown)) <= 0) set_tsw_state(p, kTswDestruction, frame);
             break;
         case kTswDestruction: {
             // TSW_PLANET_DESTROY §4: state := 10 first, countdown := the debris delay; then the Death_Explosions pick
@@ -312,7 +325,7 @@ void SpecialWeaponSystem::tsw_service(Pack& p, const SpecialWeaponDesc& d, uint3
             break;
         }
         case kTswDebrisWait:  // §3: countdown; at 0 every Death_By_TSW_Replacements entry, then the post-destruction wait
-            if (--p.countdown <= 0) {
+            if ((p.countdown = dec_wrap(p.countdown)) <= 0) {
                 p.debris_pending = 0;
                 event(SwEventKind::TswDebris, p, frame, p.debris_pick, p.tsw_target, p.tsw_target_pos);
                 p.countdown = d.tsw_post_destruction_frames;
@@ -320,7 +333,7 @@ void SpecialWeaponSystem::tsw_service(Pack& p, const SpecialWeaponDesc& d, uint3
             }
             break;
         case kTswPostWait:
-            if (--p.countdown <= 0) set_tsw_state(p, kTswRelease, frame);
+            if ((p.countdown = dec_wrap(p.countdown)) <= 0) set_tsw_state(p, kTswRelease, frame);
             break;
         case kTswRelease:  // 0x42a7b0 state 13: state 0, target cleared, screen effect off, hold released with replay
             p.tsw_init = 2;
@@ -363,7 +376,7 @@ void SpecialWeaponSystem::tick(uint32_t frame, SimRng& rng, const SpecialWeaponW
             shots_.push_back(s);
             --p.pulses_left;
             const float f = static_cast<float>(cfg_.fps) * d.pulse_delay_seconds;
-            const uint32_t gap = f > 0.0f ? static_cast<uint32_t>(f) : 0u;
+            const uint32_t gap = f > 0.0f ? static_cast<uint32_t>(frames_trunc(f)) : 0u;
             p.next_pulse = p.next_pulse + gap;  // no delay: the whole volley this frame
         }
         if ((d.kinds & (kSwSpecialWeapon | kSwLobbing)) && !p.ready_signalled && frame >= p.ready) {

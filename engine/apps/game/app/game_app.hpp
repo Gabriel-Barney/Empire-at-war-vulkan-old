@@ -3,7 +3,6 @@
 #pragma once
 #include <algorithm>
 #include <array>
-#include <cctype>
 #include <chrono>
 #include <cinttypes>
 #include <cmath>
@@ -12,35 +11,47 @@
 #include <cstring>
 #include <deque>
 #include <functional>
+#include <future>
 #include <map>
 #include <memory>
+#include <optional>
+#include <set>
 #include <span>
 #include <string>
 #include <thread>
 #include <vector>
 
+#include "alamo/core/ascii.hpp"  // ascii_iequals / ascii_upper: exact ASCII, slash-exact
 #include "alamo/core/log.hpp"
 #include "alamo/core/sim_crc.hpp"
 #include "alamo/game/attract_mode.hpp"
 #include "alamo/game/battle_fx.hpp"
 #include "alamo/game/battle_summary.hpp"
 #include "alamo/game/benchmark.hpp"
+#include "alamo/game/benchmark_save.hpp"
 #include "alamo/game/benchmark_scenario.hpp"
 #include "alamo/game/game_audio_host.hpp"
 #include "alamo/game/game_controls.hpp"
 #include "alamo/game/game_data.hpp"
 #include "alamo/game/game_session.hpp"
 #include "alamo/game/hud_feeds.hpp"
+#include "alamo/game/mod_check.hpp"
+#include "alamo/game/mod_picker.hpp"
+#include "alamo/vfs/mod_registry.hpp"  // vfs::ModCatalog: the mod picker's rows
+#include "alamo/game/planet_map.hpp"
 #include "alamo/game/radar_feed.hpp"
 #include "alamo/game/save_games.hpp"
+#include "alamo/game/story_camera.hpp"
+#include "alamo/game/story_present.hpp"
 #include "alamo/game/story_ui.hpp"
 #include "alamo/game/world_pick.hpp"
 #include "alamo/jobs/crc_recorder.hpp"
 #include "alamo/render/galactic/galactic_session.hpp"
 #include "alamo/render/png.hpp"
 #include "alamo/sim/tactical_battle.hpp"
+#include "app_probe.hpp"
+#include "screen_flow.hpp"
 #include "alamo/data/xml.hpp"
-#include "alamo/galactic/corruption.hpp"  // Int-final: corruption panel
 #include "alamo/galactic/victory.hpp"     // Int-verify: campaign end
 #include "alamo/sim/campaign_battles.hpp"  // Int-final: corruption command
 #include "alamo/ui/gui_info_screens.hpp"
@@ -60,10 +71,13 @@
 #include "alamo/ui/mouse_cursor.hpp"
 #include "alamo/ui/orders.hpp"
 #include "alamo/ui/render_bridge.hpp"
+#include "alamo/ui/rename_prompt.hpp"
 #include "alamo/ui/targeting.hpp"
 #include "alamo/ui/window_input.hpp"
 #include "frame_overlay.hpp"
 #include "game_display.hpp"
+#include "alamo/ui/credits_roll.hpp"
+#include "alamo/ui/movie_caption.hpp"
 #include "game_info.hpp"
 #include "game_render.hpp"
 #include "game_ui.hpp"
@@ -100,16 +114,6 @@ inline std::string env_or_empty(const char* name) {
 inline double ms_since(Clock::time_point t) { return std::chrono::duration<double, std::milli>(Clock::now() - t).count(); }
 inline uint64_t final_crc(const CrcLog& log) { return log.records.empty() ? 0 : log.records.back().combined; }
 
-inline bool iequal(std::string_view a, std::string_view b) {
-    if (a.size() != b.size()) return false;
-    for (size_t i = 0; i < a.size(); ++i) {
-        const char x = (a[i] >= 'a' && a[i] <= 'z') ? static_cast<char>(a[i] - 'a' + 'A') : a[i];
-        const char y = (b[i] >= 'a' && b[i] <= 'z') ? static_cast<char>(b[i] - 'a' + 'A') : b[i];
-        if (x != y) return false;
-    }
-    return true;
-}
-
 // The planet row of a galactic planet object id (kInvalidPlanet when none).
 inline PlanetIndex planet_index(const galactic::GalacticSim& g, uint32_t planet_id) {
     for (size_t i = 0; i < g.planets().size(); ++i)
@@ -129,6 +133,7 @@ inline std::u32string printable(std::u32string s) {
 struct Options {
     std::string game, cache_dir, png_dir, smoke;
     std::vector<std::string> game_args;
+    std::vector<std::string> argv;  // modc t08: argv[1..] as given (the mod picker relaunches with these, its mod args replaced)
     std::vector<std::string> movies;  // --movie NAME: Bink movies played before the main menu (Esc / click skips)
     bool intro = true;                // default movies: the LucasArts / Petroglyph logos (--no-intro: none)
     bool attract = false;             // --attract: start the main-menu attract demo at once (OI host)
@@ -137,10 +142,14 @@ struct Options {
     AudioBackendKind audio = AudioBackendKind::Device;
     uint32_t seed = 1;
     int32_t workers = -1;
+    // --priority above|normal: process priority class (game_display.hpp set_process_priority). Unset: above, except
+    // --smoke runs (tests that share the machine with builds stay at normal).
+    int8_t priority = -1;  // -1 default, 0 normal, 1 above
     long frames = -1;
     uint32_t battle_max_frames = 27000;
+    bool fleet_groups = false;  // [port] --fleet-groups: fleet groups in tactical battles (docs/DECISIONS.md)
     rhi::PresentMode mode = rhi::PresentMode::Fifo;
-    int32_t frame_cap = 0;  // --frame-cap N|display (ui::kFrameCapChoices semantics: 0 none, -1 the display's refresh rate)
+    int32_t frame_cap = 0;  // --frame-cap N|display (0 none, -1 = ui::kFrameCapDisplay, the display's refresh rate)
     bool mode_set = false, frame_cap_set = false;  // --mailbox / --immediate / --frame-cap given: they win over the video options file
     // [port] --video-options FILE: the video options file to read (live play reads and writes the default one,
     // game_display.hpp default_video_profile_path; smoke / hidden runs read only this one and write none).
@@ -156,13 +165,14 @@ struct Options {
     // BM2a: --benchmark realtime|fixed and the --bench-* flags (benchmark.hpp; app_benchmark.cpp). size_set: --width /
     // --height given (they win over the preset's window size).
     BenchmarkOptions bench;
+    BenchNewSave bench_new;  // BM3: --bench-new-save / --bench-maps (a render-free mode that never opens a window)
     bool size_set = false;
 };
 
 inline int usage() {
     std::fprintf(stderr,
                  "usage: alamo_game [--game DIR] [--width W] [--height H] [--hidden] [--audio device|null|off] [--seed S]\n"
-                 "                  [--workers N] [--frames N] [--battle-max-frames N] [--cache-dir DIR] [--mailbox|--immediate]\n"
+                 "                  [--workers N] [--priority above|normal] [--frames N] [--battle-max-frames N] [--cache-dir DIR] [--mailbox|--immediate]\n"
                  "                  [--frame-cap N|display] [--video-options FILE] [--saves-dir DIR]\n"
                  "                  [--movie NAME]... [--no-intro] [--attract] [--smoke skirmish|land|campaign|saveload --png-dir DIR] [MODPATH=..]\n"
                  "                  [--frame-overlay] [--profile] [--profile-out FILE] [--profile-budget MS] [FALLBACKPATH=..]\n"
@@ -172,27 +182,16 @@ inline int usage() {
                  "                  presets: bm-low, bm-medium, bm-high (default), bm-ultra, bm-smoke\n"
                  "       alamo_game --bench-scenario S.abench [--bench-* flags]     a BM1/BM2 scenario (host game); flags win over the file\n"
                  "       alamo_game --bench-make S.abench --bench-save FILE [...]   run from the save, then write the scenario S\n"
+                 "       alamo_game --export-save SAVE.alsv --out FILE.json [--game DIR] [MODPATH=..]   (a save as JSON, no window)\n"
                  "       game data: --game DIR or ALAMO_FOC_DATA (the corruption folder)\n");
     return 2;
 }
 
-enum class Screen : uint8_t { Menu, SessionLoad, Galactic, BattleLoad, Battle, Quit, Movie };
+// [port] Audio event log entries the live game keeps (audio::AudioConfig::log_limit): the last 2048-4096 events, about 0.6 MB.
+constexpr size_t kGameAudioLogLimit = 4096;
 constexpr uint16_t kVkF11 = 0x7A;  // OPT1 t07: frame-time overlay toggle (not in the default hotkey table)
 constexpr int32_t kLoadIntroMaxFrames = 30;  // QA t11: the most frames the sim waits for the load screen's textures
-constexpr uint32_t kBattleEndHoldFrames = 150;  // [port] Playtest QA D1: 5 s between the victory and the summary (the last break-up plays)
 constexpr uint64_t kLoadIntroMaxTicks = 30;  // sim ticks a Fight answer may take to push its battle
-inline const char* screen_name(Screen s) {
-    switch (s) {
-        case Screen::Movie: return "movie";
-        case Screen::Menu: return "menu";
-        case Screen::SessionLoad: return "session-load";
-        case Screen::Galactic: return "galactic";
-        case Screen::BattleLoad: return "battle-load";
-        case Screen::Battle: return "battle";
-        case Screen::Quit: return "quit";
-    }
-    return "?";
-}
 
 class App;
 // One scripted step: fills the frame's input (or leaves it idle) and returns true when done. Steps run in order.
@@ -202,7 +201,7 @@ struct ScriptStep {
     uint32_t timeout_frames = 3600;
 };
 
-class App {
+class App final : public AppProbe {
 public:
     explicit App(Options o) : opt_(std::move(o)) {}
     int run();
@@ -243,9 +242,9 @@ public:
     void cinematic_step();    // per frame after the sim: shot clock, timer end, letterbox slide
     void cinematic_input(ui::InputFrame& raw);  // §11.2 input skip rules (before the HUD / world routing)
     bool cinematic_camera(ui::CameraParams& cp);  // the shot's camera over the RTS params; false when no shot runs
-    bool cinematic_hides_hud() const { return cine_.shot.active(); }
+    bool cinematic_hides_hud() const { return cine_.shot.active() || story_hides_hud(); }
     // The cursor is hidden unless the attract demo runs; [port] a GUI dialog with the focus (pause menu) shows it again.
-    bool cinematic_hides_cursor() const { return cine_.shot.active() && !demo_session() && !ui_.gui.has_focus(); }
+    bool cinematic_hides_cursor() const { return (cine_.shot.active() || story_cam_.active() || story_lua_mode_ || story_present_.cinematic_mode()) && !demo_session() && !ui_.gui.has_focus(); }
     void draw_letterbox(ui::HudDrawList& dl, const ui::HudCanvas& canvas, uint32_t w, uint32_t h) const;
     // story t13 (story_ui.hpp LinkedBattleOverlay): a story-linked battle's P10 letterbox / P11 input block and the story
     // scripts' letterbox, drawn by draw_letterbox with the cinematic's bars; begun by begin_battle, stepped by
@@ -267,7 +266,17 @@ public:
     }
     void movie_step();
     void lua_presentation();
-    Screen screen_ = Screen::Menu;
+    // ref6 t05: the screen, changed only through flow_.on(ScreenEvent) (screen_flow.hpp: the rule table).
+    ScreenFlow flow_;
+    Screen screen() const { return flow_.screen(); }
+    // ref6 t05: AppProbe, the smoke script's view of the running game (app_probe.hpp, app_probe.cpp).
+    bool in_battle() const override;
+    bool unit_moves(objects::ObjectId id) const override;
+    bool unit_fights(objects::ObjectId id) const override;
+    bool hostile(int32_t a, int32_t b) const override;
+    std::vector<ProbeUnit> battle_units() const override;
+    const sim::BattleStats* battle_stats() const override;
+    void menu_action(const ui::MenuAction& action) override;
     ui::InputState input_;
     ui::InputRouter router_;
     ui::RoutedInput routed_;
@@ -299,6 +308,7 @@ public:
     uint64_t last_submit_frame_ = 0;
     uint64_t frames_ = 0;
     double now_s_ = 0.0;
+    double fsr_last_s_ = -1.0;  // [port] FSR: now_s_ of the last frame (RecordOptions::frame_ms)
     float dt_ = 0.0f;
     uint32_t last_tick_ms_ = 0;
     uint32_t prev_tick_ms_ = 0;  // the tick before last_tick_ms_ (render interpolation period)
@@ -308,8 +318,8 @@ public:
     FrameLimiter limiter_;
     uint32_t refresh_hz_ = 0;
     uint64_t refresh_checked_frame_ = 0;
-    // [port: Gabriel] advanced video: ambient occlusion and anisotropic filtering (anti-aliasing, TAA, is the profile's
-    // anti_alias strength). The detail levels and the soft shadow / heat / bloom checks reach the renderer in apply_detail_options (game_display.hpp, t10 / t11). world_view_: the last
+    // [port: Gabriel] advanced video: ambient occlusion and anisotropic filtering (anti-aliasing is the profile's anti_alias
+    // mode: Off / SMAA / TAA / MSAA 2x / 4x / 8x). The detail levels and the soft shadow / heat / bloom checks reach the renderer in apply_detail_options (game_display.hpp, t10 / t11). world_view_: the last
     // frame's world (0 none, 1 galactic, 2 battle); a change restarts the TAA history.
     ui::AdvancedVideoSettings adv_video_;
     int world_view_ = 0;
@@ -325,6 +335,8 @@ public:
     render::DrawStats draw_stats_;
     // OPT1 t07: the frame-time overlay and this frame's phase times (wall clock, presentation only).
     FrameOverlay overlay_;
+    // [port: Gabriel, 2026-11-13] fleet / ship rename prompt (HudAction::Rename opens it; app_frame.cpp feeds and draws it).
+    ui::RenamePrompt rename_;
     FrameTimes ft_;
     Clock::time_point frame_t0_{};
     bool smoke_ok_ = true;
@@ -340,8 +352,7 @@ public:
     ui::CursorTable cursor_table_;
     ui::MouseCursor cursor_;
     bool cursor_ok_ = false;
-    bool hardware_mouse_ = false;
-    std::vector<ui::HudObjective> hud_objectives_;  // tactical objectives box (built per frame)  // video options IDC_HARDWARE_MOUSE: the OS arrow instead of the drawn cursor
+    std::vector<ui::HudObjective> hud_objectives_;  // tactical objectives box (built per frame)
     ui::RadarSettings radar_settings_;
     ui::RadarImage radar_;
     ui::RadarEvents radar_events_;
@@ -349,13 +360,36 @@ public:
     RadarFeed radar_feed_;  // radar_feed.hpp: death / capture-point pings, story blips (host-side, read-only)
     std::vector<ui::RadarField> radar_fields_;  // space battle's asteroid fields (painted into the radar picture)
     bool radar_fields_built_ = false, radar_fields_dirty_ = false;
+    std::vector<uint8_t> radar_terrain_;  // map1 t02: the land battle's passability picture (RGBA, 128 x 128, row 0 = south)
+    bool radar_terrain_built_ = false;
     ui::EncyclopediaPanel ency_;
     // HUD_GAPS §2.2: the encyclopedia config (GameConstants) with the profile's IDC_DELAY_TOOLTIPS; the type of each recently
     // hovered object (the pop-up keeps drawing its shown_object() while fading out after the hover is lost).
     ui::TooltipConfig ency_cfg_;
+    ui::HudConstants hud_consts_;  // mcx4 t14 / t15: GameConstants HUD values (hud_constants_from)
+    // mcx4 t14 (banner 0x365150): set once at the battle's victory declare, shown until the battle ends.
+    bool win_banner_set_ = false;
+    size_t reserve_seen_ = 0;  // mcx4 t14: the local reinforcement pool's size last tick (CB_Flash_Count flash)
+    std::map<int64_t, int32_t> capture_owner_seen_;  // mcx4 t14: capture point -> owner last frame (radar event)
+    uint32_t pulse_activation_seen_ = 0;  // mcx4 t15: the last AbilityActivation serial turned into light effects
+    std::u32string win_banner_;
+    ui::Rgba8 win_banner_color_{};
     std::vector<std::pair<uint32_t, objects::TypeIndex>> ency_types_;
-    // Gameplay options (IDD gameplay dialog) [port: kept for the session, no profile file].
+    // Gameplay options (IDD gameplay dialog). ui1 t02: kept between runs with the audio volumes, camera settings and key
+    // bindings in game_options.txt (game_display.hpp OptionsProfile; live play only, app_options.cpp).
     ui::GameplaySettings gameplay_;
+    ui::AudioVolumes audio_opts_;
+    ui::SkirmishProfile skirmish_profile_;  // modc t47: the local skirmish slot's faction / colour (the staging dialog's start)
+    std::string options_path_;
+    std::vector<uint32_t> autofire_seen_;  // ui1 t02: local objects already given their default autofire (sorted)
+    void load_game_options();
+    void save_game_options();
+    void apply_gameplay_options();  // alternate mouse, game speeds
+    // ref6 t04: one apply hook per options page (options_pages.hpp): dialog Accept and profile load both call it.
+    void apply_audio_page();     // volumes
+    void apply_camera_page();    // FOVs, key bindings and the queue modifier
+    void apply_gameplay_page();  // tooltips, camera tuning, gameplay options
+    void queue_default_autofire(std::vector<commands::EventData>& cmds);
     bool map_shell_open_ = false;  // HUD_GAPS §4.2: map_shell shown (advanced planet map)
     bool planet_map_open_ = false;  // GALACTIC_DIALOGS §4: the FoC planet map (organiser's advanced_planetary button)
     ui::HeroPanel hero_panel_;
@@ -404,8 +438,13 @@ public:
     uint32_t last_fleet_sel_ = 0;  // galactic: the fleet selection of the last frame (organiser planet)
     uint32_t selected_planet_ = 0;        // galactic planet selection (object id, 0 = none)
     bool fleet_drag_active_ = false;      // galactic HUD fleet drag of the last frame (drag / drop sounds)
+    std::vector<std::u32string> droid_rows_;  // ui4 t11: Droid Log rows of the advisor lines shown in galactic mode
+    std::vector<ui::Rgba8> droid_row_colors_;  // mcx4 t14: their colours (Droid_Date_Color, the line's, Droid_Seperator_Color)
+    uint32_t drag_route_fleet_ = 0, drag_route_target_ = 0;  // ui4 t06: the cached route's fleet / target planet ids
+    std::vector<PlanetIndex> drag_route_;                    // ui4 t06: its planets (fleet_drag_route)
     bool battle_end_open_ = false;        // battle-end screen shown: ticks held until Continue (presentation only)
     std::u32string battle_place_;         // the running battle's localized place (the battle-end screen's title line)
+    uint32_t invade_planet_ = 0;          // ui3 t05: planet object the battle-end "Invade System" button invades (0 = none)
     int32_t load_intro_frames_ = 0;       // QA t11: frames left before the blocking load runs (0 = none; presentation only)
     uint32_t load_intro_shown_ = 0;       // frames presented since the load screen opened
     uint64_t load_open_tick_ = 0;         // sim tick at which the load screen opened ahead of the tactical push
@@ -425,10 +464,63 @@ public:
     uint64_t pause_toggles_ = 0;
     ui::CameraSettings camera_;         // FOVs / queue modifier from the options (camera and controls dialog)
     bool tactical_fov_set_ = false;     // the player changed the tactical FOV (else TacticalCameras.xml's applies)
-    std::vector<DisplayMode> display_modes_;  // the video options' resolution list (primary display, game_display.hpp)
+    std::vector<DisplayMode> display_modes_;  // the display's modes (primary display, game_display.hpp)
+    ui::WindowMode window_mode_ = ui::WindowMode::Windowed;  // UI5 t01 / [port: Gabriel] Options > Video > Display Mode
+    bool windowed() const { return window_mode_ == ui::WindowMode::Windowed; }
+    DisplayMode applied_mode_{};  // the mode apply_display last set (restored when Fullscreen regains the foreground)
+    // [port: Gabriel] Options > Video > UI Scale in percent (live play: the profile's, 100 at first start); 0 in scripted /
+    // smoke / benchmark runs, which keep the original fitted UI so their captures do not depend on the window size.
+    int32_t ui_scale_ = 0;
+    void resize_ui();  // the GUI, both HUDs and the side panels to the window size at ui_scale_
     uint64_t video_applies_ = 0;
     bool menu_dialog_open() const;  // the in-game menu or one of its option / save / load / quit dialogs is open
     uint32_t reinforce_unit_ = 0;       // reinforcement chosen on the pad, waiting for its drop point (0 = none)
+    // cu9g t03 (HUD_GAPS §9.4 - §9.6): the land bombing-run targeting state (HUD +0x20b2): toggled by the b_special_weapon
+    // click and the super-weapon hotkey; the world's next left click on a valid point sends command 28.
+    bool bombing_targeting_ = false;
+    // ui1 t04: the space special weapon being aimed (b_special_weapon in space / hotkey 22; kNoObjectId = none) and its
+    // pointer index (POINTER_ATTACK_WITH_SPECIAL_WEAPON_n).
+    objects::ObjectId sw_weapon_ = objects::kNoObjectId;
+    int32_t sw_icon_ = 0;
+    // The local player's space special weapon (a ready one first): a SPECIAL_WEAPON object (icon = Special_Weapon_Index)
+    // or a station with a special-weapon hard point (icon 2); kNoObjectId when none.
+    objects::ObjectId space_weapon(int32_t& icon, float& readiness) const;
+    void space_weapon_toggle();
+    std::optional<render::JamBlob> bombing_blob_;  // the green / red terrain blob under the cursor while targeting
+    uint64_t bombing_commands_ = 0, bombing_cancels_ = 0, bombing_invalid_clicks_ = 0;
+    bool bombing_run_ready() const;  // 0x312570's `ready`: controls not locked and the local run available
+    void bombing_toggle();           // 0x2e7950 (cancel = 0): start (Select_Target SFX) or cancel (Cancelled SFX)
+    void bombing_end(bool cancel_sfx);
+    // ui3 t01 - t04 (app_tactical_keys.cpp): tactical hotkeys / command-bar buttons beyond the camera and move toggles.
+    void tactical_hotkeys(const std::vector<ui::HotkeyEvent>& hk, std::vector<commands::EventData>& cmds,
+                          std::vector<ui::HudAction>& acts);
+    void interface_hotkey(uint16_t slot);  // QuickSave / QuickLoad / Screenshot (galactic and tactical)
+    bool tactical_button(const ui::HudAction& a);  // true = handled (c_button00 / 02 / 04, b_reinforcement, beacon, ...)
+    void fill_command_buttons(ui::TacticalHudFrame& hf) const;  // b_retreat / b_reinforcement / beacon / movie mode state
+    bool reinforce_available(objects::ObjectId galactic_id) const;
+    bool begin_first_reinforcement();  // R / b_reinforcement: the first callable pad entry's drop pick (toggle)
+    bool cancel_picks();               // Esc: ends a reinforcement / bombing-run / beacon pick (true when one was on)
+    void select_cycle(int32_t step);   // NextUnit / PreviousUnit
+    void select_like();                // SelectLike
+    // [port: Gabriel, 2026-11-13] squadron wings (ui::HudWing): wing 0 = the local player's fighter squadrons, wing 1 =
+    // its bomber squadrons (a member type with Bomber in its CategoryMask). F2 / F3 or the wing buttons select one; a
+    // second press within 0.4 s centres the camera on it.
+    void fill_wings(ui::TacticalHudFrame& hf);
+    void select_wing(size_t wing, bool add, bool centre_only);
+    std::vector<ui::HudWing> wings_;
+    int32_t wing_last_ = -1;           // wing selected last and when (double press -> camera)
+    double wing_last_s_ = -1.0e30;
+    bool movie_mode_ = false;          // MovieMode key / b_camera_t [port]: the interface hidden
+    bool interface_hidden_ = false;    // ToggleInterface key (byte 0x140b3069b)
+    bool objectives_hidden_ = false;   // MissionHolocron key in a battle [port]
+    bool camera_tether_ = false;       // CameraTether key [port]: the camera follows the selection
+    bool beacon_pick_ = false;         // place-beacon pick (b_special_weapon2 / b_beacon_t / PlaceBeacon key)
+    double beacon_last_s_ = -1.0e30;   // wall time of the last beacon (BeaconPlaceDelay)
+    float beacon_delay_s_ = 5.0f;      // GameConstants BeaconPlaceDelay (ms) / 1000
+    std::vector<std::string> command_rankings_;  // GameConstants Unit_Command_Rankings_By_Category (speaking unit)
+    uint32_t cycle_unit_ = 0;          // NextUnit / PreviousUnit: the unit selected last
+    std::optional<render::JamBlob> reinforce_blob_;  // ui3 t04: the drop-point preview blob (green valid / red invalid)
+    uint64_t reinforce_invalid_clicks_ = 0, beacons_placed_ = 0, hotkey_abilities_ = 0;
     // P1 move acknowledgement (P1_DOUBLE_CLICK_MOVE.md §2.3): GameConstants values by ui::AckEffect / ui::AckRadar index.
     std::array<std::string, 4> ack_fx_{};
     std::array<std::string, 3> ack_radar_{};
@@ -439,6 +531,8 @@ public:
     bool live_input() const { return opt_.smoke.empty() && !opt_.hidden && !opt_.bench.active(); }
     ui::CameraTuning option_tuning(ui::CameraTuning t) const;
     void apply_camera_tuning();
+    // ency_cfg_ (GameConstants + IDC_DELAY_TOOLTIPS) to the encyclopedia, the galactic / tactical HUDs and the shell panels.
+    void apply_tooltip_config();
     uint64_t reinforce_drops_ = 0;
     // Information screens fed from the sim (game_info.hpp): holocron history, story cursor, campaign tallies.
     Holocron holo_;
@@ -446,8 +540,13 @@ public:
     bool summary_completed_ = false;
     BattleTally tally_;
     bool campaign_over_ = false;
-    galactic::VictoryRules victory_rules_;  // Int-verify: the campaign's victory conditions (start_session)
-    galactic::EliminationLatch elimination_latch_;  // q6 [port]: no elimination before the player has owned something
+    // q6 t34: the campaign end screen may come (no message box, no Bink open, no hint text or encyclopedia pop-up up).
+    bool end_screen_clear() const;
+    // q6 t36: the advisor slot plays Light_Loop for a hint text / encyclopedia pop-up (light_loop_step); a failed open is
+    // not retried.
+    bool light_loop_ = false, light_loop_failed_ = false;
+    bool light_loop_held() const;
+    void light_loop_step(bool popup);
     bool choice_open_ = false;
     // GALACTIC_DIALOGS §1 battle prompt: the banner (pending_battle_shell / story_pending_battle_shell) fed through
     // GalacticHudFrame::battle while choice_open_; its clicks are HudAction BattleBegin / BattleAutoResolve.
@@ -455,6 +554,7 @@ public:
         PlanetIndex planet = kInvalidPlanet;
         bool land = false;
         bool story_pending = false;   // §1.4 single-button shell (story lock): no Auto-Resolve
+        bool no_autoresolve = false;  // ui1 t06: the advanced options' auto-resolve "never": Begin only
         bool linked = false;          // story t13: a LINK_TACTICAL record's P13 banner (Begin = GameSession::begin_linked)
         std::u32string title;         // "<planet>: SPACE / PLANETARY BATTLE IMMINENT!" (log; the ui composes its own)
         std::u32string planet_name;
@@ -480,6 +580,9 @@ public:
     std::vector<uint64_t> summary_rows_;
     bool holocron_flash_ = false;     // b_story_arc_g flashes until the summary is opened
     bool story_summary_open_ = false; // IDD_STORY_SUMMARY_DIALOG open: ticks held (the summary's galactic pause, §2.2)
+    // [port: Gabriel, 2026-11-13] a new campaign opens the mission holocron (story summary) by itself once its first
+    // chapter is added (retail only flashes b_story_arc_g). Cleared when it opens or when no chapter came early on.
+    bool summary_auto_open_ = false;
     // Screen-text lines (§2.1 transmission line, white; §3.1 auto-resolve result, red) [port: printed and kept until a ui
     // screen-text widget takes them].
     struct ScreenLine {
@@ -494,6 +597,29 @@ public:
     void open_battle_prompt(const galactic::GalacticSim& g, const galactic::ConflictInfo& c);
     void open_linked_banner(const galactic::GalacticSim& g, const sim::CampaignBattles::LinkedRecord& r);  // story t13
     std::string representative_icon(std::span<const objects::ObjectHandle> units, bool hero_filter = false) const;
+    void planet_status(const galactic::GalacticSim& g, PlanetIndex row, ui::GalacticPlanetInfo& out) const;  // ui4 t03
+    bool local_benefits_from_corruption(const galactic::GalacticSim& g) const;  // ui4 t10: the local faction's flag
+    // ui4 t04 (GALACTIC_PLANET_MAP): the planet map. planet_map_allowed = the open rules of §1.1 for the selected planet
+    // (`foreign` = the foreign-view flag); set_planet_map opens / closes it; planet_map_feed fills the HUD's map data.
+    bool planet_map_allowed(bool& foreign) const;
+    void set_planet_map(bool open);
+    void planet_map_feed(ui::GalacticPlanetMap& m);
+    // §3.2 the UI markers and world width of a planet type's land map, read on the first open [port: retail reads every
+    // planet's at boot] and kept for the session.
+    struct PlanetMapMarkers {
+        std::vector<game::PlanetMapMarker> markers;
+        float world_width = 0.0f;
+    };
+    const PlanetMapMarkers& planet_map_markers(objects::TypeIndex planet_type);
+    std::map<objects::TypeIndex, PlanetMapMarkers> planet_map_markers_;
+    uint32_t planet_map_planet_ = 0;  // the planet the map was opened for (another selection closes it)
+    struct MapMarkerSent {
+        int32_t sent = -1, before = -1;  // the marker sent, the sim's marker when it was sent
+    };
+    std::map<uint32_t, MapMarkerSent> map_marker_sent_;  // ui4 t13: SetMarkerID sent while the map is open, by object
+    mutable std::vector<std::string> corruption_planet_icons_;  // ui4 t10: GameConstants Corruption_Planet_Icon
+    mutable bool corruption_icons_loaded_ = false;
+    bool hero_filter_ = false;  // ui4 t03: b_filters3 on (GalacticHud::filter_bits, last build)
     void answer_battle_prompt(bool auto_resolve);
     void auto_resolve_result(const galactic::GalacticSim& g, const galactic::ConflictLogEntry& e);
     void add_holocron_chapter(const StoryDialogMeta& meta, size_t lines);
@@ -501,8 +627,12 @@ public:
     std::u32string txt(std::string_view id, std::u32string_view fallback) const;
     std::u32string faction_label(int32_t player) const;
     uint64_t choices_ = 0, auto_resolves_ = 0, story_dialogs_ = 0, ency_shown_ = 0, retry_boxes_ = 0, story_cues_ = 0;
-    uint64_t withdraws_ = 0, tactical_auto_resolves_ = 0, auto_results_ = 0;
+    uint64_t tactical_auto_resolves_ = 0, auto_results_ = 0;
     bool story_movie_ = false;  // the advisor slot plays a story dialog's MOVIE
+    // mcx4 t14 (AUDIO.md §9.7 step 5): the intro speech line whose Tactical_Intro_Command_Bar_Movie_Name holds the
+    // advisor slot ("" none); intro_movie_speech_done ends the movie when that line ends.
+    std::string intro_movie_line_;
+    void intro_movie_speech_done(const std::string& event);
     // L1/S4 wave 1 (story_ui.hpp): the local player's UI notifications for the story (StorySession::notify_ui through the
     // command stream); zoom_planet_ = the planet of the last zoom_to_planet; battle_plots_ = the running battle's tactical
     // plots file (the STORY_MISSION_LOST name); story_ui_sent_ = notifications submitted.
@@ -520,6 +650,83 @@ public:
     size_t reward_tac_cursor_ = 0;
     uint64_t reward_movies_ = 0, reward_speeches_ = 0;
     void story_reward_step();
+#ifdef ALAMO_SIM_HAVE_STORY
+    void load_story_campaign(const sim::StoryLoadCampaign& lc);  // modc t45: LOAD_CAMPAIGN replaces the running game
+#endif
+    uint32_t story_campaign_loads_ = 0;  // modc t45: campaigns started by LOAD_CAMPAIGN (smoke / test count)
+    // ui2: the story presentation rewards (app_story_present.cpp): the presenter, its hooks, what lua_presentation passes on,
+    // the per-frame step and the text / hint drawing (the rest of the group's overlay builders are added there).
+    StoryPresenter story_present_;
+    const void* story_present_story_ = nullptr;  // the story session the presenter state belongs to
+    void story_present_setup();
+    bool story_present_restore();  // ref4 t01: the loaded save's presenter state
+    void story_present_reward(const lua::StoryFired& f, uint8_t mode);
+    void story_present_lua(const lua::PresentationEvent& e);
+    void story_present_frame();
+    std::u32string owner_label(int32_t player) const;  // q6 t36: a planet owner's name in the changed-hands line
+    void story_advisor_frame();  // ui2 t07: the periodic advisor hint (6.4) and the hint sound cue
+    // The advisor's current mode (0 galactic, 1 space, 2 land, 255 none), the render time it began and the faction's hint ids.
+    uint8_t advisor_mode_ = 255;
+    double advisor_gal_s_ = 0.0;        // ui2 t11: render seconds spent on the galactic map this campaign
+    bool advisor_gal_started_ = false;  // the galactic mode's begin-mode ran
+    uint32_t advisor_last_tick_ = 0;
+    std::vector<std::string> advisor_hints_;
+    void build_story_overlay(ui::HudDrawList& dl, const ui::HudCanvas& canvas);
+    // storyb t13 (app_text_crawl.cpp): the full-screen movie's text crawl (StarWars3DTextCrawl.xml, read once).
+    void draw_text_crawl(ui::HudDrawList& dl, const ui::HudCanvas& canvas);
+    std::shared_ptr<struct TextCrawlCache> text_crawls_;
+    void build_story_text(ui::HudDrawList& dl, const ui::HudCanvas& canvas);
+    void build_story_hint(ui::HudDrawList& dl, const ui::HudCanvas& canvas);
+    void build_win_banner(ui::HudDrawList& dl, const ui::HudCanvas& canvas);  // mcx4 t14: the tactical win / lose banner
+    void build_countdown_column(ui::HudDrawList& dl, const ui::HudCanvas& canvas);  // mcx4 t14: retreat / build timers
+    void build_story_pointers(ui::HudDrawList& dl, const ui::HudCanvas& canvas);
+    void story_component_flash(ui::HudDrawList& dl, const ui::HudCanvas& canvas);
+    void story_forced_clicks();  // FORCE_CLICK_GUI: queued clicks ahead of the HUD's input (app_input.cpp)
+    bool story_project(const ui::HudCanvas& canvas, float x, float y, float z, ui::Vec2f& out) const;
+    bool story_type_position(std::string_view type, ui::Vec3& out) const;
+    // FLASH_FLEET_WITH_UNIT (3.5): the first fleet holding a unit of the type (its position), else the first planet whose
+    // garrison has one (the planet's position).
+    bool story_container_position(std::string_view type, ui::Vec3& out) const;
+    bool story_object_position(int32_t object, ui::Vec3& out) const;
+    std::set<int32_t> story_flashed_;  // components whose runtime flash the presenter set
+    // ui2 t03 / t04 / t05 (app_story_camera.cpp): the script's fade, bars, cinematic camera and RTS camera moves.
+    ScreenFade story_fade_;
+    ScreenLetterbox story_box_;
+    ScriptCamera story_cam_;
+    bool story_lua_mode_ = false;  // Start_Cinematic_Mode .. End_Cinematic_Mode
+    struct ScriptMoves {
+        bool scroll = false, follow_on_arrival = false, following = false, rotate = false;
+        ui::Vec3 target;
+        int32_t follow_object = -1;
+        float yaw0 = 0.0f, dyaw = 0.0f;
+        double t0 = 0.0, duration = 0.0;
+    } story_moves_;
+    Screen story_fx_screen_ = Screen::Menu;
+    uint64_t story_fx_battle_ = 0;
+    void story_script_event(const lua::PresentationEvent& e);
+    // mcx6 t05 (app_session.cpp; script_cinematics.hpp): the story script's cinematic object calls of the running battle ->
+    // GameSession::script_cinematics (hides) and the audio host (arrival / engine fly-by sounds); reset per battle.
+    void script_cinematic_event(const lua::PresentationEvent& e);
+    void script_cinematic_frame();
+    const void* cine_battle_ = nullptr;
+    uint32_t cine_frame_ = 0;
+    void story_script_mode_check();
+    void story_script_frame();
+    // ui2 t08: Play_Lightning_Effect bolts (battle frames, 30 per second) and the Enable_Fog / Enable_Distance_Fog switches.
+    struct StoryLightning {
+        std::string name;
+        ui::Vec3 start, end;
+        uint32_t from = 0, to = 0;
+    };
+    std::vector<StoryLightning> story_lightning_;
+    bool story_fog_master_ = true, story_fog_distance_ = true;
+    void story_camera_commands();
+    void build_story_fade(ui::HudDrawList& dl, const ui::HudCanvas& canvas, uint32_t w, uint32_t h) const;
+    uint32_t story_frame() const;
+    bool story_object_frame(int32_t id, ObjectFrame& out) const;
+    ScriptPose story_rts_pose() const;
+    bool story_camera_view(ui::CameraParams& cp) const;
+    bool story_hides_hud() const;
     int32_t story_page_ = -1;   // ui ask 11: the GUI image page the story movie fills (the dialog portrait), -1 none
     void galactic_screens();
     void open_holocron(ui::InfoPage page);
@@ -532,6 +739,14 @@ public:
     uint32_t panel_preview_ = 0;
     uint32_t preview_planet_ = 0;
     uint64_t special_sfx_ = 0, special_msgs_ = 0, activations_ = 0;
+    void galactic_message(std::string_view id);  // ui4 t05: a message-callback text as a white screen-text line
+    void announcer_feedback();                   // ui4 t08
+    uint64_t announcements_ = 0;                 // ui4 t08: announcer events played
+    int32_t prev_pop_used_ = 0;                  // ui4 t11: population used at the last tick (pop-cap announcer)
+    // mcx4 t13: (planet, queue) -> the queue head's start frame and remaining seconds last seen (build countdown speech)
+    std::map<std::pair<uint32_t, uint32_t>, std::pair<int32_t, float>> countdown_speech_seen_;
+    double last_approach_s_ = -1e9;              // ui4 t11: wall clock of the last enemy-approach announcement
+    uint64_t build_refusals_ = 0;  // ui4 t02: clicks on greyed galactic build pads (negative feedback)
     bool activate_special_here(uint32_t hero_id);
     std::vector<objects::ObjectHandle> special_units(const galactic::GalacticSim& g, PlanetIndex pi) const;
     // OI host: main-menu attract demo (attract_mode.hpp), audio flags, fast forward.
@@ -551,6 +766,7 @@ public:
     bool first_menu_ = true;
     double demo_shot_t0_ = -1.0;  // [port] demo camera: current shot start (wall s), shot counter, followed object
     uint32_t demo_shots_ = 0;
+    game::SaliencyWeights saliency_;  // mcx4: GameConstants Saliency_* (the demo camera's interesting-object pick)
     objects::ObjectId demo_target_ = 0;
     // Playtest 3 t14: the stand-in camera keeps a side view of the followed hull (attract_mode.hpp, demo_shot_yaw_deg).
     // demo_stats_ counts, per rendered demo frame, how often the followed hull / the hulls near the look-at point are seen
@@ -561,7 +777,7 @@ public:
     struct DemoCamStats {
         uint32_t frames = 0, target_nose_on = 0, run = 0, longest_run = 0, hulls = 0, hulls_nose_on = 0;
     } demo_stats_;
-    // OI host: the attract demo session runs behind the main menu (screen_ stays Menu; its battle world is drawn under the
+    // OI host: the attract demo session runs behind the main menu (screen() stays Menu; its battle world is drawn under the
     // menu dialogs without the tactical HUD).
     bool demo_session() const { return session_ != nullptr && session_->spec().attract; }
     void audio_flags();
@@ -581,6 +797,14 @@ public:
     uint32_t display_planet_type(const galactic::GalacticSim& g, PlanetIndex p) const;
     void update_display_rate(bool force);
     void set_present_mode(rhi::PresentMode m);
+    // [port: Gabriel 2026-11-13] apply_display_mode for the current window_mode_ (logged as "video: ..."), remembered for
+    // alt-tab, then sync_exclusive_fullscreen.
+    void apply_display(const DisplayMode& m);
+    // Fullscreen takes exclusive Vulkan full screen (rhi::Swapchain) when the driver offers it; the other modes release it.
+    void sync_exclusive_fullscreen();
+    // Fullscreen losing the foreground minimizes the window and gives the desktop its resolution back; regaining it
+    // restores the window and the full-screen mode (live play only).
+    void on_activation_changed();
     float render_alpha();
     void show_battle_end(bool dialog = true);  // story t13: dialog false = the bookkeeping only (BT §2.9.6 skip)
     int32_t galactic_faction_icon(const galactic::GalacticSim& g, int32_t player) const;
@@ -590,6 +814,10 @@ public:
     void show_auto_resolve_end(const galactic::ConflictLogEntry& e);  // ui ask 10: the battle-end screen after an auto-resolve
     void build_panels(std::vector<ui::HudDrawList>& lists);
     void update_cursor(ui::HudDrawList& dl);
+    ui::CreditsRoll credits_;            // ui1 t03: the front end's credits roll (ShowCredits)
+    uint32_t tooltip_trigger_fleet_ = 0;  // ui1 t03: the fleet / land stack whose fleet_tooltip / land_tooltip fired last
+    void show_credits();
+    void fill_cursor_hover(ui::CursorContext& c);  // ui1 t01: hovered object -> cursor context (battle)
     void update_radar();
 
     // ---- BM2a benchmark mode (app_benchmark.cpp, benchmark.hpp) ----
@@ -600,6 +828,7 @@ public:
         FixedFrameClock clock{1};
         uint32_t settled_run = 0, unsettled_run = 0;
         uint64_t warmup_frames = 0, unsettled = 0, excluded = 0, rt_ticks = 0, start_tick = 0;
+        uint64_t settled_seen = 0, forced = 0, taa_discarded = 0;  // BM2b: settled measured frames, forced redraws, TAA undos
         bool counted = false, ticked = false, tick_missed = false;  // the last frame: counted / ran a tick / a due tick did not run
         bool drawn = false;     // render_frame recorded and submitted a frame (not minimized / out of date)
         uint64_t retry_boxes = 0;  // retry_boxes_ at the start: a new one = the mission was lost
@@ -609,6 +838,7 @@ public:
         std::vector<float> frame_ms, render_ms, sim_ms;
         Clock::time_point t_load{}, t_start{}, t_progress{};  // load start, measuring start, last measured frame
         double wall = 0.0;
+        double load_ms = 0.0;   // bm3: the load start to the first measured tick
         bool failed = false;
         std::string error;
         std::vector<std::string> autopilot;
@@ -617,6 +847,8 @@ public:
     bool bench_fixed() const { return opt_.bench.fixed(); }
     bool bench_measuring() const { return bench_.phase == BenchState::Phase::Measuring; }
     bool bench_done() const { return bench_.phase == BenchState::Phase::Done; }
+    // BM2b: fixed-frames measured frames are drawn TAA-provisional; bench_frame_end keeps or discards each one.
+    bool bench_taa_provisional() const { return bench_fixed() && bench_measuring(); }
     void bench_apply_window();  // init, before the window: preset size, present mode, frame cap
     void bench_apply_video();   // init, after the video options: preset detail / AA / gamma / advanced options
     bool bench_start();         // init: the save loaded, no menus
@@ -625,6 +857,7 @@ public:
     void bench_autopilot();     // after the sim: answers what would wait for the player
     void bench_frame_end();     // after render: settle / count / finish
     void bench_fail(std::string why);
+    void bench_trace();         // BM3 --bench-trace: the live objects per owner (count, centroid, extent) of the tick just run
     float bench_alpha() const;
     double bench_now() const;
     int bench_finish();         // report, CRC log, presentation check; the exit code
@@ -657,27 +890,51 @@ public:
     void shutdown();
     void frame();
     void handle_menu_actions(const std::vector<ui::MenuAction>& acts);
+    // modc t08: the mod picker (app_mods.cpp). init_mod_picker lists the installed mods and sets MenuProviders::mods;
+    // check_mod runs the load report of a row on a worker thread (one at a time; the newest request waits), poll_mod_check
+    // hands a finished one to the dialog; launch_mod restarts the exe with the row's mod arguments and quits.
+    void init_mod_picker(ui::MenuProviders& mp);
+    void check_mod(const std::string& id);
+    void poll_mod_check();
+    void launch_mod(const std::string& id);
+    const vfs::ModDescriptor* find_mod_row(const std::string& key) const;  // the picker row with that catalog key
+    std::string game_root_;                          // the FoC folder the data was loaded from
+    std::vector<std::string> workshop_libraries_;    // Steam library folders (vfs::InstallLocations)
+    vfs::ModCatalog mod_catalog_;                    // the picker's rows (ums1 t03, ums4 t01)
+    std::future<game::ModCheckReport> mod_check_;    // the running check (valid() while one runs)
+    std::string mod_check_id_, mod_check_next_;      // its row id; the row asked for while it ran
+    bool mod_check_queued_ = false;
+    std::map<std::string, std::vector<std::string>> mod_launch_;  // checked rows: the arguments that start them
+    std::set<std::string> mod_refused_;
+    std::string pending_different_data_;  // mcx3 t05: the save the "Load anyway" box is about  // mcx3 t03: checked rows refused as base-EaW mods (D1): Launch does nothing
     bool start_session(const SessionSpec& spec);
+    // ref2 t03: the run options every new session takes (--seed, --battle-max-frames, --fleet-groups, kBattleEndHoldFrames).
+    SessionOptions session_options() const;
     void session_started(const std::vector<std::string>& diag);  // the UI / presentation reset for a new session_
     void end_session();
     // N1 / t09: the Save / Load / Delete requests of the menus.
     void save_game_as(const std::string& typed);
     bool load_saved_game(const std::string& name);
-    bool load_save_file(const std::string& path, const commands::CommandRecording* replay = nullptr);  // BM2a: load_saved_game by path (bm2: with a replay)
+    // BM2a: load_saved_game by path (bm2: with a replay); mcx3 t05: allow_different_data = the "Load anyway" answer.
+    bool load_save_file(const std::string& path, const commands::CommandRecording* replay = nullptr, bool allow_different_data = false);
     void delete_saved_game(const std::string& name);
     void save_message(std::u32string caption, const std::string& detail);
     std::string session_title() const;  // the campaign's display name / the skirmish map (save descriptions)
-    void begin_battle();
+    // from_save: the battle came back with a save taken during it (ui5 t10: the Mission load dialogs, UI.md §5.1).
+    void begin_battle(bool from_save = false);
     void start_battle_view();
     void end_battle();
     // QA t11 / t16: the battle load screen, filled from the planet's text, is on screen before the blocking loads.
     std::u32string battle_place_name(PlanetIndex planet) const;
     void planet_type_info(ui::PlanetInfoData& d, objects::TypeIndex t) const;
-    bool open_battle_load(PlanetIndex planet, bool space);
+    // UI5 t07: `mission` (a story-linked LINK_TACTICAL battle) opens IDD_LAND / SPACE_MISSION_LOAD_DIALOG (UI.md §5.1).
+    bool open_battle_load(PlanetIndex planet, bool space, bool mission = false);
     void end_load_intro_frame();
     void post_tick();
     void step_sim();
     void galactic_input();
+    // ui4 t06 (GALAXY_MAP_PRESENTATION §2.2): the grey route / cursor line while a fleet is dragged on the galaxy.
+    void fleet_drag_preview(const ui::View& view, const std::vector<ui::PickSphere>& fleets);
     void battle_input();
     // refixf t08: the world pick tests over the top tactical mode (null outside a battle). Valid until the next tick.
     const ui::WorldPickTests* world_pick_tests();
@@ -691,7 +948,15 @@ public:
     bool reticle_orders(const ui::OrderContext& ctx, std::vector<commands::EventData>& cmds);
     bool present_settled() const;
     int32_t local_player() const { return session_ ? session_->local_player() : 0; }
+    // cu9 t11: the session's galaxy / running tactical battle, nullptr without a session.
+    const galactic::GalacticSim* galaxy() const { return session_ ? session_->galaxy() : nullptr; }
+    const sim::TacticalBattle* battle() const { return session_ ? session_->battle() : nullptr; }
+    // cu9 t08: the HUD icon of type `t` ("" when out of range), and the battle-end dialog's loss rows (owner -> type -> count;
+    // `me`'s rows to your_losses, every other owner's to enemy_losses), shared by the tactical and auto-resolve ends.
+    std::string type_icon(size_t t) const { return t < ui_.hud_types.size() ? ui_.hud_types[t].icon_name : std::string(); }
+    void add_loss_rows(ui::BattleEndInfo& info, const game::BattleLosses& lost, int32_t me) const;
     std::string local_faction() const;
+    std::string_view battle_terrain() const;  // aud1 t01: the running battle's music / ambience key ("" without a battle)
     bool crc_check();
     void make_script();
     // Script helpers.

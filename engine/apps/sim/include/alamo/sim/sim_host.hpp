@@ -71,6 +71,7 @@
 #include "alamo/sim/object_scripts.hpp"
 #include "alamo/sim/pacing.hpp"
 #include "alamo/sim/save_session.hpp"
+#include "alamo/sim/ship_names.hpp"
 #include "alamo/sim/story_session.hpp"
 #ifdef ALAMO_SIM_HAVE_STORY
 #include "alamo/lua/lua_vm.hpp"           // q6 t06: the GameScoring script VM
@@ -84,6 +85,7 @@ namespace alamo::lua {
 class GlobalValueStore;
 class LuaVm;
 class LuaPlayerWorld;
+class ObjectBridge;  // storyb t14
 struct AiEventArg;
 }  // namespace alamo::lua
 namespace alamo::galactic {
@@ -94,7 +96,8 @@ struct GalacticSetup;
 namespace alamo::sim {
 
 // Q6: SimConfig::players for a galactic session over a setup with `setup_players` players: at least 8 (the default, so
-// stock FoC sessions keep their CRC), at most kMaxPlayers (start_galactic refuses a setup with more players than this).
+// stock FoC sessions keep their CRC), else the setup's count (mcx5 t01: no 64 cap). Above the kMaxPlayers guard it stays
+// at the guard, and start_galactic refuses the setup.
 inline uint32_t session_players(size_t setup_players) {
     return static_cast<uint32_t>(setup_players < 8 ? 8 : setup_players > kMaxPlayers ? kMaxPlayers : setup_players);
 }
@@ -104,7 +107,6 @@ struct SimConfig {
     uint32_t free_seed = 0x12345678u;                           // free RNG (never sim state)
     uint32_t players = 8;                                       // PlayerList size (<= kMaxPlayers); see session_players
     commands::SchedulerConfig scheduler = commands::SchedulerConfig::single_player();
-    bool parallel_crc = true;                                   // CRC hashers on the job system
     bool story_crc = false;                                     // register the "story" CRC system (S4)
     // q6: game-object Lua scripts (object_scripts.hpp, docs/re/OBJECT_SCRIPTS.md). Off by default: the attach and the
     // first-pump draws change the synced stream, so sessions without it keep their CRC streams and goldens.
@@ -168,8 +170,12 @@ public:
     //     story session), in stream order: PlanetOwnerChanged -> Galactic_Planet_Faction_Change(planet, new, old) when
     //     new != old (a missing player = the neutral player); ProductionBegin / Canceled -> Galactic_Production_Begin_ /
     //     _Canceled_Event(planet, type); ProductionCompleted -> Galactic_Production_End_Event(planet, object (its team
-    //     container), else the type); ObjectDestroyed -> Galactic_Unit_Destroyed_Event(object, neutral player) only while
-    //     the object is still alive in the store [port: the stream is read after the destroy, so in practice skipped].
+    //     container), else the type); StarbaseLevelChanged -> Galactic_Starbase_Level_Change(planet, old type, new type)
+    //     (storyb t14; each nil when absent).
+    //   * storyb t14, at the signal moment (GalacticSim::ScoringHooks, any galactic session): Galactic_Unit_Destroyed_Event
+    //     (object, killer) for every object GalacticSim::destroy_object removes, before it leaves the store [port: the
+    //     killer is not tracked in galactic mode: the neutral player]; Galactic_Neutralized_Event(hero type, neutralizer).
+    //   * storyb t14: scoring_tactical_death (the battle host, Tactical_Unit_Destroyed_Event).
     //   * scoring_reset_tactical_stats(): Reset_Tactical_Stats() (the battle host at auto-resolve begin).
     // Missing functions are skipped; calls are protected and not threads (they cannot yield). With a story session the
     // scoring VM also gets the story's player world, object bridge and presentation families.
@@ -183,6 +189,31 @@ public:
     void scoring_mode_started(ModeKind kind, std::string map_name);
     // q6 t09: Reset_Tactical_Stats() at auto-resolve begin (BATTLE_TRANSITIONS §"auto-resolve").
     void scoring_reset_tactical_stats();
+    // mcx6 t07 (GAME_SCORING.md §9.1): a skirmish map battle (CampaignBattles::start_map_battle) runs over the session's
+    // galaxy as scaffolding only [port]; retail's skirmish has no galactic mode, so its script sees only the tactical mode.
+    // From this call to the end of the session the galactic mode is hidden from the script: its queued
+    // Game_Mode_Starting_Event("Galactic", ...) is dropped, and neither its Game_Mode_Ending_Event nor the galaxy's
+    // Galactic_* event calls reach the script. The players stay those of the galaxy (the skirmish players: Base_Definitions
+    // ran while the session had none, every later call sees them). Not saved: a load's session setup calls it again.
+    void scoring_map_battle();
+    bool scoring_scaffold() const { return scoring_scaffold_; }
+    // storyb t14 (GAME_SCORING.md §3, death signal 0x25 in a tactical mode): Tactical_Unit_Destroyed_Event(object,
+    // killer player) for `object` of the battle's store `store`, called by the battle host before the object leaves the
+    // store. killer < 0 (unknown) -> the neutral player of the galactic campaign under the battle (nil without one).
+    // When the scoring VM runs on another store (a campaign battle: the galactic store), the object is passed as a
+    // wrapper of that store (the parent-store wrapper of a private bridge whose parent_store is `store`, swapped in for
+    // the call) [port: a wrapper the script keeps resolves only during the call].
+    void scoring_tactical_death(objects::ObjectStore& store, objects::ObjectHandle object, int32_t killer);
+    // storyb t14 (signal 0x22, a tactical build finished): Tactical_Production_End_Event(type, player, nil location);
+    // the battle host calls it for TacticalBattle::production_done after its tick (land builds go to the pool).
+    void scoring_tactical_production(uint32_t type, int32_t player);
+    // ui1 t05 (GAME_SCORING.md §7, 0x485760): the statistics dialog's value for `control_id`
+    // (IDC_MILITARY_EFFICIENCY_STATIC, IDC_CONQUEST_EFFICIENCY_STATIC, IDC_KILL_EFFICIENCY_STATIC, IDC_TITLE_STATIC, ...):
+    // Get_Game_Stat_For_Control_ID(PlayerWrapper, control_id, tactical) of the scoring script, its first result as a
+    // number or a string. False without a script / function or when the call fails. UI thread between ticks (the
+    // script's globals it writes are not hashed).
+    bool scoring_game_stat(int32_t player, std::string_view control_id, bool tactical, double& number, std::string& text,
+                           bool& is_number);
     // q6 t09 diagnostics: Services that pumped the threads this session, event calls made, releases (exit / error).
     uint64_t scoring_services() const { return scoring_services_; }
     uint64_t scoring_calls() const { return scoring_calls_; }
@@ -195,6 +226,15 @@ public:
     ObjectScriptHost* object_scripts() { return object_scripts_.get(); }
     const ObjectScriptHost* object_scripts() const { return object_scripts_.get(); }
     void set_object_script_files(const FileProvider* files);
+    // ref5 t04: ship names (ship_names.hpp; MCX8_BINDINGS_OBJECTS §"Ship names"). set_ship_names installs the lists the
+    // game session read (never for the attract demo: no names there) and the "ship_names" save chunk; the host names
+    // the top mode's SELECTABLE objects after each T5 update and resets the cursors at every Start_Game. ship_name_of
+    // is what every Lua object bridge's ship_name answers ("" without names).
+    void set_ship_names(std::unique_ptr<ShipNames> names);
+    const ShipNames* ship_names() const { return ship_names_.get(); }
+    std::string_view ship_name_of(const objects::ObjectStore& store, objects::ObjectHandle h) const {
+        return ship_names_ && store.exists(h) ? ship_names_->name(store.id(h)) : std::string_view();
+    }
     // The player world object scripts of a tactical store without a story session use (the galactic sim's players);
     // null before start_galactic, without object scripts or without the players family.
     lua::LuaPlayerWorld* object_script_players() { return object_players_.get(); }
@@ -249,6 +289,16 @@ public:
     CrcRegistry& crc_registry() { return registry_; }
     const CrcLog& crc_log() const { return recorder_->log(); }
     CrcLog& crc_log() { return recorder_->log(); }
+    // SIMP sp2 (docs/SIM_PARALLEL_DESIGN.md 4.5): CRC capture cadence. every == 1 (the default: headless, tests,
+    // --crc-out) records every tick. every > 1 records the initial state, the ticks with tick % every == 0 and on-demand
+    // captures (capture_crc_now: on save, at a benchmark's end, before a compare), and the log is a checkpoint log
+    // (CrcLog::checkpoint = every, so first_divergence compares stored ticks). ring > 0 keeps at most about `ring` records
+    // (the oldest are dropped). Only which ticks are hashed changes, never the sim. set_default_crc_cadence is the
+    // process-wide default a new host starts with (alamo_game's main); set_crc_cadence changes this host.
+    static void set_default_crc_cadence(uint32_t every, size_t ring = 0);
+    void set_crc_cadence(uint32_t every, size_t ring = 0);
+    uint32_t crc_cadence() const { return crc_every_; }
+    void capture_crc_now();  // records the current frame unless the log's last record already is it
     jobs::JobSystem& jobs() { return *js_; }
     const ParallelFor& parallel_for() const { return pf_; }
 
@@ -260,6 +310,9 @@ public:
     // of a galactic conflict. Trace step "T5.battles" only while a hook is set.
     using ModeUpdateHook = std::function<void(SimHost& host)>;
     void set_after_mode_update(ModeUpdateHook hook) { after_mode_update_ = std::move(hook); }
+    // sp3 t04 (AI lane): runs at the start of T2, before the tick's scheduled commands: the tactical AI lane applies its
+    // command batches due this frame (CampaignBattles -> BattleAi::apply_lane_batch). No trace step.
+    void set_before_commands(ModeUpdateHook hook) { before_commands_ = std::move(hook); }
     // ---- S10-int hooks (battle integration) ----
     // T5 object-animation slot (sim_anim.hpp: model creation + AnimWorld advance), right after the battle
     // hook. Trace step "T5.anim" only while set.
@@ -343,6 +396,12 @@ public:
     // DURING A BATTLE"). False: *err names the failing chunks and the session must be discarded (systems whose chunk
     // did read are loaded, the others keep their new-game state).
     bool load(const SaveFile& in, std::string* err = nullptr, LoadReport* report = nullptr);
+    // mcx3 t05 (D3): load() goes ahead when the save differs from the session only in its game data
+    // (SessionDescriptor::only_data_differs); every chunk still has to read (the object store refuses another type
+    // table, the story another plot set), else the load fails as any other. Off by default: such a save is refused
+    // with LoadReport::different_data set. loaded_with_different_data(): the last load went ahead that way.
+    void set_allow_different_data(bool allow) { allow_different_data_ = allow; }
+    bool loaded_with_different_data() const { return loaded_with_different_data_; }
     // Replays / records on top of a loaded session (commands/recording.hpp "REPLAY FROM A SAVE"): the loaded pipeline is
     // kept (record_to / replay_from would rebuild it). `at` = SavePoint{save.tick, save_digest(save.encode())}. Call after
     // load(), before the first tick. replay_after_load: false (+ *err, nothing changed) when `rec` does not continue the
@@ -352,6 +411,8 @@ public:
     // ---- end N1 ----
 
 private:
+    bool allow_different_data_ = false;       // mcx3 t05
+    bool loaded_with_different_data_ = false;  // mcx3 t05
     void make_pipeline(const commands::SchedulerConfig& cfg);
     commands::RejectReason handle(uint64_t tick, const commands::Command& cmd);
     commands::RejectReason apply(uint8_t player, const commands::EventData& ev);
@@ -381,20 +442,28 @@ private:
     commands::CommandRecording* record_ = nullptr;
     uint64_t batch_crc_ = 0;
     uint64_t applied_ = 0, rejected_ = 0;
-    std::array<std::vector<ObjectId>, kMaxPlayers> selection_;
-    std::array<PlayerController, kMaxPlayers> controllers_;
+    std::vector<std::vector<ObjectId>> selection_;  // per player (cfg_.players), index order
+    std::vector<PlayerController> controllers_;     // per player (cfg_.players)
     CrcRegistry registry_;
-    jobs::TickScheduler sched_;  // owns nothing but the job-system link CrcRecorder needs
     std::unique_ptr<jobs::CrcRecorder> recorder_;
+    // cu9 t13: a fresh recorder (CRC hashers on the job system; the old parallel_crc switch was never off).
+    void make_recorder() {
+        recorder_ = std::make_unique<jobs::CrcRecorder>(*js_, registry_, true);
+        recorder_->log().checkpoint = crc_every_ > 1 ? crc_every_ : 0;
+    }
+    void record_crc();  // sp2: capture this frame, then trim to the ring
+    uint32_t crc_every_ = 1;  // sp2: CRC capture cadence (set_crc_cadence)
+    size_t crc_ring_ = 0;
     std::vector<std::string>* trace_ = nullptr;
     ModeUpdateHook after_mode_update_;  // S10
+    ModeUpdateHook before_commands_;    // sp3 t04
     ModeUpdateHook object_anim_;        // S10-int
     TacticalCommandHook tactical_cmd_;  // S10-int
     TacticalCommandHook galactic_cmd_;  // Int-final
     OrderHook order_hook_;              // P host
     SelectAllHook select_all_hook_;     // q6
     PortEventHook port_hook_;           // P host
-    std::array<std::array<std::vector<ObjectId>, 10>, kMaxPlayers> groups_;  // P host: control groups
+    std::vector<std::array<std::vector<ObjectId>, 10>> groups_;  // P host: control groups, per player (cfg_.players)
     bool groups_used_ = false;                                               // P host
     ModeUpdateHook before_story_;                                            // P4 host
     ModeUpdateHook after_story_;                                             // OI host
@@ -411,7 +480,11 @@ private:
     std::string scoring_campaign_;
     std::vector<std::pair<std::string, std::string>> scoring_starts_;  // (mode, map) waiting for the next Service
     std::vector<galactic::GalacticEvent> scoring_events_;              // tapped from the story drains, delivered after T9
+    objects::ObjectStore* scoring_store_ = nullptr;                     // storyb t14: the store the scoring VM runs on
+    std::shared_ptr<lua::ObjectBridge> scoring_battle_bridge_;  // storyb t14: parent_store = the battle's store (shared: incomplete type here)
+    int32_t scoring_neutral_player() const;                             // storyb t14
     bool scoring_failed_ = false;  // the original's exited flag: a Lua error in an event call / thread
+    bool scoring_scaffold_ = false;  // mcx6 t07: scoring_map_battle() ran this session
     size_t scoring_seen_messages_ = 0, scoring_seen_errors_ = 0;
     uint64_t scoring_services_ = 0, scoring_calls_ = 0, scoring_releases_ = 0;
     void service_scoring();
@@ -461,6 +534,7 @@ private:
     // before the host whose VMs point to it.
     std::shared_ptr<lua::LuaPlayerWorld> object_players_;
     std::unique_ptr<ObjectScriptHost> object_scripts_;
+    std::unique_ptr<ShipNames> ship_names_;  // ref5 t04
 };
 
 }  // namespace alamo::sim

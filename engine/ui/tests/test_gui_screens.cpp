@@ -68,52 +68,16 @@ void test_real_data() {
     pi.name = U"Tatooine";
     pi.history = {U"Outer Rim desert world."};
     CHECK(gs.show_planet_info(pi));
-    AutoResolveInfo ar;
-    ar.invaders = {U"Star Destroyer"};
-    CHECK(gs.show_auto_resolve(ar));
-    gs.set_auto_resolve_progress(0.4f, 0.6f);
-    CHECK(gui.find(dlg::kAutoResolve)->get("IDC_AUTO_RESOLVE_PROGRESS_DEFENDER")->value == 60);
     const SkirmishMapInfo maps[1] = {{"_SPACE_PLANET_KUAT_01", U"Kuat", 2}};
     CHECK(gs.show_select_map(maps));
     std::printf("real screens: open %zu dialogs\n", gui.open_count());
     gs.close_all();
     CHECK(gui.open_count() == 0);
-    // Multiplayer screens on the shipped script.
-    LobbyScreens lob;
-    lob.init(gui);
-    lob.show_multiplayer_menu();
-    CHECK(lob.top() == dlg::kMultiplayer);
-    lob.show_lan_lobby();
-    CHECK(lob.top() == dlg::kLanLobby);
-    StagingState st;
-    st.host = true;
-    st.slots.resize(9);
-    st.slots[0].state = SlotState::Human;
-    st.slots[0].local = true;
-    st.slots[0].name = U"Gabriel";
-    CHECK(lob.show_staging(st) && lob.top() == dlg::kLanStaging);
-    st.internet = true;
-    CHECK(lob.show_staging(st) && lob.top() == dlg::kInternetStaging);
-    lob.show_internet_home();
-    CHECK(lob.top() == dlg::kInternetHome);
-    lob.set_internet_stats(12, 3, 4);
-    lob.show_internet_lobby();
-    CHECK(lob.top() == dlg::kInternetLobby);
-    lob.show_direct_connect({U"192.168.1.20"});
-    lob.show_password_prompt("g");
-    lob.show_connecting();
-    const ConnectionRow rows[1] = {{U"Host", 0.5f, true}};
-    lob.show_disconnect(rows);
-    lob.show_vote({});
-    for (const char* n : {dlg::kDirectConnect, dlg::kPassword, dlg::kConnect, dlg::kDisconnect, dlg::kVote}) CHECK(gui.find(n) != nullptr);
-    lob.close_all();
-    CHECK(gui.open_count() == 0);
     // P4 completion 2: the remaining screens on the shipped script.
     {
         InfoScreens is;
         is.init(gui);
-        CHECK(is.show_buy_units({1000, {{"X", U"X", 10, 0, "", true}}}) && is.show_story({}) && is.show_story_summary({}) &&
-              is.show_planet({}));
+        CHECK(is.show_buy_units({1000, {{"X", U"X", 10, 0, "", true}}}) && is.show_story({}) && is.show_story_summary({}));
         // GALACTIC_DIALOGS Â§2.2: chapter TITLE in the IDC_STATIC above the recap, newest chapter preselected, Completed
         // disabled with nothing completed, Abandon hidden.
         {
@@ -150,9 +114,9 @@ void test_real_data() {
             o.icon = "i_x.tga";
             return true;
         };
-        for (TechFaction f : {TechFaction::Rebel, TechFaction::Empire, TechFaction::BlackMarket})
+        for (const char* f : {"IDD_TECH_TREE_REBEL", "IDD_TECH_TREE_EMPIRE", "IDD_TECH_TREE_BLACKMARKET"})
             for (bool space : {false, true}) {
-                tt.faction = f;
+                tt.dialog = f;
                 tt.space = space;
                 is.set_tech_tree(tt);
                 CHECK(is.show_info(InfoPage::TechTree) && is.info_dialog() == tech_tree_dialog(f, space));
@@ -169,8 +133,7 @@ void test_real_data() {
     {
         std::vector<uint8_t> bytes;
         CHECK(files->read("Data\\XML\\MousePointers.xml", bytes));
-        const data::XmlDocument doc = data::XmlDocument::parse(
-            std::string_view(reinterpret_cast<const char*>(bytes.data()), bytes.size()), "MousePointers.xml");
+        const data::XmlDocument doc = data::XmlDocument::parse(bytes, "MousePointers.xml");
         CursorTable ct;
         const size_t n = ct.parse(doc.root());
         size_t known = 0;
@@ -347,6 +310,27 @@ void test_targeting() {
         // not active: the world input is not taken
         in.update(mouse_frame(400, 300, L, L, 0, 4.0));
         CHECK(!tc.update(in, keys, ctx, out));
+    }
+    // TRU1 t01: FIRE_LOBBING_SUPERWEAPON (47) picks a ground point and sends command 25 at position, one per user, never
+    // queued (even from a queued HUD click).
+    {
+        CHECK(ability_target_kind(47) == TargetKind::Point);
+        TargetingController tc;
+        InputState in;
+        HudAction a;
+        a.kind = HudAction::Kind::BeginAbilityTargeting;
+        a.ability_type = 47;
+        a.ids = {11, 12};
+        a.queued = true;
+        CHECK(tc.begin(a) && tc.target_kind() == TargetKind::Point);
+        std::vector<UiOrder> out;
+        CHECK(click(tc, in, 400, 300, L, 1.0, out));
+        CHECK(out.size() == 2 && !tc.active() && tc.issued() == 1);
+        for (size_t i = 0; i < out.size(); ++i) {
+            const commands::EventData& e = out[i].event;
+            CHECK(!out[i].queued && e.type() == commands::EventType::SpecialWeaponFire && e.u("weapon") == 11u + i &&
+                  e.u("at_position") == 1 && e.u("player") == 0 && std::fabs(e.f("x")) < 1.0f && std::fabs(e.f("y")) < 1.0f);
+        }
     }
     // Reinforcement drop: Reinforce at the ground point.
     {
@@ -577,6 +561,19 @@ void test_targeting() {
         out.clear();
         abilities_from_s9(as, grp, 32, out);
         CHECK(!out.empty() && out[0].icon == "i_sa_strike.tga" && out.size() == 2 && out[1].icon == "i_sa_tractor_beam.tga");
+        // mcx4 t14 (docs/re/MCX4_PRES_RE_ANSWERS_2.md Q5): the record's Alternate_Name_Text / Alternate_Description_Text
+        // replace the TEXT_TOOLTIP_ABILITY_<type>_NAME / _DESCRIPTION keys, each on its own.
+        // ledger: verifies Unit_Ability.Alternate_Name_Text
+        // ledger: verifies Unit_Ability.Alternate_Description_Text
+        CHECK(out[0].tooltip_key == "TEXT_TOOLTIP_ABILITY_DEFEND_NAME TEXT_TOOLTIP_ABILITY_DEFEND_DESCRIPTION");
+        ad.objects[0].unit_abilities[0].alternate_name_text = "TEXT_ALT_NAME";
+        out.clear();
+        abilities_from_s9(as, grp, 32, out);
+        CHECK(!out.empty() && out[0].tooltip_key == "TEXT_ALT_NAME TEXT_TOOLTIP_ABILITY_DEFEND_DESCRIPTION");
+        ad.objects[0].unit_abilities[0].alternate_description_text = "TEXT_ALT_DESC";
+        out.clear();
+        abilities_from_s9(as, grp, 32, out);
+        CHECK(!out.empty() && out[0].tooltip_key == "TEXT_ALT_NAME TEXT_ALT_DESC");
         // QA D5: the i_sa_* art of MT_CommandBar, by mapping or by type name.
         CHECK(ability_icon(0).empty() && ability_icon(kDefend) == "i_sa_defend_mode.tga" &&
               ability_icon(kTractorBeam) == "i_sa_tractor_beam.tga" && ability_icon(kLure) == "i_sa_lure.tga" &&
@@ -588,14 +585,22 @@ void test_targeting() {
 
 namespace test_gui_screens_t {
 void test_skirmish_maps();  // test_gui_skirmish_maps.cpp (p4ui t06)
+void test_skirmish_options();  // test_gui_skirmish_maps.cpp (skm1 t02 / t06)
 void test_skirmish_preview();  // p4uim t03 / t04
 void test_skirmish_colours();  // p4uia t01 / t02
+void test_skirmish_slot_defaults();  // modc t47
+void test_skirmish_control_points();  // ccpgt t02
+void test_custom_tech_range();  // mcx4 t19
 }
 
 int main() {
     test_skirmish_maps();
+    test_skirmish_options();
     test_skirmish_preview();
     test_skirmish_colours();
+    test_skirmish_slot_defaults();
+    test_skirmish_control_points();
+    test_custom_tech_range();
     test_screens();
     test_advanced_video();
     test_video_vsync_mode();
@@ -603,12 +608,12 @@ int main() {
     test_resolution_confirm();
     test_options_polish();
     test_advanced_video_port();
-    test_lobby();
     test_panels();
     test_encyclopedia_fade_anchor();
     test_camera_hotkeys();
     test_info_screens();
     test_cursor();
+    test_credits_roll();
     test_anim_hack_drag();
     test_controls();
     test_targeting();

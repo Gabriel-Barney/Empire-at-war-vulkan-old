@@ -144,7 +144,7 @@ Emitter parse_emitter(const Chunk& c) {
                 auto mc = ch->minis();
                 std::array<std::optional<SpawnShape>, 3> legacy;
                 while (auto m = mc.next())
-                    if (m->id >= 0x19 && m->id <= 0x1B) legacy[m->id - 0x19] = decode_shape(m->data, m->offset + 2);
+                    if (m->id >= 0x19 && m->id <= 0x1B) legacy[static_cast<size_t>(m->id - 0x19)] = decode_shape(m->data, m->offset + 2);
                 if (legacy[0] && legacy[1] && legacy[2]) e.shapes = {*legacy[0], *legacy[1], *legacy[2]};
                 break;
             }

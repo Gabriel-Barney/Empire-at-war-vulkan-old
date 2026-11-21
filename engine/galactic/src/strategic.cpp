@@ -3,11 +3,13 @@
 // stealth and detection (SG 2.2) and the event-driven victory claims (SG 1.4).
 //
 // Determinism: serial code; vectors walked in index order; the store's object list only for order-independent counts;
-// the only RNG consumer is detect_stealthed (one synced draw per qualifying candidate, candidate order).
+// the only RNG consumer is detect_stealthed (one synced draw per qualifying candidate, a second (evade, Q11) when the
+// first is below the chance; candidate order).
 #include <algorithm>
 #include <iterator>
 
 #include "alamo/galactic/campaign.hpp"
+#include "alamo/core/sim_crc.hpp"
 
 namespace alamo::galactic {
 
@@ -16,13 +18,6 @@ namespace {
 bool contains(const std::vector<uint32_t>& v, uint32_t x) { return std::find(v.begin(), v.end(), x) != v.end(); }
 
 }  // namespace
-
-commands::EventData fleet_management_event(FleetOp op, uint32_t target, uint32_t fleet, uint32_t unit, uint32_t a,
-                                           uint32_t slot) {
-    commands::EventData e = fleet_management_event(op, target, fleet, unit);
-    e.set("a", a).set("slot", slot);
-    return e;
-}
 
 // ---- SG 2.1 ----------------------------------------------------------------------------------------------------------
 
@@ -96,6 +91,7 @@ bool GalacticSim::place_company(int32_t player, PlanetIndex planet, uint32_t typ
     const uint32_t f = create_fleet(player, planet);
     fleets_[f].contents.push_back(h);
     fleets_[f].carried.push_back(0);
+    fleet_member_joined(f, h);
     last_spawn_ = h;
     return true;
 }
@@ -140,7 +136,7 @@ int32_t GalacticSim::live_count(int32_t player, uint32_t type) const {
         if (!store_->alive(h) || store_->owner(h) != player) continue;
         const uint32_t t = static_cast<uint32_t>(store_->type(h));
         if (t == type) ++n;
-        else if (t < rules_->types.size() && contains(rules_->types[t].company_units, type)) ++n;
+        else if (t < rules_->types.size() && !rules_->types[t].company_units.empty() && contains(company_members(h), type)) ++n;  // mcx4 t22
     }
     return n;
 }
@@ -186,7 +182,7 @@ BuildCheck GalacticSim::build_check(int32_t player, PlanetIndex planet, uint32_t
     if (t.advances_tech != 0 && (ps.tech_level != t.tech_level || ps.max_tech_level < t.advances_tech)) return fail(7);
     // 8. Lock_Tech list. 9. Build_Initially_Locked.
     if (type_locked(player, type)) return fail(8);
-    if (initial_build_locks_ && t.build_initially_locked && !type_unlocked(player, type)) return fail(9, kBuildInitiallyLocked);
+    if (t.build_initially_locked && !type_unlocked(player, type)) return fail(9, kBuildInitiallyLocked);
     // 10. the planet is the player's.
     if (p.owner != player) return fail(10);
     // 11. not a company / squadron member, not a transport.
@@ -266,13 +262,16 @@ BuildCheck GalacticSim::build_check(int32_t player, PlanetIndex planet, uint32_t
     if (t.limit_lifetime == 0 || (t.limit_lifetime > 0 && built_count(player, type) >= t.limit_lifetime)) return fail(22);
     if (t.limit_current == 0) return fail(23);
     if (t.limit_current > 0 && live_count(player, type) + queued_count(player, type) >= t.limit_current) return fail(23, kBuildLimit);
-    // 24. surface access for ground bases / companies / ground structures (generic heroes excepted), initial placement
-    // (the planet's initial-placement list +0x110 is not modelled: such types are never buildable [port]).
+    // 24. surface access for ground bases / companies / ground structures (generic heroes excepted), initial placement:
+    // a Build_Requires_Initial_Placement type only on the planets the campaign's Special_Case_Production lists it for
+    // (PD +0x110, mcx4 t01, MCX4_RE_ANSWERS_GALACTIC Q1).
     const bool accessible = surface_accessible(planet);  // 0x375220 [H]: planet data +0x2C8 (destroyed) -> false
     const bool needs_surface = t.dummy != 0 ? (t.dummy == kDummyGroundBase || t.dummy == kDummyGroundCompany || t.dummy == kDummyGroundStructure)
                                             : (t.kind == UnitKind::GroundUnit || t.kind == UnitKind::GroundStructure);
     if (!(accessible || !needs_surface || t.generic_hero)) return fail(24);
-    if (t.requires_initial_placement) return fail(24);
+    if (t.requires_initial_placement &&
+        std::find(p.initial_placement.begin(), p.initial_placement.end(), type) == p.initial_placement.end())
+        return fail(24);
     r.ok = true;
     return r;
 }
@@ -291,6 +290,21 @@ void GalacticSim::set_galactic_stealth(ObjectHandle object, bool on) {
     const bool has = it != stealthed_.end() && *it == id;
     if (on && !has) stealthed_.insert(it, id);
     if (!on && has) stealthed_.erase(it);
+}
+
+void GalacticSim::set_prefer_ground_over_space(ObjectHandle object, bool on) {
+    if (!store_->exists(object)) return;
+    const int32_t id = static_cast<int32_t>(store_->id(object));
+    const auto it = std::lower_bound(ground_shy_.begin(), ground_shy_.end(), id);
+    const bool has = it != ground_shy_.end() && *it == id;
+    if (!on && !has) ground_shy_.insert(it, id);
+    if (on && has) ground_shy_.erase(it);
+}
+
+bool GalacticSim::prefer_ground_over_space(ObjectHandle object) const {
+    if (!store_->exists(object)) return true;
+    const int32_t id = static_cast<int32_t>(store_->id(object));
+    return !std::binary_search(ground_shy_.begin(), ground_shy_.end(), id);
 }
 
 bool GalacticSim::galactic_stealth(ObjectHandle object) const {
@@ -328,7 +342,12 @@ int32_t GalacticSim::detect_stealthed(ObjectHandle detector, float chance) {
         if (allied(owner, store_->owner(c))) continue;
         const TypeSpecial& ct = special().type(static_cast<uint32_t>(store_->type(c)));
         if (dt.generic_hero && ct.named_hero) continue;
-        const bool discovered = (dt.named_hero && ct.generic_hero) || rng_->range_float(0.0f, 1.0f) < chance;
+        bool discovered = dt.named_hero && ct.generic_hero;  // no draw, no evade roll
+        if (!discovered && rng_->range_float(0.0f, 1.0f) < chance) {
+            // MCX4_T09_RE_ANSWERS Q11 (0x3a0b70): one more synced draw r2, made even at an evade chance of 0.0; r2 below
+            // the candidate's Evade_Detection_Chance cancels the detection ("has narrowly evaded detection").
+            discovered = !(rng_->range_float(0.0f, 1.0f) < ct.evade_detection_chance);
+        }
         if (!discovered) continue;
         set_galactic_stealth(c, false);
         ++found;
@@ -500,9 +519,20 @@ bool GalacticSim::super_weapon_leader_hit(PlanetIndex planet) const {
     return false;
 }
 
-bool GalacticSim::super_weapon_destroy_planet(PlanetIndex planet, int32_t attacker) {
+bool GalacticSim::contested_space(PlanetIndex planet, int32_t attacker) const {
+    if (!valid_planet(planet)) return false;
+    for (uint32_t f : planets_[planet].orbit) {
+        if (!fleets_[f].alive || hidden(fleets_[f].object)) continue;
+        const int32_t o = fleets_[f].owner;
+        if (o != attacker && relation(o, attacker) != Relation::Ally) return true;  // one non-friendly visible fleet is enough
+    }
+    return false;
+}
+
+bool GalacticSim::super_weapon_destroy_planet(PlanetIndex planet, int32_t attacker, bool check_contested_space) {
     // 0x707670: leader test (no name list) -> claim 7, then the shared routine only (+ the visual refresh, presentation).
     if (!valid_planet(planet) || planets_[planet].destroyed) return false;
+    if (check_contested_space && contested_space(planet, attacker)) return false;  // STY1 t01: refused, nothing destroyed
     if (valid_player(attacker) && super_weapon_leader_hit(planet)) claim_victory(attacker, 7, 30);
     return planet_destroy_core(planet, attacker);
 }
@@ -520,8 +550,10 @@ bool GalacticSim::tsw_destroy_planet(PlanetIndex planet, int32_t tsw_owner, bool
 // ---- CRC tail --------------------------------------------------------------------------------------------------------------
 
 bool GalacticSim::oi_state_default() const {
-    if (!claims_.empty() || linked_battle_pending_ || victory_hold_ != 0) return false;
+    if (!claims_.empty() || linked_battle_pending_ || victory_hold_ != 0 || !victory_deferred_.empty()) return false;
     for (int32_t id : stealthed_)
+        if (store_->alive(store_->find(static_cast<objects::ObjectId>(id)))) return false;
+    for (int32_t id : ground_shy_)  // cu8f t04b
         if (store_->alive(store_->find(static_cast<objects::ObjectId>(id)))) return false;
     for (const PlayerState& p : players_)
         if (p.max_tech_level != 5 || !p.built.empty()) return false;
@@ -546,6 +578,24 @@ void GalacticSim::hash_oi(StateHasher& h) const {
     if (victory_hold_ != 0) {  // story t11 (only once used, so older captures keep their CRC)
         h.u32(0x56484C44u);  // "VHLD"
         h.i32(victory_hold_);
+    }
+    if (!victory_deferred_.empty()) {  // q6 t21: deferred victory tests (only once used, so older captures keep their CRC)
+        h.u32(0x56444652u);  // "VDFR"
+        h.u32(static_cast<uint32_t>(victory_deferred_.size()));
+        for (const auto& e : victory_deferred_) {
+            h.i32(e.first);
+            h.u8(e.second);
+        }
+    }
+    {  // cu8f t04b: live units with Prefer_Ground_Over_Space false (only once used, so older captures keep their CRC)
+        uint32_t shy = 0;
+        for (int32_t id : ground_shy_) shy += store_->alive(store_->find(static_cast<objects::ObjectId>(id))) ? 1u : 0u;
+        if (shy != 0) {
+            h.u32(0x50474F53u);  // "PGOS"
+            h.u32(shy);
+            for (int32_t id : ground_shy_)
+                if (store_->alive(store_->find(static_cast<objects::ObjectId>(id)))) h.i32(id);
+        }
     }
     for (const PlayerState& p : players_) {
         h.i32(p.max_tech_level);

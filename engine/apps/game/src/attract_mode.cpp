@@ -5,6 +5,7 @@
 #include <cstdlib>
 #include <string_view>
 
+#include "alamo/core/ascii.hpp"
 #include "alamo/data/game_database.hpp"
 
 namespace alamo::game {
@@ -45,25 +46,18 @@ AttractConfig load_attract_config(const data::GameConstants& gc) {
 }
 
 namespace {
-char lower(char c) { return c >= 'A' && c <= 'Z' ? static_cast<char>(c - 'A' + 'a') : c; }
-bool iends_with(const std::string& s, std::string_view suffix) {
-    if (s.size() < suffix.size()) return false;
-    for (size_t i = 0; i < suffix.size(); ++i)
-        if (lower(s[s.size() - suffix.size() + i]) != lower(suffix[i])) return false;
-    return true;
-}
 // Position of `needle` in `s` (case-insensitive), npos when absent.
 size_t ifind(const std::string& s, std::string_view needle) {
     for (size_t at = 0; at + needle.size() <= s.size(); ++at) {
         size_t i = 0;
-        while (i < needle.size() && lower(s[at + i]) == lower(needle[i])) ++i;
+        while (i < needle.size() && ascii_to_lower(s[at + i]) == ascii_to_lower(needle[i])) ++i;
         if (i == needle.size()) return at;
     }
     return std::string::npos;
 }
 }  // namespace
 
-bool is_attract_recording(const std::string& entry) { return iends_with(entry, ".rec"); }
+bool is_attract_recording(const std::string& entry) { return ascii_iends_with(entry, ".rec"); }
 
 std::string attract_rec_map(std::span<const uint8_t> bytes) {
     constexpr std::string_view kPrefix = ".\\Data\\Art\\Maps\\";
@@ -75,7 +69,7 @@ std::string attract_rec_map(std::span<const uint8_t> bytes) {
             // The EaW file has printable header bytes right before the path ("d+" in front_end_demo_attract.rec), so the
             // path may start inside the run.
             const size_t at = ifind(cur, kPrefix);
-            if (at != std::string::npos && iends_with(cur, ".ted") && cur.size() > at + kPrefix.size() + 4)
+            if (at != std::string::npos && ascii_iends_with(cur, ".ted") && cur.size() > at + kPrefix.size() + 4)
                 return cur.substr(at + kPrefix.size(), cur.size() - at - kPrefix.size() - 4);
             cur.clear();
         } else if (b >= 0x20 && b < 0x7F) {
@@ -138,6 +132,54 @@ AttractController::Request AttractController::update(double now, bool input, Dia
         return r == Request::Start ? Request::Next : r;
     }
     return Request::None;
+}
+
+SaliencyWeights load_saliency_weights(const data::GameConstants& gc) {
+    SaliencyWeights w;
+    w.size = gc.get_float("Saliency_Size", w.size);           // ledger: consumes GameConstants.Saliency_Size
+    w.power = gc.get_float("Saliency_Power", w.power);        // ledger: consumes GameConstants.Saliency_Power
+    w.x = gc.get_float("Saliency_X", w.x);                    // ledger: consumes GameConstants.Saliency_X
+    w.y = gc.get_float("Saliency_Y", w.y);                    // ledger: consumes GameConstants.Saliency_Y
+    w.health = gc.get_float("Saliency_Health", w.health);     // ledger: consumes GameConstants.Saliency_Health
+    w.targets = gc.get_float("Saliency_Targets", w.targets);  // ledger: consumes GameConstants.Saliency_Targets
+    w.speed = gc.get_float("Saliency_Speed", w.speed);        // ledger: consumes GameConstants.Saliency_Speed
+    return w;
+}
+
+size_t saliency_pick(std::span<const SaliencyFeatures> features, const SaliencyWeights& w) {
+    if (features.empty()) return 0;
+    constexpr size_t kFeatures = 7;
+    const auto get = [](const SaliencyFeatures& f, size_t k) -> float {
+        switch (k) {
+            case 0: return f.size;
+            case 1: return f.power;
+            case 2: return f.x;
+            case 3: return f.y;
+            case 4: return f.health;
+            case 5: return f.targets;
+            default: return f.speed;
+        }
+    };
+    const float weight[kFeatures] = {w.size, w.power, w.x, w.y, w.health, w.targets, w.speed};
+    float lo[kFeatures], hi[kFeatures];
+    for (size_t k = 0; k < kFeatures; ++k) lo[k] = hi[k] = get(features[0], k);
+    for (const SaliencyFeatures& f : features)
+        for (size_t k = 0; k < kFeatures; ++k) {
+            lo[k] = std::min(lo[k], get(f, k));
+            hi[k] = std::max(hi[k], get(f, k));
+        }
+    size_t best = 0;
+    float best_score = 0.0f;
+    for (size_t i = 0; i < features.size(); ++i) {
+        float score = 0.0f;
+        for (size_t k = 0; k < kFeatures; ++k)
+            if (hi[k] > lo[k]) score += weight[k] * ((get(features[i], k) - lo[k]) / (hi[k] - lo[k]));
+        if (i == 0 || score > best_score) {
+            best = i;
+            best_score = score;
+        }
+    }
+    return best;
 }
 
 float demo_wrap_deg(float deg) {

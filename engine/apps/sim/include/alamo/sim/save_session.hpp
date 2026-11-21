@@ -99,8 +99,17 @@ struct SessionPlayer {
     friend bool operator==(const SessionPlayer&, const SessionPlayer&) = default;
 };
 
+// mcx3 t05: one mod of the stack a save was made with (vfs::ModDescriptor's identity; mod_registry.hpp). Shown when the
+// save's data differs; never compared for the refusal itself (data_fingerprint is).
+struct SaveMod {
+    std::string key, name, version;
+    uint64_t content_hash = 0;
+    bool operator==(const SaveMod&) const = default;
+};
+
 struct SessionDescriptor {
-    static constexpr uint32_t kVersion = 1;
+    // 2 (mcx5 t01): the scheduler's max_players is a u16 (no 64-player cap); version 1 still reads.
+    static constexpr uint32_t kVersion = 2;
 
     // What to build: "galactic" = a data-driven campaign / galactic conquest; hosts may define their own kinds
     // (alamo_headless "synthetic").
@@ -122,6 +131,9 @@ struct SessionDescriptor {
     // from different game data is refused.
     uint64_t data_fingerprint = 0;
     std::string writer;                   // engine build that wrote the save (informational)
+    // mcx3 t05: the mods the data was loaded with (VFS order). Written after `writer` only when not empty, so a save
+    // without mods keeps the version 1 bytes and an older reader's layout; a save without the block reads as no mods.
+    std::vector<SaveMod> mods;
 
     std::string option(std::string_view key, std::string_view fallback = {}) const;
     void set_option(std::string key, std::string value);  // replaces an existing key
@@ -130,7 +142,19 @@ struct SessionDescriptor {
     bool read(ByteReader& r);  // false (unchanged) on a version mismatch / truncated data
     // "" when a save written with `saved` can be loaded into a session described by `current`, else the first
     // difference (kind, campaign, data args, SimConfig, players, difficulty, options, data fingerprint).
+    // A data difference is named readably (data_change) when the mods tell what changed.
     static std::string mismatch(const SessionDescriptor& saved, const SessionDescriptor& current);
+    // mcx3 t05 (D3): true when the two differ and only in their game data (data_args, data_fingerprint, mods): the
+    // case a player may load anyway.
+    static bool only_data_differs(const SessionDescriptor& saved, const SessionDescriptor& current);
+    // What changed in the data, for the player: per mod "<name> updated since this save (version a -> b)", "<name>
+    // changed since this save (version a)", "<name> was in this save and is not loaded now", "<name> is loaded now and
+    // was not in this save"; "game data differs (fingerprint ...)" when the mods do not say. "" when the data is equal.
+    static std::string data_change(const SessionDescriptor& saved, const SessionDescriptor& current);
+    // The per-mod lines of data_change; empty when the mods say nothing (equal, or a side with mod arguments and no
+    // mods block: a save from before mcx3).
+    static std::vector<std::string> mod_changes(const SessionDescriptor& saved, const SessionDescriptor& current);
+    static std::string join_changes(const std::vector<std::string>& lines);
 };
 
 // The descriptor of a save, without loading anything (what the application needs to rebuild the session).
@@ -166,61 +190,32 @@ struct LoadReport {
     std::vector<std::string> missing;     // expected by the rebuilt session, absent from the save
     std::vector<std::string> unexpected;  // in the save, but the rebuilt session has no such system
     std::string descriptor_error;         // non-empty: the save does not belong to this session (nothing was read)
+    // mcx3 t05: descriptor_error is a data difference only (SessionDescriptor::only_data_differs): the save may be
+    // loaded anyway (SimHost::set_allow_different_data).
+    bool different_data = false;
+    // The load went ahead over a data difference (allowed): the session runs on other data than it was saved with.
+    bool loaded_with_different_data = false;
     bool ok() const { return descriptor_error.empty() && failed.empty() && missing.empty() && unexpected.empty(); }
     std::string text() const;             // one line
 };
 
-// ---- helpers for nested sections inside a chunk ----
-// u32 byte length + the bytes `fn` writes (a sub-system's own write), so the outer reader stays aligned even when the
-// sub-system writes nothing (stubs).
-template <class F>
-void write_section(ByteWriter& w, F&& fn) {
-    ByteWriter sub;
-    fn(sub);
-    w.u32(static_cast<uint32_t>(sub.size()));
-    w.raw(sub.bytes());
-}
-// Reads a write_section blob and hands `fn` a reader over exactly those bytes; true when fn succeeds and consumed
-// them all.
-template <class F>
-bool read_section(ByteReader& r, F&& fn) {
-    const uint32_t n = r.u32();
-    const std::span<const uint8_t> d = r.raw(n);
-    if (!r.ok()) return false;
-    ByteReader sub(d);
-    return fn(sub) && sub.ok() && sub.done();
-}
+// Nested sections inside a chunk use alamo::put_section / get_section (alamo/core/bytes.hpp), found by ADL on ByteWriter.
 
-// True for a type with the save_file.hpp system methods (write / read). Used to pick up implementations in other
-// modules as they land (sections whose system lacks them are written empty and fail to read: "pending").
+// A type with the save_file.hpp system methods (write / read).
 template <class T>
 concept SaveableSystem = requires(const T& c, T& m, ByteWriter& w, ByteReader& r) {
     c.write(w);
     { m.read(r) } -> std::same_as<bool>;
 };
-// write / read when T has them; otherwise nothing is written and the read fails (the chunk reports "pending").
-template <class T>
-void write_if_saveable(const T& system, ByteWriter& w) {
-    if constexpr (SaveableSystem<T>) {
-        system.write(w);
-    } else {
-        (void)system;
-        (void)w;
-    }
+// A module system's write / read. cu9 t16: every saved system has them now, so a type without them is a build error
+// (the migration fallback that wrote nothing and failed the read, "pending until the module lands", is gone).
+template <SaveableSystem T>
+void write_system(const T& system, ByteWriter& w) {
+    system.write(w);
 }
-template <class T>
-bool read_if_saveable(T& system, ByteReader& r) {
-    if constexpr (SaveableSystem<T>) {
-        return system.read(r);
-    } else {
-        (void)system;
-        (void)r;
-        return false;
-    }
-}
-template <class T>
-constexpr bool is_saveable(const T*) {
-    return SaveableSystem<T>;
+template <SaveableSystem T>
+bool read_system(T& system, ByteReader& r) {
+    return system.read(r);
 }
 
 }  // namespace alamo::sim

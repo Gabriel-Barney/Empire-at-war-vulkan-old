@@ -17,6 +17,7 @@
 
 #include "alamo/core/dmath.hpp"
 #include "alamo/core/file_provider.hpp"
+#include "alamo/core/host_fs.hpp"
 #include "alamo/core/log.hpp"
 #include "alamo/core/sim_rng.hpp"
 #include "alamo/lua/ai_bridge.hpp"  // reset_script_threads
@@ -26,6 +27,7 @@
 #include "alamo/objects/game_object_types.hpp"
 #include "alamo/objects/object_store.hpp"
 #include "alamo/objects/object_types.hpp"
+#include "alamo/test/support.hpp"
 #ifdef ALAMO_LUA_HAVE_VFS
 #include "alamo/vfs/vfs.hpp"
 #endif
@@ -38,14 +40,7 @@ using namespace alamo;
 using namespace alamo::lua;
 namespace fs = std::filesystem;
 
-static int g_fail = 0;
-#define CHECK(c)                                                     \
-    do {                                                             \
-        if (!(c)) {                                                  \
-            std::printf("FAIL %s:%d: %s\n", __FILE__, __LINE__, #c); \
-            ++g_fail;                                                \
-        }                                                            \
-    } while (0)
+using ::alamo::test::g_fail;
 
 #ifndef ALAMO_LUA_LOG_DIR
 #define ALAMO_LUA_LOG_DIR "logs"
@@ -89,10 +84,7 @@ static double gnum(LuaVm& vm, const char* name) {
     return d;
 }
 
-static void write_file(const fs::path& p, const std::string& s) {
-    fs::create_directories(p.parent_path());
-    std::ofstream(p, std::ios::binary) << s;
-}
+using ::alamo::test::write_file;
 
 static void write_log(const std::string& name, const std::string& text) {
     std::error_code ec;
@@ -152,7 +144,7 @@ static void test_registry() {
             lua_rawget(L, LUA_GLOBALSINDEX);
             const int t = lua_type(L, -1);
             lua_pop(L, 1);
-            const bool ok = is_host_value_global(b.name) ? t == LUA_TNIL : t == LUA_TUSERDATA;
+            const bool ok = (is_host_value_global(b.name) || is_unregistered_global(b.name)) ? t == LUA_TNIL : t == LUA_TUSERDATA;
             if (!ok) {
                 std::printf("  global not registered: %s\n", b.name);
                 ++missing;
@@ -497,9 +489,9 @@ static void test_objects() {
                   "same = (all[1] == Find_All_Objects_Of_Type(tt)[1]) and rawequal(all[1], Find_All_Objects_Of_Type(tt)[1])\n"
                   "tn = all[2].Get_Type().Get_Name() owner = all[1].Get_Owner().Get_ID() mode = Get_Game_Mode()\n"
                   "victim = all[2]") == "");
-    CHECK(gstr(vm, "nm") == "Trooper" && gstr(vm, "none") == "nil");
+    CHECK(gstr(vm, "nm") == "TROOPER" && gstr(vm, "none") == "nil");
     CHECK(gnum(vm, "n") == 3.0 && gstr(vm, "ids") == "4,2,1,");  // newest first
-    CHECK(gnum(vm, "byname") == 1.0 && gstr(vm, "tn") == "Trooper" && gnum(vm, "owner") == 3.0 && gstr(vm, "mode") == "Land");
+    CHECK(gnum(vm, "byname") == 1.0 && gstr(vm, "tn") == "TROOPER" && gnum(vm, "owner") == 3.0 && gstr(vm, "mode") == "Land");
     CHECK(run(vm, "ok = same and 1 or 0") == "" && gnum(vm, "ok") == 1.0);
     // Wrapper identity: tables keyed by wrappers hit (raw identity), for objects, types and players.
     CHECK(run(vm, "keyed = {} keyed[all[1]] = 'o' keyed[tt] = 't' keyed[all[1].Get_Owner()] = 'p'\n"
@@ -533,10 +525,9 @@ static void test_objects() {
     const objects::ObjectHandle t4 = store.create(sp);
     CHECK(t4.slot() == t2.slot());
     CHECK(run(vm, "v3 = victim.Is_Valid() and 1 or 0") == "" && gnum(vm, "v3") == 0.0);
-    vm.sweep_dead_wrappers();
     CHECK(run(vm, "c = table.getn(Find_All_Objects_Of_Type(tt))") == "" && gnum(vm, "c") == 3.0);
-    // A table keyed by the dead wrapper keeps it (still a dead wrapper after the sweep); the live
-    // object in the reused slot gets its own wrapper.
+    // A table keyed by the dead wrapper keeps it (still a dead wrapper); the live object in the reused slot gets its
+    // own wrapper.
     CHECK(run(vm, "dk = {} dk[victim] = 1 dead_keys = 0 for k in pairs(dk) do if not k.Is_Valid() then "
                   "dead_keys = dead_keys + 1 end end newest = Find_All_Objects_Of_Type(tt)[1] "
                   "fresh = (dk[newest] == nil) and 1 or 0") == "");
@@ -594,23 +585,84 @@ static void test_static_scan() {
 }
 
 // ------------------------------------------------------------------------------------------
+// mcx6 t07 (docs/re/LUA_API.md "Script lookup and require"): LUA_PATH order and stock 5.0.2 require.
+
+namespace {
+class MapFiles final : public FileProvider {
+public:
+    std::map<std::string, std::string> files;  // exact game-relative path -> text
+    mutable std::vector<std::string> reads;     // every read attempt, in order
+    bool read(std::string_view path, std::vector<uint8_t>& out) const override {
+        reads.emplace_back(path);
+        const auto it = files.find(std::string(path));
+        if (it == files.end()) return false;
+        out.assign(it->second.begin(), it->second.end());
+        return true;
+    }
+    bool exists(std::string_view path) const override { return files.count(std::string(path)) != 0; }
+    std::string origin(std::string_view) const override { return "test"; }
+};
+}  // namespace
+
+static void test_script_lookup_and_require() {
+    // Roots in registration order (boot init, AI scan, evaluator scan); the install folder first; .lua before .lc.
+    const std::vector<std::string_view> roots(script_roots().begin(), script_roots().end());
+    CHECK(roots.size() == 11 && roots.front() == "Data\\Scripts\\Library\\" && roots[4] == "Data\\Scripts\\Story\\" &&
+          roots[5] == "Data\\Scripts\\AI\\" && roots.back() == "Data\\Scripts\\Evaluators\\");
+    MapFiles f;
+    std::vector<uint8_t> bytes;
+    CHECK(read_script(f, "Nope", bytes).empty());
+    std::vector<std::string> want{"Nope.lua", "Nope.lc"};
+    for (const std::string_view r : roots) {
+        want.push_back(std::string(r) + "Nope.lua");
+        want.push_back(std::string(r) + "Nope.lc");
+    }
+    CHECK(f.reads == want);
+    f.files["Data\\Scripts\\AI\\Plan.lua"] = "x = 1";
+    f.files["Data\\Scripts\\Library\\Plan.lc"] = "x = 2";  // an earlier root shadows the plan's own file (.lc included)
+    CHECK(read_script(f, "Plan", bytes) == "Data\\Scripts\\Library\\Plan.lc");
+    f.files["Data\\Scripts\\Library\\Plan.lua"] = "x = 3";  // .lua before .lc in one directory
+    CHECK(read_script(f, "Plan", bytes) == "Data\\Scripts\\Library\\Plan.lua");
+    f.files["Plan.lc"] = "x = 4";  // the install folder ("./") before every root
+    CHECK(read_script(f, "Plan", bytes) == "Plan.lc");
+
+    // require: _LOADED[name] is set after a successful run to the chunk's result (nil -> true, false kept), a chunk that
+    // raises leaves no entry (a later require runs it again), _REQUIREDNAME is the name during the run and restored after.
+    f.files["Data\\Scripts\\Library\\ModA.lua"] =
+        "a_seen = _LOADED['ModA'] == nil; a_name = _REQUIREDNAME; require('ModB'); a_after = _REQUIREDNAME; a_runs = (a_runs or 0) + 1";
+    f.files["Data\\Scripts\\Library\\ModB.lua"] = "b_name = _REQUIREDNAME; return 'bee'";
+    f.files["Data\\Scripts\\Library\\ModF.lua"] = "return false";
+    f.files["Data\\Scripts\\Library\\Bad.lua"] = "bad_runs = (bad_runs or 0) + 1; if bad_runs == 1 then error('first') end";
+    LuaHost host;
+    host.files = &f;
+    LuaVm vm(host);
+    CHECK(run(vm, "_REQUIREDNAME = 'outer'; r = require('ModA'); r2 = require('ModA'); rb = require('ModB')") == "");
+    CHECK(run(vm, "assert(a_seen == true and a_name == 'ModA' and b_name == 'ModB' and a_after == 'ModA' and a_runs == 1)") == "");
+    CHECK(run(vm, "assert(r == true and r2 == true and rb == 'bee' and _LOADED.ModA == true and _LOADED.ModB == 'bee')") == "");
+    CHECK(gstr(vm, "_REQUIREDNAME") == "outer");
+    CHECK(run(vm, "f1 = require('ModF'); f2 = require('ModF'); assert(f1 == false and _LOADED.ModF == false)") == "");
+    CHECK(run(vm, "require('Bad')").find("first") != std::string::npos);
+    // (5.0.2 restores _REQUIREDNAME only after a successful run: the error left it at "Bad")
+    CHECK(run(vm, "assert(_LOADED.Bad == nil and _REQUIREDNAME == 'Bad'); require('Bad'); assert(bad_runs == 2 and _LOADED.Bad == true)") ==
+          "");
+    std::string err;
+    CHECK(vm.require("ModB", &err) && run(vm, "assert(_LOADED.ModB == 'bee')") == "");
+
+    // LuaVmOptions::legacy_require (pre-mcx6 saves' pristine plan VMs): _LOADED[name] = true before the run,
+    // _REQUIREDNAME left at the last name, a false result becomes true.
+    LuaVmOptions legacy;
+    legacy.legacy_require = true;
+    LuaVm old(host, legacy);
+    CHECK(run(old, "_REQUIREDNAME = 'outer'; r = require('ModA'); f1 = require('ModF')") == "");
+    CHECK(run(old, "assert(a_seen == false and a_name == 'ModA' and b_name == 'ModB' and a_after == 'ModB')") == "");
+    CHECK(run(old, "assert(r == true and _LOADED.ModB == 'bee' and f1 == true and _LOADED.ModF == true)") == "");
+    CHECK(gstr(old, "_REQUIREDNAME") == "ModF");
+}
+
+// ------------------------------------------------------------------------------------------
 // Shipped scripts (ALAMO_FOC_DATA / ALAMO_EAW_DATA).
 
-static std::string env(const char* name) {
-#ifdef _MSC_VER
-    char* v = nullptr;
-    size_t len = 0;
-    std::string out;
-    if (_dupenv_s(&v, &len, name) == 0 && v) {
-        out = v;
-        std::free(v);
-    }
-    return out;
-#else
-    const char* v = std::getenv(name);
-    return v ? std::string(v) : std::string();
-#endif
-}
+using ::alamo::test::env_or_empty;
 
 static bool has_script_ext(const std::string& p) {
     auto lower = p;
@@ -632,7 +684,7 @@ static void list_loose(const fs::path& dir, const std::string& rel, std::vector<
 }
 
 static void test_shipped_scripts(const char* var, const char* game) {
-    const std::string root = env(var);
+    const std::string root = env_or_empty(var);
     if (root.empty()) {
         std::printf("  %s unset: shipped %s scripts skipped\n", var, game);
         return;
@@ -747,6 +799,7 @@ int main() {
     test_objects();
     test_owner_thread();
     test_static_scan();
+    test_script_lookup_and_require();
     test_shipped_scripts("ALAMO_FOC_DATA", "foc");
     test_shipped_scripts("ALAMO_EAW_DATA", "eaw");
     if (g_fail) {

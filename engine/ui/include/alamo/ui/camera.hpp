@@ -51,7 +51,7 @@
 //     the orbit pose stay one consistent camera).
 //   * Control-group camera jump (UI.md §4.4): jump_to(point) moves the look-at point (clamped, terrain-snapped) and
 //     keeps yaw / pitch / zoom; focus_point() = mean of the group's positions in index order. The host gets the jump
-//     from HotkeyDispatcher (HotkeyEvent::camera_jump) or OrderTranslator::take_camera_jump().
+//     from HotkeyDispatcher (HotkeyEvent::camera_jump).
 #pragma once
 #include <cstdint>
 #include <functional>
@@ -93,6 +93,10 @@ struct CameraParams {
 
 // Hor+ rule of the tactical camera (RENDER.md §3.4); same formula as render::tactical_fov_x.
 float tactical_fov_x(float fov_degrees, float aspect);
+// [port: Gabriel 2026-11-13] Hor+ for the galactic camera (the original keeps B.8's horizontal FOV at every aspect): the
+// horizontal FOV `fov_x_4_3` (radians) holds at 4:3 and narrower; a wider aspect keeps 4:3's vertical FOV,
+// 2 atan(tan(fov_x_4_3 / 2) x aspect x 3/4), with no upper aspect limit (ultrawide included).
+float galactic_fov_x(float fov_x_4_3, float aspect);
 inline constexpr float kGalacticFovX = 0.46364761f;  // atan(0.5) (SPACE_AND_OPEN B.8)
 inline constexpr float kGalacticNear = 10.0f, kGalacticFar = 10000.0f;
 
@@ -238,6 +242,9 @@ public:
     // Mouse drag mode of this frame (middle / right-scroll / both-buttons drag).
     enum class Drag : uint8_t { None, Pan, Rotate };
     Drag drag() const { return drag_; }
+    // ui2 t06 (story SCROLL_LOCK, STORY_PRESENTATION_REWARDS.md 5.11): no key, edge or drag scrolling while set; rotation and zoom stay.
+    void set_scroll_locked(bool locked) { scroll_locked_ = locked; }
+    bool scroll_locked() const { return scroll_locked_; }
 
     // Overview zoom (see the header comment). Level 0 = normal, 1 / 2 = Tactical_Overview_* / *2.
     int32_t overview_level() const { return ov_level_; }
@@ -252,7 +259,6 @@ public:
     // [port: Gabriel] field of view setting (degrees, defined for 4:3 like the data; <= 0 = TacticalCameras.xml FOV).
     // Presentation only. Replaces the normal-zoom FOV; the overview levels keep their own.
     void set_fov_override(float degrees) { fov_override_ = degrees; }
-    float fov_override() const { return fov_override_; }
     float roll_deg() const { return roll_; }
     const CameraTuning& tuning() const { return t_; }
     void set_tuning(const CameraTuning& t) { t_ = t; }
@@ -269,7 +275,6 @@ public:
     float scroll_speed() const;   // world units / s of a held scroll key at the current distance
     // Smoothed scroll velocity in speed units / s (x 3e-4 x distance = world units / s; y screen-down) and a hard stop.
     float scroll_velocity_x() const { return scroll_vx_; }
-    float scroll_velocity_y() const { return scroll_vy_; }
     void stop_scroll() { scroll_vx_ = scroll_vy_ = 0.0f; }
 
     // Pose for the renderer / picking; pitch raised so the eye clears the terrain by Min_Height_Above_Terrain.
@@ -312,6 +317,7 @@ private:
     // [port: Gabriel] free rotation / FOV setting
     float pitch_free_ = 0.0f, roll_ = 0.0f, fov_override_ = 0.0f;
     float scroll_vx_ = 0.0f, scroll_vy_ = 0.0f;  // scroll smoothing (STRATEGIC_GAPS §7.1)
+    bool scroll_locked_ = false;                  // ui2 t06
 };
 
 // Galactic map camera (RENDER.md §3.5 [M], SPACE_AND_OPEN B.8): looks north (+Y) pitched down by
@@ -328,6 +334,9 @@ public:
     void set_look_at(Vec3 p);  // z := Galactic_Scroll_Plane
     void update(const InputState& in, const Bindings& keys, float dt);
     void pan(float dx, float dy);  // only while zoomed out and settled (zoom state 0)
+    // ui2 t06 (story SCROLL_LOCK): no key, edge or drag scrolling while set; the wheel zoom stays.
+    void set_scroll_locked(bool locked) { scroll_locked_ = locked; }
+    bool scroll_locked() const { return scroll_locked_; }
     // Wheel: notches > 0 = zoom-in request for the host (take_zoom_in_request: the hovered or selected planet ->
     // zoom_to_planet), < 0 = zoom out from the settled zoomed view. No continuous zoom (P1_CAMERA_INPUT.md §5).
     void zoom(float notches);
@@ -343,6 +352,7 @@ public:
     float pitch_deg() const;   // down angle (positive)
     float pullback() const;
     bool zoomed() const { return zoomed_; }
+    bool dragging() const { return dragging_; }  // ui1 t01: a middle / right-scroll drag holds the map
     bool transitioning() const { return t_anim_ < 1.0f; }
     // Zoom transition progress z (0..1, linear in time over GMC_ZoomTime, before the pose smoothstep; 1 = settled).
     // Direction: zoomed() (true = zooming / zoomed in, false = zooming / zoomed out).
@@ -353,7 +363,6 @@ public:
     // Zoom state (GalacticCameraClass +0x44): 0 free, 1 zooming in, 2 zooming out, 3 zoomed in.
     int32_t zoom_state() const { return t_anim_ < 1.0f ? (zoomed_ ? 1 : 2) : (zoomed_ ? 3 : 0); }
     float scroll_velocity_x() const { return scroll_vx_; }  // key / edge scroll smoothing (ScrollConstants), world u / s
-    float scroll_velocity_y() const { return scroll_vy_; }
     void stop_scroll() { scroll_vx_ = scroll_vy_ = 0.0f; }
     // [port: Gabriel] horizontal field of view setting (degrees; <= 0 = atan(0.5), SPACE_AND_OPEN B.8). Presentation only.
     void set_fov_deg(float degrees) { fov_deg_ = degrees; }
@@ -382,6 +391,7 @@ private:
     float t_anim_ = 1.0f;
     float fov_deg_ = 0.0f;
     float scroll_vx_ = 0.0f, scroll_vy_ = 0.0f;
+    bool scroll_locked_ = false;  // ui2 t06
 };
 
 }  // namespace alamo::ui

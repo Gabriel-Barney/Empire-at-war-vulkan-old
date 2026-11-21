@@ -3,6 +3,8 @@
 //     auto unit = [](auto& a, auto& u) { a(u.id, u.h, u.alive); };
 //     save_io::Out o(w); o.seq(units_, unit);         // write
 //     save_io::In i(r);  i.seq(units_, unit);         // read
+//     save_io::Hash h(hasher); h.seq(units_, unit);   // the CRC (REF4 t02), the same list
+// save_only(fields...) / save_only_seq(...) are written and read but not hashed (statistics, a digest hashed elsewhere).
 // Encoding: ByteWriter primitives (floats as bit patterns), enums as their underlying type, ObjectHandle as u64,
 // Vec3 as 3 x f32, vectors / maps as u32 count + elements, pairs as first then second. In fails (ByteReader::fail) on
 // a count above kMaxCount or larger than the bytes left; callers check ok() and done().
@@ -18,15 +20,18 @@
 #include "alamo/commands/command.hpp"
 #include "alamo/core/bytes.hpp"
 #include "alamo/core/galaxy.hpp"
+#include "alamo/core/sim_crc.hpp"
 #include "alamo/objects/object_store.hpp"
 
 namespace alamo::sim::save_io {
 
+// limit: guard save decode: counts, refuses (ok() false)
 constexpr uint32_t kMaxCount = 1u << 24;
 
 class Out {
 public:
     static constexpr bool kReading = false;
+    static constexpr bool kHashing = false;
     explicit Out(ByteWriter& w) : w_(w) {}
     ByteWriter& writer() { return w_; }
 
@@ -79,11 +84,25 @@ public:
         (v(x), ...);
         return *this;
     }
+    template <class... T>
+    Out& save_only(const T&... x) {
+        (v(x), ...);
+        return *this;
+    }
+    // Bytes as u32 length + the bytes.
+    void blob(std::span<const uint8_t> b) {
+        w_.u32(static_cast<uint32_t>(b.size()));
+        w_.raw(b);
+    }
     // Records: u32 count + fn(*this, element) per element.
     template <class T, class F>
     void seq(const std::vector<T>& s, F&& fn) {
         w_.u32(static_cast<uint32_t>(s.size()));
         for (const T& e : s) fn(*this, e);
+    }
+    template <class T, class F>
+    void save_only_seq(const std::vector<T>& s, F&& fn) {
+        seq(s, fn);
     }
     template <class K, class T, class F>
     void map(const std::map<K, T>& s, F&& fn) {
@@ -98,9 +117,99 @@ private:
     ByteWriter& w_;
 };
 
+// REF4 t02: Out's encoding into the per-tick CRC, so the field list a save writes is the list the CRC walks. Fields given
+// to save_only / save_only_seq are skipped. Strings use StateHasher::str.
+class Hash {
+public:
+    static constexpr bool kReading = false;
+    static constexpr bool kHashing = true;
+    explicit Hash(StateHasher& h) : h_(h) {}
+
+    void v(bool x) { h_.boolean(x); }
+    void v(uint8_t x) { h_.u8(x); }
+    void v(int8_t x) { h_.u8(static_cast<uint8_t>(x)); }
+    void v(uint16_t x) { h_.u16(x); }
+    void v(uint32_t x) { h_.u32(x); }
+    void v(int32_t x) { h_.i32(x); }
+    void v(uint64_t x) { h_.u64(x); }
+    void v(int64_t x) { h_.i64(x); }
+    void v(float x) { h_.f32(x); }
+    void v(double x) { h_.f64(x); }
+    void v(const std::string& x) { h_.str(x); }
+    void v(const Vec3& x) {
+        h_.f32(x.x);
+        h_.f32(x.y);
+        h_.f32(x.z);
+    }
+    void v(objects::ObjectHandle x) { h_.u64(x.value); }
+    void v(const commands::EventData& x) {
+        std::vector<uint8_t> p;
+        commands::encode_payload(x, p);
+        h_.u8(x.type_id());
+        h_.boolean(x.queued());
+        blob(p);
+    }
+    template <class E>
+        requires std::is_enum_v<E>
+    void v(E x) {
+        v(static_cast<std::underlying_type_t<E>>(x));
+    }
+    template <class A, class B>
+    void v(const std::pair<A, B>& x) {
+        v(x.first);
+        v(x.second);
+    }
+    template <class T>
+    void v(const std::vector<T>& x) {
+        h_.u32(static_cast<uint32_t>(x.size()));
+        for (const T& e : x) v(e);
+    }
+    template <class K, class T>
+    void v(const std::map<K, T>& x) {
+        h_.u32(static_cast<uint32_t>(x.size()));
+        for (const auto& [k, e] : x) {
+            v(k);
+            v(e);
+        }
+    }
+
+    template <class... T>
+    Hash& operator()(const T&... x) {
+        (v(x), ...);
+        return *this;
+    }
+    template <class... T>
+    Hash& save_only(const T&...) {
+        return *this;
+    }
+    void blob(std::span<const uint8_t> b) {
+        h_.u32(static_cast<uint32_t>(b.size()));
+        h_.bytes(b.data(), b.size());
+    }
+    template <class T, class F>
+    void seq(const std::vector<T>& s, F&& fn) {
+        h_.u32(static_cast<uint32_t>(s.size()));
+        for (const T& e : s) fn(*this, e);
+    }
+    template <class T, class F>
+    void save_only_seq(const std::vector<T>&, F&&) {}
+    template <class K, class T, class F>
+    void map(const std::map<K, T>& s, F&& fn) {
+        h_.u32(static_cast<uint32_t>(s.size()));
+        for (const auto& [k, e] : s) {
+            v(k);
+            fn(*this, e);
+        }
+    }
+
+private:
+    StateHasher& h_;
+};
+
 class In {
 public:
     static constexpr bool kReading = true;
+    static constexpr bool kHashing = false;
     explicit In(ByteReader& r) : r_(r) {}
     ByteReader& reader() { return r_; }
     bool ok() const { return r_.ok(); }
@@ -168,6 +277,11 @@ public:
 
     template <class... T>
     In& operator()(T&... x) {
+        (v(x), ...);
+        return *this;
+    }
+    template <class... T>
+    In& save_only(T&... x) {
         (v(x), ...);
         return *this;
     }

@@ -6,6 +6,7 @@
 #include <vector>
 
 #include "alamo/core/log.hpp"
+#include "alamo/core/ascii.hpp"
 #include "alamo/core/sim_rng.hpp"
 #include "alamo/objects/game_object_types.hpp"
 #if defined(ALAMO_LUA_PLAYERS)
@@ -20,14 +21,8 @@ using detail::Call;
 
 namespace {
 
-int push_nil(Call& c) {
-    lua_pushnil(c.L);
-    return 1;
-}
-int push_bool(Call& c, bool b) {
-    lua_pushboolean(c.L, b ? 1 : 0);
-    return 1;
-}
+using detail::push_nil;  // ref5 t03: vm_internal.hpp
+using detail::push_bool;  // ref5 t03: vm_internal.hpp
 int push_num(Call& c, double d) {
     lua_pushnumber(c.L, d);
     return 1;
@@ -75,18 +70,23 @@ int m_object_get_owner(Call& c) {
     const objects::ObjectHandle self = self_object(c);
     int32_t owner = c.vm->host.store->owner(self);
 #if defined(ALAMO_LUA_PLAYERS)
-    // q6 [inferred]: a galactic planet object reports the planet's owner (GalacticSim PlanetState::owner, the owner every
-    // galactic system reads). The port's planet objects are created without a store owner (campaign.cpp: "planets
-    // report their owner from the data pack"), so the store alone said -1 for every planet; mod scripts read
-    // FindPlanet(x).Get_Owner().Get_Faction_Name() for every planet at start (Thrawn's Revenge GalacticConquest,
-    // RandomSpawnManager). Only with a player world attached to the galactic sim whose store this VM reads.
+    // q6 (docs/re/MCX8_BINDINGS_PLAYERS_STORY.md "Get_Owner") [H]: a galactic planet object reports the planet's owner
+    // (GalacticSim PlanetState::owner; retail reads the planet's political control record). The port's planet objects are
+    // created without a store owner (campaign.cpp: "planets report their owner from the data pack"), so the store alone
+    // said -1 for every planet; mod scripts read FindPlanet(x).Get_Owner().Get_Faction_Name() for every planet at start
+    // (Thrawn's Revenge GalacticConquest, RandomSpawnManager). Only with a player world attached to the galactic sim
+    // whose store this VM reads. mcx8 t12: an owner id that is no player of the world gives nil (retail's player-list
+    // lookup finds nothing).
     if (c.vm->owner)
-        if (const LuaPlayerWorld* w = player_world(*c.vm->owner))
+        if (const LuaPlayerWorld* w = player_world(*c.vm->owner)) {
             if (const galactic::GalacticSim* sim = w->galactic(); sim && c.vm->host.store == &sim->store()) {
                 const PlanetIndex p = sim->planet_of(self);
                 if (p != kInvalidPlanet && static_cast<size_t>(p) < sim->planets().size()) owner = sim->planets()[p].owner;
             }
+            if (!w->valid(owner)) return push_nil(c);
+        }
 #endif
+    if (owner < 0) return push_nil(c);  // mcx8 t12: no player has a negative id
     detail::push_player(c.L, *c.vm, owner);
     return 1;
 }
@@ -95,17 +95,14 @@ int m_type_get_name(Call& c) {
     const objects::GameObjectTypes* types = c.vm->host.types;
     if (!types || c.self->value >= types->raw().type_count()) return push_nil(c);
     // q6 (OBJECT_SCRIPTS.md §6.1 step 4, OBJECT_TYPES §3.1): the original stores type names upper-cased, so Get_Name
-    // returns the upper-case name (TR's GroundCompanyList keys are upper-case type names). [port interim] Only VMs with
-    // LuaVmOptions::upper_type_names (the object-script VMs) do so; the others keep the name as written, so the AI /
-    // story goldens and tests stay as they are until the switch is made for every VM.
-    const std::string_view n = types->raw().types().name[c.self->value];
+    // returns the upper-case name (TR's GroundCompanyList keys, FotR's PlanetTable keys are upper-case type names).
+    // LuaVmOptions::upper_type_names is on for every VM since modc t45.
+    const std::string_view n = types->name(static_cast<objects::TypeIndex>(c.self->value));
     if (!c.vm->options.upper_type_names) {
         lua_pushlstring(c.L, n.data(), n.size());
         return 1;
     }
-    std::string up(n);
-    for (char& ch : up)
-        if (ch >= 'a' && ch <= 'z') ch = static_cast<char>(ch - 'a' + 'A');
+    const std::string up = ascii_upper(n);
     lua_pushlstring(c.L, up.data(), up.size());
     return 1;
 }
@@ -448,18 +445,12 @@ int g_get_game_mode(Call& c) {
     return 1;
 }
 
-// StringCompare(a, b) [inferred]: true when the two strings are equal ignoring ASCII case, else false
-// (GameScoring.lua tests it with `if`, so it is a boolean, not a strcmp-style number); non-strings: false.
+// StringCompare(a, b, ...) (docs/re/MCX8_BINDINGS_PLAYERS_STORY.md "StringCompare") [H]: true when the first two
+// arguments are Lua strings equal ignoring ASCII case, else false (a boolean; GameScoring.lua tests it with `if`). Fewer
+// than 2 arguments or a non-string (a number is not converted): false; arguments past the second are ignored.
 int g_string_compare(Call& c) {
-    if (c.nargs != 2 || !c.is_string(1) || !c.is_string(2)) return push_bool(c, false);
-    const std::string_view a = c.string(1), b = c.string(2);
-    if (a.size() != b.size()) return push_bool(c, false);
-    for (size_t i = 0; i < a.size(); ++i) {
-        const char x = (a[i] >= 'a' && a[i] <= 'z') ? static_cast<char>(a[i] - 'a' + 'A') : a[i];
-        const char y = (b[i] >= 'a' && b[i] <= 'z') ? static_cast<char>(b[i] - 'a' + 'A') : b[i];
-        if (x != y) return push_bool(c, false);
-    }
-    return push_bool(c, true);
+    if (c.nargs < 2 || !c.is_string(1) || !c.is_string(2)) return push_bool(c, false);
+    return push_bool(c, ascii_iequals(c.string(1), c.string(2)));
 }
 
 constexpr BindingKind G = BindingKind::Global;
@@ -529,6 +520,34 @@ void detail::queue_event(lua_State* L, int fn_index, int params_index) {
     lua_rawseti(L, q, static_cast<int>(t));
     set_queue_field(L, q, "t", t);
     lua_pop(L, 1);
+}
+
+void detail::queue_event_tagged(lua_State* L, int fn_index, int params_index, const std::string& tag) {
+    queue_event(L, fn_index, params_index);
+    push_event_queue(L);
+    const int q = lua_gettop(L);
+    lua_rawgeti(L, q, static_cast<int>(queue_field(L, q, "t")));  // the entry just appended
+    lua_pushlstring(L, tag.data(), tag.size());
+    lua_rawseti(L, -2, 3);
+    lua_pop(L, 2);
+}
+
+bool detail::queue_has_tag(lua_State* L, const std::string& tag) {
+    push_event_queue(L);
+    const int q = lua_gettop(L);
+    const double h = queue_field(L, q, "h"), t = queue_field(L, q, "t");
+    bool found = false;
+    for (double i = h; i <= t && !found; i += 1.0) {
+        lua_rawgeti(L, q, static_cast<int>(i));
+        if (lua_type(L, -1) == LUA_TTABLE) {
+            lua_rawgeti(L, -1, 3);
+            found = lua_type(L, -1) == LUA_TSTRING && tag == std::string(lua_tostring(L, -1), lua_strlen(L, -1));
+            lua_pop(L, 1);
+        }
+        lua_pop(L, 1);
+    }
+    lua_pop(L, 1);
+    return found;
 }
 
 void detail::reset_event_queue(lua_State* L) {

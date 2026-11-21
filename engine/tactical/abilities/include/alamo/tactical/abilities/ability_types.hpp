@@ -11,7 +11,9 @@ namespace alamo::tactical::abilities {
 using combat::GameMode;
 
 // Per-object arrays are indexed by type 0..0x4c (the info table has 0x4d entries; 0 and 76 unused).
+// limit: retail ABILITIES_HARDPOINTS §2.1 (info table 0x4d entries)
 inline constexpr uint32_t kAbilitySlots = 0x4d;
+// limit: retail ABILITIES_HARDPOINTS §2.1 (UnitAbilityType 0x5dea20)
 inline constexpr uint8_t kMaxAbilityType = 75;
 
 // UnitAbilityType (0x5dea20) [H]; LURE = 10 and STUN = 49 per the icon strings (2.1).
@@ -156,7 +158,7 @@ enum class SpecialClass : uint8_t {
     ForceSight,       // Force_Sight_Ability (FOG_OF_WAR.md §3.3: Reveal_All for the owner while channelling)
     // ---- OI abilities (TACTICAL_GAPS.md §2.3, TACTICAL_COMBAT §4.3) ----
     CombatBonus,          // Combat_Bonus_Ability (aura: object ModifierSet entries, event-driven)
-    EnhanceDefense,       // Enhance_Defense_Ability [inferred: a list-0 aura]
+    EnhanceDefense,       // Enhance_Defense_Ability: permanent per-player list-0 entries (s78n t04, TACTICAL_COMBAT §5.4.4 3c)
     BattlefieldModifier,  // Battlefield_Modifier_Ability (player-level lists, §2.3.11)
     ForceHealing,         // Force_Healing_Ability (§2.3.1)
     Berserker,            // Berserker_Ability (§2.3.2)
@@ -204,6 +206,11 @@ enum class SpecialClass : uint8_t {
     // the station's Next_Level_Base (SpawnPurpose::StationUpgrade) and then for the upgrade object's silent removal
     // (AbilityEventKind::RemoveSilently), whether or not a station was found. One-shot.
     StarbaseUpgrade,
+    // tru3 t05 (SKIRMISH_SETUP §2.4 "Garrison_Upgrade_Ability" [H]): apply 0x6ffc60 / remove 0x6ffe30, skirmish only
+    // (0x6ffdb0). Appends the Additional_Garrison_Units types to the owner's (Apply_To_All_Allies: every allied
+    // player's) skirmish garrison list, the list the start-force re-delivery copies; the remove erases one occurrence of
+    // each. An aura class (no service).
+    GarrisonUpgrade,
 };
 SpecialClass special_class_from_tag(std::string_view element_name);
 const char* special_class_name(SpecialClass c);

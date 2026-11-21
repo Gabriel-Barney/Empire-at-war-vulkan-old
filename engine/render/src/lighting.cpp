@@ -1,6 +1,6 @@
 #include "alamo/render/lighting.hpp"
 
-#include "alamo/render/ted.hpp"
+#include "alamo/terrain/ted.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -171,9 +171,11 @@ assets::Float3 sph_irradiance(const SphMatrices& m, const assets::Float3& n) {
 
 SceneLightConstants scene_light_constants(const Lighting& l) {
     SceneLightConstants s;
-    s.sph_fill = sph_matrices(l.fill, 2, l.ambient);
-    const DirLight all[3] = {l.fill[0], l.fill[1], l.sun};
-    s.sph_all = sph_matrices(all, 3, l.ambient);
+    // vis1 t01: the lightning flash joins the fills (sph_matrices skips a light of intensity 0).
+    const DirLight fills[3] = {l.fill[0], l.fill[1], l.flash};
+    s.sph_fill = sph_matrices(fills, 3, l.ambient);
+    const DirLight all[4] = {l.fill[0], l.fill[1], l.sun, l.flash};
+    s.sph_all = sph_matrices(all, 4, l.ambient);
     return s;
 }
 

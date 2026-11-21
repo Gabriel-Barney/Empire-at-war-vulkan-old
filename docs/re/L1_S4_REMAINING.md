@@ -297,12 +297,99 @@ Both use the object itself, or for a TEAM container (behaviour 0x16) its represe
   0x6e66a0 (identical bodies): exactly 1 AI target (errors; dead target → error "target is dead").
   Returns an `ExploreAreaBlockStatus` (id 0x82b, 0x6afec0): +0x48 target, +0x54 start frame. Init
   0x6b0320: unit list = the task force's units (TF) or the object. Start 0x6b06f0: owner player of the
-  first unit; the exploration helper 0x140b31900 picks a point near the target (0x6558b0 for a target
-  position / 0x655be0 for a target object, with the player and start frame) [M: least-recently-seen FOW
-  area]; a valid point (≠ 1e18) → a new movement coordinator (mode vf +0x228 → 0x426010), every unit
-  leaves its coordinator and joins, Move_To(point) (0x4f8200; type 1, mask 0x3f); +0x50 := 0. No point
-  → +0x51 := 1 (finished). [M: status service re-picks points; IsFinished = +0x51.] Shipped: LandScout /
-  SpaceScout `BlockOnCommand(MainForce.Explore_Area(AITarget), 10)`.
+  first unit; the threat grid 0x140b31900 picks a point in the target's area (0x6558b0 for a rectangle /
+  0x655be0 for a hint zone, with the player and start frame): the least-recently-seen fogged threat
+  cell (§2.3.1); a valid point (≠ 1e18) → a new movement coordinator (mode vf +0x228 → 0x426010), every
+  unit leaves its coordinator and joins, Move_To(point) (0x4f8200; type 1, mask 0x3f); +0x50 := 0. No
+  point → +0x51 := 1 (finished). The status re-picks after each arrival; IsFinished = +0x51 (§2.3.1).
+  Shipped: LandScout / SpaceScout `BlockOnCommand(MainForce.Explore_Area(AITarget), 10)`.
+
+#### 2.3.1 `ExploreAreaBlockStatus`: point pick, re-pick and end (aitac t07 RE, 2026-11-19) [H unless tagged]
+
+Replaces the [M] guesses above. Functions: create 0x6b02d0, init 0x6b0320, unit add 0x6affb0, start / pick 0x6b06f0,
+IsFinished (vf19) 0x6b04a0, signal handler 0x6b0920 (SignalListener vtable 0x8bde20, at status +0x30), save / load
+0x6b0a10 / 0x6b0550, primary vtable 0x8bdd70; point pickers 0x6558b0 (rectangle) and 0x655be0 (zone) on the threat
+grid (`TacticalPerceptionGridClass`, AI_TACTICAL_PERCEPTION §4).
+
+**Fields.** +0x40 unit list, +0x48 the AI target, +0x50 "pick again" byte, +0x51 finished byte, +0x54 start frame
+(the mode frame at creation; never changed afterwards, only saved and loaded).
+
+**Creation** (0x6b02d0, from the three Lua entry points): base init, +0x48 := target, +0x50 = +0x51 := 0, +0x54 := the
+current mode's frame (mode +0x10; 0 without a mode), then init, then **one pick at once** (0x6b06f0).
+
+**Unit list** (init 0x6b0320 → 0x6affb0 per unit): the owner task force's units in TF order (0x5fcc10), or the wrapper's
+object. A unit is skipped when its movement is locked (0x39ad40) or the mode has no coordinator manager. If the manager
+accepts it for a coordinator (0x425e30) the unit itself is listed; otherwise, when it is a TEAM container, **each
+member** is listed instead [M: 0x425e30 is the "can join a movement coordinator" test]. Each listed object first gets
+**signal 0xb raised on it** (0x220ed0: older orders' statuses drop it, A1_READINGS §33.3) and the status subscribes to
+its signals **10, 0xb, 0x10, 0x1a** (the 0x1a argument read in the bytes at 0x6b01f2).
+
+**Pick (0x6b06f0)**, in order:
+1. No unit listed, the first unit's owner (obj +0x58 → player list 0x294bc0) not found, no target, or no threat grid →
+   **finished** (+0x51 := 1).
+2. Area: target vf +0x40 is the target's hint zone (land `TacticalRegionAITargetLocationClass` +0x28, set by 0x7253d0;
+   **null** for unit targets, 0x17d070, and for space region cells, 0x725340).
+   - Zone present (land region targets) → **zone picker 0x655be0** over the zone's threat-cell set (zone +0x90, in its
+     list order = `zone_order` of A1_READINGS §30.1).
+   - Otherwise → **rectangle picker 0x6558b0** over target vf +0x70, a rectangle (x, y, w, h):
+     - unit target (0x724ce0): a square centred on the object (obj +0x78 / +0x7c) with half-side = the max attack range
+       of its representative type (0x3749d0 on 0x3973b0's type), so side 2·range; range 0 gives the one cell under the
+       unit;
+     - region target (0x7254f0): a square of side `AI_LandEvaluatorRegionSize` (land, GC +0x10d4) or
+       `AI_SpaceEvaluatorRegionSize` (space, GC +0x10d0) centred on the region centre (+0x1c / +0x20). Land region
+       targets never get here (they have a zone).
+3. Both pickers return (x, y, 0) or (1e18, 1e18, 1e18) for "none". A point with any coordinate ≠ 1e18 → get a new
+   coordinator (mode vf +0x228 → 0x426010; none → finished), for each listed unit in list order: leave its old
+   coordinator (0x426d50) and join the new one (vf +0x18); then `Move_To` (0x4f8200) with a plain position move
+   (kind 1, avoidance mask 0x3f, max distance 1e18, flags 0) to the point; **+0x50 := 0**.
+4. Point is "none" → **finished**.
+
+**The pickers** (same tests, different cell sets) [H]:
+- Cell set:
+  - rectangle: columns c0 = max(0, trunc((x − left) / cellW)) … c1 = min(nx − 1, trunc((x + w − left) / cellW)); rows
+    r0 = max(0, trunc((top − (y + h)) / cellH)) … r1 = min(ny − 1, trunc((top − y) / cellH)) (row 0 is the top);
+    scanned **rows r0 → r1 (top to bottom), within a row columns c0 → c1 (left to right)**;
+  - zone: the zone's cells in list order (key = col | row << 16).
+- Cell centre C = (left + (col + 0.5)·cellW, top − (row + 0.5)·cellH, 0).
+- A cell is a candidate only if:
+  1. C lies inside the mode's playable box (mode vf +0x208: |Cx − cx| ≤ hx and |Cy − cy| ≤ hy) [M: always true, the
+     grid spans that box];
+  2. **C is fogged for the player** under real fog: FOW_Point_Test(mode, player +0x4c, C, force = 1) (0x35f3b0,
+     FOG_OF_WAR §5.1; force 1 ignores `AIUsesFogOfWar*`). Cells the player sees now are never picked. This holds in space
+     too (the FOW-active flag stays set there, FOG_OF_WAR §8 item 2);
+  3. land only (mode vf +0xe0 == 1): the passability cell under C (grid 0x140b36b90, (x + 10) / 20, (y + 10) / 20)
+     exists and its **base** word has none of **0x26** = Steep | Obstacle | Water (MOVEMENT §1.1). (TimeLastSeen's test,
+     A1_READINGS §26, uses 0x22; this one also drops Obstacle.)
+- Score = the cell's last-seen stamp for the player: threat grid +0x70[player +0x48][row·nx + col] (the frame the cell
+  last went from seen to fully fogged; **0 = never seen**, A1_READINGS §27.1).
+- Pick: best starts at the **start frame** (+0x54); a candidate wins when stamp < best (**strict**), and best := stamp.
+  So the result is the candidate with the **oldest** stamp, ties going to the **first** in scan order; never-seen
+  cells (0) beat every seen one. A cell whose stamp is ≥ the start frame (it re-fogged after the order was given) is
+  never picked.
+- **No random draw**, no distance or threat term, no path or reachability test.
+
+**Re-pick and end** [H]:
+- Signal handler 0x6b0920:
+  - **10** (movement finished: the formation arrived, A1_READINGS §33.2) from any listed unit → **+0x50 := 1**.
+  - **0xb, 0x10, 0x1a** from a unit → unsubscribe 10 / 0xb / 0x10 / 0x1a and remove it from the unit list. Nothing else:
+    the status does not finish here.
+- IsFinished 0x6b04a0 (each Lua poll): if +0x50 is set, run the pick again (step list above, same target, same start
+  frame, the current unit list), then return **+0x51**.
+- So the units walk from one fogged, least-recently-seen cell of the area to the next. Each re-pick happens on the
+  first poll after an arrival. The block finishes on the first pick that finds no candidate (every cell of the area
+  is visible now, impassable, or re-fogged after the start), or when the unit list is empty at a pick.
+- If every unit leaves (0xb / 0x10 / 0x1a) while +0x50 is clear, no signal 10 can come and the status never finishes
+  by itself; the shipped scripts end it with the `BlockOnCommand` timeout (10 s) [H code; M that this case happens].
+- **Result** (vf20) is the BlockingStatus base 0x245ca0: always **true** (`BlockOnCommand` returns nil on its own
+  timeout). No timeout inside the status.
+- A zone target and a rectangle target differ only in the cell set; nothing in the zone picker uses a game object (the
+  earlier "target object" reading of 0x655be0 was wrong).
+
+**Port notes.**
+- `unit_explore_area` / the task-force `Explore_Area` in `engine/ai/tactical/src/tactical_ai.cpp` move straight to the
+  target; retail moves to the oldest-stamped fogged threat cell of the target's area and re-picks after each arrival.
+- The port needs the threat grid's per-player last-seen stamps (already kept for TimeLastSeen) and the FOW point test
+  with force = 1.
 
 ### 2.4 Damage statistics [H]
 
@@ -537,6 +624,8 @@ type, intensity +0x448 := `Emitter_Intensity`, transition flag +0x454 := 0, weat
 Duration) × FPS frames; environment lightning (record +0x138) := `Lightning_Intensity`; fog-plane alpha
 (record +0xfc, when the record has a fog plane +0xf8) := `Fog_Plane_Interpolation_Alpha`; emitter
 intensity := `Emitter_Intensity`. The `emitter_name` particle is added to the scene.
+**Correction (2026-11-08, CU8G_T02_ENV_PICK_RE §4):** a (re-)init with phases runs the start phase **twice** (2 synced
+draws; the second timer stays); only the advance / `Force_Weather` costs one.
 
 **Service** (0x46a0c0, from land-mode service 0x3bb440 when land mode +0x328 ≠ 0):
 1. Return unless re-init (force 0) reports a scenario and a current phase.
@@ -911,7 +1000,9 @@ group move (0x2a7b80) entry → exit, target := marker. Allied with the local pl
 entry i; when no bombers remain: kill every DUMMY_DESTROY_AFTER_BOMBING_RUN (0x66) object of that
 player, ready := now + interval, available := 0, in progress := 0 [M: LandBomber removes itself at the
 exit]. Save: manager chunk 5 (micro 0 enabled, 1 mode, 2 +0x10, 3 +0x14, 6 count), record chunk 4
-(0x4958c0), type saved by CRC. UI query 0x4950f0 (frames until available).
+(0x4958c0), type saved by CRC. UI query 0x4950f0: the **frame** the run is available again (absolute, not a
+count; −1 without a record; in progress: now + interval + remaining flight) and the HUD dial 0x495250 built on it
+(HUD_GAPS §9.3, corrected cu9g t01).
 
 Lua: `LandTaskForceClass.Bombing_Run` §2.10; `PlayerWrapper.Disable_Bombing_Run(bool)` (0x601aa0, bound)
 pushes the bool with no expiry into tactical list +0x1c8 under key 0x1407ff8a8 (0x3a8cb0) [M: whether
@@ -1047,6 +1138,14 @@ obj +0x1e0: +8 pending controller player id (−1 none), +0xc progress 0..1) [H 
   complete** (0x500e30, old → new owner), owner change (0x38e5a0 with pending), progress := 0. An
   enemy-held point therefore goes owner → neutral → capturer in two full transitions. Shader
   "MeshAdditiveOffset" UV offset shows progress (1 − progress when the controller is neutral).
+- **Empty-pad revert** (bkg1 b0001, `BKG1_RE_ANSWERS.md` 7.4) [H unless tagged]: an owned CAPTURE_POINT pad whose
+  TACTICAL_BUILD_OBJECTS pack is empty and with no candidate in the radius gets the neutral controller by (d) and
+  decays owner → Neutral in one transition: T = 5.0 s (150 frames; float accumulation of 1/150 reaches 1.0 on the
+  151st service) for SKIRMISH_BUILD_PAD, BUNKER_PAD and SKIRMISH_MINERAL_PROCESSOR_PAD, 8.0 s (240 frames) for
+  SKIRMISH_OUTPOST_PAD; retail traces saw 148..151 frames after the owner's last unit left (SKAI_T06 §2). An owner
+  candidate in the radius walks the progress back down step by step. REINFORCEMENT_POINT and `Ownership_Sticks`
+  types never decay; the faction base `*_BUILD_PAD` types have no CAPTURE_POINT behaviour and keep their owner. A
+  destroyed child still sends the pad to Neutral at once (SKIRMISH_SETUP §8).
 - **Capture complete** 0x500e30, in order: refresh team colour; mode notification 0x360d90(mode, object,
   old, new) [M: stats / victory]; **dispatch STORY_CAPTURE_STRUCTURE**; local SFX (type +0x1788 via
   0x355ca0) when the local player is old or new owner; faction speech from faction tables (0x33e8b0,

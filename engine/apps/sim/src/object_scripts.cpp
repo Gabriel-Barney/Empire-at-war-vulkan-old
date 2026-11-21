@@ -1,4 +1,5 @@
 // q6: game-object Lua scripts (object_scripts.hpp, docs/re/OBJECT_SCRIPTS.md).
+#include "alamo/core/ascii.hpp"
 #include "alamo/sim/object_scripts.hpp"
 
 #include <cmath>
@@ -217,11 +218,7 @@ std::string error_key(const std::string& text) {
     auto ws = [](char c) { return c == ' ' || c == '\t' || c == '\r' || c == '\n'; };
     while (!n.empty() && ws(n.front())) n.remove_prefix(1);
     while (!n.empty() && ws(n.back())) n.remove_suffix(1);
-    if (n.size() > 4) {  // ".lua" optional (§1.1)
-        const std::string_view ext = n.substr(n.size() - 4);
-        auto low = [](char c) { return (c >= 'A' && c <= 'Z') ? static_cast<char>(c - 'A' + 'a') : c; };
-        if (ext[0] == '.' && low(ext[1]) == 'l' && low(ext[2]) == 'u' && low(ext[3]) == 'a') n.remove_suffix(4);
-    }
+    if (n.size() > 4 && ascii_iends_with(n, ".lua")) n.remove_suffix(4);  // ".lua" optional (§1.1)
     return std::string(n);
 }
 
@@ -359,8 +356,8 @@ void ObjectScriptHost::load_type_scripts(StoreScripts& ss) {
     const objects::GameObjectTypes& types = ss.mode->types();
     const uint64_t frame = ss.mode->frame();
     for (objects::TypeIndex t = 0; t < types.size(); ++t) {
-        if (!types.get_bool(t, "Execute_Script_On_Type")) continue;
-        const std::string name = trimmed_script_name(types.get_string(t, "Lua_Script"));
+        if (!types.get(t, objects::tags::Execute_Script_On_Type)) continue;
+        const std::string name = trimmed_script_name(types.get(t, objects::tags::Lua_Script));
         if (name.empty()) continue;
         auto ts = std::make_unique<TypeScript>();
         ts->type = t;
@@ -396,7 +393,7 @@ void ObjectScriptHost::attach(StoreScripts& ss, objects::ObjectHandle h) {
         ss.named.resize(types.size(), 0);
     }
     if (!ss.named[t]) {
-        ss.names[t] = trimmed_script_name(types.get_string(t, "Lua_Script"));
+        ss.names[t] = trimmed_script_name(types.get(t, objects::tags::Lua_Script));
         ss.named[t] = 1;
     }
     if (ss.names[t].empty()) return;
@@ -410,6 +407,7 @@ void ObjectScriptHost::attach(StoreScripts& ss, objects::ObjectHandle h) {
     if (!s->inst) return;
     lua::LuaVm& vm = *s->inst->vm;
     attach_engine(vm, globals_, ss.world, ss.bridge);  // step 3
+    if (!ss.bridge) ++stats_.attached_no_bridge;
     std::string err;
     if (s->inst->fresh && vm.has_function("Base_Definitions") && !vm.call("Base_Definitions", &err))  // step 4
         note(frame, s->name, s->id, "Base_Definitions: " + err, true);  // the script stays attached (its globals as far as they got)
@@ -544,6 +542,7 @@ void ObjectScriptHost::service(GameMode& mode) {
 // INSTANCE: u8 in use, u8 fresh, u8 poolable, i32 store its LuaHost points to (stores index, -1 none on the stack),
 // u32 length + the lua::write_script_block bytes.
 namespace {
+// limit: guard save decode: counts, refuses
 [[maybe_unused]] constexpr uint32_t kMaxSavedCount = 1u << 20;
 #ifdef ALAMO_SIM_HAVE_STORY
 struct SavedInstance {
@@ -718,7 +717,7 @@ bool ObjectScriptHost::read(ByteReader& r, std::string* err) {
         tr.type = static_cast<objects::TypeIndex>(r.u32());
         tr.slot = r.i32();
         if (!r.ok() || stores_.empty() || tr.type >= stores_.front()->mode->types().size()) return fail("bad type instance record");
-        tr.name = trimmed_script_name(stores_.front()->mode->types().get_string(tr.type, "Lua_Script"));
+        tr.name = trimmed_script_name(stores_.front()->mode->types().get(tr.type, objects::tags::Lua_Script));
         if (tr.slot < 0) {
             if (tr.slot != -1 || !get(tr.own) || tr.own.poolable) return fail("bad unpooled type instance");
             tr.own.holder = -2;

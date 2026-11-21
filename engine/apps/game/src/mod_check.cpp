@@ -1,328 +1,30 @@
-#include "alamo/game/mod_check.hpp"
+// check_mod_data (mod_check.hpp): loads the data as alamo_game does and runs each check family in its own file
+// (mod_check_detail.hpp): files, content, XML tags, shaders, Lua, honour gaps, story, token coverage, grade. The text
+// report is mod_report_text.cpp, the JSON documents mod_report_json.cpp.
+#include "mod_check_detail.hpp"
 
-#include <algorithm>
-#include <cstdint>
-#include <cstdio>
 #include <exception>
-#include <iterator>
-#include <map>
-#include <set>
-#include <string_view>
-#include <utility>
+#include <string>
+#include <vector>
 
-#include "alamo/core/hash.hpp"
-#include "alamo/data/xml.hpp"
-#include "alamo/objects/coverage.hpp"
 #include "alamo/vfs/vfs.hpp"
-#ifdef ALAMO_GAME_HAVE_LUA_VM
-#include "alamo/lua/bindings.hpp"
-#include "alamo/lua/lua_vm.hpp"
-#include "alamo/lua/script_loader.hpp"
-#endif
 
 namespace alamo::game {
 
-namespace {
-
-// "DATA\XML\UNITS.XML" -> "XML"; "DATA\MEGAFILES.XML" -> "".
-std::string data_folder(std::string_view path) {
-    constexpr std::string_view kData = "DATA\\";
-    if (path.substr(0, kData.size()) != kData) return {};
-    path.remove_prefix(kData.size());
-    const size_t sep = path.find('\\');
-    return sep == std::string_view::npos ? std::string() : std::string(path.substr(0, sep));
-}
-
-void list_mod_files(const vfs::Vfs& v, ModCheckReport& r) {
-    constexpr uint32_t kLower = vfs::Vfs::kLayerBase | vfs::Vfs::kLayerMeg | vfs::Vfs::kLayerFallback;
-    const std::vector<std::string> mod = v.list("Data\\**", vfs::Vfs::kLayerMod);
-    const std::vector<std::string> lower = v.list("Data\\**", kLower);  // both sorted by byte order
-    std::map<std::string, ModFolderStats> folders;
-    for (const std::string& p : mod) {
-        ModFolderStats& f = folders[data_folder(p)];
-        if (std::binary_search(lower.begin(), lower.end(), p)) ++f.overrides;
-        else ++f.added;
-    }
-    for (auto& [name, f] : folders) {
-        f.folder = name;
-        r.mod_folders.push_back(f);
-    }
-}
-
-void count_content(const GameData& d, ModCheckReport& r) {
-    r.counts.campaigns = d.db.campaigns().size();
-    r.counts.planets = d.db.planets().size();
-    r.counts.trade_routes = d.db.trade_routes().size();
-    r.counts.object_types = d.types.size();
-    r.counts.factions = d.rules.factions.size();
-#ifdef ALAMO_GAME_HAVE_GALACTIC_AI
-    if (d.ai) {
-        r.counts.ai = true;
-        r.counts.ai_plans = d.ai->plan_files.size();
-#ifdef ALAMO_SIM_HAVE_TACTICAL_AI
-        if (d.ai->tactical) {
-            r.counts.tactical_space_plans = d.ai->tactical->space_plans.size();
-            r.counts.tactical_land_plans = d.ai->tactical->land_plans.size();
-        }
-#endif
-    }
-#endif
-    if (d.vfs) {
-        const SkirmishMapCatalog cat = build_skirmish_map_catalog(*d.vfs);
-        r.counts.official_maps = skirmish_map_rows(cat, false).size();
-        r.counts.custom_maps = skirmish_map_rows(cat, true).size();
-    }
-}
-
-// Mods ship one campaign per playable faction, so the same skipped route shows up in many: one line per message.
-void check_campaigns(const GameData& d, ModCheckReport& r) {
-    std::map<std::string, std::vector<std::string>> by_message;  // message -> campaigns, in database order
-    for (const data::CampaignDef& c : d.db.campaigns()) {
-        std::vector<std::string> diag;
-        const auto map = data::build_galaxy_map(d.db, c.name, &diag);
-        ++r.campaigns_checked;
-        if (map.planets.size() == 0) r.campaigns_without_planets.push_back(c.name);
-        const std::string prefix = c.name + ": ";
-        for (std::string_view msg : diag) {
-            if (msg.starts_with(prefix)) msg.remove_prefix(prefix.size());
-            by_message[std::string(msg)].push_back(c.name);
-        }
-    }
-    for (const auto& [msg, camps] : by_message) {
-        std::string line = msg + " (" + std::to_string(camps.size()) + (camps.size() == 1 ? " campaign: " : " campaigns: ");
-        constexpr size_t kNamed = 3;
-        for (size_t i = 0; i < camps.size() && i < kNamed; ++i) line += (i ? ", " : "") + camps[i];
-        if (camps.size() > kNamed) line += ", ...";
-        r.campaign_warnings.push_back(line + ")");
-        r.campaign_warning_count += camps.size();
-    }
-}
-
-std::string upper(std::string_view in) {
-    std::string s(in);
-    for (char& c : s) {
-        if (c == '/') c = '\\';
-        else if (c >= 'a' && c <= 'z') c = static_cast<char>(c - 'a' + 'A');
-    }
-    return s;
-}
-
-using MissingMap = std::map<std::string, MissingFile>;  // by path: sorted, deterministic
-
-// True when `path` resolves to a file of a mod folder (the VFS mod layer).
-bool in_mod_layer(const vfs::Vfs& v, std::string_view path) {
-    const auto res = v.resolve(path);
-    return res && res->layer == vfs::Vfs::Resolution::Mod;
-}
-
-void note_missing(MissingMap& m, std::string path, std::string_view by, bool in_mod) {
-    MissingFile& f = m[path];
-    if (f.references++ == 0) {
-        f.path = std::move(path);
-        f.referenced_by = std::string(by);
-    }
-    f.in_mod = f.in_mod || in_mod;
-}
-
-// Entries of every Data\XML\*Files.xml list (GameObjectFiles, FactionFiles, CampaignFiles, SFXEventFiles, ...): each
-// <File> names Data\XML\<entry> (the convention of every list the loaders read: game_database.cpp read_list,
-// object_types.cpp). A list that fails to parse is reported by its loader, not here.
-void check_list_files(const GameData& d, MissingMap& m) {
-    std::vector<uint8_t> bytes;
-    for (const std::string& list : d.vfs->list("Data\\XML\\*Files.xml")) {
-        if (!d.files->read(list, bytes)) continue;
-        const bool in_mod = in_mod_layer(*d.vfs, list);
-        const data::XmlDocument doc = data::XmlDocument::parse(bytes, list);
-        if (!doc.ok()) continue;
-        for (data::XmlNode f : doc.root().children("File")) {
-            const std::string_view name = f.text_trimmed();
-            if (name.empty()) continue;
-            std::string path = upper(std::string("Data\\XML\\") + std::string(name));
-            if (!d.files->exists(path)) note_missing(m, std::move(path), list, in_mod);
-        }
-    }
-}
-
-// The model of each object type (first definitions only: a later duplicate never loads). A name without an extension
-// is also tried with .ALO (PROVISIONAL: how the original completes such names is not traced; this avoids a false report).
-void check_models(const GameData& d, MissingMap& m) {
-    static constexpr std::string_view kTags[] = {"Space_Model_Name", "Land_Model_Name", "Galactic_Model_Name"};
-    const objects::ObjectTypeDatabase& db = d.raw;
-    const objects::TypeColumns& t = db.types();
-    const objects::FieldColumns& f = db.fields();
-    std::set<std::string> present;  // paths already found (types share models)
-    for (objects::TypeIndex i = 0; i < t.size(); ++i) {
-        if (t.first_definition[i] != i) continue;
-        for (objects::FieldIndex fi = t.field_begin[i]; fi < t.field_end[i]; ++fi) {
-            if (f.depth[fi] != 1 || f.text[fi].empty()) continue;
-            const std::string_view tag = db.tag_name(fi);
-            const auto* hit = std::find_if(std::begin(kTags), std::end(kTags), [&](std::string_view k) { return iequals(k, tag); });
-            if (hit == std::end(kTags)) continue;
-            std::string path = upper(std::string("Data\\Art\\Models\\") + std::string(f.text[fi]));
-            if (present.count(path)) continue;
-            bool found = d.files->exists(path);
-            if (!found && path.find('.', path.rfind('\\')) == std::string::npos) found = d.files->exists(path + ".ALO");
-            if (found) {
-                present.insert(std::move(path));
-                continue;
-            }
-            note_missing(m, std::move(path), std::string(t.name[i]) + " (" + std::string(*hit) + ")", in_mod_layer(*d.vfs, db.file_of(i)));
-        }
-    }
-}
-
-void check_files(const GameData& d, ModCheckReport& r) {
-    if (!d.vfs) return;
-    MissingMap m;
-    check_list_files(d, m);
-    check_models(d, m);
-    for (auto& [path, f] : m) r.missing_files.push_back(std::move(f));
-}
-
-void check_xml_tags(const GameData& d, ModCheckReport& r) {
-    const objects::CoverageReport cov = objects::build_coverage(d.raw, 0);
-    const auto& files = d.raw.files();
-    for (const objects::TagCoverage& t : cov.tags) {
-        if (!t.unknown() || t.occurrences == 0) continue;
-        UnknownXmlTag u;
-        u.tag = std::string(t.name);
-        u.occurrences = t.occurrences;
-        u.types = t.types;
-        if (!t.files.empty() && t.files.front() < files.size()) u.first_file = files[t.files.front()].path;
-        for (const uint32_t fi : t.files)
-            if (fi < files.size() && d.vfs && in_mod_layer(*d.vfs, files[fi].path)) {
-                u.in_mod = true;
-                break;
-            }
-        r.unknown_xml_tags.push_back(std::move(u));
-    }
-    std::sort(r.unknown_xml_tags.begin(), r.unknown_xml_tags.end(), [](const UnknownXmlTag& a, const UnknownXmlTag& b) {
-        return a.occurrences != b.occurrences ? a.occurrences > b.occurrences : a.tag < b.tag;
-    });
-}
-
-#ifdef ALAMO_GAME_HAVE_LUA_VM
-// Engine bindings the port registers as "unbound" stubs, by name (globals and methods separately; a method name counts
-// as unbound only when no class implements it, as lua::scan_report does).
-struct UnboundNames {
-    std::set<std::string, std::less<>> globals, methods;
-    UnboundNames() {
-        std::set<std::string, std::less<>> method_impl;
-        for (const lua::BindingInfo& b : lua::binding_table()) {
-            if (b.kind == lua::BindingKind::Method) {
-                if (lua::binding_implemented(b)) method_impl.insert(b.name);
-                else methods.insert(b.name);
-            } else if (!lua::binding_implemented(b) && !lua::is_host_value_global(b.name)) {
-                globals.insert(b.name);
-            }
-        }
-        for (const std::string& n : method_impl) methods.erase(n);
-    }
-};
-
-// Scripts the original starts as scripts of their own: those under a script root other than Library (story plots, AI
-// plans, GameObject scripts, evaluators, free stores, interventions, miscellaneous; lua/script_loader.hpp). Library
-// scripts are only reached through require from those, and often rely on globals their requirer set, so running one on
-// its own reports errors the game never hits.
-bool is_entry_script(std::string_view path) {
-    bool entry = false;
-    for (const std::string_view root : lua::script_roots()) {
-        if (path.size() <= root.size() || !iequals(path.substr(0, root.size()), root)) continue;
-        if (iequals(root, "Data\\Scripts\\Library\\")) return false;
-        entry = true;
-    }
-    return entry;
-}
-
-using UnboundMap = std::map<std::pair<std::string, bool>, UnboundLuaCall>;  // (name, method): sorted, deterministic
-
-void add_unbound(UnboundMap& calls, const std::map<std::string, uint32_t>& found, const std::set<std::string, std::less<>>& unbound,
-                 bool method) {
-    for (const auto& [name, sites] : found) {
-        if (!unbound.count(name)) continue;
-        UnboundLuaCall& c = calls[{name, method}];
-        c.name = name;
-        c.method = method;
-        c.call_sites += sites;
-        ++c.scripts;
-    }
-}
-#endif
-
-void check_lua(const GameData& d, ModCheckReport& r, bool run_chunks) {
-#ifdef ALAMO_GAME_HAVE_LUA_VM
-    if (!d.vfs) return;
-    lua::LuaHost host;
-    host.files = d.files.get();
-    host.types = &d.types;
-    lua::LuaVm compiler(host);
-    const UnboundNames unbound;
-    UnboundMap calls;
-    std::vector<uint8_t> bytes;
-    for (const std::string& path : d.vfs->list("Data\\Scripts\\**.lua")) {
-        ++r.lua_scripts;
-        std::string err;
-        const bool in_mod = in_mod_layer(*d.vfs, path);
-        if (!d.files->read(path, bytes)) {
-            r.lua_errors.push_back({path, "unreadable", in_mod});
-            continue;
-        }
-        const std::string_view chunk(reinterpret_cast<const char*>(bytes.data()), bytes.size());
-        if (!compiler.compile(chunk, path, &err)) {
-            r.lua_errors.push_back({path, err, in_mod});
-            continue;
-        }
-        lua::ScriptScan scan;
-        lua::scan_script(chunk, scan);
-        add_unbound(calls, scan.global_calls, unbound.globals, false);
-        add_unbound(calls, scan.method_calls, unbound.methods, true);
-        if (!run_chunks || !is_entry_script(path)) continue;
-        // What loading the script runs: its main chunk (requires, definitions, top-level calls), in a VM of its own as
-        // the original gives every script (lua_vm.hpp). No objects, players or session values exist here.
-        lua::LuaVmOptions opt;
-        const size_t slash = path.rfind('\\');
-        opt.script_name = path.substr(slash == std::string::npos ? 0 : slash + 1);
-        lua::LuaVm vm(host, opt);
-        ++r.lua_run;
-        if (!vm.run(chunk, path, &err)) r.lua_run_errors.push_back({path, err, in_mod});
-    }
-    for (auto& [key, c] : calls) r.unbound_lua_calls.push_back(std::move(c));
-    std::sort(r.unbound_lua_calls.begin(), r.unbound_lua_calls.end(), [](const UnboundLuaCall& a, const UnboundLuaCall& b) {
-        if (a.call_sites != b.call_sites) return a.call_sites > b.call_sites;
-        if (a.name != b.name) return a.name < b.name;
-        return a.method < b.method;
-    });
-#else
-    (void)d;
-    (void)r;
-    (void)run_chunks;
-#endif
-}
-
-void append(std::string& s, const char* fmt, auto... args) {
-    char buf[512];
-    const int n = std::snprintf(buf, sizeof buf, fmt, args...);
-    if (n > 0) s.append(buf, std::min(static_cast<size_t>(n), sizeof buf - 1));
-}
-
-void append_list(std::string& s, const std::vector<std::string>& items, size_t first, size_t count, bool verbose) {
-    constexpr size_t kShown = 20;
-    const size_t shown = verbose ? count : std::min(count, kShown);
-    for (size_t i = 0; i < shown; ++i) s += "    " + items[first + i] + "\n";
-    if (shown < count) append(s, "    ... %zu more (--verbose lists all)\n", count - shown);
-}
-
-}  // namespace
+using namespace mod_check_detail;
 
 size_t ModCheckReport::error_count() const {
     size_t n = loaded ? 0 : 1;
     for (const auto& s : stages) n += s.ok ? 0 : 1;
-    return n + campaigns_without_planets.size() + check_errors.size();
+    if (resolved) n += stack.errors.size();
+    return n + (no_startable_campaign() ? 1u : 0u) + check_errors.size();
 }
 
 size_t ModCheckReport::warning_count() const {
-    return vfs_warnings.size() + diagnostics.size() + campaign_warning_count + missing_files.size() + unknown_xml_tags.size() +
-           lua_errors.size() + lua_run_errors.size() + unbound_lua_calls.size();
+    const size_t menu_only = no_startable_campaign() ? 0 : campaigns_without_planets.size();
+    return vfs_warnings.size() + diagnostics.size() + menu_only + campaign_warning_count + missing_files.size() +
+           unknown_xml_tags.size() + lua_errors.size() + lua_run_errors.size() + unbound_lua_calls.size() + shaders.issues.size() +
+           (resolved ? stack.warnings.size() : 0u) + (base_eaw_suspect.empty() ? 0u : 1u);
 }
 
 ModCheckReport check_mod_data(const std::string& root, const std::vector<std::string>& args, const ModCheckOptions& options) {
@@ -344,10 +46,23 @@ ModCheckReport check_mod_data(const std::string& root, const std::vector<std::st
     if (d.vfs) {
         r.vfs_layers = d.vfs->describe();
         r.vfs_warnings = d.vfs->warnings();
-        r.mod_dirs = d.vfs->mod_dirs();
+        r.mod_dirs = vfs::mod_layer_roots(*d.vfs);
         list_mod_files(*d.vfs, r);
     }
-    if (!r.loaded) return r;
+    r.mods = d.mods;
+    if (!r.loaded) {
+        r.grade.grade = "G0";  // version 4: the data does not load
+        for (const vfs::ModDescriptor& m : r.mods)
+            if (m.game_tag == vfs::GameTag::Eaw) {  // D1: refused before loading (load_game_data)
+                r.base_eaw = true;
+                r.grade.blocking.push_back(m.key() + ": " + vfs::kBaseEawRefusal);
+            }
+        if (options.compat) {  // ums4 t07: the findings of a load that stopped (VFS, then the loader steps that ran)
+            r.issues.merge(d.vfs_issues);
+            loader_issues(d, r);
+        }
+        return r;
+    }
     // The checks below read what loaded; a throw in one is reported as that check's error, the others still run.
     const auto guarded = [&](const char* what, auto&& fn) {
         try {
@@ -360,373 +75,40 @@ ModCheckReport check_mod_data(const std::string& root, const std::vector<std::st
     if (options.campaigns) guarded("campaigns", [&] { check_campaigns(d, r); });
     if (options.files) guarded("files", [&] { check_files(d, r); });
     if (options.xml_tags) guarded("xml tags", [&] { check_xml_tags(d, r); });
-    if (options.lua) guarded("lua", [&] { check_lua(d, r, options.lua_run); });
-    return r;
-}
-
-std::string format_mod_report(const ModCheckReport& r, bool verbose) {
-    std::string s;
-    s += "== files\n";
-    s += r.vfs_layers;
-    if (!r.vfs_layers.empty() && r.vfs_layers.back() != '\n') s += '\n';
-    append(s, "VFS warnings: %zu\n", r.vfs_warnings.size());
-    append_list(s, r.vfs_warnings, 0, r.vfs_warnings.size(), verbose);
-    if (r.mod_dirs.empty()) {
-        s += "mod dirs: none (base game)\n";
-    } else {
-        uint32_t added = 0, overrides = 0;
-        for (const auto& f : r.mod_folders) added += f.added, overrides += f.overrides;
-        append(s, "mod files: %u new, %u replace a base / MEG / fallback file\n", added, overrides);
-        for (const auto& f : r.mod_folders)
-            append(s, "    Data\\%-16s %6u new %6u replaced\n", f.folder.empty() ? "." : f.folder.c_str(), f.added, f.overrides);
-    }
-
-    s += "== loaders\n";
-    for (const auto& st : r.stages) {
-        append(s, "%-16s %s %8.1f ms  %zu diagnostics\n", st.name.c_str(), st.ok ? "ok    " : "FAILED", st.ms, st.diag_count);
-        append_list(s, r.diagnostics, st.first_diag, st.diag_count, verbose);
-    }
-    if (!r.loaded) s += "LOAD FAILED: " + r.error + "\n";
-
-    if (r.loaded) {
-        const auto& c = r.counts;
-        s += "== content\n";
-        append(s, "campaigns %zu, planet types %zu, trade routes %zu, object types %zu, factions %zu\n", c.campaigns, c.planets,
-               c.trade_routes, c.object_types, c.factions);
-        if (c.ai)
-            append(s, "AI: %zu galactic plans, %zu space / %zu land tactical plans\n", c.ai_plans, c.tactical_space_plans,
-                   c.tactical_land_plans);
-        else
-            s += "AI: no AI data\n";
-        append(s, "skirmish maps: %zu official, %zu custom\n", c.official_maps, c.custom_maps);
-
-        append(s, "== campaigns\n%zu checked, %zu without planets (errors), %zu skipped rows (warnings)\n", r.campaigns_checked,
-               r.campaigns_without_planets.size(), r.campaign_warning_count);
-        append_list(s, r.campaigns_without_planets, 0, r.campaigns_without_planets.size(), verbose);
-        append_list(s, r.campaign_warnings, 0, r.campaign_warnings.size(), verbose);
-        append(s, "== missing files\n%zu files named by the data that no layer has (warnings)\n", r.missing_files.size());
-        {
-            std::vector<std::string> lines;
-            for (const MissingFile& f : r.missing_files)
-                lines.push_back(std::string(f.in_mod ? "[mod] " : "      ") + f.path + "  (" + f.referenced_by +
-                                (f.references > 1 ? ", +" + std::to_string(f.references - 1) + " more" : std::string()) + ")");
-            append_list(s, lines, 0, lines.size(), verbose);
-        }
-        append(s, "== xml tags\n%zu object type tags the original does not read (warnings)\n", r.unknown_xml_tags.size());
-        {
-            std::vector<std::string> lines;
-            for (const UnknownXmlTag& t : r.unknown_xml_tags) {
-                std::string line;
-                append(line, "%s%-40s %6u uses in %u types, first in %s", t.in_mod ? "[mod] " : "      ", t.tag.c_str(), t.occurrences,
-                       t.types, t.first_file.c_str());
-                lines.push_back(std::move(line));
+    if (options.lua) guarded("lua", [&] { check_lua(d, r, options.lua_run, options.lua_script_budget); });
+    if (options.shaders && options.fx_prebuild)
+        guarded("fx prebuild", [&] { r.shaders.fx_prebuild = prebuild_mod_effects(d, options.fx_cache_dir); });
+    if (options.shaders) guarded("shaders", [&] { check_shaders(d, r, options.shader_compile, options.fx_cache_dir); });
+    if (options.files && options.submod) guarded("submod", [&] { check_submod(d, r, options); });
+    if (options.files) guarded("base-EaW heuristic", [&] { check_base_eaw_suspect(d, r); });
+    if (options.compat) {  // mcx0 t06: report version 4 (after the checks it reads)
+        // A throw here is not a load error (version 4 never changes errors / warnings): grade.check_errors, G3 stays open.
+        const auto compat_guarded = [&](const char* what, auto&& fn) {
+            try {
+                fn();
+            } catch (const std::exception& e) {
+                r.grade.check_errors.push_back(std::string(what) + ": exception: " + e.what());
             }
-            append_list(s, lines, 0, lines.size(), verbose);
-        }
-        const auto issue_lines = [](const std::vector<LuaIssue>& v) {
-            std::vector<std::string> lines;
-            for (const LuaIssue& e : v) lines.push_back(std::string(e.in_mod ? "[mod] " : "      ") + e.text());
-            return lines;
         };
-        append(s, "== lua\n%zu scripts compiled, %zu do not compile (warnings)\n", r.lua_scripts, r.lua_errors.size());
-        const std::vector<std::string> compile_lines = issue_lines(r.lua_errors);
-        append_list(s, compile_lines, 0, compile_lines.size(), verbose);
-        append(s, "%zu entry scripts' main chunks run, %zu raise an error (warnings)\n", r.lua_run, r.lua_run_errors.size());
-        const std::vector<std::string> run_lines = issue_lines(r.lua_run_errors);
-        append_list(s, run_lines, 0, run_lines.size(), verbose);
-        append(s, "%zu unbound engine functions / methods called (warnings)\n", r.unbound_lua_calls.size());
-        {
-            std::vector<std::string> lines;
-            for (const UnboundLuaCall& u : r.unbound_lua_calls) {
-                std::string line;
-                append(line, "%-44s %-6s %6u call sites in %u scripts", u.name.c_str(), u.method ? "method" : "global", u.call_sites,
-                       u.scripts);
-                lines.push_back(std::move(line));
-            }
-            append_list(s, lines, 0, lines.size(), verbose);
-        }
+        compat_guarded("honour gaps", [&] { check_honour_gaps(d, r); });
+        compat_guarded("story", [&] { check_story(d, r); });
+        compat_guarded("token coverage", [&] { check_token_coverage(d, r); });
+        if (options.assets && d.vfs)
+            compat_guarded("assets", [&] {
+                AssetAuditOptions ao;
+                ao.strict = options.strict;
+                ao.cache_dir = options.asset_cache_dir;
+                r.assets = audit_mod_assets(*d.vfs, ao);
+            });
+        retail_equivalent_from_checks(r);
+        compat_issues_and_grade(r, d.vfs, d.vfs_issues);
+        loader_issues(d, r);  // ums4 t07
+    } else {  // check_lua collects the binding findings with its scan; version 4 lists stay empty without compat
+        r.binding_gaps.clear();
+        r.retail_equivalent.clear();
+        r.binding_calls = 0;
     }
-    if (!r.check_errors.empty()) {
-        append(s, "== check errors: %zu\n", r.check_errors.size());
-        append_list(s, r.check_errors, 0, r.check_errors.size(), true);
-    }
-    append(s, "== result: %s, %zu errors, %zu warnings\n", r.error_count() ? "ERRORS" : "OK", r.error_count(), r.warning_count());
-    return s;
-}
-
-namespace {
-
-// Length of the valid UTF-8 sequence at s[i] (1-4), or 0 when the bytes there are not one.
-size_t utf8_length(std::string_view s, size_t i) {
-    const auto b = [&](size_t k) { return static_cast<unsigned char>(s[k]); };
-    const unsigned char c = b(i);
-    size_t n = 0;
-    uint32_t cp = 0;
-    if (c < 0x80) return 1;
-    if (c >= 0xC2 && c <= 0xDF) n = 2, cp = c & 0x1Fu;
-    else if (c >= 0xE0 && c <= 0xEF) n = 3, cp = c & 0x0Fu;
-    else if (c >= 0xF0 && c <= 0xF4) n = 4, cp = c & 0x07u;
-    else return 0;
-    if (i + n > s.size()) return 0;
-    for (size_t k = 1; k < n; ++k) {
-        if ((b(i + k) & 0xC0u) != 0x80u) return 0;
-        cp = (cp << 6) | (b(i + k) & 0x3Fu);
-    }
-    if ((n == 3 && (cp < 0x800 || (cp >= 0xD800 && cp <= 0xDFFF))) || (n == 4 && (cp < 0x10000 || cp > 0x10FFFF))) return 0;
-    return n;
-}
-
-// A JSON string. Mod data and file names are not always UTF-8 (a mod's XML in a Windows code page): a byte that does not
-// start a valid UTF-8 sequence is written as the Latin-1 character of that value, so the output is always valid JSON.
-void json_str(std::string& o, std::string_view s) {
-    o.push_back('"');
-    for (size_t i = 0; i < s.size();) {
-        const char c = s[i];
-        const auto u = static_cast<unsigned char>(c);
-        const size_t n = utf8_length(s, i);
-        if (c == '"' || c == '\\') {
-            o.push_back('\\');
-            o.push_back(c);
-        } else if (u < 0x20 || n == 0) {
-            char buf[8];
-            std::snprintf(buf, sizeof buf, "\\u%04x", static_cast<unsigned>(u));
-            o += buf;
-        } else {
-            o.append(s.substr(i, n));
-            i += n;
-            continue;
-        }
-        ++i;
-    }
-    o.push_back('"');
-}
-
-// Minimal writer: objects and arrays with comma handling, two-space indent, keys in call order.
-class Json {
-public:
-    std::string out;
-    void open(char c) {
-        sep();
-        out.push_back(c);
-        first_.push_back(true);
-    }
-    void close(char c) {
-        const bool empty = first_.back();
-        first_.pop_back();
-        if (!empty) newline();
-        out.push_back(c);
-    }
-    void key(std::string_view k) {
-        sep();
-        json_str(out, k);
-        out += ": ";
-        pending_value_ = true;
-    }
-    void str(std::string_view v) {
-        sep();
-        json_str(out, v);
-    }
-    void num(uint64_t v) {
-        sep();
-        out += std::to_string(v);
-    }
-    void real(double v) {
-        sep();
-        char buf[32];
-        std::snprintf(buf, sizeof buf, "%.1f", v >= 0 && v < 1e15 ? v : 0.0);
-        out += buf;
-    }
-    void boolean(bool v) {
-        sep();
-        out += v ? "true" : "false";
-    }
-    // key: [the strings v[first, first + count)]
-    void strings(std::string_view k, const std::vector<std::string>& v, size_t first = 0, size_t count = SIZE_MAX) {
-        key(k);
-        open('[');
-        const size_t begin = std::min(first, v.size());
-        const size_t end = begin + std::min(count, v.size() - begin);
-        for (size_t i = begin; i < end; ++i) str(v[i]);
-        close(']');
-    }
-
-private:
-    void newline() {
-        out.push_back('\n');
-        out.append(2 * first_.size(), ' ');
-    }
-    void sep() {
-        if (pending_value_) {
-            pending_value_ = false;
-            return;
-        }
-        if (first_.empty()) return;
-        if (!first_.back()) out.push_back(',');
-        first_.back() = false;
-        newline();
-    }
-    std::vector<bool> first_;
-    bool pending_value_ = false;
-};
-
-void lua_issues(Json& j, std::string_view k, const std::vector<LuaIssue>& v) {
-    j.key(k);
-    j.open('[');
-    for (const LuaIssue& e : v) {
-        j.open('{');
-        j.key("path");
-        j.str(e.path);
-        j.key("error");
-        j.str(e.error);
-        j.key("in_mod");
-        j.boolean(e.in_mod);
-        j.close('}');
-    }
-    j.close(']');
-}
-
-void count(Json& j, std::string_view k, uint64_t v) {
-    j.key(k);
-    j.num(v);
-}
-
-}  // namespace
-
-std::string format_mod_report_json(const ModCheckReport& r) {
-    Json j;
-    j.open('{');
-    j.key("schema");
-    j.str("alamo.mod_report");
-    count(j, "version", 1);
-    j.key("result");
-    j.str(r.error_count() ? "errors" : "ok");
-    count(j, "errors", r.error_count());
-    count(j, "warnings", r.warning_count());
-    j.key("game");
-    j.str(r.game);
-    j.strings("args", r.args);
-    j.key("loaded");
-    j.boolean(r.loaded);
-    j.key("load_error");
-    j.str(r.error);
-
-    j.key("files");
-    j.open('{');
-    j.strings("mod_dirs", r.mod_dirs);
-    j.strings("vfs_warnings", r.vfs_warnings);
-    uint64_t added = 0, replaced = 0;
-    for (const auto& f : r.mod_folders) added += f.added, replaced += f.overrides;
-    count(j, "added", added);
-    count(j, "replaced", replaced);
-    j.key("folders");
-    j.open('[');
-    for (const auto& f : r.mod_folders) {
-        j.open('{');
-        j.key("folder");
-        j.str(f.folder);
-        count(j, "added", f.added);
-        count(j, "replaced", f.overrides);
-        j.close('}');
-    }
-    j.close(']');
-    j.close('}');
-
-    j.key("loaders");
-    j.open('[');
-    for (const auto& st : r.stages) {
-        j.open('{');
-        j.key("name");
-        j.str(st.name);
-        j.key("ok");
-        j.boolean(st.ok);
-        j.key("ms");
-        j.real(st.ms);
-        j.strings("diagnostics", r.diagnostics, st.first_diag, st.diag_count);
-        j.close('}');
-    }
-    j.close(']');
-
-    const auto& c = r.counts;
-    j.key("content");
-    j.open('{');
-    count(j, "campaigns", c.campaigns);
-    count(j, "planets", c.planets);
-    count(j, "trade_routes", c.trade_routes);
-    count(j, "object_types", c.object_types);
-    count(j, "factions", c.factions);
-    j.key("ai");
-    j.boolean(c.ai);
-    count(j, "ai_plans", c.ai_plans);
-    count(j, "tactical_space_plans", c.tactical_space_plans);
-    count(j, "tactical_land_plans", c.tactical_land_plans);
-    count(j, "official_maps", c.official_maps);
-    count(j, "custom_maps", c.custom_maps);
-    j.close('}');
-
-    j.key("campaigns");
-    j.open('{');
-    count(j, "checked", r.campaigns_checked);
-    j.strings("without_planets", r.campaigns_without_planets);
-    count(j, "skipped_rows", r.campaign_warning_count);
-    j.strings("warnings", r.campaign_warnings);
-    j.close('}');
-
-    j.key("missing_files");
-    j.open('[');
-    for (const MissingFile& f : r.missing_files) {
-        j.open('{');
-        j.key("path");
-        j.str(f.path);
-        j.key("referenced_by");
-        j.str(f.referenced_by);
-        count(j, "references", f.references);
-        j.key("in_mod");
-        j.boolean(f.in_mod);
-        j.close('}');
-    }
-    j.close(']');
-
-    j.key("unknown_xml_tags");
-    j.open('[');
-    for (const UnknownXmlTag& t : r.unknown_xml_tags) {
-        j.open('{');
-        j.key("tag");
-        j.str(t.tag);
-        count(j, "occurrences", t.occurrences);
-        count(j, "types", t.types);
-        j.key("first_file");
-        j.str(t.first_file);
-        j.key("in_mod");
-        j.boolean(t.in_mod);
-        j.close('}');
-    }
-    j.close(']');
-
-    j.key("lua");
-    j.open('{');
-    count(j, "scripts", r.lua_scripts);
-    lua_issues(j, "compile_errors", r.lua_errors);
-    count(j, "chunks_run", r.lua_run);
-    lua_issues(j, "run_errors", r.lua_run_errors);
-    j.key("unbound_calls");
-    j.open('[');
-    for (const UnboundLuaCall& u : r.unbound_lua_calls) {
-        j.open('{');
-        j.key("name");
-        j.str(u.name);
-        j.key("kind");
-        j.str(u.method ? "method" : "global");
-        count(j, "call_sites", u.call_sites);
-        count(j, "scripts", u.scripts);
-        j.close('}');
-    }
-    j.close(']');
-    j.close('}');
-
-    j.strings("check_errors", r.check_errors);
-    j.close('}');
-    j.out.push_back('\n');
-    return std::move(j.out);
+    return r;
 }
 
 }  // namespace alamo::game

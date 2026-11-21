@@ -3,6 +3,8 @@
 /logs/
 /dist/
 /backups/
+# Scenario results computed from builds (tools/goldens/scenario_results.py, wr1)
+/.cache/
 
 # Project-local toolchain (rebuilt by toolchain\*.cmd) and agent worktrees
 /toolchain/
@@ -16,6 +18,8 @@
 
 # Probe captures and traces (many GB)
 /tools/probe_mod/**/out/
+# Q4 parity harness reports and port runs (tools/parity/README.md)
+/tools/parity/out/
 
 # Roadmap data lives in its own repository
 /roadmap-store/
@@ -32,3 +36,14 @@ __pycache__/
 *.actual
 /tools/probe_mod/**/bin/
 /tools/probe_mod/**/*.log
+/tools/probe_mod/**/selftest/work/
+# Generated file-priority probe payloads (build_probe.py writes them; see tools/probe_mod/README.md)
+/tools/probe_mod/v2/Mods/
+/tools/probe_mod/v2/OPTIONAL_*/
+/tools/probe_mod/probeE/Mods/
+/tools/probe_mod/probeE/OPTIONAL_*/
+
+# Command Center launcher build output (launcher\cargo.cmd)
+/launcher/target/
+/.verifier_wc_slot
+/.alamo_writer

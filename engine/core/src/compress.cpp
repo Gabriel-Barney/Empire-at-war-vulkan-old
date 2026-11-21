@@ -14,14 +14,17 @@ static_assert(std::endian::native == std::endian::little, "the match finder load
 
 constexpr uint32_t kMinMatch = 3;                          // shortest length the format codes (repeat distances)
 constexpr uint32_t kMinNewMatch = 4;                       // shortest match at a new distance the encoder emits
+// limit: dynamic LZ format: longer runs are coded as several matches
 constexpr uint32_t kMaxMatch = kMinMatch + (1u << 20) - 1;  // length - 3 < 2^20: 42 bucket codes
 constexpr uint32_t kWindow = 1u << 24;                     // distance - 1 < 2^24: 50 bucket codes
+// limit: dynamic LZ format code-length bound; any input still encodes
 constexpr uint32_t kMaxCodeLen = 15;
 constexpr uint32_t kEndOfBlock = 256;
 constexpr uint32_t kLitLenSymbols = 257 + 42;
 constexpr uint32_t kDistSymbols = 2 + 50;
 constexpr size_t kBlockTokens = size_t{1} << 16;  // tokens per block (each block has its own codes)
 constexpr uint32_t kHashBits = 18;
+// limit: dynamic match-search budget per position; never refuses input
 constexpr int kMaxChain = 48;          // candidates tried per position
 constexpr uint32_t kNiceLength = 1024;  // a match this long ends the search
 constexpr uint32_t kLazyBelow = 64;     // a shorter match is compared with the one at the next position

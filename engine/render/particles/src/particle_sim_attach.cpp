@@ -1,6 +1,7 @@
 #include "alamo/render/particles/particle_sim_attach.hpp"
 
 #include <algorithm>
+#include <string_view>
 
 #include "alamo/render/hardpoints.hpp"
 
@@ -87,28 +88,41 @@ SimAttachStats sync_sim_frame(ProxyAttachments& attach, const InterpolatedFrame&
             continue;
         }
         Mat3x4 xf = object_transform(*it, g.ti ? g.ti->scale : 1.0f);
-        // R5 Lua Attach_Particle_Effect: at the named bone of the object's model (current pose) when it has one.
+        // R5 Lua Attach_Particle_Effect: at the named bone of the object's model (current pose) when it has one. vis1 t06:
+        // a comma-separated list takes the first bone the model has.
         if (!e.bone.empty())
             if (const GpuModel* m = models.type_model(it->type); m && m->asset) {
-                const int32_t b = m->asset->skeleton.find(e.bone);
+                int32_t b = -1;
+                for (std::string_view rest = e.bone; b < 0 && !rest.empty();) {
+                    const size_t comma = rest.find(',');
+                    std::string_view name = rest.substr(0, comma);
+                    rest = comma == std::string_view::npos ? std::string_view() : rest.substr(comma + 1);
+                    while (!name.empty() && name.front() == ' ') name.remove_prefix(1);
+                    while (!name.empty() && name.back() == ' ') name.remove_suffix(1);
+                    if (!name.empty()) b = m->asset->skeleton.find(name);
+                }
                 if (b >= 0) {
                     const std::span<const Mat3x4> bw = pose && *pose ? (*pose)(it->id, *m) : std::span<const Mat3x4>();
                     xf = attachment_transform(*m->asset, xf, bw, b);
                     ++st.lua_bones;
                 }
             }
-        const uint64_t key = e.lua_seq ? lua_effect_key(e.lua_seq) : attached_effect_key(e.id, e.percent);
+        const uint64_t key = e.lua_seq  ? lua_effect_key(e.lua_seq)
+                             : e.fx_seq ? ability_fx_key(e.fx_seq)
+                                        : attached_effect_key(e.id, e.percent);
         attach.sync_effect(key, std::move(fx), xf, g.fade, !g.culled);
         ++st.attached;
         st.lua += e.lua_seq ? 1u : 0u;
+        st.ability_fx += e.fx_seq ? 1u : 0u;
     }
     // Projectiles (missile trails / particle projectiles), after the objects' effects.
     for (const SnapshotProjectile& p : frame.projectiles) {
         const SnapshotTypeInfo* ti = table.valid(p.type) ? &table[p.type] : nullptr;
         if (!ti || ti->model.empty()) continue;
         const bool visible = !projectile_fogged(frame, p);
+        const assets::Mat3x4 xf = projectile_transform(p, ti);
         if (SystemPtr fx = attach.library().get(ti->model)) {
-            attach.sync_effect(projectile_key(p.serial), std::move(fx), projectile_transform(p, ti, nullptr), 1.0f, visible);
+            attach.sync_effect(projectile_key(p.serial), std::move(fx), xf, 1.0f, visible);
             ++st.projectiles;
             continue;
         }
@@ -116,7 +130,7 @@ SimAttachStats sync_sim_frame(ProxyAttachments& attach, const InterpolatedFrame&
         if (!m || !m->asset || m->asset->proxies.empty()) continue;
         Instance in;
         in.model = m;
-        in.transform = projectile_transform(p, ti, m);
+        in.transform = xf;
         in.light_scale = {1, 1, 1, visible ? 1.0f : 0.0f};
         attach.sync(projectile_key(p.serial), in);
         ++st.projectiles;

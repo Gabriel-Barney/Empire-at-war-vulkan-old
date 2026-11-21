@@ -8,6 +8,7 @@
 #include "alamo/core/hash.hpp"
 #include "alamo/data/values.hpp"
 #include "alamo/data/xml.hpp"
+#include "alamo/data/xml_list.hpp"
 
 namespace alamo::audio {
 namespace {
@@ -136,14 +137,18 @@ const FieldTable<MusicEvent>& music_fields() {
         ALAMO_F("Fade_Out_Previous_Seconds", fade_out_previous_seconds),
         ALAMO_B("Loop", loop),
         ALAMO_B("MSS_Internal_Loop", mss_internal_loop),
+        // mcx4 t13 (MCX4_T13_RE_ANSWERS "DynamicTrack.Files family" [H]): xml_field_tables.md files the music parser's
+        // Files / Volume_Percent under DynamicTrack (DynamicTrackFX.xml has neither); the music update 0x2d2ab0 reads them.
+        // ledger: consumes DynamicTrack.Files
         ALAMO_L("Files", files),
         ALAMO_L("Text_ID", text_ids),
+        // ledger: consumes DynamicTrack.Volume_Percent
         ALAMO_I("Volume_Percent", volume_percent),
     };
     return t;
 }
 
-// SpeechEvent has no table in xml_field_tables.md; these are the tags the shipped files use.
+// SpeechEvent has no segment of its own in xml_field_tables.md; these are the tags the shipped files use.
 const FieldTable<SpeechEvent>& speech_fields() {
     static const FieldTable<SpeechEvent> t = {
         ALAMO_L("Files", files),
@@ -369,26 +374,26 @@ bool AudioDatabase::load(const FileProvider& files, AudioLoadReport* report) {
     if (read_text(files, "Data\\XML\\Audio.xml", text)) parse_audio_xml(text, "Audio.xml", r);
     else diag(r, "Audio.xml", 0, "missing");
 
-    if (!read_text(files, "Data\\XML\\SFXEventFiles.xml", text)) {
+    // cu5 t02: the shared list walk (list order, empty entries skipped, a missing file reported here).
+    data::ListedXmlOptions lo;
+    lo.visit_missing = true;
+    const data::ListStatus st = data::for_each_listed_file(files, "Data\\XML\\SFXEventFiles.xml",
+        [&](const data::ListedXmlEntry& en, const std::vector<uint8_t>* bytes) {
+            ++r.sfx_files;
+            if (!bytes) {
+                ++r.sfx_files_missing;
+                diag(r, en.name, 0, "listed in SFXEventFiles.xml but missing");
+                return;
+            }
+            parse_sfx_xml(std::string_view(reinterpret_cast<const char*>(bytes->data()), bytes->size()), en.name, r);
+        }, lo);
+    if (st == data::ListStatus::Missing) {
         diag(r, "SFXEventFiles.xml", 0, "missing");
         return false;
     }
-    XmlDocument list = XmlDocument::parse(text, "SFXEventFiles.xml");
-    if (!list.ok()) {
+    if (st == data::ListStatus::Unparsable) {
         diag(r, "SFXEventFiles.xml", 0, "not parsable");
         return false;
-    }
-    for (XmlNode f : list.root().children("File")) {
-        const std::string name(f.text_trimmed());
-        if (name.empty()) continue;
-        ++r.sfx_files;
-        std::string body;
-        if (!read_text(files, "Data\\XML\\" + name, body)) {
-            ++r.sfx_files_missing;
-            diag(r, name, 0, "listed in SFXEventFiles.xml but missing");
-            continue;
-        }
-        parse_sfx_xml(body, name, r);
     }
     resolve_links(r);
 

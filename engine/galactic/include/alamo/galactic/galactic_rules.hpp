@@ -7,6 +7,7 @@
 #include <cstdint>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 #include "alamo/core/file_provider.hpp"
@@ -24,11 +25,8 @@ namespace alamo::galactic {
 
 inline constexpr uint32_t kNoIndex = 0xFFFFFFFFu;
 
-// How a type takes part in the galaxy. The original classifies by category flags (GE 2.1 / 2.5:
-// 0x5c starbase, 0x5e/0x60/4/0x61 starbase upgrade families, 0x5f ground structure) [M]; the port
-// derives them from the XML element kind (StarBase, GroundStructure/GroundBase/SpecialStructure,
-// Squadron, ground companies/infantry/vehicles) and, since q6 t03, from the DUMMY_* behaviours those
-// flags turned out to be (galactic_unit_kind below).
+// How a type takes part in the galaxy: from its DUMMY_* behaviours and PLANET, never from its XML element tag
+// (mcx1 t05, D4; MCX1_RE_ANSWERS.md Q7; galactic_unit_kind below).
 enum class UnitKind : uint8_t {
     Other = 0,
     SpaceUnit = 1,        // ships, space heroes: live in fleets
@@ -48,6 +46,7 @@ struct TypeInfo {
     int32_t required_ground_base = 0;   // Required_Ground_Base_Level
     int32_t required_star_base = 0;     // Required_Star_Base_Level
     int32_t base_level = 0;             // Base_Level (starbases)
+    uint32_t next_level_base = kNoIndex;  // Next_Level_Base (starbases, type +0x8c0; kNoIndex = none / unresolved)
     int32_t advances_tech = 0;          // Build_Advances_Tech_Level (tech upgrades)
     int32_t squadron_capacity = 0;      // Squadron_Capacity
     bool hyperspace = false;            // Hyperspace
@@ -79,6 +78,12 @@ struct TypeInfo {
     bool surface_accessible = true;      // Planet_Surface_Accessible
     ForceSide the_force = ForceSide::Neutral;  // The_Force
     float force_strength = 0.0f;         // Force_Strength
+    // bkg2 b0125 (BKG1_RE_ANSWERS 9) [H]: political control inputs. Political_Control (+0x79C) of a planet (its leaning),
+    // a unit in orbit (capital ships / enemy fleets) or a structure (its own breakdown group); Political_Faction (+0x7A0)
+    // of a planet; Planet_Max_Political_Control_For_Faction (+0x830) pairs (faction index, maximum). All 0 / empty in FoC.
+    int32_t political_control = 0;
+    uint32_t political_faction = kNoIndex;
+    std::vector<std::pair<uint32_t, int32_t>> max_political_control;
 
     // ---- OI galactic (docs/re/STRATEGIC_GAPS.md = SG) -----------------------------------------------------------
     // Defaults are the hand-built-rules values (tests): no dummy behaviour, no limits, unlimited slots. The data path
@@ -96,6 +101,16 @@ struct TypeInfo {
     bool planet_destruction = false;     // has a Planet_Destruction_Ability (the galactic super weapon, SG 1.4) [port]
     bool named_hero = false;             // Is_Named_Hero (+0x13)
     bool generic_hero = false;           // Is_Generic_Hero (+0x14)
+    bool prevents_story_autoresolve = false;  // Prevents_Story_Campaign_Autoresolve (+0xA1; MCX4_T09_RE_ANSWERS Q5)
+    // mcx4 t09 (MCX4_GAL2_RE_ANSWERS Q3, presentation): Hyperspace_Fleet_Reveal_Range (+0x64C; a type with a value > 0 is
+    // a revealer) and CategoryMask has Super (0x375270).
+    float fleet_reveal_range = 0.0f;
+    // mcx4 t05 (MCX4_T10_RE_ANSWERS §8): Respawn_Tied_To_Structure (+0x2000, resolved +0x2008), the structure type a
+    // respawn needs; kNoIndex = none
+    uint32_t respawn_tied_to_structure = 0xFFFFFFFFu;
+    bool super = false;
+    bool build_countdown_timer = false;       // Build_Countdown_Timer (+0xC7; Q7, presentation: econ::build_countdown_*)
+    std::string build_speech_countdowns;      // Build_Speech_Countdowns (+0x15C8): the countdown speech event prefix
     // Required_Special_Structures as OR chains (SG 1.3 step 14): `A | B, C` = {{A, B}, {C}}; kNoIndex = an unresolvable
     // name (passes its chain). `required_special_structures` above keeps the flat resolved list (factory count).
     std::vector<std::vector<uint32_t>> required_special_groups;
@@ -105,6 +120,11 @@ struct TypeInfo {
     int32_t limit_lifetime = -1;            // Build_Limit_Lifetime_Per_Player (-1 unlimited, 0 never)
     int32_t limit_current = -1;             // Build_Limit_Current_Per_Player (-1 unlimited, 0 never)
     bool requires_initial_placement = false;  // Build_Requires_Initial_Placement (+0xC3)
+    // mcx4 t05 (MCX4_RE_ANSWERS_GALACTIC Q5.1): the per-unit route toll a corruption faction pays at a planet it does not
+    // hold in orbit: Cheap_Bribe_Cost (+0x2350) when the planet owner's faction is Easily_Bribed, else Expensive_Bribe_Cost
+    // (+0x2354). Both default 1 (type ctor 0x367250).
+    int32_t cheap_bribe_cost = 1;
+    int32_t expensive_bribe_cost = 1;
     // Planet types.
     int32_t max_space_base = 5;             // Max_Space_Base (type +0x668)
     int32_t ground_structure_slots = -1;    // Special_Structures_Land (+0x92C), -1 = unlimited
@@ -124,20 +144,20 @@ inline bool is_star_base_type(const TypeInfo& t) {
     return t.dummy != 0 ? t.dummy == kDummyStarBase : t.kind == UnitKind::StarBase;
 }
 
-// Galactic role (q6 t03). The element tag carries no behaviour in the original (OBJECT_TYPES §2); galactic code tests
-// the DUMMY_* behaviours (SG 1.2, AI_GALACTIC_TOKENS). The port's older element-tag table stays for the vanilla tags.
-//   unit_kind_from_element: the tag table alone (Other for a tag outside it).
-//   unit_kind_from_dummy:   DUMMY_STAR_BASE -> StarBase, DUMMY_GROUND_BASE / _GROUND_STRUCTURE / _ORBITAL_STRUCTURE ->
-//                           GroundStructure, DUMMY_GROUND_COMPANY -> GroundUnit, DUMMY_SPACE_FIGHTER_SQUADRON ->
-//                           Squadron, DUMMY_STARSHIP -> SpaceUnit; Other for 0.
-//   galactic_unit_kind:     a tag in the table takes the behaviour's role when it has one, else the table's (no vanilla
-//                           FoC / EaW type has a behaviour that disagrees with its tag); a tag outside the table takes
-//                           the behaviour's role, except the vanilla tags whose vanilla types the port always left Other
-//                           (is_vanilla_unclassified_element), so vanilla data maps exactly as before.
-UnitKind unit_kind_from_element(std::string_view element, bool hyperspace);
+// Galactic role (q6 t03; mcx1 t05, D4). The element tag carries no behaviour (OBJECT_TYPES §0 rule 2; MCX1_RE_ANSWERS
+// Q7.1: no galactic reader of it). Retail's create-at-planet routine (Q7.2, 0x400b40) tests the DUMMY_* ids of the type's
+// generic <Behavior> list (not Galactic / Land / SpaceBehavior) in the fixed order 0x5B, 0x5C, 0x5F, 0x60, 0x5D, 0x5E,
+// 0x61, the first match wins; a type with none of them is not created. A planet is any type with PLANET (id 3) in its
+// Behavior or GalacticBehavior list (Q7.3).
+//   galactic_dummy:       that first DUMMY_* id, 0 = none.
+//   unit_kind_from_dummy: DUMMY_STAR_BASE -> StarBase, DUMMY_GROUND_BASE / _GROUND_STRUCTURE / _ORBITAL_STRUCTURE ->
+//                         GroundStructure, DUMMY_GROUND_COMPANY -> GroundUnit, DUMMY_SPACE_FIGHTER_SQUADRON ->
+//                         Squadron, DUMMY_STARSHIP -> SpaceUnit; Other for 0.
+//   galactic_unit_kind:   Planet when `planet`, else unit_kind_from_dummy(dummy).
+uint8_t galactic_dummy(const objects::GameObjectTypes& types, uint32_t type);
+bool has_planet_behavior(const objects::GameObjectTypes& types, uint32_t type);
 UnitKind unit_kind_from_dummy(uint8_t dummy);
-bool is_vanilla_unclassified_element(std::string_view element);
-UnitKind galactic_unit_kind(std::string_view element, bool hyperspace, uint8_t dummy);
+UnitKind galactic_unit_kind(uint8_t dummy, bool planet);
 
 // Terrain enum (AI_GALACTIC_3 Â§6.1, BATTLE_TRANSITIONS map picker order): Temperate 0 .. Urban 6, Space 7.
 inline constexpr const char* kTerrainNames[] = {"Temperate", "Arctic", "Desert", "Forest", "Swamp", "Volcanic", "Urban", "Space"};
@@ -156,11 +176,28 @@ struct GalacticRules {
     std::vector<DifficultyRules> difficulties; // DifficultyAdjustments.xml order
     std::vector<TypeInfo> types;               // index = objects::TypeIndex
     SpecialRules special;                      // P4 sim: black market, sabotage, hack, income abilities, corruption choices
+    // bkg3 b0115 (BKG1_RE_ANSWERS 11 [H]): the fleet hop factor R (0x397470 -> 0x471470) does not read the campaign's
+    // listed route: it walks the global TradeRoute table in ascending unsigned CRC-32 of the upper-cased route name and
+    // takes the first route whose endpoint planet types match (either orientation). Links, path costs and the AI travel
+    // estimate keep the listed route. One entry per unordered planet-name-CRC pair (lo <= hi), sorted by (lo, hi): the
+    // lowest-CRC route's HS_Speed_Factor. Empty when the rules are built by hand (then the listed route is used).
+    struct HopRoute {
+        uint32_t lo = 0, hi = 0;   // name_crc of the two planet type names, lo <= hi
+        uint32_t route_crc = 0;    // the winning route's name CRC
+        float hs = 1.0f;           // its HS_Speed_Factor
+    };
+    std::vector<HopRoute> hop_routes;
+    const HopRoute* find_hop_route(uint32_t planet_crc_a, uint32_t planet_crc_b) const;  // nullptr if none
 
     uint32_t find_faction(std::string_view name) const;     // case-insensitive, kNoIndex if absent
     uint32_t find_difficulty(std::string_view name) const;
     uint32_t find_type(std::string_view name) const;        // first definition
     uint32_t neutral_faction() const;                       // first Is_Neutral faction, kNoIndex if none
+    // modc t03 [port, inferred from the S10 probe, REMAINING_GAPS 3.3]: the faction whose player owns a tactical map's
+    // native objects when their own faction has no player: the first faction (FactionFiles.xml order) that is neither
+    // Is_Playable nor Is_Neutral nor Can_Control_Planets (FoC: Hostile). kNoIndex if none. Retail holds a player per
+    // faction instead (campaign_setup.cpp); this picks the one native player the port adds, by data, not by name.
+    uint32_t native_owner_faction() const;
 };
 
 // GameConstants -> EconomyConstants (fields absent from the XML keep the vanilla defaults).

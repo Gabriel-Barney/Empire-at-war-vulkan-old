@@ -1,0 +1,128 @@
+[
+ {
+  "op": "update",
+  "collection": "nodes",
+  "doc_id": "UIART",
+  "data": {
+   "order": 1
+  }
+ },
+ {
+  "op": "update",
+  "collection": "nodes",
+  "doc_id": "AUDIO",
+  "data": {
+   "order": 2
+  }
+ },
+ {
+  "op": "update",
+  "collection": "nodes",
+  "doc_id": "STORY",
+  "data": {
+   "order": 3
+  }
+ },
+ {
+  "op": "update",
+  "collection": "nodes",
+  "doc_id": "Q5",
+  "data": {
+   "order": 1
+  }
+ },
+ {
+  "op": "update",
+  "collection": "nodes",
+  "doc_id": "Q6",
+  "data": {
+   "order": 2
+  }
+ },
+ {
+  "op": "update",
+  "collection": "nodes",
+  "doc_id": "MCX1",
+  "data": {
+   "order": 3
+  }
+ },
+ {
+  "op": "update",
+  "collection": "nodes",
+  "doc_id": "MCX2",
+  "data": {
+   "order": 4
+  }
+ },
+ {
+  "op": "update",
+  "collection": "nodes",
+  "doc_id": "MCX3",
+  "data": {
+   "order": 5
+  }
+ },
+ {
+  "op": "update",
+  "collection": "nodes",
+  "doc_id": "MCX4",
+  "data": {
+   "order": 6
+  }
+ },
+ {
+  "op": "update",
+  "collection": "nodes",
+  "doc_id": "MCX5",
+  "data": {
+   "order": 7
+  }
+ },
+ {
+  "op": "update",
+  "collection": "nodes",
+  "doc_id": "MCX6",
+  "data": {
+   "order": 8
+  }
+ },
+ {
+  "op": "update",
+  "collection": "nodes",
+  "doc_id": "MODC",
+  "data": {
+   "order": 9
+  }
+ },
+ {
+  "op": "update",
+  "collection": "items",
+  "doc_id": "mapx1",
+  "data": {
+   "order": 219,
+   "updated": "2026-11-19",
+   "by": "roadmap-audit-08a8b0"
+  }
+ },
+ {
+  "op": "update",
+  "collection": "items",
+  "doc_id": "aud7",
+  "data": {
+   "order": 192,
+   "updated": "2026-11-19",
+   "by": "roadmap-audit-08a8b0"
+  }
+ },
+ {
+  "op": "set",
+  "collection": "log",
+  "doc_id": "roadmap-audit-2026-11-19-g3a",
+  "data": {
+   "at": "2026-11-19T00:00:00+00:00",
+   "by": "roadmap-audit-08a8b0",
+   "text": "Roadmap audit goal 3a (order inside stages): Campaigns and menus UIART -> AUDIO -> STORY; Mod system Q5, Q6, MCX1-MCX6, MODC; mapx1 order 219, aud7 order 192"
+  }
+ }
+]

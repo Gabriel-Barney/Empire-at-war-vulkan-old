@@ -205,11 +205,27 @@ DecodeError decode_payload(uint16_t type, std::span<const uint8_t> bytes, EventD
     return DecodeError::None;
 }
 
+uint8_t source_byte(CommandSource source, uint16_t player, bool queued) noexcept {
+    const auto high = static_cast<uint32_t>((player >> 8) & 0x1Fu) << kPlayerHighShift;
+    return static_cast<uint8_t>((static_cast<uint32_t>(source) & kSourceMask) | high | (queued ? kCommandQueuedBit : 0u));
+}
+
+bool split_source_byte(uint8_t byte, uint8_t player_low, CommandSource& source, uint16_t& player, bool& queued) noexcept {
+    const uint32_t src = static_cast<uint32_t>(byte & kSourceMask);
+    const uint32_t high = (static_cast<uint32_t>(byte & ~kCommandQueuedBit) >> kPlayerHighShift) & 0x1Fu;
+    const uint32_t id = (high << 8) | player_low;
+    if (src >= kCommandSourceCount || id >= kMaxPlayerSlots) return false;
+    source = static_cast<CommandSource>(src);
+    player = static_cast<uint16_t>(id);
+    queued = (byte & kCommandQueuedBit) != 0;
+    return true;
+}
+
 void encode_command(const Command& c, std::vector<uint8_t>& out) {
     put(out, static_cast<uint16_t>(c.payload.type_id()));
-    put(out, c.header.player);
+    put(out, static_cast<uint8_t>(c.header.player & 0xFFu));
     // [port: Gabriel] bit 7 = queued (0 for every command recorded before queueable actions: same bytes).
-    put(out, static_cast<uint8_t>(static_cast<uint8_t>(c.header.source) | (c.payload.queued() ? kCommandQueuedBit : 0u)));
+    put(out, source_byte(c.header.source, c.header.player, c.payload.queued()));
     put(out, c.header.sequence);
     put(out, c.header.issue_tick);
     put(out, c.header.scheduled_tick);
@@ -230,9 +246,8 @@ DecodeError decode_command(std::span<const uint8_t> in, size_t& pos, Command& ou
     Reader r(in, pos);
     const uint16_t type = r.get<uint16_t>();
     Command c;
-    c.header.player = r.get<uint8_t>();
+    const uint8_t player_low = r.get<uint8_t>();
     const uint8_t src_byte = r.get<uint8_t>();
-    const uint8_t src = static_cast<uint8_t>(src_byte & ~kCommandQueuedBit);  // [port: Gabriel] bit 7 = queued
     c.header.sequence = r.get<uint32_t>();
     c.header.issue_tick = r.get<uint64_t>();
     c.header.scheduled_tick = r.get<uint64_t>();
@@ -240,11 +255,11 @@ DecodeError decode_command(std::span<const uint8_t> in, size_t& pos, Command& ou
     if (!r.ok()) return DecodeError::Truncated;
     if (len > kMaxPayloadBytes) return DecodeError::TooLarge;
     if (r.remaining() < len) return DecodeError::Truncated;
-    if (src >= kCommandSourceCount || c.header.player >= kMaxPlayerSlots) return DecodeError::BadField;
-    c.header.source = static_cast<CommandSource>(src);
+    bool queued = false;
+    if (!split_source_byte(src_byte, player_low, c.header.source, c.header.player, queued)) return DecodeError::BadField;
     const DecodeError e = decode_payload(type, in.subspan(r.pos(), len), c.payload);
     if (e != DecodeError::None) return e;
-    c.payload.set_queued((src_byte & kCommandQueuedBit) != 0);
+    c.payload.set_queued(queued);
     pos = r.pos() + len;
     out = std::move(c);
     return DecodeError::None;
@@ -289,7 +304,7 @@ EventData production(uint16_t type_index, ObjectId location, bool cancel, uint8_
     e.set("type_index", type_index).set("location", location).set("cancel", cancel ? 1u : 0u).set("queue", queue).set("index", index);
     return e;
 }
-EventData tactical_build(ObjectId pad, uint16_t type_index, uint8_t player) {
+EventData tactical_build(ObjectId pad, uint16_t type_index, uint16_t player) {
     EventData e(EventType::TacticalBuild);
     e.set("pad", pad).set("type_index", type_index).set("player", player);
     return e;
@@ -309,11 +324,80 @@ EventData retreat(bool request) {
     e.set("request", request ? 1u : 0u);
     return e;
 }
+EventData set_marker_id(ObjectId object, int32_t marker) {
+    EventData e(EventType::SetMarkerID);
+    e.set("object", object).set("marker", static_cast<uint32_t>(marker));
+    return e;
+}
 EventData port_extension(uint16_t subtype, std::span<const uint8_t> data) {
     EventData e(EventType::PortExtension);
     e.set("subtype", subtype).set_bytes("data", data);
     return e;
 }
 }  // namespace ev
+
+EventData fleet_management_event(FleetOp op, ObjectId target, ObjectId fleet, ObjectId unit, ObjectId a, uint32_t slot) {
+    EventData e(EventType::FleetManagement);
+    e.set("target", target).set("fleet", fleet).set("unit", unit).set("op", static_cast<uint32_t>(op)).set("slot", slot).set("a", a);
+    return e;
+}
+
+bool normalize_object_name(std::string_view raw, std::string& out) {
+    size_t b = 0, e = raw.size();
+    while (b < e && raw[b] == ' ') ++b;
+    while (e > b && raw[e - 1] == ' ') --e;
+    const std::string_view s = raw.substr(b, e - b);
+    size_t chars = 0;
+    for (size_t i = 0; i < s.size();) {
+        const auto c0 = static_cast<uint8_t>(s[i]);
+        uint32_t cp = 0;
+        size_t len = 0;
+        if (c0 < 0x80) {
+            cp = c0;
+            len = 1;
+        } else if (c0 >= 0xC2 && c0 <= 0xDF) {
+            cp = c0 & 0x1Fu;
+            len = 2;
+        } else if (c0 >= 0xE0 && c0 <= 0xEF) {
+            cp = c0 & 0x0Fu;
+            len = 3;
+        } else if (c0 >= 0xF0 && c0 <= 0xF4) {
+            cp = c0 & 0x07u;
+            len = 4;
+        } else {
+            return false;  // stray continuation byte, overlong lead (C0 / C1) or out of range (F5..FF)
+        }
+        if (i + len > s.size()) return false;
+        for (size_t k = 1; k < len; ++k) {
+            const auto ck = static_cast<uint8_t>(s[i + k]);
+            if ((ck & 0xC0u) != 0x80u) return false;
+            cp = (cp << 6) | (ck & 0x3Fu);
+        }
+        if ((len == 3 && cp < 0x800) || (len == 4 && (cp < 0x10000 || cp > 0x10FFFF))) return false;  // overlong / range
+        if (cp >= 0xD800 && cp <= 0xDFFF) return false;                                              // surrogates
+        if (cp < 0x20 || (cp >= 0x7F && cp <= 0x9F)) return false;                                    // control characters
+        i += len;
+        if (++chars > kMaxObjectNameChars) return false;
+    }
+    out.assign(s);
+    return true;
+}
+
+EventData rename_object_event(ObjectId object, std::string_view name) {
+    std::vector<uint8_t> data(4 + name.size());
+    for (size_t i = 0; i < 4; ++i) data[i] = static_cast<uint8_t>(object >> (8 * i));
+    for (size_t i = 0; i < name.size(); ++i) data[4 + i] = static_cast<uint8_t>(name[i]);
+    return ev::port_extension(kRenameSubtype, data);
+}
+
+bool read_rename_event(const EventData& e, ObjectId& object, std::string& name) {
+    if (e.type() != EventType::PortExtension || e.u("subtype") != kRenameSubtype) return false;
+    const std::span<const uint8_t> d = e.bytes_view("data");
+    if (d.size() < 4 || d.size() > 4 + kMaxObjectNameBytes) return false;
+    object = static_cast<ObjectId>(d[0]) | static_cast<ObjectId>(d[1]) << 8 | static_cast<ObjectId>(d[2]) << 16 |
+             static_cast<ObjectId>(d[3]) << 24;
+    name.assign(reinterpret_cast<const char*>(d.data() + 4), d.size() - 4);
+    return true;
+}
 
 }  // namespace alamo::commands

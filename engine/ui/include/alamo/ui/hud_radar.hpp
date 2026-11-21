@@ -15,6 +15,7 @@
 #pragma once
 #include <array>
 #include <cstdint>
+#include <functional>
 #include <map>
 #include <optional>
 #include <span>
@@ -91,6 +92,31 @@ private:
 };
 // Passability classes (w x h, values Passability) -> RGBA with a palette.
 std::vector<uint8_t> passability_rgba(std::span<const uint8_t> classes, const PassabilityPalette& palette);
+
+// map1 t02 (docs/re/MAP1_RADAR_TERRAIN_RE.md): the land radar's terrain picture.
+// RadarMap.xml block of a map's environment index (.ted map info mini 0x06, MapInfo::counts[4]): 0..7 = TEMPERATE, ARCTIC,
+// DESERT, FOREST, SWAMP, VOLCANIC, URBAN, SPACE; any other value: "" (no block: no picture) [H].
+std::string_view radar_biome(uint32_t index);
+// One cell's class from its effective CellPassabilityType bits (.ted 0x10A: Clear 0x1, Steep 0x2, Obstacle 0x4, RebelWall 0x8,
+// EmpireWall 0x10, Water 0x20, Shield 0x40, InfantryOnly 0x80, Impassable 0x100) [H]: water first (the Water bit, or the water
+// surface at or above the terrain there), then Steep > Obstacle > InfantryOnly > Impassable > either wall > Clear (Shield alone
+// and an empty cell are Clear). No height shading; the alpha is the colour's.
+Passability radar_cell_class(uint32_t bits, bool water_surface);
+struct RadarTerrainSource {
+    std::span<const uint32_t> cells;  // per-cell bits, row-major (y * gw + x); cell index = (coord + 10) / 20 [H]
+    uint32_t gw = 0, gh = 0;
+    float cell = 20.0f;
+    // The playable box (.ted 0x103): a cell outside it reads Obstacle too [H]. has_box false: no such cells.
+    bool has_box = false;
+    float box_min_x = 0, box_min_y = 0, box_max_x = 0, box_max_y = 0;
+    std::function<bool(float, float)> water;  // water surface at or above the terrain at (x, y); null = no water
+};
+// `size` x `size` RGBA over the world box [min, max], RadarImage's terrain convention (row 0 = min y, column 0 = min x),
+// sampled at the texel corner (retail clamps the point into [min + 0.001, max - 10 - 0.001]); a texel whose cell is outside
+// the grid is transparent [H]. [port] The cell bits are the static map bits (object footprints are not added) and the
+// tactical camera box (opaque black outside it, [M]) is not applied.
+std::vector<uint8_t> radar_terrain_rgba(const RadarTerrainSource& src, const PassabilityPalette& palette, uint32_t size, float min_x,
+                                        float min_y, float max_x, float max_y);
 
 struct RadarEvent {
     std::string type;  // RadarEventType name

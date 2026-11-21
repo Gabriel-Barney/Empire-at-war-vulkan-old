@@ -43,8 +43,12 @@ enum class GalacticEventKind : uint8_t {
     ProductionBegin,         // player, planet, type, value = queue (0 ground, 1 space)
     ProductionCanceled,      // player, planet, type, value = queue, other_player = 1 if refunded
     ProductionCompleted,     // player, planet, type, object = created object (0 = none: tech upgrade)
-    StarbaseLevelChanged,    // player, planet, value = new level (0 = destroyed)
-    ObjectDestroyed,         // object, type (kNoIndex for a fleet object), player = owner, planet (or invalid)
+    StarbaseLevelChanged,    // player, planet, value = new level (0 = destroyed), type = new starbase type (level 0: none),
+                             // other_player = the old starbase type, -1 none (storyb t14: Galactic_Starbase_Level_Change)
+    ObjectDestroyed,         // object, type (kNoIndex for a fleet object), player = owner, planet (or invalid); value 1 =
+                             // an auto-resolve kill (mcx4 Q4: Die schedules the respawn itself and skips the "hero
+                             // defeated" path 0x3a01f0, so no STORY_DEFEAT_HERO); 2 = a member `type` of the
+                             // company `object` lost at a battle end (the company stays, mcx4 t22); else 0
     UnitsLanded,             // player, planet, value = units landed
     CorruptionChanged,       // planet, player = corrupting player, value = corruption type, other_player = old type
     TechLevelChanged,        // player, value = new level, other_player = old level
@@ -59,7 +63,7 @@ enum class GalacticEventKind : uint8_t {
                              // 7 hack), value = q5 code of the black-market respawn time R (else 0)
     SpecialError,            // the local error SFX: player, planet, object = hero
     SpecialApplied,          // a Ground_Activated apply succeeded (story LAND_ON 2 + DEPLOY 0xC): player, planet, object, type = unit
-                             // type, value = SpecialRules::abilities index
+                             // type, value = SpecialRules::abilities index (galab: kGalabRef | SpecialRules::galab index)
     BlackMarketPurchase,     // player, planet, object = hero, value = item index, other_player = 1 for a human buyer
                              // (story BUY_BLACK_MARKET 0x38 with the item Name [port: at execute time; humans only])
     GalacticSabotage,        // story GALACTIC_SABOTAGE 0x39: player (-1 story reward), planet, type = structure type
@@ -74,6 +78,23 @@ enum class GalacticEventKind : uint8_t {
     Slice,                   // player = slicer owner, planet, object = slicer, type = the entry's type (kNoIndex: no
                              // candidate), value = outcome (0 success, 1 captured, 2 lost effort, 3 cheated, 4 vigilance),
                              // other_player = planet owner
+    // STY1 t08 (retail wrappers 0x3f6810 / 0x3f6770 -> 0x32edd0, GRC 4.3): a timed corruption transition begins:
+    CorruptionStarted,       // planet, player = corrupting player (gain), value = 1 gain / 0 removal; story STORY_GENERIC
+                             // "increase_corruption" / "decrease_corruption"
+    // galab (docs/re/GALAB_ABILITIES_RE.md):
+    SiphonStarted,           // Siphon_Credits applied: player = siphoner, planet, object = hero, type = hero type, value =
+                             // Siphon_Duration_In_Cycles, other_player = planet owner (TEXT_SIPHON_BEGIN)
+    SiphonVigilance,         // a generic siphoner caught on Planet_Vigilance (killed): player, planet, object = hero,
+                             // other_player = planet owner (TEXT_SIPHON_FAILURE_VIGILANCE / _PREVENTED_VIGILANCE)
+    HeroNeutralized,         // Neutralize_Hero executed: player = the neutralizer's owner, planet, type = the target's type,
+                             // object = the target, other_player = the target's owner, value = credits charged
+                             // (story generic "hero_neutralized"); a siphon entry: object = 0, type = the siphoner's type
+    NeutralizeDialog,        // a human's Neutralize_Hero found candidates (0x3c8d90 panel): player, planet, object = the
+                             // neutralizer, value = candidate count; the list is GalacticSim::neutralize_offer(), the pick
+                             // is SpecialAbility kind 3 (kSpecialNeutralize). [port] Kept apart from SpecialDialog until a
+                             // panel exists (backlog, GALAB §7.5).
+    NeutralizeVigilance,     // a generic neutralizer caught on Planet_Vigilance (killed): player, planet, object = the
+                             // neutralizer, other_player = planet owner
     Count
 };
 

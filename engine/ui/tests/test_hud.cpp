@@ -14,6 +14,7 @@
 #include <vector>
 
 #include "alamo/core/file_provider.hpp"
+#include "alamo/core/host_fs.hpp"
 #include "alamo/core/hash.hpp"
 #include "alamo/data/xml.hpp"
 #include "alamo/ui/camera.hpp"
@@ -27,6 +28,7 @@
 #include "alamo/ui/input.hpp"
 #include "alamo/ui/picking.hpp"
 #include "alamo/ui/tactical_hud.hpp"
+#include "alamo/test/support.hpp"
 #include "hud_test_data.hpp"
 #ifdef ALAMO_UI_HAVE_VFS
 #include "alamo/vfs/vfs.hpp"
@@ -35,14 +37,7 @@
 using namespace alamo;
 using namespace alamo::ui;
 
-static int g_fail = 0;
-#define CHECK(c)                                                     \
-    do {                                                             \
-        if (!(c)) {                                                  \
-            std::printf("FAIL %s:%d: %s\n", __FILE__, __LINE__, #c); \
-            ++g_fail;                                                \
-        }                                                            \
-    } while (0)
+using ::alamo::test::g_fail;
 
 namespace {
 
@@ -124,7 +119,30 @@ void test_canvas() {
     const HudCanvas d = HudCanvas::make(800, 600);
     CHECK(near(d.width, 1024) && near(d.height, 768) && near(d.units_per_pixel_x, 1.28f) && d.text_wrap_factor() == 0.95f);
     CHECK(a.text_wrap_factor() == 1.0f);
-    for (const HudCanvas* cv : {&a, &b, &c, &d}) {
+    CHECK(a.font_height() == 768 && b.font_height() == 1080 && c.font_height() == 1024);  // no UI scale: the screen height
+    // [port: Gabriel] DPI-style UI scale: 100 % is the original's size on a 1440p screen (1440 / 768 pixels per unit), so at
+    // 3840 x 2160 the canvas is 1152 units high (text sized for 1440); 125 % gives 921.6 units (text for 1800); 150 % is exactly
+    // the fitted canvas; larger scales keep the fitted canvas (the original size).
+    const HudCanvas e = HudCanvas::make(3840, 2160, 1.0f), f = HudCanvas::make(3840, 2160, 1.25f), g = HudCanvas::make(3840, 2160, 3.0f);
+    CHECK(near(e.width, 3840.0f / kUiScaleUnitPixels, 1e-2f) && near(e.height, 1152) && near(e.units_per_pixel_y, 1152.0f / 2160.0f) &&
+          e.font_height() == 1440);
+    CHECK(near(f.width, 3840.0f / 1.25f / kUiScaleUnitPixels, 1e-2f) && near(f.height, 921.6f, 1e-2f) && f.font_height() == 1800);
+    const HudCanvas fit = HudCanvas::make(3840, 2160), uhd15 = HudCanvas::make(3840, 2160, 1.5f);
+    CHECK(uhd15.width == fit.width && uhd15.height == fit.height && uhd15.font_height() == 2160);
+    // Past the original size only the text grows: 175 % = 7 / 6 of the original's text, 200 % and up 4 / 3 (the cap).
+    const HudCanvas uhd175 = HudCanvas::make(3840, 2160, 1.75f), uhd2 = HudCanvas::make(3840, 2160, 2.0f);
+    CHECK(uhd175.width == fit.width && uhd175.height == fit.height && uhd175.font_height() == 2520);
+    CHECK(uhd2.width == fit.width && uhd2.height == fit.height && uhd2.font_height() == 2880);
+    CHECK(g.width == fit.width && g.height == fit.height && g.font_height() == 2880 && g.ui_scale == 3.0f);
+    // 1080p and 1440p at 100 % are the original fitted size and text; 1080p at 125 % has 1.25 x the text, at 150 % 4 / 3.
+    const HudCanvas hd = HudCanvas::make(1920, 1080, 1.0f), qhd = HudCanvas::make(2560, 1440, 1.0f);
+    CHECK(hd.width == b.width && hd.height == b.height && hd.font_height() == 1080);
+    const HudCanvas hd125 = HudCanvas::make(1920, 1080, 1.25f), hd15 = HudCanvas::make(1920, 1080, 1.5f);
+    CHECK(hd125.height == b.height && hd125.font_height() == 1350 && hd15.height == b.height && hd15.font_height() == 1440);
+    CHECK(near(qhd.height, 768) && qhd.font_height() == 1440);
+    const HudCanvas h = HudCanvas::make(1024, 768, 1.0f);  // the base size: 100 % is the original
+    CHECK(h.width == a.width && h.height == a.height && h.font_height() == 768);
+    for (const HudCanvas* cv : {&a, &b, &c, &d, &e, &f}) {
         // Corners and round trips.
         const Vec2f tl = cv->pixel_to_canvas(0, 0), br = cv->pixel_to_canvas(static_cast<float>(cv->screen_width),
                                                                              static_cast<float>(cv->screen_height));
@@ -291,9 +309,30 @@ void test_atlas_text() {
     esc.add("TEXT_ESC", u"a\\nb");
     CHECK(*esc.find("TEXT_ESC") == u"a\\nb" && esc.text("TEXT_ESC") == u"a\\nb");
     std::vector<uint8_t> bad = make_dat(kv);
-    bad.resize(bad.size() - 3);
+    bad.resize(bad.size() - 3);  // the last key cut: the entries before it are kept (mcx2 t06, text_salvaged)
     TextDatabase e2;
-    CHECK(!e2.parse(bad) && e2.size() == 0);
+    std::string why;
+    CHECK(e2.parse(bad, &why) && e2.size() == kv.size() - 1 && e2.salvaged() && e2.declared() == kv.size() &&
+          why.find("text_salvaged") != std::string::npos);
+    {  // one bad value count in the middle: the keys come from the file's tail, entries before the bad record are kept
+        const std::vector<std::pair<std::string, std::u16string>> three = {{"TEXT_A", u"aa"}, {"TEXT_B", u"bb"}, {"TEXT_C", u"cc"}};
+        std::vector<uint8_t> one_bad = make_dat(three);
+        one_bad[4 + 12 + 4] = 200;  // record 1 claims 200 characters
+        TextDatabase s;
+        CHECK(s.parse(one_bad) && s.size() == 1 && s.text("TEXT_A") == u"aa" && s.salvaged());
+        std::vector<uint8_t> none = make_dat(three);
+        none[4 + 4] = 200;  // record 0 bad: nothing to keep
+        CHECK(!s.parse(none) && s.size() == 0);
+        TextDatabase ok;
+        CHECK(ok.parse(make_dat(three)) && !ok.salvaged() && ok.size() == 3);
+    }
+    // Retail's language from the Windows LANGID (docs/re/MCX2_T02_ASSET_SALVAGE.md 5)
+    CHECK(retail_language_for_langid(0x0407) == "GERMAN" && retail_language_for_langid(0x0807) == "GERMAN");
+    CHECK(retail_language_for_langid(0x040C) == "FRENCH" && retail_language_for_langid(0x2C0A) == "SPANISH");
+    CHECK(retail_language_for_langid(0x0419) == "RUSSIAN" && retail_language_for_langid(0x0415) == "POLISH");
+    CHECK(retail_language_for_langid(0x0411) == "ENGLISH" && retail_language_for_langid(0x0804) == "ENGLISH");
+    CHECK(retail_language_for_langid(0x041E) == "ENGLISH" && retail_language_for_langid(0x0413) == "ENGLISH");
+    CHECK(retail_language_for_langid(0x0809) == "ENGLISH" && retail_language_for_langid(0x0816) == "ENGLISH");
     // Language fallback to English.
     MemProvider files;
     files.put("Data\\Text\\MasterTextFile_ENGLISH.DAT", make_dat(kv));
@@ -387,9 +426,12 @@ void test_draw_list() {
     const float fills[] = {0.0f, 5.0f, 12.5f, 13.0f, 25.0f, 50.0f, 99.0f, 100.0f};
     const uint32_t want[] = {0, 3, 3, 4, 4, 6, 10, 4};
     for (size_t i = 0; i < 8; ++i) CHECK(radial_wipe(q, fills[i], v) == want[i]);
-    // 50 %: fan centre, top-centre start, corners/midpoints, ends at bottom-centre.
-    CHECK(radial_wipe(q, 50.0f, v) == 6 && near(v[0].x, 5) && near(v[0].y, 5) && near(v[1].x, 5) && near(v[1].y, 10) &&
-          near(v[5].x, 5) && near(v[5].y, 0));
+    // 50 %: fan centre, bottom-centre start, corners/midpoints, ends at top-centre (cu9h t03: the last half of the clock).
+    CHECK(radial_wipe(q, 50.0f, v) == 6 && near(v[0].x, 5) && near(v[0].y, 5) && near(v[1].x, 5) && near(v[1].y, 0) &&
+          near(v[2].x, 0) && near(v[2].y, 0) && near(v[5].x, 5) && near(v[5].y, 10));
+    // 25 %: from 9 o'clock (left-centre) over the top-left corner to 12 o'clock.
+    CHECK(radial_wipe(q, 25.0f, v) == 4 && near(v[1].x, 0) && near(v[1].y, 5) && near(v[2].x, 0) && near(v[2].y, 10) &&
+          near(v[3].x, 5) && near(v[3].y, 10));
     // Batching by page, order kept; the list gives the effect (STRATEGIC_GAPS §7.2).
     HudDrawList dl;
     HudQuad a = q, b = q, c = q;
@@ -834,7 +876,7 @@ void test_world() {
         wh.build(ctx, std::span<const HudUnit>(&big, 1), types, atlas, fonts, dl4, &blobs);
         CHECK(dl4.items(0, HudList::Alpha).size() >= 2 && near(dl4.items(0, HudList::Alpha)[0].max.y - dl4.items(0, HudList::Alpha)[0].min.y, 32.0f));
         CHECK(wh.stats().bars == 2);
-        CHECK(blobs.size() == 1 && blobs[0].radius == 60.0f && blobs[0].material == "Selection_Empire_Space" && !blobs[0].land);
+        CHECK(blobs.size() == 1 && blobs[0].radius == 60.0f && blobs[0].material.empty() && !blobs[0].land);
         ctx.land = true;
         ctx.selection_material = [](int32_t, bool land, bool) { return std::string(land ? "Selection_Rebel_Land" : "x"); };
         blobs.clear();
@@ -1136,10 +1178,23 @@ void test_tactical_hud() {
         CHECK(hud.stats().radar_blips == 4);
         types[0].visible_on_radar_when_fogged = false;
         units[3].script_hidden = false;
+        // map1 t01 (radar filter 0x35b4d0): a fog-hidden unit has no blip unless Visible_On_Radar_When_Fogged; a
+        // contained (garrisoned / transported) one has none either way.
+        units[3].fog_hidden = true;
+        hud.build(fr, units, types);
+        CHECK(hud.stats().radar_blips == 3);
+        types[0].visible_on_radar_when_fogged = true;
+        hud.build(fr, units, types);
+        CHECK(hud.stats().radar_blips == 4);
+        units[3].fog_hidden = false;
+        units[3].contained = true;
+        hud.build(fr, units, types);
+        CHECK(hud.stats().radar_blips == 3);
+        types[0].visible_on_radar_when_fogged = false;
+        units[3].contained = false;
     }
     CHECK(digest != 0);
 }
-
 
 // OI 2026-10-28: planet panel texts, credits separator, Game Paused banner (Resume -> HudAction::ResumeGame) and the
 // Mission Objectives box.

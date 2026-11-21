@@ -51,7 +51,15 @@ public:
     void shutdown();  // the GPU must be idle
     bool initialized() const { return ctx_ != nullptr; }
 
+    // Scene wind for the Affected_By_Wind particle path (FrameConstants::wind, particles.hlsl: velocity += wind x 0.5 x dt;
+    // weather particles step with velocity + 5 x wind). World space, world units per second. Hosts set it at map load
+    // from render::scene_wind (map_scene.hpp, cu8f t05): land = the active environment's wind, space = zero.
     void set_wind(const Float3& w) { wind_ = w; }
+    // vis1 t05 (ANIM_PARTICLES B.4, docs/re/WEATHER_VISUALS.md §7): the land terrain for the ground behaviour of emitters
+    // with 0x2F = 1 / 2 - the height grid (row-major, `width` x `height` vertices `spacing` world units apart from the
+    // origin, world z), sampled like terrain::Terrain::sample_height. Empty = no terrain (space): no ground test. Call
+    // after init(), with the GPU idle or before the first prepare() that uses it (the buffer is replaced at once).
+    bool set_terrain(std::span<const float> heights, uint32_t width, uint32_t height, float spacing);
     // Scene fog on the main-scene particle draws (the renderer forwards its lighting's FOG_VALS before prepare; never in
     // the heat pass).
     void scene_fog(bool enabled, const Float3& color, float fog_x, float fog_y) override {
@@ -106,8 +114,10 @@ private:
     VkDescriptorSetLayout set0_ = VK_NULL_HANDLE, set1_ = VK_NULL_HANDLE;
     VkPipelineLayout layout_ = VK_NULL_HANDLE;
     VkPipeline cs_update_ = VK_NULL_HANDLE, cs_spawn_ = VK_NULL_HANDLE, cs_sort_ = VK_NULL_HANDLE, cs_clear_ = VK_NULL_HANDLE;
-    std::map<std::tuple<uint32_t, VkFormat, VkFormat, VkFormat>, VkPipeline> gfx_;
+    std::map<std::tuple<uint32_t, VkFormat, VkFormat, VkFormat, VkSampleCountFlagBits>, VkPipeline> gfx_;
     rhi::Buffer particles_, order_, death_;
+    rhi::Buffer heights_;  // vis1 t05: terrain heights (binding 8; a 16-byte dummy without terrain)
+    float ground_[4] = {0, 0, 1, 0};  // grid width, height, spacing, enabled
     uint32_t capacity_ = 0;
     GpuTexture default_tex_;
     std::map<std::string, std::unique_ptr<GpuTexture>> textures_;

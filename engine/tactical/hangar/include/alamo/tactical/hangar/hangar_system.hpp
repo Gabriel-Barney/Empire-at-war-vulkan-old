@@ -1,8 +1,8 @@
 // Hangars - SPAWN_SQUADRON (behaviour 0x1A, SpawnSquadronBehaviorClass) for space stations and carriers, and the
 // hangar / hardpoint part of the skirmish station upgrade (Starbase_Upgrade_Ability).
 // Spec: docs/re/STATION_HANGARS_SOUND.md §1-§2 (with HARDPOINT_DISABLED.md §3 / §9.4, ABILITIES_HARDPOINTS.md §2.4 /
-// §2.5 for DEPLOY_SQUAD). Space spawners only: the land structure path (bones, Structure Open / Hold / Close states,
-// Spawn_Garrison_On_Load, companies) is not modelled here.
+// §2.5 for DEPLOY_SQUAD). r3g t03: the land structure path (HangarConfig::land) - bones, the Structure Open / Hold /
+// Close states, Spawn_Garrison_On_Load - is modelled (LAND below).
 //
 // WIRING (host = the battle, engine/apps/sim TacticalBattle)
 //   * add_carrier(id, desc, frame, &rng) when the spawner object is created (its combat unit must exist): it makes the
@@ -21,6 +21,22 @@
 //   * Carrier death / removal: remove_carrier() (or the next update() notices the dead combat unit). Spawned units
 //     survive and are no longer counted by anyone. Retreat: nothing here (the hyperspace query blocks launches; the
 //     retreat coordinator treats spawned squadrons like any unit).
+//
+// LAND (r3g t03, §2.5 "Land" / §2.7, SpawnSquadron service 0x594880, signal handler 0x593760, bulk 0x593960): no bays.
+//   * state 0: can-spawn (items 1-5, 7, 8) -> Structure Open (68, HangarHost::clip) -> state 1; no Open clip: launch at
+//     once -> state 2. State 1: at the first service where Open has finished, launch -> Structure Hold (69, looping,
+//     presentation only) -> state 2 (a failed launch retries). State 2 waits for the unit that is leaving: its exit move
+//     finished (signal 10, the host calls unit_left) or its removal (squadron_removed) -> Structure Close (70) -> state 3,
+//     or (no Close clip) state 0 with next := int(now + FPS x delay). State 3: Close finished -> state 0 and that next.
+//     Clip ends are read at the 30-frame services (finish frame = start + one_shot_frames, the host's).
+//   * the launch (0x594dc0 land branch): at the spawner (position, facing) or, with Spawned_Squadron_Location_Bones, a
+//     synced bone pick Get_Int(0, bones - 1) (no draw with one bone) and the bone's frame (HangarHost::land_bone); the
+//     fly-out distance = that bone's Spawned_Squadron_Location_Flyout_Distances entry, else HangarDesc::default_flyout.
+//     The request carries land = true, origin = the spawn point, facing, flyout = origin + facing x distance; the host
+//     creates the unit / company there and moves it to the flyout point.
+//   * Spawn_Garrison_On_Load (vf13 0x594400 -> 0x593960, not in skirmish, spawn enabled): when the carrier is added
+//     its list is built, can-spawn runs (its draws) and every entry spawns max-alive units at once at one point
+//     (the bone pick as above), live += 1 / remaining -= 1 each; no Open / Close and no leaving unit.
 //
 // DETERMINISM: carriers are kept sorted by id; lists in insertion order; draws only from the synced SimRng passed
 // to update() / add_carrier(), in the documented order; no pointer-keyed containers. The state is hashed in
@@ -53,6 +69,7 @@ namespace alamo::tactical::hangar {
 using combat::kNoObject;
 using combat::ObjectId;
 
+// limit: retail A2F_RE_READS §2.1 (Tech_0..5 lists, type +0xAD0 / +0xB60)
 inline constexpr uint32_t kTechSlots = 6;  // Starting / Reserve_Spawned_Units_Tech_0..5
 
 // One (type, count) pair of a Starting_ / Reserve_Spawned_Units_Tech_N list.
@@ -72,6 +89,13 @@ struct HangarDesc {
     // The type has the DEPLOY_SQUAD (75) unit ability. Used when no AbilitySystem is attached (set_abilities);
     // with one, AbilitySystem::has_ability(id, kDeploySquad) decides.
     bool deploy_squad = false;
+    // Land (r3g t03): Spawned_Squadron_Location_Bones count (the host resolves bone i), their fly-out distances
+    // (Spawned_Squadron_Location_Flyout_Distances, by bone index), the distance without one ([port] the spawner's
+    // combat radius; retail: a model size), Spawn_Garrison_On_Load.
+    uint32_t land_bones = 0;
+    std::vector<float> land_flyouts;
+    float default_flyout = 0.0f;
+    bool garrison_on_load = false;
 };
 
 // Flattened 0x46 list tokens ("Type", "2", "Type", "1", ...) or "Type, 2" pairs -> entries in list order. `resolve`
@@ -86,6 +110,7 @@ struct HangarConfig {
     uint32_t fps = combat::kDefaultFps;
     uint32_t service_interval = 30;  // behaviour service interval (first due = add frame + Get_Int(0, interval - 1))
     bool skirmish = true;            // community-property rotation and the station pending-delivery path
+    bool land = false;               // r3g t03: the land structure path (no bays; Open / Hold / Close states)
 };
 
 // A unit the host must create after update(), request order. Each consumes object ids.
@@ -102,6 +127,8 @@ struct LaunchRequest {
     Vec3 direction;              // normalize(P1 - P0); zero when the flyout distance is 0
     Vec3 facing{1.0f, 0.0f, 0.0f};  // direction, else the bone X axis [port]
     bool escort = false;         // the carrier has a locomotor: order kind 3 (guard the carrier); else move to P1
+    bool land = false;           // r3g t03: a land structure's unit: created at `origin` facing `facing`, moved to `flyout`
+    bool leaving = false;        // r3g t03: the one-by-one launch whose exit move closes the structure (not the bulk)
 };
 
 enum class HangarEventKind : uint8_t {
@@ -136,6 +163,12 @@ struct HangarHost {
     std::function<bool(ObjectId carrier, uint32_t hardpoint, Vec3& pos, Vec3& x_axis)> bay_bone;
     // DEFEND (1) active on the carrier; unset: the attached AbilitySystem (is_active), else false.
     std::function<bool(ObjectId carrier)> defend_active;
+    // r3g t03 (land): plays clip `anim` (68 Open / 69 Hold looping / 70 Close, random variant) on the spawner; true
+    // when it played, with `finish_frames` = sim frames until the one-shot finishes. Unset / false: no such clip.
+    std::function<bool(ObjectId carrier, int32_t anim, bool loop, uint32_t& finish_frames)> clip;
+    // r3g t03 (land): world position and facing (XY) of Spawned_Squadron_Location_Bones[bone] on the spawner. False:
+    // [port] the spawner's position and facing.
+    std::function<bool(ObjectId carrier, uint32_t bone, Vec3& pos, Vec3& facing)> land_bone;
 };
 
 class HangarSystem {
@@ -160,6 +193,12 @@ public:
     bool bind_launch(uint32_t serial, ObjectId object);
     // The host removed a squadron container / single ship (§2.7). Unknown ids are ignored.
     void squadron_removed(ObjectId object, uint32_t frame);
+    // r3g t03 (land, signal 10): the leaving unit's exit move finished. Closes the structure when `object` is the unit a
+    // carrier is waiting for (state 2); otherwise ignored.
+    void unit_left(ObjectId object, uint32_t frame);
+    // r3g t03: the land units still leaving their structure (one per carrier in state 2 with a bound unit), ascending
+    // carrier id. The host reports their arrival with unit_left.
+    std::vector<ObjectId> leaving_units() const;
     // Lua Set_Garrison_Spawn (obj +0x3CB).
     void set_spawn_enabled(ObjectId carrier, bool on);
     // DEPLOY_SQUAD handler (ABILITIES_HARDPOINTS §2.5, inline in 0x38a350): resets SPAWN_SQUADRON (state 0) and sets the
@@ -168,13 +207,17 @@ public:
     void deploy_squad(ObjectId carrier, uint32_t frame, float recharge_seconds);
 
     // Serial, once per frame: carrier deaths, then the due services (descending id).
-    void update(uint32_t frame, SimRng& rng);
+    // SP5 t03 (docs/SIM_PARALLEL_DESIGN.md §4.4): with `stream_of`, each serviced carrier's draws (the entry and bay
+    // picks) come from stream_of(carrier id) - a counter-based stream of its own - instead of `rng`; the order of the
+    // services and every other effect are unchanged. Null: the synced draws (retail order).
+    using StreamOf = std::function<SimRng(ObjectId carrier)>;
+    void update(uint32_t frame, SimRng& rng, const StreamOf* stream_of = nullptr);
 
     // ---- queries ----
     bool has_carrier(ObjectId id) const { return find(id) >= 0; }
     bool spawn_enabled(ObjectId carrier) const;
     bool deploy_ready(ObjectId carrier) const;                 // DEPLOY_SQUAD gate: state 4
-    uint8_t state(ObjectId carrier) const;                     // 0 idle, 4 manual
+    uint8_t state(ObjectId carrier) const;                     // 0 idle, 1 opening, 2 out, 3 closing (land), 4 manual
     uint32_t entry_count(ObjectId carrier) const;              // 0 until the first service
     int32_t live(ObjectId carrier, uint32_t entry) const;      // counted units of the entry
     int32_t max_alive(ObjectId carrier, uint32_t entry) const; // starting count
@@ -227,6 +270,9 @@ private:
         uint8_t enabled = 1;        // +0x3CB
         uint8_t deploy_latch = 0;   // [L] one launch after a DEPLOY_SQUAD reset
         uint8_t bays_gone = 0;      // BaysGone reported
+        uint32_t clip_end = 0;      // r3g t03 land: the frame the Open / Close clip finishes (state 1 / 3)
+        uint32_t leaving_serial = 0;      // r3g t03 land: the launch request whose unit is leaving (+0x58), 0 none
+        ObjectId leaving = kNoObject;     // ... its bound unit
         std::vector<uint32_t> bays;   // cached FIGHTER_BAY hardpoint indices
         std::vector<Entry> entries;
         std::vector<Spawned> spawned;  // counted units (launch order)
@@ -240,6 +286,15 @@ private:
     bool can_spawn(Carrier& c, uint32_t frame, SimRng& rng);
     void launch(Carrier& c, uint32_t frame, SimRng& rng);
     void emit(Carrier& c, int32_t type, int32_t entry, bool pending, uint32_t frame, SimRng& rng);
+    // r3g t03 land
+    void service(Carrier& c, uint32_t frame, SimRng& rng, bool load, bool due);
+    bool pick_spawn(Carrier& c, uint32_t frame, SimRng& rng);  // 0x594600 entry pick + land emit (the leaving unit)
+    void emit_land(Carrier& c, int32_t type, int32_t entry, uint32_t frame, bool leaving, int32_t bone);
+    int32_t pick_bone(const Carrier& c, SimRng& rng) const;
+    void land_service(Carrier& c, uint32_t frame, SimRng& rng);
+    void land_close(Carrier& c, uint32_t frame);
+    void garrison_on_load(Carrier& c, uint32_t frame, SimRng& rng);
+    uint32_t delay_frame(const Carrier& c, uint32_t frame) const;  // int(now + FPS x delay), float sum
     bool allied(int32_t a, int32_t b) const;
     bool has_deploy_squad(const Carrier& c) const;
     bool defend_on(const Carrier& c) const;

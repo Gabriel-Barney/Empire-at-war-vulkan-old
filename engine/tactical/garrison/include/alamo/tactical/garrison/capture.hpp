@@ -26,7 +26,7 @@
 #include <vector>
 
 #include "alamo/core/galaxy.hpp"
-#include "alamo/core/sim_crc.hpp"
+#include "alamo/core/sim_crc_fwd.hpp"
 #include "alamo/tactical/garrison/garrison.hpp"
 
 namespace alamo::tactical::garrison {
@@ -49,6 +49,16 @@ struct CaptureEvent {
     uint32_t frame = 0;
 };
 
+// r3h t05 (ABILITIES_HARDPOINTS §4.15, service 0x501980): a clip the point asks for. `transition` false: Idle when the
+// progress decays to 0 under the owner (from above 0); true: Transition_Ownership when another controller starts a
+// transition (progress exactly 0 before the step). The host picks the variant from the faction of `controller` (the
+// owner's when the controller's faction is neutral). Presentation only: not saved, not hashed.
+struct CaptureAnim {
+    ObjectId point = kNoObject;
+    int32_t owner = -1, controller = -1;
+    bool transition = false;
+};
+
 class CapturePointSystem {
 public:
     CapturePointSystem(int32_t neutral_player, uint32_t interval = 4, uint32_t allowed_frame = 0)
@@ -63,6 +73,9 @@ public:
     // q6 t19 rule (a) (AI_GALACTIC_TOKENS §9.11, AI_TACTICAL §7.5.1 item 1): a build pad whose pad data holds an
     // under-construction object or a child keeps its current owner, whoever stands on it. Unset: no pads.
     void set_pad_occupied(std::function<bool(ObjectId point)> fn) { pad_occupied_ = std::move(fn); }
+    // STY1 t01 (Lua Disable_Capture): a point whose CAPTURE_POINT behaviour is suspended is not serviced - no controller scan,
+    // no progress or owner change, no event; progress and pending stay as they were. Not saved (the host's state). Unset: none.
+    void set_suspended(std::function<bool(ObjectId point)> fn) { suspended_ = std::move(fn); }
 
     bool add_point(ObjectId id, int32_t owner, Vec3 position, const CapturePointDesc& d, uint32_t first_frame = 0);
     void remove(ObjectId id);
@@ -82,6 +95,7 @@ public:
 
     std::span<const CaptureEvent> events() const { return events_; }
     void clear_events() { events_.clear(); }
+    std::span<const CaptureAnim> anims() const { return anims_; }  // r3h t05: the last service's, in point order
     void hash(StateHasher& h) const;
     // N1 stage 2 (save_file.hpp contract, garrison_save.cpp): the constructor parameters (neutral player, interval,
     // allowed frame - restored), every point (owner, position, descriptor, step, pending, progress, next service) and
@@ -107,12 +121,14 @@ private:
     int32_t neutral_;
     uint32_t interval_;
     uint32_t allowed_frame_;
+    std::function<bool(ObjectId)> suspended_;
     std::function<bool(int32_t, int32_t)> allied_;
     std::function<int32_t(ObjectId)> occupant_owner_;
     std::function<bool(int32_t)> neutral_owner_;
     std::function<bool(ObjectId)> pad_occupied_;
     std::vector<Point> points_;  // ascending id
     std::vector<CaptureEvent> events_;
+    std::vector<CaptureAnim> anims_;  // r3h t05: presentation, not saved
 };
 
 }  // namespace alamo::tactical::garrison

@@ -3,13 +3,15 @@
 // "L1 systems" block; docs/re/SCRIPT_GAPS.md §1-§3). Serial code only; the synced RNG is drawn by the departure
 // timers (HyperspaceDepartures) and nothing else here.
 #include <algorithm>
+#include <utility>
 #include <array>
 
 #include "alamo/core/dmath.hpp"
+#include "alamo/core/sim_crc.hpp"
 #include "alamo/data/xml.hpp"
 #include "alamo/objects/game_object_types.hpp"
 #include "alamo/objects/type_fields.hpp"
-#include "alamo/sim/campaign_battles.hpp"
+#include "alamo/sim/l1_loaders.hpp"
 #include "alamo/sim/tactical_battle.hpp"
 #ifdef ALAMO_SIM_HAVE_ANIM
 #include "alamo/sim/sim_anim.hpp"
@@ -51,12 +53,12 @@ void TacticalBattle::l1_add_types(std::vector<uint32_t>& use) const {
     for (uint32_t t = 0; t < types.size(); ++t) {
         bool want = false;
         if (space_) {
-            want = types.has_behavior(t, objects::BehaviorSet::Space, b.special) && types.get_bool(t, "Is_Special_Weapon_In_Space") &&
-                   types.get_int(t, "Special_Weapon_Index") >= 0;
+            want = types.has_behavior(t, objects::BehaviorSet::Space, b.special) && types.get(t, objects::tags::Is_Special_Weapon_In_Space) &&
+                   types.get(t, objects::tags::Special_Weapon_Index) >= 0;
         } else {
             want = types.has_behavior(t, objects::BehaviorSet::Land, b.lobbing);
             // Bombing runs: every Land_Bomber_Type (its bomb projectile in the tables).
-            if (const objects::TypeIndex bt = types.get_type_ref(t, "Land_Bomber_Type"); bt != objects::kNone &&
+            if (const objects::TypeIndex bt = types.get(t, objects::tags::Land_Bomber_Type); bt != objects::kNone &&
                 std::find(use.begin(), use.end(), static_cast<uint32_t>(bt)) == use.end())
                 use.push_back(static_cast<uint32_t>(bt));
         }
@@ -83,14 +85,14 @@ void TacticalBattle::l1_setup(TacticalMode& mode) {
         const objects::TypeIndex t = st.type(h);
         if (t >= types.size()) continue;
         uint32_t kinds = 0;
-        if (types.get_bool(t, "Is_Asteroid_Field")) kinds |= ta::kFieldAsteroid;
-        if (types.get_bool(t, "Is_Impassable_Asteroid")) kinds |= ta::kFieldImpassable;
-        if (types.get_bool(t, "Is_Ion_Storm")) kinds |= ta::kFieldIonStorm;
-        if (types.get_bool(t, "Is_Nebula")) kinds |= ta::kFieldNebula;
+        if (types.get(t, objects::tags::Is_Asteroid_Field)) kinds |= ta::kFieldAsteroid;
+        if (types.get(t, objects::tags::Is_Impassable_Asteroid)) kinds |= ta::kFieldImpassable;
+        if (types.get(t, objects::tags::Is_Ion_Storm)) kinds |= ta::kFieldIonStorm;
+        if (types.get(t, objects::tags::Is_Nebula)) kinds |= ta::kFieldNebula;
         if (!kinds) continue;
         const Vec3 p = st.position(h);
-        const std::array<float, 4> off = types.get_vec(t, "Space_Obstacle_Offset");
-        l1_fields_.add({st.id(h), kinds, p.x + off[0], p.y + off[1], types.get_float(t, "Space_Obstacle_Radius")});
+        const std::array<float, 4> off = types.get(t, objects::tags::Space_Obstacle_Offset);
+        l1_fields_.add({st.id(h), kinds, p.x + off[0], p.y + off[1], types.get(t, objects::tags::Space_Obstacle_Radius)});
     }
 }
 
@@ -146,9 +148,10 @@ void TacticalBattle::l1_fields(uint32_t frame, SimRng& rng) {
                 r.amount = l1_k_.asteroid_field_damage;
                 r.damage_type = asteroid_damage_type;
                 combat_->take_damage(r, frame);
+                l1_asteroid_hits_.push_back(u.id);  // mcx4 t13: presentation feed
                 // One Asteroid_Damage_Hit_Particles entry (synced int); [port] no skeleton: the model centre + 90 z,
                 // no bone draw.
-                const auto list = types.get_list(st.type(h), "Asteroid_Damage_Hit_Particles");
+                const auto list = types.get(st.type(h), objects::tags::Asteroid_Damage_Hit_Particles);
                 if (!list.empty()) {
                     const int32_t k = rng.range_int(0, static_cast<int32_t>(list.size()) - 1);
                     std::string name;
@@ -199,24 +202,24 @@ uint32_t TacticalBattle::l1_desc_of(int32_t type) {
     if (types.has_behavior(ti, set, b.special)) d.kinds |= ta::kSwSpecialWeapon;
     if (types.has_behavior(ti, set, b.lobbing)) d.kinds |= ta::kSwLobbing;
     if (types.has_behavior(ti, set, b.tsw)) d.kinds |= ta::kSwTsw;
-    d.recharge_seconds = types.get_float(ti, "Projectile_Fire_Recharge_Seconds");
-    d.pulse_count = std::max(1, types.get_int(ti, "Projectile_Fire_Pulse_Count"));
-    d.pulse_delay_seconds = types.get_float(ti, "Projectile_Fire_Pulse_Delay_Seconds");
+    d.recharge_seconds = types.get(ti, objects::tags::Projectile_Fire_Recharge_Seconds);
+    d.pulse_count = std::max(1, types.get(ti, objects::tags::Projectile_Fire_Pulse_Count));
+    d.pulse_delay_seconds = types.get(ti, objects::tags::Projectile_Fire_Pulse_Delay_Seconds);
     for (size_t i = 0; i < types_used_.size(); ++i)  // the weapon projectile from the battle tables
         if (static_cast<int32_t>(types_used_[i]) == type && descs_[i] < tables_->combat.units.size())
             d.projectile = tables_->combat.units[descs_[i]].listed_projectile;  // S8 t08: with or without WEAPON
-    d.valid_targets = types.get_mask(ti, "Special_Weapon_Valid_Targets");
-    d.requires_base_power = types.get_bool(ti, "Requires_Base_Power");
-    d.target_action_index = types.get_int(ti, "Special_Weapon_Target_Action_Index");
+    d.valid_targets = types.get(ti, objects::tags::Special_Weapon_Valid_Targets);
+    d.requires_base_power = types.get(ti, objects::tags::Requires_Base_Power);
+    d.target_action_index = types.get(ti, objects::tags::Special_Weapon_Target_Action_Index);
     d.max_speed = ti < types.columns().max_speed.size() ? types.columns().max_speed[ti] : 0.0f;
-    d.tsw_start_distance = types.get_float(ti, "TSW_Start_Distance_From_Target");
-    d.tsw_attack_distance = types.get_float(ti, "TSW_Attack_Distance_From_Target");
-    d.tsw_match_target_z = types.get_bool(ti, "TSW_Start_Pos_Match_Targets_Z");
-    d.tsw_z_adjust = types.get_float(ti, "TSW_Z_Adjust_Relative_To_Target_Pos");
-    d.tsw_power_up_seconds = types.get_float(ti, "TSW_Power_Up_Countdown_Seconds");
-    d.tsw_attack_anim_seconds = types.get_float(ti, "TSW_Attack_Anim_Duration_Seconds");
-    d.tsw_debris_delay_frames = types.get_int(ti, "TSW_Explosion_Debris_Creation_Frame_Delay");
-    d.tsw_post_destruction_frames = types.get_int(ti, "TSW_Post_Destruction_Wait_Frames");
+    d.tsw_start_distance = types.get(ti, objects::tags::TSW_Start_Distance_From_Target);
+    d.tsw_attack_distance = types.get(ti, objects::tags::TSW_Attack_Distance_From_Target);
+    d.tsw_match_target_z = types.get(ti, objects::tags::TSW_Start_Pos_Match_Targets_Z);
+    d.tsw_z_adjust = types.get(ti, objects::tags::TSW_Z_Adjust_Relative_To_Target_Pos);
+    d.tsw_power_up_seconds = types.get(ti, objects::tags::TSW_Power_Up_Countdown_Seconds);
+    d.tsw_attack_anim_seconds = types.get(ti, objects::tags::TSW_Attack_Anim_Duration_Seconds);
+    d.tsw_debris_delay_frames = types.get(ti, objects::tags::TSW_Explosion_Debris_Creation_Frame_Delay);
+    d.tsw_post_destruction_frames = types.get(ti, objects::tags::TSW_Post_Destruction_Wait_Frames);
     const uint32_t idx = l1_sw_.add_desc(d);
     l1_desc_cache_.emplace_back(type, idx);
     return idx;
@@ -244,6 +247,38 @@ void TacticalBattle::adopt_object(TacticalMode& mode, objects::ObjectHandle h) {
     if (st.alive(h)) l1_register(mode, h, static_cast<int32_t>(st.type(h)));
 }
 
+std::vector<std::string> TacticalBattle::adoption_violations(const TacticalMode& mode) const {
+    std::vector<std::string> out;
+    if (!combat_) return out;
+    const objects::ObjectStore& st = mode.primary();
+    const objects::GameObjectTypes& types = catalog_->types();
+    auto say = [&](objects::ObjectId id, uint32_t t, const char* what) {
+        const auto& names = types.raw().types().name;
+        const std::string name = t < names.size() ? std::string(names[t]) : std::string("?");
+        out.push_back(std::to_string(id) + " " + name + ": " + what);
+    };
+    for (const Unit& u : units_) {
+        if (!u.alive || u.retreated) continue;
+        if (!st.alive(u.h) || st.id(u.h) != u.id) say(u.id, u.type, "battle unit without a live store object");
+        else if (!combat_->has_unit(u.id)) say(u.id, u.type, "battle unit without a combat entry");
+        else if (u.movable && movement_ && !movement_->has_unit(u.id) && garrison_holder_of(u.id) == objects::kNoObjectId)
+            say(u.id, u.type, "movable battle unit without a movement entry");
+    }
+    for (const objects::ObjectHandle h : st.all_objects()) {
+        if (!st.active(h)) continue;  // dead or a death clone
+        const auto t = static_cast<uint32_t>(st.type(h));
+        const bool in_tables = std::find(types_used_.begin(), types_used_.end(), t) != types_used_.end();
+        if (!in_tables && !st.has_behavior(h, objects::beh::Locomotor)) continue;
+        const objects::ObjectId id = st.id(h);
+        const auto ui = std::lower_bound(units_.begin(), units_.end(), id, [](const Unit& a, objects::ObjectId v) { return a.id < v; });
+        if (ui != units_.end() && ui->id == id) continue;
+        if (std::any_of(containers_.begin(), containers_.end(), [id](const Container& c) { return c.id == id; })) continue;
+        if (bt_owner_neutral(st.owner(h))) continue;  // neutral mobile / selectable map objects stay unadopted (map load)
+        say(id, t, "store object not adopted by the battle");
+    }
+    return out;
+}
+
 ta::SpecialWeaponWorld TacticalBattle::l1_world(const TacticalMode& mode) {
     const objects::ObjectStore* st = &mode.primary();
     ta::SpecialWeaponWorld w;
@@ -262,7 +297,7 @@ ta::SpecialWeaponWorld TacticalBattle::l1_world(const TacticalMode& mode) {
     w.category_mask = [this, st](tc::ObjectId t) -> uint64_t {
         if (combat_->has_unit(t)) return combat_->data().units[combat_->desc_index(t)].category_mask;
         const objects::ObjectHandle h = st->find(t);
-        return st->alive(h) ? catalog_->types().get_mask(st->type(h), "CategoryMask") : 0u;
+        return st->alive(h) ? catalog_->types().get(st->type(h), objects::tags::CategoryMask) : 0u;
     };
     w.target_flagged = [st](tc::ObjectId t) { return !st->alive(st->find(t)); };  // obj +0x3a0 & 0x40 [M: dying]
     // OI abilities: the Base_Power_Ability list (TACTICAL_GAPS §7.3; empty = no power) replaces the "passes" stand-in.
@@ -287,7 +322,7 @@ ta::SpecialWeaponWorld TacticalBattle::l1_world(const TacticalMode& mode) {
     const objects::GameObjectTypes* types = &catalog_->types();
     w.debris_choices = [st, types](tc::ObjectId target) {
         const objects::ObjectHandle h = st->find(target);
-        return st->alive(h) ? static_cast<uint32_t>(types->get_type_refs(st->type(h), "Death_Explosions").size()) : 0u;
+        return st->alive(h) ? static_cast<uint32_t>(types->get_type_refs(st->type(h), objects::tags::Death_Explosions).size()) : 0u;
     };
     return w;
 }
@@ -305,15 +340,23 @@ bool TacticalBattle::sw_fire_at_object(const TacticalMode& mode, objects::Object
 
 bool TacticalBattle::sw_fire_lobbing_at(const TacticalMode& mode, objects::ObjectId weapon, Vec3 point) {
     if (finished_) return false;
-    return l1_sw_.fire_lobbing_at(weapon, to_t(point), frame_, l1_world(mode));
+    if (!l1_sw_.fire_lobbing_at(weapon, to_t(point), frame_, l1_world(mode))) return false;
+    // TRU1 t01 (0x4ea3f0 -> 0x42fb70): an accepted order starts FIRE_LOBBING_SUPERWEAPON's recharge on the ability countdown
+    if (abilities_) abilities_->force_recharge(weapon, tactical::abilities::kFireLobbingSuperweapon);
+    return true;
 }
 
 bool TacticalBattle::special_weapons_allowed(int32_t player) const {
-    // campaign: no per-player rule (0x527620); skirmish: the player's special-weapon hard-point flag (HARDPOINT_DISABLED §4).
-    if (cfg_.skirmish && combat_ && !combat_->special_weapon_hp_enabled(player)) return false;
+    // SpecialWeaponsAllowed (0x527620): false once the battle planet is destroyed. cu8f t06 (CU8F_T04_T06_RE §3.3 [H]): the
+    // Enable_Special_Weapons list (+0x1e0): empty -> allowed in a campaign battle, refused in a skirmish; non-empty -> the
+    // AND of its entries and the special-weapon hard-point flag +0x2f0 (HARDPOINT_DISABLED §4).
     if (l1_planet_destroyed_) return false;
     const PlanetIndex p = req_.info.planet;
-    return !(p < galaxy_->planets().size() && galaxy_->planets()[p].destroyed);
+    if (p < galaxy_->planets().size() && galaxy_->planets()[p].destroyed) return false;
+    bool all = true;
+    const uint32_t n = abilities_ ? abilities_->player_gate(player, tactical::abilities::PlayerGate::SpecialWeapons, all) : 0u;
+    if (n == 0) return !cfg_.skirmish;
+    return all && (!combat_ || combat_->special_weapon_hp_enabled(player));
 }
 
 int32_t TacticalBattle::tsw_state(objects::ObjectId tsw) const { return l1_sw_.tsw_state(tsw); }
@@ -327,7 +370,7 @@ bool TacticalBattle::tsw_fire(objects::ObjectId tsw) {
         const uint32_t gt = galaxy_->planets()[p].type;
         if (gt < galaxy_->rules().types.size()) {
             const objects::TypeIndex t = catalog_->types().resolve_name(galaxy_->rules().types[gt].name);
-            planet_ok = t != objects::kNone && catalog_->types().get_bool(t, "Planet_Is_Destroyable_By_TSW");
+            planet_ok = t != objects::kNone && catalog_->types().get(t, objects::tags::Planet_Is_Destroyable_By_TSW);
         }
     }
     return l1_sw_.tsw_fire(tsw, planet_ok, frame_);
@@ -335,14 +378,41 @@ bool TacticalBattle::tsw_fire(objects::ObjectId tsw) {
 
 // ---- motion: teleport, hyperspace, engines ----
 
+bool TacticalBattle::face_immediate(TacticalMode& mode, objects::ObjectId id, Vec3 facing) {
+    objects::ObjectStore& st = mode.primary();
+    const objects::ObjectHandle h = st.find(id);
+    if (!st.alive(h)) return false;
+    st.set_facing(h, facing);
+    if (movement_) (void)movement_->set_heading(id, yaw_deg_of(facing));  // unknown to movement: nothing
+    if (combat_ && combat_->has_unit(id)) combat_->set_facing(id, to_t(facing));
+    return true;
+}
+
 bool TacticalBattle::teleport(TacticalMode& mode, objects::ObjectId id, Vec3 position, Vec3 facing) {
     objects::ObjectStore& st = mode.primary();
     const objects::ObjectHandle h = st.find(id);
     if (!st.alive(h)) return false;
     st.set_position(h, position);
     st.set_facing(h, facing);
-    if (const Unit* u = unit_by_id(id); u && u->movable && movement_)
+    // s78n review (TACTICAL_COMBAT §5.4.4 item 2.4: position setters move a land squad container too [M]): a squad
+    // container is no battle unit but has a mover of its own, which commit() writes back to the store - so it moves with
+    // the mover. s78n t18 (FIGHTER_FLYING §7.4, 0x3abb80): its members go with it, each at the new place + its old
+    // offset from the container (MovementSystem::teleport); their store / combat positions and tree boxes follow here.
+    const Unit* u = unit_by_id(id);
+    const bool squad = !u && movement_ && movement_->is_land_team_container(id);
+    if (movement_ && ((u && u->movable) || squad))
         movement_->teleport(id, {position.x, position.y}, position.z, yaw_deg_of(facing), frame_);
+    if (squad) {
+        for (const Unit& m : units_) {
+            if (!m.alive || m.retreated || m.container >= containers_.size() || containers_[m.container].id != id) continue;
+            if (!movement_->has_unit(m.id) || !st.alive(m.h)) continue;
+            const mv::UnitView v = movement_->view(m.id);
+            const Vec3 p{v.pos.x, v.pos.y, map_.terrain.sample_height(v.pos.x, v.pos.y)};
+            st.set_position(m.h, p);
+            if (combat_ && combat_->has_unit(m.id)) combat_->set_position(m.id, to_t(p));
+            mode.trees().update(static_cast<tactical::EntityHandle>(m.id), mode.bounds_of(m.h));
+        }
+    }
     if (combat_ && combat_->has_unit(id)) {
         combat_->set_position(id, to_t(position));
         combat_->set_facing(id, to_t(facing));
@@ -359,8 +429,8 @@ bool TacticalBattle::hyperspace_out(objects::ObjectId id, int32_t delay_frames, 
     // vf +0x2a8 is implemented by the FIGHTER and SIMPLE_SPACE locomotors only (STARSHIP_LOCOMOTOR: empty stub).
     const objects::GameObjectTypes& types = catalog_->types();
     bool implemented = false;
-    for (const char* tag : {"Behavior", "SpaceBehavior"})
-        for (std::string_view b : types.get_list(st.type(u->h), tag)) {
+    for (const objects::ListTag* tag : {&objects::tags::Behavior, &objects::tags::SpaceBehavior})
+        for (std::string_view b : types.get(st.type(u->h), *tag)) {
             std::string up;
             for (char ch : b)
                 if (ch != ' ' && ch != '\t' && ch != ',') up.push_back(ch >= 'a' && ch <= 'z' ? static_cast<char>(ch - 'a' + 'A') : ch);
@@ -378,6 +448,7 @@ bool TacticalBattle::hyperspace_out(objects::ObjectId id, int32_t delay_frames, 
     }
     if (abilities_->has_object(id)) abilities_->set_locomotor_busy(id, true);
     l1_used_ = true;
+    story_generics_.push_back({"start_hyperspace", owner});  // STY1 t03 (0x41f70): the jump order was accepted
     return true;
 }
 
@@ -398,7 +469,29 @@ bool TacticalBattle::disable_engines(objects::ObjectId id, float seconds) {
     if (engines_online(id) < 0) return false;
     l1_engines_.disable(id, seconds, frame_);
     l1_used_ = true;
+    // cu8 t04 (STATION_HANGARS_SOUND §3.3): a timed engine disable turns both engine loops off (audio requests only).
+    if (const Unit* u = unit_by_id(id); u && hg_engine_unit(*u)) engine_loops_.timed_disable(id, frame_);
     return true;
+}
+
+void TacticalBattle::energy_drain_engines(objects::ObjectId id, float seconds) {
+    // cu8f t02 (CU8F_T01_T02_T07_RE.md §2.4), after EnergyPool::Absorb took energy > 0: 1. with a locomotor,
+    // Locomotor_Set_Engines(destroyed 0, t) (EngineControl::disable keeps the 0x5545a0 gate and the max expiry), then the
+    // current move stops (0x422040); 2. signal 0x16; 3. moving loop off, then idle loop off.
+    // cu8g t01 [port]: 0x422040 keeps the move when its last waypoint has flag 0x10 [M meaning]; the port's paths carry no
+    // waypoint flags, so the move always stops. Signal 0x16 is the EngineControl::disable EngineEvent::Off (raised when the
+    // engines were on; nothing in the port subscribes to it); the original's repeat on engines already off is not raised.
+    const Unit* u = unit_by_id(id);
+    if (!u || !u->alive || u->retreated) return;
+    if (engines_online(id) >= 0) {
+        l1_engines_.disable(id, seconds, frame_);
+        l1_used_ = true;
+        if (u->movable && movement_ && movement_->has_unit(id)) {
+            const std::vector<objects::ObjectId> ids{id};
+            movement_->stop(ids);
+        }
+    }
+    if (hg_engine_unit(*u)) engine_loops_.timed_disable(id, frame_);
 }
 
 bool TacticalBattle::enable_engines(objects::ObjectId id) {
@@ -425,14 +518,31 @@ uint32_t TacticalBattle::anim_clip_frames(const TacticalMode& mode, objects::Obj
     return anim_clip_info(mode, id, anim_type, frames, fps) ? frames : 0u;
 }
 
+uint32_t TacticalBattle::clip_finish_frames(uint32_t frames, float fps) {
+#ifdef ALAMO_SIM_HAVE_ANIM
+    const uint64_t n = anim::one_shot_frames(frames, fps, 1.0f);
+    return n >= 0xFFFFFFFFull ? 0xFFFFFFFEu : static_cast<uint32_t>(n);
+#else
+    (void)frames, (void)fps;
+    return 0;
+#endif
+}
+
 bool TacticalBattle::anim_clip_info(const TacticalMode& mode, objects::ObjectId id, int32_t anim_type, uint32_t& frames,
                                     float& fps, uint32_t variant) const {
 #ifdef ALAMO_SIM_HAVE_ANIM
-    if (!anim_ || anim_type < 0) return false;
+    // r3g: static clip data, the same with and without the animation service (refixf t04's rule for death clones): the
+    // attached service's models, else the clone-model source, else the battle's own loader over the catalog's files.
+    SimAnimation* src = anim_ ? anim_ : clone_models_;
+    if (!src && catalog_->files()) {
+        if (!own_clone_models_) own_clone_models_ = std::make_unique<SimAnimation>(catalog_->types(), *catalog_->files());
+        src = own_clone_models_.get();
+    }
+    if (!src || anim_type < 0) return false;
     const objects::ObjectStore& st = mode.primary();
     const objects::ObjectHandle h = st.find(id);
     if (!st.exists(h)) return false;
-    const anim::AnimModel* m = anim_->model_for(st.type(h), mode.kind());
+    const anim::AnimModel* m = src->model_for(st.type(h), mode.kind());
     const anim::ClipRef* c = m ? m->clip(anim_type, variant) : nullptr;
     if (!c || !c->clip || c->clip->frame_count == 0) return false;
     frames = c->clip->frame_count;
@@ -473,6 +583,39 @@ int32_t TacticalBattle::retreat_increment_frames(int32_t player) const {
     return f < l1_retreat_increments_.size() ? l1_retreat_increments_[f] : 0;
 }
 
+void TacticalBattle::l1_force_disable(const TacticalMode& mode) {
+    if (!abilities_) return;
+    const objects::GameObjectTypes& types = catalog_->types();
+    if (force_disable_range_.size() != types.size()) {
+        force_disable_range_.assign(types.size(), 0.0f);
+        for (objects::TypeIndex t = 0; t < types.size(); ++t)
+            force_disable_range_[t] = types.get(t, objects::tags::Disable_Force_Abilities_Range);  // read as a float [M]
+    }
+    // cu8f t07 (CU8F_T01_T02_T07_RE.md §3.1): DisableForceAbilitiesBehaviorClass (0x52) Service 0x636260, interval 1, so
+    // every frame. Only objects that carry DISABLE_FORCE_ABILITIES in their current mode's list emit (FoC: Ysalamiri_Tree,
+    // Underworld_Ysalamiri_Cage, land only; Rebel_Mobile_Shield_Generator's range tag is dead data). Query 0x2a9ff0:
+    // SELECTABLE objects of every player but the emitter's owner (allies and neutral included), 3-D distance² < r².
+    // Victim stamp CD +0x110 := now when it has a Force (F column) unit ability; nothing ever clears it (gate 3 / 0x380b10
+    // ends the lockout passively).
+    const objects::ObjectStore& st = mode.primary();
+    for (const objects::ObjectHandle e : st.all_objects()) {  // emitters, store order
+        const objects::TypeIndex et = st.type(e);
+        if (!st.alive(e) || et >= force_disable_range_.size() || !(force_disable_range_[et] > 0.0f)) continue;
+        if (!st.has_behavior(e, objects::beh::DisableForceAbilities)) continue;
+        const float r = force_disable_range_[et];
+        const Vec3 ep = st.position(e);
+        const int32_t owner = st.owner(e);
+        for (const Unit& u : units_) {  // ascending id; the stamp is order-independent
+            if (!u.alive || u.retreated || !st.alive(u.h) || st.owner(u.h) == owner) continue;
+            if (!st.has_behavior(u.h, objects::beh::Selectable)) continue;
+            const Vec3 p = st.position(u.h);
+            const float dx = p.x - ep.x, dy = p.y - ep.y, dz = p.z - ep.z;
+            if (!(dx * dx + dy * dy + dz * dz < r * r)) continue;
+            if (abilities_->has_force_ability(u.id)) abilities_->set_force_disabled(u.id, frame_);
+        }
+    }
+}
+
 void TacticalBattle::l1_motion(TacticalMode& mode, SimRng& rng) {
     if (!l1_used_) return;
     objects::ObjectStore& st = mode.primary();
@@ -493,6 +636,10 @@ void TacticalBattle::l1_motion(TacticalMode& mode, SimRng& rng) {
         mode.trees().update(static_cast<tactical::EntityHandle>(u.id), mode.bounds_of(u.h));
     }
     for (const mv::HyperspaceEvent& e : l1_jumps_.events()) {
+        if (e.kind == mv::HyperspaceEvent::Kind::Jumped) {  // aud1 t05 (AUDIO.md §9.6): the jump sound (presentation log)
+            if (const Unit* j = unit_by_id(e.id); j && j->alive && !j->retreated && st.alive(j->h))
+                hyperspace_sfx_.push_back({HyperspaceSfx::Kind::Depart, j->id, j->type, st.owner(j->h), st.position(j->h)});
+        }
         if (e.kind != mv::HyperspaceEvent::Kind::Killed) continue;  // Jumped: presentation (SFX, model stretch)
         Unit* u = unit_by_id(e.id);
         if (!u || !u->alive || u->retreated) continue;
@@ -566,7 +713,7 @@ void TacticalBattle::l1_tsw_destruction(TacticalMode& mode, const ta::SpecialWea
     const objects::TypeIndex dt = st.type(dh);
     const Vec3 pos = st.position(dh), facing = st.facing(dh);
     const int32_t neutral = galaxy_->neutral_player();
-    const auto explosions = types.get_type_refs(dt, "Death_Explosions");
+    const auto explosions = types.get_type_refs(dt, objects::tags::Death_Explosions);
     if (e.value >= 0 && static_cast<size_t>(e.value) < explosions.size() && explosions[static_cast<size_t>(e.value)] != objects::kNone)
         spawn_particle(mode, static_cast<int32_t>(explosions[static_cast<size_t>(e.value)]), pos, neutral);
     bt_kill_silently(mode, dh);
@@ -590,21 +737,34 @@ void TacticalBattle::l1_tsw_debris(TacticalMode& mode, const ta::SpecialWeaponEv
     const L1TswDebris d = *it;
     l1_tsw_debris_.erase(it);
     const int32_t neutral = galaxy_->neutral_player();
-    for (const objects::TypeIndex t : catalog_->types().get_type_refs(static_cast<objects::TypeIndex>(d.type), "Death_By_TSW_Replacements"))
+    for (const objects::TypeIndex t : catalog_->types().get_type_refs(static_cast<objects::TypeIndex>(d.type), objects::tags::Death_By_TSW_Replacements))
         if (t != objects::kNone && spawn_prop(mode, static_cast<int32_t>(t), d.pos, d.facing, neutral)) ++stats_.props;
 }
 
 // ---- tactical weather (land; L1_S4_REMAINING §3.2) ----
 void TacticalBattle::l1_weather_tick(SimRng& rng) {
     if (space_ || !l1_weather_data_) return;
-    if (!l1_weather_started_) {  // the first service's re-init starts the map environment's scenario
+    const uint32_t env_now = environment_index();
+    if (!l1_weather_started_ || l1_weather_env_ != env_now) {
+        // Re-init (0x468a50): the first service starts the active environment's scenario (cu8g t02: the map-load pick);
+        // cu8g t03: a changed environment index (Set_New_Environment) restarts the weather with the new environment's
+        // scenario, and a missing scenario / no phases turns it off (§3.2). An unchanged index re-inits nothing. A start
+        // with phases costs 2 synced draws (WeatherSystem::start, CU8G_T02_ENV_PICK_RE §4).
+        const bool restart = l1_weather_started_;
         l1_weather_started_ = true;
+        l1_weather_env_ = env_now;
         const terrain::EnvironmentSet& env = map_.environments;
         std::string name;
-        if (env.start_index < env.environments.size()) name = env.environments[env.start_index].weather_effect;
+        if (env_now < env.environments.size()) name = env.environments[env_now].weather_effect;
         const tactical::combat::WeatherScenario* sc = l1_weather_data_->find(name);
-        if (!sc) return;
-        l1_weather_.start(sc, l1_weather_data_.get(), frame_, rng);
+        if (restart) {
+            l1_weather_note_fow();  // events raised between ticks reach the fog before start() clears them
+            l1_weather_.start(sc, l1_weather_data_.get(), frame_, rng);  // null / no phases: weather off, no draw
+            combat_->set_weather_accuracy(l1_weather_.accuracy_row());   // off: the all-1 row
+        } else {
+            if (!sc) return;
+            l1_weather_.start(sc, l1_weather_data_.get(), frame_, rng);
+        }
         l1_used_ = true;
     } else {
         l1_weather_note_fow();  // Int-final: events raised between ticks (Force_Weather) reach the fog first
@@ -622,6 +782,59 @@ void TacticalBattle::l1_weather_note_fow() {
         if (e.kind == tactical::combat::WeatherEvent::Kind::FowDirty) fog_weather_dirty_ = true;
 }
 
+// cu8g t03: mode vf25 (0x276ff0): index := clamp(arg, 0, n - 1), no draw. The weather follows on its next service.
+bool TacticalBattle::set_environment(int32_t index) {
+    const size_t n = map_.environments.environments.size();
+    if (n == 0) return false;  // [port] retail's clamp to n - 1 = -1 is not modelled: nothing changes
+    const int32_t hi = static_cast<int32_t>(std::min<size_t>(n - 1, 0x7fffffff));
+    env_index_ = static_cast<uint32_t>(std::clamp(index, 0, hi));
+    return true;
+}
+
+bool TacticalBattle::set_cinematic_environment(bool on) {
+    const std::vector<terrain::Environment>& envs = map_.environments.environments;
+    if (on) {
+        for (uint32_t i = 0; i < envs.size(); ++i)
+            if (envs[i].name == "Cinematic") {
+                if (i == env_index_) return false;  // already active
+                env_saved_ = env_index_;
+                return set_environment(static_cast<int32_t>(i));
+            }
+        return false;
+    }
+    if (env_saved_ == 0xFFFFFFFFu) return false;
+    const uint32_t back = std::exchange(env_saved_, 0xFFFFFFFFu);
+    return set_environment(static_cast<int32_t>(back));
+}
+
+// cu8g t02: 0x277030 (CU8G_T02_ENV_PICK_RE §1). [port] n == 0 (a map without environments; retail keeps the ctor's
+// default record, n = 1) -> 0 without a draw.
+uint32_t TacticalBattle::pick_environment(const terrain::EnvironmentSet& envs, SimRng& rng) {
+    const std::vector<terrain::Environment>& e = envs.environments;
+    const size_t n = e.size();
+    if (n <= 1) return 0;
+    const int32_t hi = static_cast<int32_t>(std::min<size_t>(n - 1, 0x7ffe));
+    uint32_t i = static_cast<uint32_t>(rng.range_int(0, hi));
+    if (e[i].name == "Cinematic") i = i + 1 < n ? i + 1 : 0u;  // strcmp: exact, case-sensitive; no re-check
+    return i;
+}
+
+// cu8g t03: mode vf27 (0x2770e0, CU8G_T02_ENV_PICK_RE §5): no Cinematic skip in the typed branch.
+bool TacticalBattle::set_environment_of_weather_type(uint32_t type, SimRng& rng) {
+    const std::vector<terrain::Environment>& envs = map_.environments.environments;
+    const uint32_t n = static_cast<uint32_t>(envs.size());
+    if (n == 0) return false;
+    std::vector<uint32_t> typed;
+    if (type <= 4)
+        for (uint32_t i = 0; i < n; ++i)
+            if (envs[i].field_13 == type) typed.push_back(i);
+    uint32_t index = 0;
+    if (typed.size() == 1) index = typed[0];
+    else if (typed.size() >= 2) index = typed[static_cast<size_t>(rng.range_int(0, static_cast<int32_t>(std::min<size_t>(typed.size() - 1, 0x7ffe))))];
+    else index = pick_environment(map_.environments, rng);
+    return set_environment(static_cast<int32_t>(index));
+}
+
 bool TacticalBattle::force_weather(SimRng& rng) {
     if (space_ || finished_ || !l1_weather_.active()) return false;
     const bool ok = l1_weather_.force_weather(frame_, rng);
@@ -634,7 +847,8 @@ float TacticalBattle::weather_sight_modifier(objects::ObjectId id) const {
     const objects::ObjectStore& st = l1_mode_->primary();
     const objects::ObjectHandle h = st.find(id);
     if (!st.exists(h)) return 1.0f;
-    return l1_weather_.sight_modifier(catalog_->types().get_string(st.type(h), "Weather_Category"));
+    if (abilities_ && !abilities_->weather_affected(st.owner(h))) return 1.0f;  // cu8 t01: Weatherproof owner
+    return l1_weather_.sight_modifier(catalog_->types().get(st.type(h), objects::tags::Weather_Category));
 }
 
 // ---- damage statistics (L1_S4_REMAINING §2.4) ----
@@ -756,9 +970,29 @@ std::vector<objects::TypeIndex> TacticalBattle::projectile_types(objects::Object
     const objects::ObjectStore& st = l1_mode_->primary();
     const objects::ObjectHandle h = st.find(x);
     if (!st.alive(h)) return out;
-    for (const objects::TypeIndex t : types.get_type_refs(st.type(h), "Projectile_Types"))
+    for (const objects::TypeIndex t : types.get_type_refs(st.type(h), objects::tags::Projectile_Types))
         if (t != objects::kNone) out.push_back(t);
     return out;
+}
+
+int32_t TacticalBattle::should_switch_weapons(objects::ObjectId self, objects::ObjectId target) const {
+    if (!combat_) return 0;
+    // a TEAM container answers for its first live member; an empty team: kNoObjectId (-> 0)
+    const auto member = [this](objects::ObjectId id) {
+        for (size_t c = 0; c < containers_.size(); ++c)
+            if (containers_[c].id == id) {
+                for (const Unit& u : units_)
+                    if (u.container == c && u.alive && !u.retreated) return u.id;
+                return objects::kNoObjectId;
+            }
+        return id;
+    };
+    const objects::ObjectId s = member(self);
+    if (s == objects::kNoObjectId) return 0;
+    if (target == objects::kNoObjectId) return combat_->should_switch_weapons(s, tactical::combat::kNoObject);
+    const objects::ObjectId t = member(target);
+    if (t == objects::kNoObjectId) return 0;
+    return combat_->should_switch_weapons(s, t);
 }
 
 objects::TypeIndex TacticalBattle::current_projectile(objects::ObjectId id) const {
@@ -777,7 +1011,7 @@ objects::TypeIndex TacticalBattle::current_projectile(objects::ObjectId id) cons
             if (!member) return objects::kNone;
         }
     if (!st.alive(h)) return objects::kNone;
-    const auto refs = catalog_->types().get_type_refs(st.type(h), "Projectile_Types");
+    const auto refs = catalog_->types().get_type_refs(st.type(h), objects::tags::Projectile_Types);
     if (refs.empty()) return objects::kNone;
     // S8 t12 (TACTICAL_COMBAT §3.1.1 "Lua Get_Current_Projectile_Type", 0x578470): Projectile_Types[obj +0x324] (the weapon
     // index: 0 at creation, SWAP_WEAPONS / Permanent_Weapon_Swap), with no WEAPON behaviour test; an index outside the list
@@ -787,14 +1021,19 @@ objects::TypeIndex TacticalBattle::current_projectile(objects::ObjectId id) cons
 }
 
 bool TacticalBattle::opposite_sides_of_shield(Vec3 a, Vec3 b, int32_t player, bool friendly, bool shield_damage) const {
-    if (space_ || !l1_mode_ || !shield_damage) return false;
+    if (space_ || !l1_mode_) return false;
     static const objects::BehaviorTypeId kBaseShield = objects::behavior_type_id("BASE_SHIELD");
     const objects::ObjectStore& st = l1_mode_->primary();
     const objects::GameObjectTypes& types = catalog_->types();
     for (const objects::ObjectHandle h : st.all_objects()) {  // the land store's object list order
         if (!st.alive(h) || kBaseShield == objects::kNoBehavior || !st.has_behavior(h, kBaseShield)) continue;
-        const float r = types.get_float(st.type(h), "Base_Shield_Radius");
+        const float r = types.get(st.type(h), objects::tags::Base_Shield_Radius);
         if (!(r > 0.0f)) continue;
+        // tru1 t02 (TRU1_A_RE_ANSWERS A5 / L1_S4 §1.2): only a shield that is on; a shot without shield damage counts
+        // only upgraded ones (pack +0xc)
+        if (combat_->has_unit(st.id(h)) && !(shield_damage ? combat_->base_shield_active(st.id(h))
+                                                           : combat_->base_shield_active_upgraded(st.id(h))))
+            continue;
         if (player >= 0 && (!combat_->is_enemy(player, st.owner(h))) != friendly) continue;  // 0x39a2c0 [M]
         const Vec3 c = st.position(h);
         auto inside = [&](Vec3 p) {
@@ -853,42 +1092,29 @@ void TacticalBattle::l1_hash(StateHasher& h) const {
 }
 
 // ---- CampaignBattles helper: Space_Retreat_Unit_Increment_Wait_Frames per faction (FactionFiles.xml) ----
-std::vector<int32_t> load_retreat_increments(const FileProvider& provider, const galactic::GalacticRules& rules) {
+std::vector<int32_t> load_retreat_increments(const galactic::GalacticRules& rules) {
     std::vector<int32_t> out(rules.factions.size(), 0);  // [port] unset = 0 (the hook's documented default)
-    std::vector<uint8_t> bytes;
-    if (!provider.read("Data\\XML\\FactionFiles.xml", bytes)) return out;
-    const data::XmlDocument list = data::XmlDocument::parse(bytes, "FactionFiles.xml");
-    for (data::XmlNode file : list.root().children("File")) {
-        std::vector<uint8_t> fb;
-        const std::string path = "Data\\XML\\" + std::string(file.text_trimmed());
-        if (!provider.read(path, fb)) continue;
-        const data::XmlDocument doc = data::XmlDocument::parse(fb, path);
-        for (data::XmlNode n : doc.root().children("Faction")) {
-            const uint32_t fi = rules.find_faction(n.attribute("Name"));
-            const std::string_view v = n.child_text("Space_Retreat_Unit_Increment_Wait_Frames");
-            if (fi < out.size() && !v.empty()) out[fi] = objects::c_atoi(v);
-        }
+    for (const galactic::FactionRules& f : rules.factions) {  // every definition, list order
+        const uint32_t fi = rules.find_faction(f.name);
+        const std::string_view v = f.xml_text("Space_Retreat_Unit_Increment_Wait_Frames");
+        if (fi < out.size() && !v.empty()) out[fi] = objects::c_atoi(v);
     }
     return out;
 }
 
-std::vector<float> load_retreat_flight_increments(const FileProvider& provider, const galactic::GalacticRules& rules) {
+std::vector<float> load_retreat_flight_increments(const galactic::GalacticRules& rules) {
     std::vector<float> out(rules.factions.size(), 500.0f);  // [port] unset = 500 (the shipped value)
-    std::vector<uint8_t> bytes;
-    if (!provider.read("Data\\XML\\FactionFiles.xml", bytes)) return out;
-    const data::XmlDocument list = data::XmlDocument::parse(bytes, "FactionFiles.xml");
-    for (data::XmlNode file : list.root().children("File")) {
-        std::vector<uint8_t> fb;
-        const std::string path = "Data\\XML\\" + std::string(file.text_trimmed());
-        if (!provider.read(path, fb)) continue;
-        const data::XmlDocument doc = data::XmlDocument::parse(fb, path);
-        for (data::XmlNode n : doc.root().children("Faction")) {
-            const uint32_t fi = rules.find_faction(n.attribute("Name"));
-            const std::string_view v = n.child_text("Space_Retreat_Flight_Move_Increment");
-            if (fi < out.size() && !v.empty()) out[fi] = static_cast<float>(objects::c_atof(v));
-        }
+    for (const galactic::FactionRules& f : rules.factions) {  // every definition, list order
+        const uint32_t fi = rules.find_faction(f.name);
+        const std::string_view v = f.xml_text("Space_Retreat_Flight_Move_Increment");
+        if (fi < out.size() && !v.empty()) out[fi] = static_cast<float>(objects::c_atof(v));
     }
     return out;
+}
+
+// ref3 t06: StoryHooks::station_fire (the tactical story VMs' space-station special weapon).
+bool TacticalBattle::station_special_weapon_fire(objects::ObjectId station, objects::ObjectId target) {
+    return abilities_->combat().special_weapon_fire(station, target);
 }
 
 }  // namespace alamo::sim

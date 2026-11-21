@@ -195,7 +195,6 @@ void WorldHud::build(const WorldHudContext& ctx, std::span<const HudUnit> units,
             sb.land = ctx.land;
             if (!t.selection_blob_material.empty()) sb.material = t.selection_blob_material;
             else if (ctx.selection_material) sb.material = ctx.selection_material(u.owner, ctx.land, t.is_hero);
-            else sb.material = ctx.land ? "Selection_Empire_Land" : "Selection_Empire_Space";
             blobs->push_back(std::move(sb));
             ++stats_.blobs;
         }
@@ -258,8 +257,8 @@ void WorldHud::build(const WorldHudContext& ctx, std::span<const HudUnit> units,
         if (u.control_group >= 0 && u.control_group <= 9) {
             const CommandBarComponent* gc = group_ >= 0 && table_ ? &(*table_)[static_cast<size_t>(group_)] : nullptr;
             HudTextStyle st;
-            st.font = fonts.font(gc && !gc->font_name.empty() ? gc->font_name : std::string(kFallbackFontFace),
-                                 gc && gc->font_point_size > 0 ? gc->font_point_size : 9.0f, cv.screen_height);
+            st.font = fonts.component_font(gc ? std::string_view(gc->font_name) : std::string_view(), gc ? gc->font_point_size : 9.0f,
+                                           FontUse::World, cv.font_height());
             st.color = gc && gc->has_text_color ? gc->text_color : Rgba8{};
             st.outline = gc ? gc->text_outline : true;
             st.emboss = gc ? gc->text_emboss : false;
@@ -276,8 +275,8 @@ void WorldHud::build(const WorldHudContext& ctx, std::span<const HudUnit> units,
     if (flytext) {
         const CommandBarComponent* fc = flytext_ >= 0 && table_ ? &(*table_)[static_cast<size_t>(flytext_)] : nullptr;
         HudTextStyle st;
-        st.font = fonts.font(fc && !fc->font_name.empty() ? fc->font_name : std::string(kFallbackFontFace),
-                             fc && fc->font_point_size > 0 ? fc->font_point_size : 7.0f, cv.screen_height);
+        st.font = fonts.component_font(fc ? std::string_view(fc->font_name) : std::string_view(), fc ? fc->font_point_size : 0.0f,
+                                       FontUse::World, cv.font_height());
         st.outline = fc ? fc->text_outline : false;
         st.emboss = fc ? fc->text_emboss : true;
         st.align = TextAlign::Center;

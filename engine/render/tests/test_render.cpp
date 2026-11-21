@@ -1,5 +1,8 @@
 // test_render: main and the tests that stayed (see test_render_common.hpp; the others are in test_render_*.cpp).
 #include "test_render_common.hpp"
+#include "renderer_core.hpp"  // REF3 t07: RendererCore inspection points (src/, target alamo_render_internal)
+#include "alamo/core/host_fs.hpp"
+#include "alamo/render/weather_fx.hpp"
 
 namespace test_render_t {
 
@@ -16,7 +19,8 @@ void test_formats() {
     CHECK(render::to_rhi_format(TF::R8G8) == rhi::Format::R8G8);
     CHECK(render::to_rhi_format(TF::Unknown) == rhi::Format::Undefined);
     // The VkFormat names assets documents agree with what rhi creates.
-    for (TF f : {TF::BC1_RGBA, TF::BC2, TF::BC3, TF::RGBA8, TF::BGRA8, TF::R8, TF::R8G8}) {
+    for (TF f : {TF::BC1_RGBA, TF::BC2, TF::BC3, TF::RGBA8, TF::BGRA8, TF::R8, TF::R8G8, TF::R8G8_SNORM, TF::RGBA8_SNORM,
+                 TF::RGBA16F, TF::RGBA32F}) {
         const rhi::Format r = render::to_rhi_format(f);
         CHECK(rhi::to_vk(r) != VK_FORMAT_UNDEFINED);
         CHECK(render::to_rhi_format(f) != rhi::Format::Undefined);
@@ -73,9 +77,7 @@ void test_layouts() {
         CHECK(render::assets_layout_for(l) == (c.skinned ? assets::VertexLayout::Skinned : assets::VertexLayout::Static));
         CHECK(render::vertex_tables_agree(l));
         // Lower-case spelling is accepted too.
-        std::string lc = c.name;
-        for (char& ch : lc) ch = static_cast<char>(std::tolower(static_cast<unsigned char>(ch)));
-        CHECK(render::vertex_layout_for(lc) == c.expect);
+        CHECK(render::vertex_layout_for(alamo::ascii_lower(c.name)) == c.expect);
         render::VertexInputDesc vin;
         CHECK(render::build_vertex_input(l, {}, vin));
         CHECK(vin.binding.stride == 64 && vin.attributes.size() == 6);
@@ -251,6 +253,25 @@ void test_camera() {
 
 // [port] SSAO depth reconstruction (ssao.hpp, the CPU mirror of ssao.hlsl's ViewPos): view point -> uv + depth ->
 // view point round trip for a perspective projection (normal and reversed depth, sub-pixel offset) and an orthographic one.
+// [port: Gabriel] Render scale is a share of the pixels: each side x sqrt(scale).
+void test_render_scale_extent() {
+    const VkExtent2D uhd{3840, 2160};
+    const VkExtent2D s75 = render::render_scale_extent(uhd, 0.75f);
+    CHECK(s75.width == 3326 && s75.height == 1871);
+    const VkExtent2D s50 = render::render_scale_extent(uhd, 0.5f);
+    CHECK(s50.width == 2715 && s50.height == 1527);
+    const VkExtent2D same = render::render_scale_extent(uhd, 1.0f);
+    CHECK(same.width == 3840 && same.height == 2160);
+    const VkExtent2D above = render::render_scale_extent(uhd, 2.0f);  // never above native
+    CHECK(above.width == 3840 && above.height == 2160);
+    const VkExtent2D low = render::render_scale_extent(uhd, 0.01f);  // clamped to kRenderScaleMin: half each side
+    CHECK(low.width == 1920 && low.height == 1080);
+    const VkExtent2D fhd = render::render_scale_extent({1920, 1080}, 0.75f);
+    CHECK(fhd.width == 1663 && fhd.height == 935);
+    const VkExtent2D tiny = render::render_scale_extent({1, 1}, 0.25f);
+    CHECK(tiny.width == 1 && tiny.height == 1);
+}
+
 void test_ssao_math() {
     render::Mat4 persp = render::perspective_rh(0.8f, 16.0f / 9.0f, 10.0f, 7000.0f);
     render::Mat4 jitter = persp;
@@ -395,7 +416,7 @@ void test_lod() {
     CHECK(render::choose_lod(2, render::lod_detail(4.0f, 0.1f, 1.0f)) == 1 && render::choose_lod(2, render::lod_detail(1.0f, 0.1f, 1.0f)) == 0);
     // Hidden meshes (B.9): Damage_Decal names (exact, case-insensitive) + STEALTH/buildup/charged substrings;
     // without XML the *_BLAST* fallback.
-    CHECK(render::is_damage_mesh("HP_F-R_Blast") && render::is_damage_mesh("hp_trac_blast") && !render::is_damage_mesh("Girders01"));
+    CHECK(render::fallback_damage_decal_rule("HP_F-R_Blast") && render::fallback_damage_decal_rule("hp_trac_blast") && !render::fallback_damage_decal_rule("Girders01"));
     CHECK(render::is_state_mesh("Hull_STEALTH") && render::is_state_mesh("Gun_BuildUp_01") && render::is_state_mesh("charged_fx") &&
           !render::is_state_mesh("HULL"));
     assets::ModelAsset dm;
@@ -424,15 +445,15 @@ void test_lod() {
         CHECK(near_eq(p.color[1].x, 237.0f / 255.0f) && near_eq(p.color[8].y, 129.0f / 255.0f));                         // Red, Eight
         CHECK(near_eq(render::owner_team_color(9, p).x, p.color[0].x) && render::owner_team_color(7, p).w == 1.0f);
     }
-    // Galactic camera (B.8): horizontal FOV atan(0.5) at every aspect, near 10, far 10000.
+    // Galactic camera (B.8): horizontal FOV atan(0.5) at 4:3, near 10, far 10000; [port: Gabriel] Hor+ above 4:3 - the
+    // vertical FOV stays 4:3's at 16:9 and 32:9.
     {
         render::OrbitCamera gc;
         gc.fov_x = 1.0f;
-        for (const float a : {4.0f / 3.0f, 16.0f / 9.0f}) {
-            const uint32_t w = a > 1.5f ? 1600u : 1200u;
+        const float fy43 = render::fov_y_from_horizontal(std::atan(0.5f), 4.0f / 3.0f);
+        for (const uint32_t w : {1200u, 1600u, 3200u}) {
             const render::ViewMatrices gv = render::make_galactic_view(gc, w, 900);
-            const float fy = render::fov_y_from_horizontal(std::atan(0.5f), static_cast<float>(w) / 900.0f);
-            CHECK(near_eq(gv.proj.m[1][1], 1.0f / std::tan(0.5f * fy)));  // vertical scale from the fixed horizontal FOV
+            CHECK(near_eq(gv.proj.m[1][1], 1.0f / std::tan(0.5f * fy43)));  // vertical scale = 4:3's at every aspect
             CHECK(near_eq(gv.proj.m[0][0] * static_cast<float>(w) / 900.0f, gv.proj.m[1][1]));
             const float zn = gv.proj.m[2][3] / gv.proj.m[2][2], zf = gv.proj.m[2][3] / (gv.proj.m[2][2] + 1.0f);
             CHECK(std::fabs(zn - 10.0f) < 1e-2f && std::fabs(zf - 10000.0f) < 5.0f);
@@ -495,7 +516,7 @@ void test_lighting() {
     CHECK(near_eq(cb.light0_specular.x, l.sun.specular.x * 2.0f * l.sun.intensity));
     // SH lighting contract: a FrameCB without SH under a lit scene fails the check; the renderer's single FrameCB
     // builder (every extras combination) carries SH; an unlit scene (all zero) passes either way.
-    CHECK(!render::Renderer::frame_cb_sh_ok(cb, l));
+    CHECK(!render::RendererCore::frame_cb_sh_ok(cb, l));
     {
         render::Renderer r0;  // frame_constants() needs no device
         r0.set_lighting(l);
@@ -503,17 +524,98 @@ void test_lighting() {
         const render::ViewMatrices v = render::make_view(oc, 64, 64);
         for (uint32_t extras : {0u, 1u, 3u, 4u, 7u}) {
             materials::FrameCB fc{};
-            r0.frame_constants(v, extras, fc);
-            CHECK(render::Renderer::frame_cb_sh_ok(fc, l));
+            render::renderer_core(r0).frame_constants(v, extras, fc);
+            CHECK(render::RendererCore::frame_cb_sh_ok(fc, l));
             CHECK(std::memcmp(fc.sph_all, s.sph_all.data(), sizeof fc.sph_all) == 0 &&
                   std::memcmp(fc.sph_fill, s.sph_fill.data(), sizeof fc.sph_fill) == 0);
         }
         render::Lighting dark = l;
         dark.sun.intensity = dark.fill[0].intensity = dark.fill[1].intensity = 0.0f;
         dark.ambient = {0, 0, 0};
-        CHECK(render::Renderer::frame_cb_sh_ok(materials::FrameCB{}, dark));
-        CHECK(r0.frame_cb_violations() == 0);
+        CHECK(render::RendererCore::frame_cb_sh_ok(materials::FrameCB{}, dark));
+        CHECK(render::renderer_core(r0).frame_cb_violations() == 0);
     }
+}
+
+// vis1 t01 (docs/re/WEATHER_VISUALS.md §2 / §3): lightning-flash schedule, fog-plane alpha, the flash in the SH lighting.
+void test_weather_fx() {
+    using namespace alamo::render;
+    {  // fog plane: start pulled toward end - 0.0001, end kept; fog off or alpha 0: unchanged
+        Lighting l;
+        l.fog_enabled = true;
+        l.fog_start = 0.0f;
+        l.fog_end = 3500.0f;
+        apply_fog_plane_alpha(l, 0.3f);
+        CHECK(std::fabs(l.fog_start - 0.3f * (3500.0f - 0.0001f)) < 1e-3f && l.fog_end == 3500.0f);
+        Lighting a = l;
+        apply_fog_plane_alpha(a, 0.0f);
+        CHECK(a.fog_start == l.fog_start);
+        Lighting off;
+        off.fog_start = 100.0f;
+        apply_fog_plane_alpha(off, 1.0f);
+        CHECK(off.fog_start == 100.0f);
+        Lighting full;
+        full.fog_enabled = true;
+        full.fog_start = 200.0f;
+        full.fog_end = 1200.0f;
+        apply_fog_plane_alpha(full, 1.0f);
+        CHECK(std::fabs(full.fog_start - (1200.0f - 0.0001f)) < 1e-3f);
+    }
+    {  // L = 0: nothing ever flashes and no schedule is drawn
+        LightningFlash f;
+        for (int i = 0; i < 1000; ++i) f.step(0.0f);
+        CHECK(f.light().intensity == 0.0f && f.wait_steps() == 0 && f.flash_steps() == 0);
+    }
+    for (const float L : {1.0f, 0.25f}) {  // the schedule: draw (no flash), flash steps, wait steps, draw again
+        LightningFlash f(12345u);
+        uint32_t flashes = 0, draws = 0, steps = 0;
+        bool bounded = true, unit_dirs = true, strengths = true, order = true;
+        for (; steps < 20000; ++steps) {
+            const bool both_over = f.flash_steps() == 0 && f.wait_steps() == 0;
+            const int32_t fl = f.flash_steps(), wt = f.wait_steps();
+            f.step(L);
+            if (both_over) {
+                ++draws;
+                order = order && f.light().intensity == 0.0f;  // the drawing step never flashes
+                bounded = bounded && f.wait_steps() <= static_cast<int32_t>(500.0f * L) && f.flash_steps() <= static_cast<int32_t>(30.0f * L);
+            } else if (fl > 0) {
+                order = order && f.flash_steps() == fl - 1 && f.wait_steps() == wt;  // flashing comes before waiting
+                const DirLight& d = f.light();
+                const float len = std::sqrt(d.direction.x * d.direction.x + d.direction.y * d.direction.y + d.direction.z * d.direction.z);
+                unit_dirs = unit_dirs && std::fabs(len - 1.0f) < 1e-4f;
+                strengths = strengths && d.intensity >= 0.0f && d.intensity <= 0.5f * L && d.color.x == 1.0f;
+                flashes += d.intensity > 0.0f ? 1u : 0u;
+            } else {
+                order = order && f.wait_steps() == wt - 1 && f.light().intensity == 0.0f;
+            }
+        }
+        CHECK(bounded && unit_dirs && strengths && order && draws > 10 && flashes > 10);
+    }
+    {  // wall clock: 60 steps per second, at most 8 per call
+        LightningFlash a(7u), b(7u);
+        for (int i = 0; i < 60; ++i) a.advance(1.0f, 1.0 / 60.0);
+        for (int i = 0; i < 60; ++i) b.step(1.0f);
+        CHECK(a.wait_steps() == b.wait_steps() && a.flash_steps() == b.flash_steps());
+        LightningFlash c(7u), d(7u);
+        c.advance(1.0f, 10.0);
+        for (int i = 0; i < 8; ++i) d.step(1.0f);
+        CHECK(c.wait_steps() == d.wait_steps() && c.flash_steps() == d.flash_steps());
+    }
+    {  // the flash brightens the SH irradiance toward its direction; intensity 0 changes nothing
+        Lighting l = Lighting::land_default();
+        const SceneLightConstants before = scene_light_constants(l);
+        l.flash.direction = {0, 0, 1};
+        l.flash.intensity = 0.0f;
+        const SceneLightConstants zero = scene_light_constants(l);
+        CHECK(std::memcmp(&zero, &before, sizeof zero) == 0);
+        l.flash.intensity = 0.4f;
+        const SceneLightConstants lit = scene_light_constants(l);
+        const assets::Float3 up{0, 0, 1};
+        const assets::Float3 e0 = sph_irradiance(before.sph_fill, up), e1 = sph_irradiance(lit.sph_fill, up);
+        const assets::Float3 a0 = sph_irradiance(before.sph_all, up), a1 = sph_irradiance(lit.sph_all, up);
+        CHECK(e1.x > e0.x + 0.2f && e1.y > e0.y + 0.2f && e1.z > e0.z + 0.2f && a1.x > a0.x + 0.2f);
+    }
+    std::printf("weather fx (fog plane, lightning flash): OK\n");
 }
 
 void test_pipeline_keys() {
@@ -753,6 +855,8 @@ void test_type_resolution() {
           "<Unit Name=\"No_Model\"/>"
           "</Objects>");
     write(x / "Later.xml", "<Objects><Unit Name=\"BASE\"><Land_Model_Name>duplicate.alo</Land_Model_Name></Unit></Objects>");
+    write(x / "GameConstants.xml", "<GameConstants><Water_Render_Target_Resolution>256</Water_Render_Target_Resolution>"
+                                   "<Water_Clip_Plane_Offset>1.5</Water_Clip_Plane_Offset></GameConstants>");
     {
         DirectoryProvider dp(path_to_utf8(tmp));
         data::GameDatabase db;
@@ -776,6 +880,12 @@ void test_type_resolution() {
         CHECK(!r.resolve(alamo::name_crc("Unknown_Type"), false, t) && r.resolve(alamo::name_crc("No_Model"), false, t));
         CHECK(scale("Base") == 2.0f && scale("Var_Space") == 1.0f && scale("Var_Land") == 2.0f && scale("Var_Var") == 1.0f);
         CHECK(scale("Gal_Only") == 1.0f);  // invalid Scale_Factor -> 1
+        // mcx4 t15 (docs/re/TERRAIN_WATER_POST.md, the reflection pass): the water render target and clip plane come from
+        // GameConstants.
+        // ledger: verifies GameConstants.Water_Render_Target_Resolution
+        // ledger: verifies GameConstants.Water_Clip_Plane_Offset
+        const terrain::WaterOptions wo = r.water_options();
+        CHECK(wo.render_target_resolution == 256 && wo.clip_plane_offset == 1.5f);
         std::printf("type resolution: Var_Space land %s / space %s, Var_Land space %s, duplicate BASE -> %s\n",
                     model("Var_Space", false).c_str(), model("Var_Space", true).c_str(), model("Var_Land", true).c_str(),
                     model("Base", false).c_str());
@@ -797,15 +907,110 @@ void test_cloud_slots() {
     fow.texture_semantic = "FOW_TEXTURE";
     p.samplers = {base, cloud, fow};
     const int none[4] = {0, -1, -1, -1}, bound[4] = {0, 3, -1, -1};
-    CHECK(render::Renderer::cloud_texture_slots(p, none) == 0x2);
-    CHECK(render::Renderer::cloud_texture_slots(p, bound) == 0);  // a material texture in the slot wins
+    CHECK(render::RendererCore::cloud_texture_slots(p, none) == 0x2);
+    CHECK(render::RendererCore::cloud_texture_slots(p, bound) == 0);  // a material texture in the slot wins
     p.samplers[1].texture_semantic = "cloud_texture";             // semantics compare case-insensitively
-    CHECK(render::Renderer::cloud_texture_slots(p, none) == 0x2);
+    CHECK(render::RendererCore::cloud_texture_slots(p, none) == 0x2);
+}
+
+// cu8f t05 (CU8F_T03_T05_RE §2.1 / §2.2): the particle scene wind. Land = speed x (cos w, sin w, 0) of the start
+// environment (0 deg = +X, 90 deg = +Y); no environment = the ctor default (0 deg, 2.0); space = zero.
+void test_scene_wind() {
+    terrain::MapData m;
+    m.terrain.present = true;  // land
+    Float3 w = render::scene_wind(m);
+    CHECK(near_eq(w.x, 2.0f) && near_eq(w.y, 0.0f) && w.z == 0.0f);
+    terrain::Environment a, b;
+    a.wind_direction_deg = 0.0f;
+    a.wind_speed = 7.0f;
+    b.wind_direction_deg = 90.0f;
+    b.wind_speed = 10.0f;
+    m.environments.environments = {a, b};
+    m.environments.start_index = 1;
+    w = render::scene_wind(m);
+    CHECK(std::fabs(w.x) < 1e-4f && near_eq(w.y, 10.0f) && w.z == 0.0f);
+    m.environments.start_index = 0;
+    w = render::scene_wind(m);
+    CHECK(near_eq(w.x, 7.0f) && std::fabs(w.y) < 1e-4f);
+    m.terrain.present = false;  // space: never written
+    w = render::scene_wind(m);
+    CHECK(w.x == 0.0f && w.y == 0.0f && w.z == 0.0f);
+    // cu8g t03: the wind of the environment Set_New_Environment made active (index form; clamped to n - 1), space zero.
+    m.terrain.present = true;
+    m.environments.start_index = 0;
+    w = render::scene_wind(m, 1);
+    CHECK(std::fabs(w.x) < 1e-4f && near_eq(w.y, 10.0f));
+    w = render::scene_wind(m, 0);
+    CHECK(near_eq(w.x, 7.0f) && std::fabs(w.y) < 1e-4f);
+    w = render::scene_wind(m, 9);  // clamped to the last environment
+    CHECK(std::fabs(w.x) < 1e-4f && near_eq(w.y, 10.0f));
+    CHECK(render::active_environment(m, 9) == &m.environments.environments[1] && render::active_environment(m, 0) == &m.environments.environments[0]);
+    m.terrain.present = false;
+    w = render::scene_wind(m, 1);
+    CHECK(w.x == 0.0f && w.y == 0.0f && w.z == 0.0f);
+    terrain::MapData none;
+    CHECK(render::active_environment(none, 0) == nullptr);
+    none.terrain.present = true;
+    w = render::scene_wind(none, 3);  // land without environments: the record ctor default
+    CHECK(near_eq(w.x, 2.0f) && w.z == 0.0f);
+    // A scene without a map has no environment to switch to.
+    render::MapScene empty;
+    CHECK(!empty.set_environment(1) && empty.environment_index() == 0 && empty.environment() == nullptr);
+    // WorldRenderer::set_clouds before init: scale / velocity only (the offset keeps accumulating from there).
+    render::WorldRenderer world;
+    world.update(1.0f);  // default velocity (5, 5)
+    terrain::CloudParams cp;
+    cp.scale = 800.0f;
+    cp.velocity[0] = 1.0f;
+    cp.velocity[1] = -2.0f;
+    cp.texture = "W_Clouds01.tga";
+    world.set_clouds(cp);
+    world.update(1.0f);
+    CHECK(near_eq(world.cloud_scale(), 800.0f) && near_eq(world.cloud_velocity_x(), 1.0f) && near_eq(world.cloud_velocity_y(), -2.0f));
+    CHECK(near_eq(world.cloud_offset_x(), 6.0f) && near_eq(world.cloud_offset_y(), 3.0f) && world.cloud_texture_name() == nullptr);
+}
+
+// cu8g t03 (real data): MapScene::set_environment before start() switches the active environment of a loaded land map:
+// lighting(), environment() and scene_wind() follow it; out of range clamps; the same index changes nothing.
+void test_scene_environment_real() {
+    const char* data = std::getenv("ALAMO_FOC_DATA");
+    const std::string root = data ? data : "";
+    if (root.empty()) {
+        std::printf("scene environment: ALAMO_FOC_DATA not set, skipped\n");
+        return;
+    }
+    vfs::VfsConfig cfg;
+    cfg.foc_root = root;
+    std::string err;
+    auto files = vfs::Vfs::create(cfg, &err);
+    CHECK(files != nullptr);
+    if (!files) return;
+    render::MapScene scene;
+    CHECK(scene.load(*files, "_MP_LAND_ENDOR", nullptr, serial_for, &err));  // 4 environments (CU8G_T02_ENV_PICK_RE §7)
+    const std::vector<terrain::Environment>& envs = scene.map().environments.environments;
+    std::printf("scene environment: %zu environments, start %u\n", envs.size(), scene.environment_index());
+    CHECK(envs.size() >= 2 && !scene.space());
+    if (envs.empty()) return;
+    const uint32_t n = static_cast<uint32_t>(envs.size());
+    for (uint32_t i = 0; i < n; ++i) {
+        const uint32_t before = scene.environment_index();
+        CHECK(scene.set_environment(i) == (i != before));
+        CHECK(scene.environment_index() == i && scene.environment() == &envs[i]);
+        CHECK(!scene.set_environment(i));  // already active
+        const std::array<float, 3> wv = envs[i].wind_vector();
+        const Float3 w = scene.scene_wind();
+        CHECK(near_eq(w.x, wv[0]) && near_eq(w.y, wv[1]) && w.z == 0.0f);
+        const render::Lighting l = render::Lighting::from_environment(envs[i], false);
+        CHECK(near_eq(scene.lighting().sun.intensity, l.sun.intensity) && near_eq(scene.lighting().fog_start, l.fog_start) &&
+              scene.lighting().fog_enabled == l.fog_enabled && scene.lighting().skydome[0] == l.skydome[0]);
+    }
+    scene.set_environment(n + 5);
+    CHECK(scene.environment_index() == n - 1);
 }
 
 void test_png() {
     const uint8_t iend[] = {'I', 'E', 'N', 'D'};
-    CHECK(render::crc32(iend) == 0xAE426082u);
+    CHECK(alamo::crc32(iend, sizeof iend) == 0xAE426082u);
     const char* wiki = "Wikipedia";
     CHECK(render::adler32({reinterpret_cast<const uint8_t*>(wiki), 9}) == 0x11E60398u);
     std::vector<uint8_t> px(3 * 2 * 4);
@@ -822,7 +1027,7 @@ void test_png() {
         const std::span<const uint8_t> typed(f.data() + pos + 4, len + 4);
         const size_t c = pos + 8 + len;
         const uint32_t crc = (uint32_t(f[c]) << 24) | (uint32_t(f[c + 1]) << 16) | (uint32_t(f[c + 2]) << 8) | f[c + 3];
-        CHECK(render::crc32(typed) == crc);
+        CHECK(alamo::crc32(typed.data(), typed.size()) == crc);
         if (!std::memcmp(f.data() + pos + 4, "IDAT", 4)) idat.assign(f.begin() + static_cast<std::ptrdiff_t>(pos + 8),
                                                                    f.begin() + static_cast<std::ptrdiff_t>(pos + 8 + len));
         if (!std::memcmp(f.data() + pos + 4, "IEND", 4)) saw_iend = true;
@@ -843,6 +1048,43 @@ using namespace test_render_t;
 
 
 // Hardpoint plumbing (hardpoints.hpp): XML record, mesh -> bone map, effects, per-instance visibility composition.
+// bkx1 t05 (b0019 / b0020, BKX1_RENDER_RE §1 [H]): the SimpleSpace engine glow rule. Proxy groups by name prefix
+// (pe engines, pte turbo engines, pi ion stun; case-insensitive); G = pte while TURBO is active, else pe, the other group
+// hidden; engines off without a timer (a destroyed engine hard point) hide G; a timed disable keeps G with the flicker
+// tint (in [0, 0.2], 1.0 over 0.1 s at the last frame); online: brightness 0.8 v / V + 0.2; ion stun shows pi; dying hides
+// pe and pte; a unit without the rule (no SimpleSpace locomotor) is left alone.
+void test_engine_glow() {
+    using render::EngineGlow;
+    CHECK(render::particle_glow_group("pe_StarDestroyerEngines") == render::kGlowPe);
+    CHECK(render::particle_glow_group("PTE_turbo") == render::kGlowPte);
+    CHECK(render::particle_glow_group("pi_ion_sparks") == render::kGlowPi);
+    CHECK(render::particle_glow_group("p_smoke") == 0 && render::particle_glow_group("") == 0 &&
+          render::particle_glow_group("engine") == 0);
+    const uint8_t unit = render::kEngineGlowUnit;
+    CHECK(!render::engine_glow(0, 0, 1.0f, false, false).applies);
+    const EngineGlow on = render::engine_glow(unit, 0, 0.5f, false, false);
+    CHECK(on.applies && on.show == render::kGlowPe && on.hide == (render::kGlowPte | render::kGlowPi) && on.tint_group == render::kGlowPe);
+    CHECK(std::fabs(on.tint - 0.6f) < 1e-6f);
+    CHECK(render::engine_glow(unit, 0, 3.0f, false, false).tint == 1.0f);  // clamped
+    const EngineGlow turbo = render::engine_glow(unit, 0, 1.0f, true, false);
+    CHECK(turbo.show == render::kGlowPte && (turbo.hide & render::kGlowPe) != 0);
+    const EngineGlow off = render::engine_glow(unit | render::kEngineGlowOff, 0, 0.0f, false, false);
+    CHECK((off.hide & render::kGlowPe) != 0 && (off.show & render::kGlowPe) == 0 && off.tint < 0.0f);
+    const EngineGlow timed = render::engine_glow(unit | render::kEngineGlowOff, 90, 0.0f, false, false);
+    CHECK((timed.show & render::kGlowPe) != 0 && timed.tint >= 0.0f && timed.tint <= 0.2f);
+    CHECK(timed.tint == render::engine_glow_flicker(90));  // a fixed value per frame left
+    const EngineGlow last = render::engine_glow(unit | render::kEngineGlowOff, 1, 0.0f, false, false);
+    CHECK(last.tint == 1.0f && last.tint_seconds == 0.1f);
+    const EngineGlow ion = render::engine_glow(unit | render::kEngineGlowOff | render::kEngineGlowIonStun, 0, 0.0f, false, false);
+    CHECK((ion.show & render::kGlowPi) != 0 && (ion.hide & render::kGlowPi) == 0 && (ion.hide & render::kGlowPe) != 0);
+    const EngineGlow dying = render::engine_glow(unit, 0, 1.0f, false, true);
+    CHECK((dying.hide & (render::kGlowPe | render::kGlowPte)) == (render::kGlowPe | render::kGlowPte) && (dying.show & render::kGlowPe) == 0);
+    for (uint32_t f = 2; f < 400; ++f) {
+        const float t = render::engine_glow_flicker(f);
+        CHECK(t >= 0.0f && t <= 0.2f);
+    }
+}
+
 void test_hardpoints() {
     {   // <HardPoint> record: known fields + every tag kept (repeats, case-insensitive lookup, empty element).
         const std::string xml =
@@ -935,12 +1177,13 @@ void test_hardpoints() {
         v.init(std::make_shared<const render::HardpointLayout>(l));
         const uint8_t* storage = v.mask().data();
         auto mask = [&] { return V(v.mask().begin(), v.mask().end()); };
-        CHECK(v.ready() && mask() == (V{0, 0, 0, 1, 0, 0, 0, 0, 0, 1, 0, 0, 0}));  // A: decal + ALO-hidden scorch + proxy shown
-        CHECK(v.attachment_visible(0) && v.attachment_visible(1) && !v.attachment_visible(2));
+        // A: decal + ALO-hidden scorch + proxy shown; its Model_To_Attach slot (10) erased (r1b t03, B.10 step (f))
+        CHECK(v.ready() && mask() == (V{0, 0, 0, 1, 0, 0, 0, 0, 0, 1, 1, 0, 0}));
+        CHECK(!v.attachment_visible(0) && v.attachment_visible(1) && !v.attachment_visible(2));
         CHECK(v.set_destroyed(1, true) && v.set_destroyed(1, true) && v.destroyed_count() == 2);
-        CHECK(mask() == (V{0, 0, 0, 1, 1, 0, 0, 0, 1, 0, 0, 1, 0}));  // B: damage proxy shown, engine subtree hidden
-        CHECK(v.attachment_visible(0) && !v.attachment_visible(1));
-        CHECK(v.set_destroyed(2, true) && mask() == (V{0, 0, 0, 1, 1, 0, 0, 0, 1, 0, 0, 1, 0}));  // dummy: no change
+        CHECK(mask() == (V{0, 0, 0, 1, 1, 0, 0, 0, 1, 0, 1, 1, 0}));  // B: damage proxy shown, engine subtree hidden
+        CHECK(!v.attachment_visible(0) && !v.attachment_visible(1));
+        CHECK(v.set_destroyed(2, true) && mask() == (V{0, 0, 0, 1, 1, 0, 0, 0, 1, 0, 1, 1, 0}));  // dummy: no change
         CHECK(v.set_override(3, render::MeshOverride::Show) && v.set_override(0, render::MeshOverride::Hide) &&
               !v.set_override(13, render::MeshOverride::Show));
         CHECK(v.mask()[3] == 0 && v.mask()[0] == 1);
@@ -959,6 +1202,32 @@ void test_hardpoints() {
         // Fallback layout (no XML): the given mesh mask + ALO proxy flags, no effects.
         w.init(std::make_shared<const render::HardpointLayout>(render::fallback_hardpoint_layout(m, V{1, 0, 0, 0, 0, 0, 0}, 3)));
         CHECK(w.destroyed(0) && w.mask().size() == 13 && w.hidden(0) && !w.hidden(1) && !w.attachment_visible(0));
+    }
+    {   // r1b t03 (B.10 answer 4, 0x3a5700): a death erases the FIRST remaining sub-object named like its
+        // Model_To_Attach stem - meshes, proxies, then the slots in HardPoints order; not destroyable: nothing.
+        assets::ModelAsset t;
+        for (const char* n : {"HULL", "mesh_twin"}) {
+            assets::MeshInfo mi;
+            mi.name = n;
+            t.meshes.push_back(mi);
+        }
+        std::vector<render::HardpointDef> td(4);
+        td[0].model_to_attach = "T.alo";
+        td[1].model_to_attach = "t.ALO";  // the same model
+        td[2].model_to_attach = "X.alo";
+        td[2].destroyable = false;
+        td[3].model_to_attach = "Mesh_Twin.alo";  // an owner mesh carries that name
+        const render::HardpointLayout tl = render::build_hardpoint_layout(t, td);
+        CHECK(tl.removes.size() == 4 && tl.removes[0] == (U{2, 3}) && tl.removes[1] == (U{2, 3}) && tl.removes[2].empty() &&
+              tl.removes[3] == (U{1, 5}));
+        render::HardpointVisibility tv;
+        tv.reset(4);
+        tv.init(std::make_shared<const render::HardpointLayout>(tl));
+        CHECK(tv.set_destroyed(1, true) && !tv.attachment_visible(0) && tv.attachment_visible(1));  // the first copy goes
+        CHECK(tv.set_destroyed(0, true) && !tv.attachment_visible(0) && !tv.attachment_visible(1));
+        CHECK(tv.set_destroyed(3, true) && tv.hidden(1) && tv.attachment_visible(3) && tv.attachment_visible(2));
+        CHECK(tv.set_destroyed(3, false) && !tv.hidden(1));  // debug reset recomputes the erasures
+        CHECK(render::fallback_hardpoint_layout(t, V{0, 0}, 4).removes == std::vector<std::vector<uint32_t>>(4));
     }
     {   // Attachment transform: owner x bone (pose when given, else bind), identity bone for -1.
         assets::ModelAsset o;
@@ -1003,22 +1272,27 @@ void operator delete(void* p, std::size_t) noexcept { std::free(p); }
 int main() {
     test_formats();
     test_hardpoints();
+    test_engine_glow();
     test_layouts();
     test_samplers();
     test_camera();
+    test_render_scale_extent();
     test_ssao_math();
     test_idle_spin();
     test_lod();
     test_lighting();
+    test_weather_fx();
     test_pipeline_keys();
     test_ted();
     test_png();
     test_world();
     test_type_resolution();
     test_cloud_slots();
-    std::printf("cpu: %s\n", g_failures ? "FAILED" : "ok");
+    test_scene_wind();
+    test_scene_environment_real();
+    std::printf("cpu: %s\n", g_fail ? "FAILED" : "ok");
     const int gpu = run_gpu(ALAMO_RENDER_SOURCE_DIR);
-    if (gpu) ++g_failures;
-    std::printf("%s (%d failures)\n", g_failures ? "FAILED" : "PASSED", g_failures);
-    return g_failures ? 1 : 0;
+    if (gpu) ++g_fail;
+    std::printf("%s (%d failures)\n", g_fail ? "FAILED" : "PASSED", g_fail);
+    return g_fail ? 1 : 0;
 }

@@ -1,4 +1,5 @@
 #include "alamo/tactical/movement/fighter.hpp"
+#include "alamo/core/sim_crc.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -10,7 +11,6 @@
 namespace alamo::tactical::movement {
 
 namespace {
-float sgn1(float x) { return x >= 0.0f ? 1.0f : -1.0f; }  // §3.2 s(x)
 bool tiny(float x) { return (std::bit_cast<uint32_t>(x) & 0x7F800000u) < 0x1D000001u; }
 // float -> int truncation toward zero; [port] guard against out-of-range / NaN (UB in C++).
 int32_t trunc_i(float f) {
@@ -91,7 +91,7 @@ void fighter_yaw_bank_step(FAttitude& o, const FighterKin& k, float dy, float& b
     } else {
         r += e;
     }
-    if (r != 0.0f && sgn1(-bank) != sgn1(r)) {
+    if (r != 0.0f && fighter_sign(-bank) != fighter_sign(r)) {
         budget = 0.0f;  // still banked the wrong way: no yaw
     } else if (budget < std::fabs(dy)) {
         if (dy <= 0.0f) y -= budget;
@@ -150,7 +150,7 @@ void fighter_steer_to(FighterBody& b, const FighterKin& k, F3 aim, float v, floa
     }
     // §3.1 step 5: roll anticipation.
     const float r = fighter_wrap180(b.o.roll);
-    if (180.0f < std::fabs(k.turn * (r / k.roll) + ry)) ry -= sgn1(ry) * 360.0f;
+    if (180.0f < std::fabs(k.turn * (r / k.roll) + ry)) ry -= fighter_sign(ry) * 360.0f;
     fighter_yaw_bank_step(b.o, k, ry, tb);
     fighter_pitch_step(b.o, rp, lb);
     fighter_speed_step(b, v, thb);
@@ -285,11 +285,11 @@ float fighter_squad_idle(F3 p, F3 lp, F3& d, bool leader, float avoid_speed) {
 // ---------------------------------------------------------------- XML
 FighterParams fighter_params_from_type(const objects::GameObjectTypes& t, uint32_t ti) {
     FighterParams p;
-    const float thrust = t.get_float(ti, "Max_Thrust");
+    const float thrust = t.get(ti, objects::tags::Max_Thrust);
     if (thrust > 0.0f) p.max_thrust = thrust;
-    const float mfd = t.get_float(ti, "Minimum_Follow_Distance");
+    const float mfd = t.get(ti, objects::tags::Minimum_Follow_Distance);
     if (mfd > 0.0f) p.min_follow_distance = mfd;
-    const float range = t.get_float(ti, "Targeting_Max_Attack_Distance");
+    const float range = t.get(ti, objects::tags::Targeting_Max_Attack_Distance);
     if (range > 0.0f) p.attack_range = range;
     p.chase = fighter_chase_ranges_from_type(t, ti);
     return p;
@@ -297,15 +297,15 @@ FighterParams fighter_params_from_type(const objects::GameObjectTypes& t, uint32
 
 FighterChaseRanges fighter_chase_ranges_from_type(const objects::GameObjectTypes& t, uint32_t ti) {
     FighterChaseRanges c;
-    c.guard = t.get_float(ti, "Guard_Chase_Range");
-    c.idle = t.get_float(ti, "Idle_Chase_Range");
-    c.attack_move = t.get_float(ti, "Attack_Move_Response_Range");
-    c.extension = t.get_float(ti, "Autonomous_Move_Extension_Vs_Attacker");
+    c.guard = t.get(ti, objects::tags::Guard_Chase_Range);
+    c.idle = t.get(ti, objects::tags::Idle_Chase_Range);
+    c.attack_move = t.get(ti, objects::tags::Attack_Move_Response_Range);
+    c.extension = t.get(ti, objects::tags::Autonomous_Move_Extension_Vs_Attacker);
     return c;
 }
 
 float squadron_tolerance_from_type(const objects::GameObjectTypes& t, uint32_t ti) {
-    const float tol = t.get_float(ti, "Squadron_Formation_Error_Tolerance");
+    const float tol = t.get(ti, objects::tags::Squadron_Formation_Error_Tolerance);
     return tol > 0.0f ? tol : 25.0f;
 }
 

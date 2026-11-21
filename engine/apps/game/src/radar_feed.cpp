@@ -1,25 +1,15 @@
 #include "alamo/game/radar_feed.hpp"
+#include "alamo/objects/game_object_types.hpp"
 
-#ifdef ALAMO_GAME_HAVE_CONTROLS
 #include <algorithm>
 
+#include "alamo/core/ascii.hpp"
 #include "alamo/data/values.hpp"
 #ifdef ALAMO_SIM_HAVE_STORY
 #include "alamo/lua/story_model.hpp"
 #endif
 
 namespace alamo::game {
-
-namespace {
-bool iequals(std::string_view a, std::string_view b) {
-    if (a.size() != b.size()) return false;
-    for (size_t i = 0; i < a.size(); ++i) {
-        const auto up = [](char c) { return c >= 'a' && c <= 'z' ? static_cast<char>(c - 'a' + 'A') : c; };
-        if (up(a[i]) != up(b[i])) return false;
-    }
-    return true;
-}
-}  // namespace
 
 std::vector<ui::RadarField> radar_asteroid_fields(std::span<const tactical::abilities::SpaceField> fields) {
     std::vector<ui::RadarField> out;
@@ -62,7 +52,7 @@ void RadarFeed::blips(std::span<const RadarBlipNote> notes, ui::RadarEvents& eve
     for (const RadarBlipNote& n : notes)
         if (n.valid) events.set_marker(n.name, n.x, n.y);
     for (const std::string& name : events.marker_names()) {
-        const bool listed = std::any_of(notes.begin(), notes.end(), [&](const RadarBlipNote& n) { return iequals(n.name, name); });
+        const bool listed = std::any_of(notes.begin(), notes.end(), [&](const RadarBlipNote& n) { return ascii_iequals(n.name, name); });
         if (!listed) events.remove_marker(name);
     }
 }
@@ -83,7 +73,6 @@ void RadarFeed::battle_tick(const sim::TacticalBattle& battle, const objects::Ob
         deaths_now.push_back(n);
     }
     deaths(deaths_now, settings, events);
-#ifdef ALAMO_SIM_HAVE_GARRISON
     if (const tactical::garrison::CapturePointSystem* cps = battle.captures()) {
         std::vector<RadarCapturePointNote> pts;
         for (size_t i = 0; i < cps->point_count(); ++i) {
@@ -104,16 +93,21 @@ void RadarFeed::battle_tick(const sim::TacticalBattle& battle, const objects::Ob
         }
         capture_points(pts, settings, events);
     }
-#else
-    (void)types;
-#endif
 #ifdef ALAMO_SIM_HAVE_STORY
     std::vector<RadarBlipNote> notes;
     if (story) {
         for (const lua::StoryBlip& b : story->blips()) {
+            if (b.name.empty()) continue;  // a galactic planet highlight (Add_Radar_Blip(planet)), not a radar blip
             RadarBlipNote n;
             n.name = b.name;
-            const objects::ObjectHandle h = b.object_id >= 0 ? store.find(static_cast<objects::ObjectId>(b.object_id)) : objects::ObjectHandle{};
+            if (b.object_id < 0) {  // mcx8 t12: a blip at a fixed position (AI target / task force / position argument)
+                n.valid = true;
+                n.x = b.x;
+                n.y = b.y;
+                notes.push_back(std::move(n));
+                continue;
+            }
+            const objects::ObjectHandle h = store.find(static_cast<objects::ObjectId>(b.object_id));
             n.valid = store.exists(h) && store.alive(h);
             if (n.valid) {
                 n.x = store.position(h).x;
@@ -129,4 +123,3 @@ void RadarFeed::battle_tick(const sim::TacticalBattle& battle, const objects::Ob
 }
 
 }  // namespace alamo::game
-#endif

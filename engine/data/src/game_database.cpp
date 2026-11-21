@@ -9,12 +9,12 @@
 #include "alamo/core/hash.hpp"
 #include "alamo/core/log.hpp"
 #include "alamo/data/values.hpp"
+#include "alamo/data/xml_values.hpp"
 
 namespace alamo::data {
 
 namespace {
 
-constexpr std::string_view kXmlDir = "Data\\XML\\";
 constexpr std::string_view kConstantsPath = "Data\\XML\\GameConstants.xml";
 constexpr std::string_view kGameObjectList = "Data\\XML\\GameObjectFiles.xml";
 constexpr std::string_view kTradeRouteList = "Data\\XML\\TradeRouteFiles.xml";
@@ -48,6 +48,46 @@ bool same_content(const CampaignDef& a, const CampaignDef& b) {
     return true;
 }
 
+using WarnFn = std::function<void(std::string)>;
+
+// A TradeRouteFiles / CampaignFiles entry and the provider its file falls back to (extra campaign lists only).
+struct OrderedEntry {
+    ListedXmlEntry list;
+    const FileProvider* fallback = nullptr;
+};
+using CrcOrderedList = std::map<uint32_t, OrderedEntry>;  // key: list_file_crc of the entry name
+
+// cu5 t05 (Q13): the entries are de-duplicated by list_file_crc and parsed in ascending CRC order; an entry whose CRC
+// is already taken collapses into the first one listed (warned when `report`; the extra campaign lists do not).
+void add_crc_ordered(CrcOrderedList& ordered, ListedXmlEntry en, const FileProvider* fallback, std::string_view list_path,
+                     bool report, const WarnFn& warn) {
+    const uint32_t key = list_file_crc(en.name);
+    if (const auto it = ordered.find(key); it != ordered.end()) {
+        if (report)
+            warn(std::string(list_path) + ": '" + en.name + "' collapses with '" + it->second.list.name +
+                 "' (same name CRC); loaded once");
+        return;
+    }
+    ordered.emplace(key, OrderedEntry{std::move(en), fallback});
+}
+
+// cu5 t05 (Q13): last wins with whole-object replacement. A new name is appended (and indexed in `by_crc`); a repeated
+// name replaces the earlier definition in its slot, counting the definitions, with the duplicate warning.
+template <class Def>
+void upsert_last_wins(std::vector<Def>& defs, std::unordered_map<uint32_t, std::vector<uint32_t>>& by_crc, Def d,
+                      const XmlNode& element, std::string_view kind, const WarnFn& warn) {
+    const uint32_t idx = find_by_crc(by_crc, d.name, [&defs](uint32_t k) { return std::string_view(defs[k].name); });
+    if (idx == kInvalidPlanet) {
+        by_crc[d.name_crc].push_back(static_cast<uint32_t>(defs.size()));
+        defs.push_back(std::move(d));
+        return;
+    }
+    warn(where(element) + ": duplicate " + std::string(kind) + " '" + d.name + "' replaces the earlier definition (" +
+         (same_content(defs[idx], d) ? "identical content" : "CONTENT DIFFERS") + ")");
+    d.definitions = defs[idx].definitions + 1;
+    defs[idx] = std::move(d);  // last wins, no field merge
+}
+
 }  // namespace
 
 uint32_t list_file_crc(std::string_view listed_name) {
@@ -64,19 +104,21 @@ std::optional<std::string_view> GameConstants::get(std::string_view tag) const {
     return fields[it->second].second;
 }
 
+// mcx1 t02: retail's converters (MCX1_RE_ANSWERS Q1 / Q2, OBJECT_TYPES §4.5): a stored value always converts (atoi / atof
+// prefix, garbage 0; bool "1" or a first Y / T); only an absent tag gives the fallback (fields holds no empty or TBD values).
 float GameConstants::get_float(std::string_view tag, float fallback) const {
     const auto v = get(tag);
-    return v ? parse_float_or(*v, fallback) : fallback;
+    return v ? xml_values::to_float(*v) : fallback;
 }
 
 int32_t GameConstants::get_int(std::string_view tag, int32_t fallback) const {
     const auto v = get(tag);
-    return v ? parse_int_or(*v, fallback) : fallback;
+    return v ? xml_values::to_int(*v) : fallback;
 }
 
 bool GameConstants::get_bool(std::string_view tag, bool fallback) const {
     const auto v = get(tag);
-    return v ? parse_bool_or(*v, fallback) : fallback;
+    return v ? xml_values::to_bool(*v) : fallback;
 }
 
 uint32_t PlanetTypes::find(std::string_view planet_name) const {
@@ -84,8 +126,9 @@ uint32_t PlanetTypes::find(std::string_view planet_name) const {
 }
 
 std::string_view CampaignDef::raw_value(std::string_view tag) const {
-    for (const auto& [k, v] : raw)
-        if (iequals(k, tag)) return v;
+    // mcx1 t03 (MCX1_RE_ANSWERS Q1): a repeated scalar tag takes its last occurrence (`raw` holds no empty / TBD value).
+    for (auto it = raw.rbegin(); it != raw.rend(); ++it)
+        if (iequals(it->first, tag)) return it->second;
     return {};
 }
 
@@ -150,8 +193,10 @@ const XmlDocument* GameDatabase::load_file(const FileProvider& provider, const F
     const FileProvider* used = &provider;
     if (!provider.read(path, bytes)) {
         if (!fallback || !fallback->read(path, bytes)) {
+            // mcx1 t08 (MCX1_RE_ANSWERS Q6.1): GameConstants.xml and the core list files are fatal in the original too
+            // (its init fails and the process ends); the port refuses the load and says so.
             warn(std::string(required ? "error: " : "") + "unable to open XML file '" + std::string(path) + "'" +
-                 (required ? "" : " (skipped)"));
+                 (required ? " (the original game does not start without it either)" : " (skipped)"));
             return nullptr;
         }
         used = fallback;
@@ -167,23 +212,24 @@ const XmlDocument* GameDatabase::load_file(const FileProvider& provider, const F
     return doc->ok() ? doc : nullptr;
 }
 
+// mcx1 t08 (MCX1_RE_ANSWERS Q6.1): a listed trade-route or campaign file that opens but does not parse ends the original's
+// init (the process exits); the port refuses the load and says why. A listed file that does not open is skipped there too.
+bool GameDatabase::listed_file_unparsable(std::string_view path, const char* what) {
+    const auto it = file_index_.find(normalize_path(path));
+    if (it == file_index_.end() || files_[it->second].doc->ok()) return false;
+    warn(std::string("error: listed ") + what + " file '" + std::string(path) +
+         "' does not parse (the original game does not start with it either)");
+    return true;
+}
+
 // Every <File> entry in list order (duplicates kept; GameObjectFiles.xml parses them twice).
-std::vector<GameDatabase::ListEntry> GameDatabase::read_list(const FileProvider& provider, std::string_view list_path,
-                                                             bool& ok) {
-    std::vector<ListEntry> out;
+std::vector<ListedXmlEntry> GameDatabase::read_list(const FileProvider& provider, std::string_view list_path, bool& ok) {
     const XmlDocument* doc = load_file(provider, nullptr, list_path, true);
     if (!doc) {
         ok = false;
-        return out;
+        return {};
     }
-    for (XmlNode f : doc->root().children("File")) {
-        const std::string_view name = f.text_trimmed();
-        if (name.empty()) continue;
-        std::string path(kXmlDir);
-        path += name;
-        out.push_back({std::string(name), std::move(path)});
-    }
-    return out;
+    return listed_xml_entries(*doc);
 }
 
 void GameDatabase::load_constants(const FileProvider& provider, bool& ok) {
@@ -194,21 +240,48 @@ void GameDatabase::load_constants(const FileProvider& provider, bool& ok) {
     }
     GameConstants& c = constants_;
     c.element = doc->root();
-    for (XmlNode n : c.element.children()) {
-        c.index_[normalize_name(n.name())] = static_cast<uint32_t>(c.fields.size());
-        c.fields.emplace_back(n.name(), n.text_trimmed());
+    // mcx1 t03 (MCX1_RE_ANSWERS Q1): every element of the file, nested ones descended into; an empty or TBD value changes
+    // nothing; a repeated tag: the last one wins.
+    for (const auto& [tag, value] : xml_values::fields(c.element, xml_values::kData)) {
+        c.index_[normalize_name(tag)] = static_cast<uint32_t>(c.fields.size());
+        c.fields.emplace_back(tag, value);
     }
-    if (const auto v = c.get("MaximumFleetMovementDistance")) {
-        if (const auto f = parse_float(*v)) c.max_fleet_move_distance = *f;
-        else warn("GameConstants: bad MaximumFleetMovementDistance '" + std::string(*v) + "'");
-    }
+    // Retail atof, like get_float: an unreadable value gives 0 (mcx1 t02).
+    // mcx5 t02 (MCX5_RE_ANSWERS Q1.9, 0x2c91c0 [H]): a file without the tag keeps the GameConstants default 1.0.
+    if (const auto v = c.get("MaximumFleetMovementDistance")) c.max_fleet_move_distance = xml_values::to_float(*v);
+    else c.max_fleet_move_distance = 1.0f;
+    // ref4 t06: the tags several modules read, once (game_database.hpp, SharedGameConstants).
+    SharedGameConstants& s = c.shared;
+    const auto f = [&c](std::string_view tag, std::optional<float>& out) {
+        if (const auto v = c.get(tag)) out = xml_values::to_float(*v);
+    };
+    const auto i = [&c](std::string_view tag, std::optional<int32_t>& out) {
+        if (const auto v = c.get(tag)) out = xml_values::to_int(*v);
+    };
+    const auto b = [&c](std::string_view tag, std::optional<bool>& out) {
+        if (const auto v = c.get(tag)) out = xml_values::to_bool(*v);
+    };
+    f("Health_Low_Percent_Threshold", s.health_low_percent_threshold);
+    i("MP_Default_Credits", s.mp_default_credits);
+    if (s.mp_default_credits) s.mp_default_credits = std::max(0, *s.mp_default_credits);
+    f("Object_Max_Speed_Multiplier_Galactic", s.object_max_speed_multiplier_galactic);
+    f("Object_Max_Speed_Multiplier_Space", s.object_max_speed_multiplier_space);
+    f("Object_Max_Speed_Multiplier_Land", s.object_max_speed_multiplier_land);
+    f("InfantryTurnBlendTime", s.infantry_turn_blend_time);
+    i("Raid_Force_Max_Limited_Objects", s.raid_force_max_limited_objects);
+    i("Raid_Force_Max_Heros", s.raid_force_max_heros);
+    f("DesiredLandFOWCellSize", s.desired_land_fow_cell_size);
+    f("DesiredSpaceFOWCellSize", s.desired_space_fow_cell_size);
+    b("AIUsesFogOfWarGalactic", s.ai_uses_fog_of_war_galactic);
+    b("AIUsesFogOfWarSpace", s.ai_uses_fog_of_war_space);
+    b("AIUsesFogOfWarLand", s.ai_uses_fog_of_war_land);
 }
 
 void GameDatabase::load_game_objects(const FileProvider& provider, bool& ok) {
     // Q13: list order, a file listed twice is parsed twice (its objects become duplicates).
-    const std::vector<ListEntry> list = read_list(provider, kGameObjectList, ok);
+    const std::vector<ListedXmlEntry> list = read_list(provider, kGameObjectList, ok);
     std::unordered_set<std::string> listed;
-    for (const ListEntry& en : list) {
+    for (const ListedXmlEntry& en : list) {
         if (!listed.insert(normalize_path(en.path)).second)
             warn(std::string(kGameObjectList) + ": '" + en.name + "' listed twice; parsed twice");
         const XmlDocument* doc = load_file(provider, nullptr, en.path, false);
@@ -226,55 +299,117 @@ void GameDatabase::load_game_objects(const FileProvider& provider, bool& ok) {
                      "' (kept; name lookup returns the first definition)");
             bucket.push_back(static_cast<uint32_t>(objects_.size()));
             objects_.push_back({e.name(), name, crc, e, dup});
-
-            if (!iequals(e.name(), "Planet")) continue;
-            PlanetTypes& p = planets_;
-            const uint32_t row = static_cast<uint32_t>(p.name.size());
-            p.name.emplace_back(name);
-            p.name_crc.push_back(crc);
-            p.by_crc_[crc].push_back(row);  // find() returns the first matching row
-            p.element.push_back(e);
-            p.duplicate.push_back(dup ? uint8_t{1} : uint8_t{0});
-
-            Vec3 pos{};
-            if (XmlNode gp = e.child("Galactic_Position")) {
-                if (const auto v = parse_vec3(gp.text())) pos = *v;
-                else warn(where(gp) + ": planet '" + std::string(name) + "' has a bad Galactic_Position");
-            }
-            p.position.push_back(pos);
-            uint32_t flags = 0;
-            if (parse_bool_or(e.child_text("In_Background"), false)) flags |= kPlanetInBackground;
-            if (parse_bool_or(e.child_text("Always_Instantiate_Galactic"), false)) flags |= kPlanetAlwaysInstantiate;
-            // Q1: graph membership is "has a PLANET behaviour slot", from <Behavior>.
-            std::vector<std::string> beh;
-            for (XmlNode bn : e.children("Behavior"))
-                for (std::string_view tok : split_list(bn.text())) beh.emplace_back(tok);
-            for (const std::string& tok : beh)
-                if (iequals(tok, "PLANET")) flags |= kPlanetHasPlanetBehavior;
-            p.behaviors.push_back(std::move(beh));
-            p.flags.push_back(flags);
-            p.credit_value.push_back(parse_int_or(e.child_text("Planet_Credit_Value"), 0));
-            p.max_space_base.push_back(parse_int_or(e.child_text("Max_Space_Base"), 0));
-            p.max_ground_base.push_back(parse_int_or(e.child_text("Max_Ground_Base"), 0));
         }
+    }
+
+    // The variant chain of an object element: the element, then its parents (first definition of each name, in any file;
+    // §3.4); a missing parent or a cycle leaves the element alone.
+    auto variant_chain = [this](XmlNode e) {
+        std::vector<XmlNode> chain{e};
+        for (int depth = 0; depth < 16; ++depth) {
+            const std::string_view parent = trim(xml_values::text(chain.back(), "Variant_Of_Existing_Type", xml_values::kObject));
+            if (parent.empty()) break;
+            const GameObjectRecord* rec = find_game_object(parent);
+            if (!rec || std::find(chain.begin(), chain.end(), rec->element) != chain.end()) {
+                chain.resize(1);  // unresolved: own tags only
+                break;
+            }
+            chain.push_back(rec->element);
+        }
+        return chain;
+    };
+    // A behaviour list along the chain: a plain type appends every occurrence (§4.4); in a variant the last non-empty one
+    // replaces the parent's list.
+    auto behavior_list = [](const std::vector<XmlNode>& chain, std::string_view tag) {
+        std::vector<std::string> out;
+        for (const XmlNode& n : chain) {
+            const bool variant = !trim(xml_values::text(n, "Variant_Of_Existing_Type", xml_values::kObject)).empty() && chain.size() > 1;
+            // kData walk (OBJECT_TYPES §4.2 / §4.4): nested groups descended into, empty and TBD occurrences skipped.
+            std::vector<std::string> own;
+            for (std::string_view v : xml_values::texts(n, tag, xml_values::kObject)) {
+                if (variant) own.clear();
+                for (std::string_view tok : split_list(v)) own.emplace_back(tok);
+            }
+            if (!own.empty()) {
+                out = std::move(own);
+                break;
+            }
+        }
+        return out;
+    };
+    auto has_planet = [](const std::vector<std::string>& toks) {
+        for (const std::string& t : toks)
+            if (iequals(t, "PLANET")) return true;
+        return false;
+    };
+
+    // mcx1 t05 (D4; MCX1_RE_ANSWERS Q7.3, OBJECT_TYPES §0 rule 2): the element tag carries no behaviour. A planet type is
+    // any type whose resolved Behavior or GalacticBehavior list holds PLANET, whatever element it is written in. A <Planet>
+    // element without PLANET keeps its row without kPlanetHasPlanetBehavior, as before (it is not a planet either way).
+    PlanetTypes& p = planets_;
+    std::vector<std::vector<XmlNode>> chains;
+    std::vector<std::vector<std::string>> behaviors;
+    std::vector<uint8_t> planet_behavior;
+    for (const GameObjectRecord& o : objects_) {
+        std::vector<XmlNode> chain = variant_chain(o.element);
+        std::vector<std::string> beh = behavior_list(chain, "Behavior");
+        const bool is_planet = has_planet(beh) || has_planet(behavior_list(chain, "GalacticBehavior"));
+        if (!is_planet && !iequals(o.type, "Planet")) continue;
+        const uint32_t row = static_cast<uint32_t>(p.name.size());
+        p.name.emplace_back(o.name);
+        p.name_crc.push_back(o.name_crc);
+        p.by_crc_[o.name_crc].push_back(row);  // find() returns the first matching row
+        p.element.push_back(o.element);
+        p.duplicate.push_back(o.duplicate ? uint8_t{1} : uint8_t{0});
+        chains.push_back(std::move(chain));
+        behaviors.push_back(std::move(beh));
+        planet_behavior.push_back(is_planet ? uint8_t{1} : uint8_t{0});
+    }
+
+    // The planet columns, after every file is read: a <Variant_Of_Existing_Type> planet takes each field it does not
+    // set from its resolved parent (OBJECT_TYPES.md §3.3: scalars from the child when it has the tag). Within one element
+    // a repeated scalar tag takes its last occurrence and an empty or TBD value changes nothing (mcx1 t03, §4.4); values
+    // convert by their type codes (mcx1 t02: In_Background / Always_Instantiate_Galactic bool 0x0, the ints atoi).
+    // modc t06: a mod defines every planet as a variant of one template planet; base FoC / EaW define no planet variant.
+    for (uint32_t row = 0; row < p.name.size(); ++row) {
+        const std::vector<XmlNode>& chain = chains[row];
+        // The nearest element of the chain that sets <tag>; its last occurrence.
+        auto text = [&](std::string_view tag) -> std::string_view {
+            for (const XmlNode& n : chain)
+                if (const std::string_view v = xml_values::text(n, tag, xml_values::kObject); !v.empty()) return v;
+            return {};
+        };
+        Vec3 pos{};
+        if (const std::string_view gp = text("Galactic_Position"); !gp.empty()) {
+            if (const auto v = parse_vec3(gp)) pos = *v;
+            else warn(where(p.element[row]) + ": planet '" + p.name[row] + "' has a bad Galactic_Position");
+        }
+        p.position.push_back(pos);
+        uint32_t flags = 0;
+        if (xml_values::bool_or(text("In_Background"), false)) flags |= kPlanetInBackground;
+        if (xml_values::bool_or(text("Always_Instantiate_Galactic"), false)) flags |= kPlanetAlwaysInstantiate;
+        if (planet_behavior[row] != 0) flags |= kPlanetHasPlanetBehavior;
+        p.behaviors.push_back(std::move(behaviors[row]));
+        p.flags.push_back(flags);
+        p.credit_value.push_back(xml_values::int_or(text("Planet_Credit_Value"), 0));
+        p.max_space_base.push_back(xml_values::int_or(text("Max_Space_Base"), 0));
+        p.max_ground_base.push_back(xml_values::int_or(text("Max_Ground_Base"), 0));
     }
 }
 
 void GameDatabase::load_trade_routes(const FileProvider& provider, bool& ok) {
+    const WarnFn warn_fn = [this](std::string m) { warn(std::move(m)); };
     // Q13: de-duplicated and parsed in ascending CRC order of the listed name.
-    std::map<uint32_t, ListEntry> ordered;
-    for (ListEntry& en : read_list(provider, kTradeRouteList, ok)) {
-        const uint32_t key = list_file_crc(en.name);
-        if (const auto it = ordered.find(key); it != ordered.end()) {
-            warn(std::string(kTradeRouteList) + ": '" + en.name + "' collapses with '" + it->second.name +
-                 "' (same name CRC); loaded once");
+    CrcOrderedList ordered;
+    for (ListedXmlEntry& en : read_list(provider, kTradeRouteList, ok))
+        add_crc_ordered(ordered, std::move(en), nullptr, kTradeRouteList, true, warn_fn);
+    for (const auto& [key, oe] : ordered) {
+        const ListedXmlEntry& en = oe.list;
+        const XmlDocument* doc = load_file(provider, nullptr, en.path, false);
+        if (!doc) {
+            if (listed_file_unparsable(en.path, "trade-route")) ok = false;
             continue;
         }
-        ordered.emplace(key, std::move(en));
-    }
-    for (const auto& [key, en] : ordered) {
-        const XmlDocument* doc = load_file(provider, nullptr, en.path, false);
-        if (!doc) continue;
         for (XmlNode e : doc->root().children("TradeRoute")) {
             const std::string_view name = trim(e.attribute("Name"));
             if (name.empty()) {
@@ -286,53 +421,28 @@ void GameDatabase::load_trade_routes(const FileProvider& provider, bool& ok) {
             r.name_crc = name_crc(name);
             r.file = en.path;
             r.element = e;
-            for (XmlNode f : e.children()) {
-                const std::string_view tag = f.name();
-                const std::string_view v = f.text_trimmed();
-                auto num = [&](float& out) {
-                    if (const auto x = parse_float(v)) out = *x;
-                    else warn(where(f) + ": bad number '" + std::string(v) + "' in <" + std::string(tag) + ">");
-                };
+            // mcx1 t02 / t03 (MCX1_RE_ANSWERS Q1): every field (nested elements descended into, empty / TBD change nothing),
+            // the last occurrence wins; the numbers are atof (0x8) / atoi (Political_Control_Gain 0x5), garbage 0.
+            for (const auto& [tag, v] : xml_values::fields(e, xml_values::kData)) {
                 if (iequals(tag, "Point_A")) r.point_a = std::string(v);
                 else if (iequals(tag, "Point_B")) r.point_b = std::string(v);
-                else if (iequals(tag, "HS_Speed_Factor")) num(r.hs_speed_factor);
-                else if (iequals(tag, "Political_Control_Gain")) num(r.political_control_gain);
-                else if (iequals(tag, "Credit_Gain_Factor")) num(r.credit_gain_factor);
+                else if (iequals(tag, "HS_Speed_Factor")) r.hs_speed_factor = xml_values::to_float(v);
+                else if (iequals(tag, "Political_Control_Gain"))
+                    r.political_control_gain = static_cast<float>(xml_values::to_int(v));
+                else if (iequals(tag, "Credit_Gain_Factor")) r.credit_gain_factor = xml_values::to_float(v);
                 else if (iequals(tag, "Visible_Line_Name")) r.visible_line_name = std::string(v);
             }
-            const uint32_t idx =
-                find_by_crc(route_by_crc_, name, [this](uint32_t k) { return std::string_view(routes_[k].name); });
-            if (idx == kInvalidPlanet) {
-                route_by_crc_[r.name_crc].push_back(static_cast<uint32_t>(routes_.size()));
-                routes_.push_back(std::move(r));
-                continue;
-            }
-            warn(where(e) + ": duplicate trade route '" + std::string(name) + "' replaces the earlier definition (" +
-                 (same_content(routes_[idx], r) ? "identical content" : "CONTENT DIFFERS") + ")");
-            r.definitions = routes_[idx].definitions + 1;
-            routes_[idx] = std::move(r);  // last wins, no field merge
+            upsert_last_wins(routes_, route_by_crc_, std::move(r), e, "trade route", warn_fn);
         }
     }
 }
 
 void GameDatabase::load_campaigns(const FileProvider& provider, const LoadOptions& options, bool& ok) {
-    struct Entry {
-        ListEntry list;
-        const FileProvider* fallback;
-    };
+    const WarnFn warn_fn = [this](std::string m) { warn(std::move(m)); };
     // Q13: de-duplicated and parsed in ascending CRC order of the listed name.
-    std::map<uint32_t, Entry> ordered;
-    auto add = [&](ListEntry en, const FileProvider* fallback, bool report) {
-        const uint32_t key = list_file_crc(en.name);
-        if (const auto it = ordered.find(key); it != ordered.end()) {
-            if (report)
-                warn(std::string(kCampaignList) + ": '" + en.name + "' collapses with '" + it->second.list.name +
-                     "' (same name CRC); loaded once");
-            return;
-        }
-        ordered.emplace(key, Entry{std::move(en), fallback});
-    };
-    for (ListEntry& en : read_list(provider, kCampaignList, ok)) add(std::move(en), nullptr, true);
+    CrcOrderedList ordered;
+    for (ListedXmlEntry& en : read_list(provider, kCampaignList, ok))
+        add_crc_ordered(ordered, std::move(en), nullptr, kCampaignList, true, warn_fn);
     if (options.merge_campaign_lists) {
         for (const LoadOptions::ExtraList& extra : options.extra_campaign_lists) {
             const FileProvider& lp = extra.provider ? *extra.provider : provider;
@@ -350,24 +460,22 @@ void GameDatabase::load_campaigns(const FileProvider& provider, const LoadOption
             for (const XmlDiagnostic& d : f.doc->diagnostics()) warn(d.to_string());
             const XmlDocument* doc = f.doc.get();
             files_.push_back(std::move(f));  // not indexed: its path may shadow the primary list
-            if (!doc->ok()) continue;
-            for (XmlNode fe : doc->root().children("File")) {
-                const std::string_view name = fe.text_trimmed();
-                if (name.empty()) continue;
-                std::string path(kXmlDir);
-                path += name;
-                add(ListEntry{std::string(name), std::move(path)}, extra.provider, false);
-            }
+            for (ListedXmlEntry& en : listed_xml_entries(*doc))
+                add_crc_ordered(ordered, std::move(en), extra.provider, kCampaignList, false, warn_fn);
         }
     }
 
     for (const auto& [key, en] : ordered) {
         const XmlDocument* doc = load_file(provider, en.fallback, en.list.path, false);
-        if (!doc) continue;
-        for (XmlNode e : doc->root().children("Campaign")) {
+        if (!doc) {
+            if (listed_file_unparsable(en.list.path, "campaign")) ok = false;
+            continue;
+        }
+        // mcx1 t05 (D4; MCX1_RE_ANSWERS Q1): every top-level child of a campaign file is a campaign, whatever its tag.
+        for (XmlNode e = doc->root().first_child(); e; e = e.next_sibling()) {
             const std::string_view name = trim(e.attribute("Name"));
             if (name.empty()) {
-                warn(where(e) + ": <Campaign> without a Name ignored");
+                warn(where(e) + ": <" + std::string(e.name()) + "> without a Name ignored (campaign file)");
                 continue;
             }
             CampaignDef c;  // a whole new object: defaults + this element's XML
@@ -375,41 +483,29 @@ void GameDatabase::load_campaigns(const FileProvider& provider, const LoadOption
             c.name_crc = name_crc(name);
             c.file = en.list.path;
             c.element = e;
-            for (XmlNode f : e.children()) {
-                const std::string_view tag = f.name();
-                const std::string_view v = f.text_trimmed();
+            // mcx1 t03 (MCX1_RE_ANSWERS Q1): every field in document order, nested elements descended into, empty and TBD
+            // values change nothing; a repeated scalar takes the last occurrence, a repeated list appends.
+            for (const auto& [tag, v] : xml_values::fields(e, xml_values::kData)) {
                 c.raw.emplace_back(tag, v);
                 if (iequals(tag, "Campaign_Set")) c.campaign_set = std::string(v);
                 else if (iequals(tag, "Text_ID")) c.text_id = std::string(v);
                 else if (iequals(tag, "Description_Text")) c.description_text = std::string(v);
                 else if (iequals(tag, "Starting_Active_Player")) c.starting_active_player = std::string(v);
-                else if (iequals(tag, "Sort_Order")) {
-                    if (const auto x = parse_int(v)) c.sort_order = *x;
-                    else warn(where(f) + ": bad Sort_Order '" + std::string(v) + "'");
-                } else if (iequals(tag, "Locations")) {
+                else if (iequals(tag, "Sort_Order")) c.sort_order = xml_values::to_int(v);  // code 0x5: atoi
+                else if (iequals(tag, "Locations")) {
                     for (std::string_view s : split_list(v)) c.locations.emplace_back(s);
                 } else if (iequals(tag, "Trade_Routes")) {
                     for (std::string_view s : split_list(v)) c.trade_routes.emplace_back(s);
                 } else if (iequals(tag, "Home_Location")) {
                     if (const auto pr = parse_pair(v)) c.home_locations.emplace_back(pr->first, pr->second);
-                    else warn(where(f) + ": bad Home_Location '" + std::string(v) + "'");
+                    else warn(where(e) + ": campaign '" + c.name + "': bad Home_Location '" + std::string(v) + "'");
                 } else if (iequals(tag, "AI_Player_Control")) c.ai_player_control.emplace_back(v);
                 else if (iequals(tag, "Starting_Forces")) c.starting_forces.emplace_back(v);
                 else if (iequals(tag, "Starting_Credits")) c.starting_credits.emplace_back(v);
                 else if (iequals(tag, "Starting_Tech_Level")) c.starting_tech_level.emplace_back(v);
                 else if (iequals(tag, "Max_Tech_Level")) c.max_tech_level.emplace_back(v);
             }
-            const uint32_t idx =
-                find_by_crc(campaign_by_crc_, name, [this](uint32_t k) { return std::string_view(campaigns_[k].name); });
-            if (idx == kInvalidPlanet) {
-                campaign_by_crc_[c.name_crc].push_back(static_cast<uint32_t>(campaigns_.size()));
-                campaigns_.push_back(std::move(c));
-                continue;
-            }
-            warn(where(e) + ": duplicate campaign '" + std::string(name) + "' replaces the earlier definition (" +
-                 (same_content(campaigns_[idx], c) ? "identical content" : "CONTENT DIFFERS") + ")");
-            c.definitions = campaigns_[idx].definitions + 1;
-            campaigns_[idx] = std::move(c);  // last wins, no field merge
+            upsert_last_wins(campaigns_, campaign_by_crc_, std::move(c), e, "campaign", warn_fn);
         }
     }
 }

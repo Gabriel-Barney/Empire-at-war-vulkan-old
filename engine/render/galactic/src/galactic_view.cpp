@@ -2,7 +2,6 @@
 
 #include <algorithm>
 #include <array>
-#include <cctype>
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
@@ -11,6 +10,7 @@
 #include "alamo/assets/asset_cache.hpp"
 #include "alamo/assets/model.hpp"
 #include "alamo/assets/vertex_layout.hpp"
+#include "alamo/core/ascii.hpp"
 #include "alamo/data/xml.hpp"
 #include "alamo/render/sim_snapshot.hpp"
 
@@ -20,20 +20,6 @@ namespace {
 
 constexpr float kPi = 3.14159265358979323846f;
 static_assert(sizeof(assets::StaticVertex) == 64, "StaticVertex is the 64-byte alD3dVertNU2C record");
-
-std::string upper(std::string_view s) {
-    std::string u(s);
-    for (char& c : u) c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
-    return u;
-}
-
-std::string trim(std::string s) {
-    const auto ws = [](unsigned char c) { return c == ' ' || c == '\t' || c == '\r' || c == '\n'; };
-    size_t a = 0, b = s.size();
-    while (a < b && ws(static_cast<unsigned char>(s[a]))) ++a;
-    while (b > a && ws(static_cast<unsigned char>(s[b - 1]))) --b;
-    return s.substr(a, b - a);
-}
 
 // Up to `n` floats separated by commas / whitespace; returns how many parsed.
 size_t parse_float_list(std::string_view text, float* out, size_t n) {
@@ -55,6 +41,7 @@ size_t parse_float_list(std::string_view text, float* out, size_t n) {
 float len3(const Vec3& v) { return std::sqrt(v.x * v.x + v.y * v.y + v.z * v.z); }
 Vec3 sub(const Vec3& a, const Vec3& b) { return {a.x - b.x, a.y - b.y, a.z - b.z}; }
 Vec3 add(const Vec3& a, const Vec3& b) { return {a.x + b.x, a.y + b.y, a.z + b.z}; }
+constexpr float kDragLineWidth = 2.0f;  // 0x3da30: the width it passes to the line builder [H]
 Vec3 mul(const Vec3& a, float s) { return {a.x * s, a.y * s, a.z * s}; }
 Vec3 cross(const Vec3& a, const Vec3& b) { return {a.y * b.z - a.z * b.y, a.z * b.x - a.x * b.z, a.x * b.y - a.y * b.x}; }
 float dot(const Vec3& a, const Vec3& b) { return a.x * b.x + a.y * b.y + a.z * b.z; }
@@ -209,7 +196,7 @@ std::string primitive_model_name(GalacticPrimitive kind, uint32_t rgba) {
 }
 
 bool parse_primitive_model_name(std::string_view name, GalacticPrimitive& kind, uint32_t& rgba) {
-    const std::string u = upper(name);
+    const std::string u = ascii_upper(name);
     const std::string_view prefix = "ALAMO_GAL_";
     if (u.size() < prefix.size() || u.compare(0, prefix.size(), prefix) != 0) return false;
     for (uint8_t k = 0; k < static_cast<uint8_t>(GalacticPrimitive::Count); ++k) {
@@ -406,7 +393,7 @@ const GpuModel* GalacticModels::model(const std::string& name) {
     uint32_t rgba = 0;
     if (parse_primitive_model_name(name, kind, rgba)) return primitive(kind, rgba);
     if (!streamer_) return nullptr;
-    auto [it, inserted] = by_name_.try_emplace(upper(name), 0u);
+    auto [it, inserted] = by_name_.try_emplace(ascii_upper(name), 0u);
     if (inserted) {
         it->second = streamer_->request(name);
         handles_.push_back(it->second);
@@ -416,7 +403,7 @@ const GpuModel* GalacticModels::model(const std::string& name) {
 
 bool GalacticModels::model_failed(const std::string& name) {
     if (!streamer_) return false;
-    const auto it = by_name_.find(upper(name));
+    const auto it = by_name_.find(ascii_upper(name));
     return it != by_name_.end() && streamer_->state(it->second) == ModelStreamer::State::Failed;
 }
 
@@ -445,7 +432,7 @@ const GpuModel* GalacticModels::resident(Prim& p) {
 
 const GpuModel* GalacticModels::line(const std::string& texture, uint32_t rgba) {
     (void)rgba;  // tinted per instance (Instance::light_scale)
-    auto [it, inserted] = lines_.try_emplace(upper(texture));
+    auto [it, inserted] = lines_.try_emplace(ascii_upper(texture));
     if (inserted) {
         it->second = std::make_unique<Prim>();
         std::string err;
@@ -462,7 +449,7 @@ const GpuModel* GalacticModels::line(const std::string& texture, uint32_t rgba) 
 
 std::shared_ptr<const assets::AnimationClip> GalacticModels::idle_clip(const std::string& model) {
     if (!cache_ || !files_ || model.empty()) return nullptr;
-    const std::string key = upper(model);
+    const std::string key = ascii_upper(model);
     auto [it, inserted] = clips_.try_emplace(key);
     if (!inserted) return it->second;
     // "<model stem>_IDLE_00" (w_planet_urban01.alo -> W_PLANET_URBAN01_IDLE_00.ALA), existence checked first so
@@ -525,7 +512,7 @@ RouteLineStyle load_route_line_style(const FileProvider& files) {
     for (data::XmlNode n : doc.root().children("TradeRouteLine")) {
         if (!line) line = n;  // first entry, unless one is called Default
         std::string nm(n.attribute("Name"));
-        if (upper(nm) == "DEFAULT") {
+        if (ascii_iequals(nm, "DEFAULT")) {
             line = n;
             break;
         }
@@ -538,15 +525,20 @@ RouteLineStyle load_route_line_style(const FileProvider& files) {
         if (parse_color_bytes(f.child_text("Color_Zoomed_Out"), c)) r.zoomed_out = c;
         if (parse_color_bytes(f.child_text("Color_Zoomed_In"), c)) r.zoomed_in = c;
         {
+            // mcx4 t15: the TradeRouteLines block fields (xml_field_tables files them under TradeRoute).
+            // ledger: consumes TradeRoute.Width
             const std::string w(f.child_text("Width"));
             const float v = std::strtof(w.c_str(), nullptr);
             if (std::isfinite(v) && v >= 0.0f) r.width = v;
         }
-        const std::string mode = trim(std::string(f.child_text("Render_Mode")));
-        if (!mode.empty()) r.render_mode = upper(mode);
-        const std::string tex = trim(std::string(f.child_text("Texture")));
+        // ledger: consumes TradeRoute.Render_Mode
+        const std::string mode(ascii_trim(f.child_text("Render_Mode")));
+        if (!mode.empty()) r.render_mode = ascii_upper(mode);
+        // mcx4 t15: retail's tags are Texture_Name / Spark_Texture_Name (descriptor table; the port read <Texture> /
+        // <Spark_Texture>, which retail ignores). FoC writes neither, so its lines keep the parser defaults.
+        const std::string tex(ascii_trim(f.child_text("Texture_Name")));
         if (!tex.empty()) r.texture = tex;
-        const std::string spark = trim(std::string(f.child_text("Spark_Texture")));
+        const std::string spark(ascii_trim(f.child_text("Spark_Texture_Name")));
         if (!spark.empty()) r.spark = spark;
         s.settings[route_settings_index(f.attribute("Name"))] = r;
     }
@@ -586,7 +578,7 @@ uint32_t RouteLineStyle::index(RouteClass c) {
 }
 
 uint32_t route_settings_index(std::string_view name) {
-    const std::string n = upper(trim(std::string(name)));
+    const std::string n = ascii_upper(ascii_trim(name));
     if (n == "ENEMY") return kRouteEnemy;
     if (n == "ALLY") return kRouteAlly;
     if (n == "GOOD") return kRouteGood;
@@ -629,14 +621,10 @@ float path_factor(const GalacticPlanetSnap& p) {
 }
 }  // namespace
 
-CorruptionPathSettings load_corruption_path_settings(const FileProvider& files) {
+CorruptionPathSettings load_corruption_path_settings(const data::XmlNode& root) {
     CorruptionPathSettings s;
-    std::vector<uint8_t> bytes;
-    if (!files.read("Data\\XML\\GameConstants.xml", bytes)) return s;
-    const data::XmlDocument doc = data::XmlDocument::parse(bytes, "GameConstants.xml");
-    if (!doc.ok()) return s;
-    const data::XmlNode root = doc.root();
-    const std::string tex = trim(std::string(root.child_text("Fleet_Hyperspace_Band_Texture_Name")));
+    if (!root) return s;
+    const std::string tex(ascii_trim(root.child_text("Fleet_Hyperspace_Band_Texture_Name")));
     if (!tex.empty()) s.texture = tex;
     float v[4] = {0, 0, 0, 0};
     if (parse_float_list(root.child_text("Corruption_Path_Width"), v, 1) == 1 && std::isfinite(v[0]) && v[0] >= 0.0f) s.width = v[0];
@@ -649,7 +637,9 @@ CorruptionPathSettings load_corruption_path_settings(const FileProvider& files) 
     if (parse_float_list(root.child_text("Corruption_Path_Offset"), v, 3) == 3 && std::isfinite(v[0]) && std::isfinite(v[1]) &&
         std::isfinite(v[2]))
         s.offset = {v[0], v[1], v[2]};
-    if (parse_float_list(root.child_text("MaximumFleetMovementDistance"), v, 1) == 1 && std::isfinite(v[0]) && v[0] >= 0.0f)
+    // mcx5: a GameConstants without the tag has the GameConstants default 1.0 (0x2c91c0, MCX5_RE_ANSWERS Q1.9), as the sim.
+    if (root.child_text("MaximumFleetMovementDistance").empty()) s.neighbour_distance = 1.0f;
+    else if (parse_float_list(root.child_text("MaximumFleetMovementDistance"), v, 1) == 1 && std::isfinite(v[0]) && v[0] >= 0.0f)
         s.neighbour_distance = v[0];
     return s;
 }
@@ -823,6 +813,9 @@ void GalacticSceneBuilder::build(const GalacticFrame& frame, GalacticModelSource
         in.team_color = p.team_color;
         in.lod_bias = ti.lod_bias;
         in.alt = fog ? kFogPlanetAlt : 0;
+        // mcx4 t14: the selected planet pulses towards red (0x3ca480 overrides the cycle colour to 6, 0, 0).
+        if (p.id == sel_.planet && sel_.planet != objects::kNoObjectId && sel_.cycle_darken > 0.0f)
+            in.light_scale = cycle_light_scale(in.light_scale, Vec3{6.0f, 0.0f, 0.0f}, sel_.cycle_phase, sel_.cycle_darken);
         in.bone_world = pose(anims_[p.row], m, name, ti, frame.anim_frames, models);
         st.animated += in.bone_world.empty() ? 0u : 1u;
         st.fogged += fog ? 1u : 0u;
@@ -921,6 +914,10 @@ void GalacticSceneBuilder::build(const GalacticFrame& frame, GalacticModelSource
             else ++st.orbit_fleets;
             continue;
         }
+        if (f.flags & kGalFleetHidden) {  // mcx4 t14 (MCX4_GAL2_RE_ANSWERS Q3): the local client does not see it
+            ++st.hidden_fleets;
+            continue;
+        }
         const std::string name = fleet_model(f);
         const GpuModel* m = owner_model(models, name, f.team_color);
         if (!m) {
@@ -975,6 +972,18 @@ void GalacticSceneBuilder::build(const GalacticFrame& frame, GalacticModelSource
             ++st.corruption_paths;
         }
     }
+    // ui4 t06 fleet drag preview (GALAXY_MAP_PRESENTATION §2.2): grey ribbons, tinted like the corruption paths.
+    for (const GalacticDragLine& l : drag_lines_) {
+        const GpuModel* m = models.line(opt_.corruption_path.texture, rgba8(l.grey, l.grey, l.grey, 255));
+        if (!m) continue;
+        Instance in;
+        in.model = m;
+        const float c = static_cast<float>(l.grey) / 255.0f;
+        in.light_scale = {c, c, c, 1.0f};
+        in.transform = ribbon_transform(l.a, l.b, kDragLineWidth * opt_.corruption_width_scale);
+        main.push_back(in);
+        ++st.drag_lines;
+    }
     // Selection model round the selected planet (§3).
     if (opt_.selection && overlay > 0.0f && sel_.planet != objects::kNoObjectId && !opt_.selection_model.empty()) {
         const GalacticPlanetSnap* sp = nullptr;
@@ -1001,6 +1010,11 @@ void GalacticSceneBuilder::build(const GalacticFrame& frame, GalacticModelSource
         }
     }
     if (stats) *stats = st;
+}
+
+materials::float4 GalacticSceneBuilder::cycle_light_scale(materials::float4 base, const Vec3& cycle, float phase, float darken) {
+    const float f = std::sin(phase) * darken + darken;
+    return {base.x * (1.0f + cycle.x * f), base.y * (1.0f + cycle.y * f), base.z * (1.0f + cycle.z * f), base.w};
 }
 
 float GalacticSceneBuilder::overlay_fade(float zoom) {
@@ -1042,13 +1056,9 @@ const GpuModel* owner_model(GalacticModelSource& models, const std::string& name
 }
 }  // namespace
 
-GalacticLightSettings load_galactic_light_settings(const FileProvider& files) {
+GalacticLightSettings load_galactic_light_settings(const data::XmlNode& root) {
     GalacticLightSettings s;
-    std::vector<uint8_t> bytes;
-    if (!files.read("Data\\XML\\GameConstants.xml", bytes)) return s;
-    const data::XmlDocument doc = data::XmlDocument::parse(bytes, "GameConstants.xml");
-    if (!doc.ok()) return s;
-    const data::XmlNode root = doc.root();
+    if (!root) return s;
     auto angles = [&](std::string_view tag, float& yaw, float& elev) {
         float v[3] = {0, 0, 0};
         if (parse_float_list(root.child_text(tag), v, 3) == 3 && std::isfinite(v[1]) && std::isfinite(v[2])) {
@@ -1063,15 +1073,11 @@ GalacticLightSettings load_galactic_light_settings(const FileProvider& files) {
     return s;
 }
 
-GalacticCorruptionSettings load_galactic_corruption_settings(const FileProvider& files) {
+GalacticCorruptionSettings load_galactic_corruption_settings(const data::XmlNode& root) {
     GalacticCorruptionSettings s;
-    std::vector<uint8_t> bytes;
-    if (!files.read("Data\\XML\\GameConstants.xml", bytes)) return s;
-    const data::XmlDocument doc = data::XmlDocument::parse(bytes, "GameConstants.xml");
-    if (!doc.ok()) return s;
-    const data::XmlNode root = doc.root();
-    const std::string pn = trim(std::string(root.child_text("Corruption_Particle_Name")));
-    const std::string ln = trim(std::string(root.child_text("Corruption_Particle_Line_Name")));
+    if (!root) return s;
+    const std::string pn(ascii_trim(root.child_text("Corruption_Particle_Name")));
+    const std::string ln(ascii_trim(root.child_text("Corruption_Particle_Line_Name")));
     if (!pn.empty()) s.planet_particle = pn;
     if (!ln.empty()) s.line_particle = ln;
     float b[2] = {0, 0};

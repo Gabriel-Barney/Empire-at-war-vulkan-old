@@ -1,14 +1,17 @@
 ﻿#include "alamo/game/game_data.hpp"
 
+#include "alamo/game/open_game_data.hpp"  // ref4 t05
+
 #include <algorithm>
-#include <cctype>
 #include <chrono>
 #include <cstring>
 #include <filesystem>
 #include <map>
 #include <optional>
 
+#include "alamo/core/ascii.hpp"
 #include "alamo/core/file_provider.hpp"
+#include "alamo/core/host_fs.hpp"
 #include "alamo/data/xml.hpp"
 #include "alamo/sim/save_session.hpp"
 #include "alamo/terrain/chunk.hpp"
@@ -68,15 +71,10 @@ bool load_common(GameData& out, std::string* err) {
     return true;
 }
 
-std::string upper(std::string s) {
-    for (char& c : s) c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
-    return s;
-}
-
 void load_faction_skirmish_data(GameData& out) {
-    out.skirmish_forces = load_skirmish_forces(*out.files);
+    out.skirmish_forces = load_skirmish_forces(out.rules.factions);  // cu5 t01: the galactic rules' faction parse
 #ifdef ALAMO_GAME_HAVE_GALACTIC_AI
-    out.basic_ai = ai::load_faction_basic_ai(*out.files);
+    out.basic_ai = ai::load_faction_basic_ai(out.rules.factions);
 #endif
 }
 
@@ -89,19 +87,29 @@ uint32_t neutral_faction(const galactic::GalacticRules& rules) {
 }  // namespace
 
 bool load_game_data(const std::string& root, const std::vector<std::string>& args, GameData& out, std::string* err) {
-    vfs::VfsConfig cfg;  // mounted exactly as alamo_headless does
-    cfg.foc_root = root;
-    vfs::parse_command_line(args, cfg);
-    std::string e;
-    std::unique_ptr<vfs::Vfs> v = vfs::Vfs::create(cfg, &e);
-    if (!v) {
-        if (err) *err = "VFS: " + e;
+    // ums2 / ref4 t05: opened through open_game_data, as every alamo_headless runner (with the mods' content hash: saves).
+    // The caller has picked the folder (an empty one is not replaced by ALAMO_FOC_DATA here).
+    if (root.empty()) {
+        if (err) *err = "VFS: no game folder";
         return false;
     }
-    out.root = root;
+    OpenGameDataOptions gopt;
+    gopt.hash = true;
+    OpenedGameData opened = open_game_data(root, args, out.vfs_issues, std::move(gopt));
+    if (!opened.env) {  // the VFS error
+        if (err) *err = opened.error;
+        return false;
+    }
+    out.root = opened.root;
     out.args = args;
-    out.vfs = v.get();
-    out.files = std::move(v);
+    out.env = opened.env.get();
+    out.vfs = &opened.env->vfs();
+    out.mods = opened.env->mounted();
+    out.files = std::move(opened.env);
+    if (opened.status == OpenedGameData::Status::Refused) {  // D1: FoC mods only; *err names the mod
+        if (err) *err = opened.error;
+        return false;
+    }
     if (!load_common(out, err)) return false;
 #ifdef ALAMO_GAME_HAVE_GALACTIC_AI
     stage(out, "AI data", [&](std::vector<std::string>&) {  // as alamo_headless --galactic-ai: definitions, equations,
@@ -142,17 +150,14 @@ uint64_t GameData::types_fingerprint() const {
 bool load_game_data_dir(const std::string& dir, GameData& out, std::string* err) {
     out.root = dir;
     out.vfs = nullptr;
+    out.env = nullptr;
     out.files = std::make_unique<DirectoryProvider>(dir);
     return load_common(out, err);
 }
 
-std::vector<std::string> data_fallback_forces(const GameData& data, const std::string& faction, bool land) {
-    return game::data_fallback_forces(data.rules, data.types, faction, land);
-}
-
 namespace {
 std::vector<std::string> game_default_forces(const GameData& data, const std::string& faction, bool land) {
-    return skirmish_default_forces({data.rules, data.types, data.skirmish_forces, data.basic_ai}, faction, land);
+    return skirmish_default_forces({data.rules, data.types, data.skirmish_forces}, faction, land);
 }
 }  // namespace
 
@@ -164,8 +169,53 @@ std::vector<std::string> default_skirmish_ground(const GameData& data, const std
     return game_default_forces(data, faction, true);
 }
 
-bool make_skirmish_galaxy(const GameData& data, const SkirmishSetup& s, galactic::GalacticSetup& g, std::string* err) {
+std::string default_skirmish_faction(const galactic::GalacticRules& rules, bool ai_slot, std::string_view human) {
+    for (const galactic::FactionRules& f : rules.factions) {
+        if (!f.is_playable || f.is_neutral) continue;
+        if (ai_slot && !human.empty() && rules.find_faction(human) == rules.find_faction(f.name)) continue;
+        return f.name;
+    }
+    return {};
+}
+
+const data::CampaignDef* load_campaign_target(const GameData& data, std::string_view name, int32_t side) {
+    const data::CampaignDef* named = nullptr;
+    for (const data::CampaignDef& c : data.db.campaigns())
+        if (!named && ascii_iequals(c.name, name)) named = &c;
+    if (!named || side < 0 || static_cast<size_t>(side) >= data.rules.factions.size()) return nullptr;
+    const std::string& faction = data.rules.factions[static_cast<size_t>(side)].name;
+    for (const data::CampaignDef& c : data.db.campaigns())
+        if (ascii_iequals(c.campaign_set, named->campaign_set) && ascii_iequals(c.starting_active_player, faction)) return &c;
+    return nullptr;
+}
+
+SkirmishSetup resolve_skirmish_factions(const galactic::GalacticRules& rules, SkirmishSetup s) {
+    // mcx1 t08 (MCX1_RE_ANSWERS Q6.3, SKIRMISH_SETUP §2.8) [port]: a slot faction the data does not have falls back like an
+    // empty slot, and GameSession::start reports the substitution. The original keeps a bad saved faction index unrepaired:
+    // the box shows nothing, Start refuses on a non-team map and may crash on a team map; the port keeps the game startable.
+    const auto known = [&rules](const std::string& f) { return !f.empty() && rules.find_faction(f) != galactic::kNoIndex; };
+    if (!known(s.human_faction)) s.human_faction = default_skirmish_faction(rules, false);
+    if (!known(s.ai_faction)) s.ai_faction = default_skirmish_faction(rules, true, s.human_faction);
+    for (SkirmishSetup::ExtraSlot& x : s.extra_slots)  // skm2 t02: an AI slot's default
+        if (!known(x.faction)) x.faction = default_skirmish_faction(rules, true, s.human_faction);
+    return s;
+}
+
+int32_t skirmish_slot_count(const SkirmishSetup& s) { return static_cast<int32_t>(std::min<size_t>(2 + s.extra_slots.size(), 8)); }
+
+int32_t skirmish_slot_team(const SkirmishSetup& s, int32_t slot) {
+    if (slot < 0) return -1;
+    const size_t k = static_cast<size_t>(slot);
+    return k < s.teams.size() && s.teams[k] >= 0 ? s.teams[k] : slot;
+}
+
+PlanetIndex skirmish_slot_planet(int32_t slot) {
+    return slot == 0 ? kSkirmishHumanPlanet : slot == 1 ? kSkirmishBattlePlanet : static_cast<PlanetIndex>(slot + 1);
+}
+
+bool make_skirmish_galaxy(const GameData& data, const SkirmishSetup& setup, galactic::GalacticSetup& g, std::string* err) {
     const galactic::GalacticRules& rules = data.rules;
+    const SkirmishSetup s = resolve_skirmish_factions(rules, setup);
     g = galactic::GalacticSetup{};
     galactic::PlayerSetup human, ai, neutral;
     human.faction = rules.find_faction(s.human_faction);
@@ -174,43 +224,62 @@ bool make_skirmish_galaxy(const GameData& data, const SkirmishSetup& s, galactic
     ai.ai = true;
     // t50: a land skirmish side starts with MP_Default_Credits (GameConstants, shipped 6000): the pads' Tactical_Build_Cost_Multiplayer
     // charges the galactic account. A space skirmish buys nothing in the battle, so its sides keep 0.
-    if (s.land) human.credits = ai.credits = static_cast<float>(std::max(0, data.db.constants().get_int("MP_Default_Credits", 0)));
+    if (s.land) human.credits = ai.credits = static_cast<float>(data.db.constants().shared.mp_default_credits.value_or(0));
     neutral.faction = neutral_faction(rules);
     if (human.faction == galactic::kNoIndex || ai.faction == galactic::kNoIndex) {
-        if (err) *err = "skirmish: faction " + (human.faction == galactic::kNoIndex ? s.human_faction : s.ai_faction) + " unknown";
+        // mcx1 t08 (MCX1_RE_ANSWERS Q6.2): with no playable faction left for a slot the original's skirmish faction lists
+        // are empty and no skirmish can start; the port refuses the same way, saying why.
+        if (err) *err = "skirmish: the data has no playable, non-neutral faction for the " +
+                        std::string(human.faction == galactic::kNoIndex ? "human" : "AI") + " slot";
         return false;
+    }
+    // skm2 t02: the extra slots' AI players (slot k = player k), as the AI slot.
+    const int32_t slots = skirmish_slot_count(s);
+    std::vector<galactic::PlayerSetup> extras;
+    for (int32_t k = 2; k < slots; ++k) {
+        const SkirmishSetup::ExtraSlot& x = s.extra_slots[static_cast<size_t>(k - 2)];
+        galactic::PlayerSetup p;
+        p.faction = rules.find_faction(x.faction);
+        p.ai = true;
+        p.credits = ai.credits;
+        if (p.faction == galactic::kNoIndex) {
+            if (err) *err = "skirmish: faction " + x.faction + " unknown";
+            return false;
+        }
+        extras.push_back(p);
     }
     uint32_t planet = galactic::kNoIndex;
     if (!s.planet_type.empty()) planet = rules.find_type(s.planet_type);
-    for (const char* n : {"Kuat", "Coruscant"})
-        if (planet == galactic::kNoIndex) planet = rules.find_type(n);
-    for (uint32_t t = 0; t < rules.types.size() && planet == galactic::kNoIndex; ++t)
-        if (rules.types[t].kind == galactic::UnitKind::Planet) planet = t;
+    if (planet == galactic::kNoIndex) planet = skirmish_galaxy_planet(rules, {}, s.land);  // modc t19: from the data
     if (planet == galactic::kNoIndex) {
         if (err) *err = "skirmish: no planet type";
         return false;
     }
     GalaxyMap& m = g.map;
     m.campaign_name = "Alamo_Skirmish";
-    for (uint32_t i = 0; i < 3; ++i) {
+    const uint32_t planets = 3u + static_cast<uint32_t>(extras.size());  // skm2 t02: one more per extra slot
+    for (uint32_t i = 0; i < planets; ++i) {
         m.planets.add(std::string("ALAMO_SKIRMISH_P") + std::to_string(i));
         m.planets.position[i] = {static_cast<float>(i) * 60.0f, 0.0f, 0.0f};
         m.planets.flags[i] = static_cast<uint32_t>(kPlanetHasPlanetBehavior);
     }
-    for (uint32_t i = 0; i + 1 < 3; ++i) {
+    for (uint32_t i = 0; i + 1 < planets; ++i) {
         const uint32_t r = m.routes.add("ALAMO_SKIRMISH_R" + std::to_string(i));
         m.routes.point_a[r] = i;
         m.routes.point_b[r] = i + 1;
         m.routes.hs_speed_factor[r] = 5.0f;
     }
-    g.planet_type = {planet, planet, planet};
+    g.planet_type.assign(planets, planet);
     g.players = {human, ai};
+    g.players.insert(g.players.end(), extras.begin(), extras.end());
     if (neutral.faction != galactic::kNoIndex) g.players.push_back(neutral);
     // S10 map owners [probe 2026-10-29]: retail skirmish has Neutral and Hostile players besides the slots; map objects
     // resolve their owner by faction (TacticalBattle::bt_map_owner), natives without a player go to Hostile.
     galactic::PlayerSetup hostile;
-    hostile.faction = rules.find_faction("Hostile");
-    if (hostile.faction != galactic::kNoIndex && hostile.faction != human.faction && hostile.faction != ai.faction) g.players.push_back(hostile);
+    hostile.faction = rules.native_owner_faction();  // modc t03: by data (FoC: Hostile)
+    bool hostile_slot = hostile.faction == human.faction || hostile.faction == ai.faction;
+    for (const galactic::PlayerSetup& x : extras) hostile_slot = hostile_slot || hostile.faction == x.faction;
+    if (hostile.faction != galactic::kNoIndex && !hostile_slot) g.players.push_back(hostile);
     auto add = [&](int32_t player, PlanetIndex at, const std::vector<std::string>& names, const std::string& faction, bool ground = false) {
         const std::vector<std::string> list =
             !names.empty() ? names : ground ? default_skirmish_ground(data, faction) : default_skirmish_fleet(data, faction);
@@ -246,9 +315,18 @@ bool make_skirmish_galaxy(const GameData& data, const SkirmishSetup& s, galactic
         nh = add(0, kSkirmishHumanPlanet, s.units_human, s.human_faction);
         if (nh > 0 && !s.ground_human.empty()) add(0, kSkirmishHumanPlanet, s.ground_human, s.human_faction, true);  // P4 host
     }
-    if (na == 0 || nh == 0) {
+    if ((na == 0 || nh == 0) && !s.empty_slots_ok) {
         if (err) *err = "skirmish: no known unit type in the " + std::string(nh == 0 ? "human" : "AI") + " fleet";
         return false;
+    }
+    // skm2 t02: each extra slot's forces on its own planet (its fleet in space, its ground forces on land), as the AI slot's.
+    for (int32_t k = 2; k < slots; ++k) {
+        const SkirmishSetup::ExtraSlot& x = s.extra_slots[static_cast<size_t>(k - 2)];
+        const uint32_t n = s.land ? add(k, skirmish_slot_planet(k), x.ground, x.faction, true) : add(k, skirmish_slot_planet(k), x.units, x.faction);
+        if (n == 0 && !s.empty_slots_ok) {
+            if (err) *err = "skirmish: no known unit type in slot " + std::to_string(k) + "'s forces";
+            return false;
+        }
     }
     return true;
 }
@@ -274,7 +352,7 @@ std::vector<std::string> list_maps(const GameData& data, const char* glob) {
         std::string stem = p;
         if (const size_t s = stem.find_last_of("\\/"); s != std::string::npos) stem = stem.substr(s + 1);
         if (const size_t d = stem.find_last_of('.'); d != std::string::npos) stem = stem.substr(0, d);
-        stem = upper(stem);
+        ascii_upper_in_place(stem);
         if (std::find(out.begin(), out.end(), stem) != out.end()) continue;
         if (!map_file_usable(*data.vfs, p)) continue;
         out.push_back(stem);
@@ -287,9 +365,7 @@ std::vector<std::string> list_maps(const GameData& data, const char* glob) {
 std::vector<std::string> skirmish_land_maps(const GameData& data) { return list_maps(data, "Data\\Art\\Maps\\_MP_LAND_*.ted"); }
 
 std::vector<std::string> skirmish_space_maps(const GameData& data) {
-    std::vector<std::string> out = list_maps(data, "Data\\Art\\Maps\\_MP_SPACE_*.ted");
-    if (const auto it = std::find(out.begin(), out.end(), "_MP_SPACE_KUAT"); it != out.end()) std::rotate(out.begin(), it, it + 1);
-    return out;
+    return list_maps(data, "Data\\Art\\Maps\\_MP_SPACE_*.ted");
 }
 
 namespace {
@@ -318,6 +394,9 @@ SkirmishMapEntry read_map_entry(const FileProvider& files, const std::string& pa
     e.players = terrain::find_mini(md.info.raw, 0x02) ? md.info.counts[0] : 1u;
     e.custom = md.info.flag_0b == 1;
     e.name_key = md.info.name_key;
+    e.mode_tag = md.info.text_0a;  // UI.md 9.3: stored upper-cased
+    std::transform(e.mode_tag.begin(), e.mode_tag.end(), e.mode_tag.begin(),
+                   [](char c) { return c >= 'a' && c <= 'z' ? static_cast<char>(c - 'a' + 'A') : c; });
     return e;
 }
 }  // namespace

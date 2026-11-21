@@ -1,15 +1,10 @@
 #include "alamo/anim/anim_events.hpp"
 
+#include "alamo/core/ascii.hpp"
+
 namespace alamo::anim {
 
 namespace {
-
-std::string upper(std::string_view s) {
-    std::string out(s);
-    for (char& c : out)
-        if (c >= 'a' && c <= 'z') c = static_cast<char>(c - 'a' + 'A');
-    return out;
-}
 
 bool is_space(char c) { return c == ' ' || c == '\t' || c == '\r' || c == '\v' || c == '\f'; }
 
@@ -42,10 +37,10 @@ std::string clip_stem(std::string_view path) {
     const size_t slash = path.find_last_of("\\/");
     if (slash != std::string_view::npos) path = path.substr(slash + 1);
     if (path.size() > 4) {
-        const std::string ext = upper(path.substr(path.size() - 4));
+        const std::string ext = ascii_upper(path.substr(path.size() - 4));
         if (ext == ".ALA") path = path.substr(0, path.size() - 4);
     }
-    return upper(path);
+    return ascii_upper(path);
 }
 
 size_t AnimEventMap::parse(std::string_view text, std::vector<std::string>* diagnostics) {
@@ -59,10 +54,10 @@ size_t AnimEventMap::parse(std::string_view text, std::vector<std::string>* diag
         ++line_no;
         const std::vector<std::string_view> f = fields(line);
         if (f.empty() || f[0][0] == ';' || f[0][0] == '#' || f[0].substr(0, 2) == "//") continue;
-        const std::string k = upper(f[0]);
+        const std::string k = ascii_upper(f[0]);
         const bool sound = k == "SOUND", surface = k == "SURFACE";
         AnimEventDef e;
-        if (!((sound && f.size() >= 4) || (surface && f.size() >= 5)) || !parse_ms(f[2], e.time_ms)) {
+        if (!((sound && f.size() >= 4) || (surface && f.size() >= 5)) || !parse_ms(f[2], e.time)) {
             if (diagnostics) diagnostics->push_back("AnimationSFXMaps.txt(" + std::to_string(line_no) + "): bad line '" + std::string(line) + "'");
             continue;
         }
@@ -71,7 +66,7 @@ size_t AnimEventMap::parse(std::string_view text, std::vector<std::string>* diag
         if (surface) e.bone = std::string(f[4]);
         std::vector<AnimEventDef>& list = by_clip_[clip_stem(f[1])];
         auto it = list.end();  // time order, equal times keep file order
-        while (it != list.begin() && (it - 1)->time_ms > e.time_ms) --it;
+        while (it != list.begin() && (it - 1)->time > e.time) --it;
         list.insert(it, std::move(e));
         ++added;
     }
@@ -84,23 +79,16 @@ const std::vector<AnimEventDef>* AnimEventMap::find(std::string_view clip) const
     return it == by_clip_.end() ? nullptr : &it->second;
 }
 
-void crossed_events(const std::vector<AnimEventDef>& events, float fps, uint32_t count, float before, float after, bool wrapped,
+void crossed_events(const std::vector<AnimEventDef>& events, float /*fps*/, uint32_t count, float before, float after, bool wrapped,
                     std::vector<uint32_t>& out) {
-    if (!(fps > 0.0f) || count < 2) return;
-    const float to_ms = 1000.0f / fps;
-    const float b = before * to_ms, a = after * to_ms;
-    const float end = static_cast<float>(count - 1) * to_ms;
-    const auto range = [&](float lo, float hi) {
-        for (size_t i = 0; i < events.size(); ++i) {
-            const float t = static_cast<float>(events[i].time_ms);
-            if (t >= lo && t < hi) out.push_back(static_cast<uint32_t>(i));
-        }
-    };
-    if (wrapped) {
-        range(b, end);  // the tail of the cycle first, then the new cycle
-        range(0.0f, a);
-    } else {
-        range(b, a);
+    // AUDIO.md §9.4 (0x4775d0): row time = file value / 100 in animation frames; nothing when the times are equal or
+    // negative; forward: every row with before < t <= after; a wrap: every row with t > before or t <= after (so a row at
+    // exactly 0 fires only on a wrap, never on the first play).
+    if (count < 2 || before < 0.0f || after < 0.0f || before == after) return;
+    for (size_t i = 0; i < events.size(); ++i) {
+        const float t = static_cast<float>(events[i].time) / 100.0f;
+        const bool hit = wrapped ? (t > before || t <= after) : (t > before && t <= after);
+        if (hit) out.push_back(static_cast<uint32_t>(i));
     }
 }
 

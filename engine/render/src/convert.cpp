@@ -2,10 +2,10 @@
 
 #include <algorithm>
 #include <cassert>
-#include <cctype>
 #include <cstring>
 #include <string>
 
+#include "alamo/core/ascii.hpp"
 #include "alamo/core/log.hpp"
 
 namespace alamo::render {
@@ -20,6 +20,10 @@ rhi::Format to_rhi_format(assets::TextureFormat f) {
     case TF::BGRA8: return rhi::Format::BGRA8;
     case TF::R8: return rhi::Format::R8;
     case TF::R8G8: return rhi::Format::R8G8;
+    case TF::R8G8_SNORM: return rhi::Format::RG8_SNORM;
+    case TF::RGBA8_SNORM: return rhi::Format::RGBA8_SNORM;
+    case TF::RGBA16F: return rhi::Format::RGBA16F;
+    case TF::RGBA32F: return rhi::Format::RGBA32F;
     case TF::Unknown: break;
     }
     return rhi::Format::Undefined;
@@ -38,19 +42,6 @@ bool to_rhi_swizzle(const assets::ComponentMapping& m, rhi::Swizzle& out) {
 }
 
 namespace {
-
-bool iequals(std::string_view a, std::string_view b) {
-    if (a.size() != b.size()) return false;
-    for (size_t i = 0; i < a.size(); ++i)
-        if (std::tolower(static_cast<unsigned char>(a[i])) != std::tolower(static_cast<unsigned char>(b[i]))) return false;
-    return true;
-}
-bool icontains(std::string_view s, std::string_view needle) {
-    if (needle.size() > s.size()) return false;
-    for (size_t i = 0; i + needle.size() <= s.size(); ++i)
-        if (iequals(s.substr(i, needle.size()), needle)) return true;
-    return false;
-}
 
 using ML = materials::VertexLayout;
 
@@ -87,9 +78,9 @@ ML from_traits(const assets::VertexFormatTraits& t) {
 
 materials::VertexLayout vertex_layout_for(std::string_view name, const assets::VertexFormatTraits& traits) {
     for (const NameMap& n : kNames)
-        if (iequals(name, n.name)) return n.layout;
+        if (ascii_iequals(name, n.name)) return n.layout;
     if (!traits.known && !traits.skinned && !traits.tangent_frame && traits.uv_sets == 0 && !traits.color &&
-        !icontains(name, "alD3dVert"))
+        !ascii_icontains(name, "alD3dVert"))
         return ML::Unknown;
     return from_traits(traits);
 }
@@ -97,10 +88,10 @@ materials::VertexLayout vertex_layout_for(std::string_view name, const assets::V
 materials::VertexLayout vertex_layout_for(std::string_view name) {
     assets::VertexFormatTraits t;
     t.known = false;
-    t.skinned = icontains(name, "RSkin") || icontains(name, "B4I4");
-    t.tangent_frame = icontains(name, "U3U3");
-    t.uv_sets = icontains(name, "U2") ? 1 : 0;
-    t.color = !name.empty() && (name.back() == 'C' || name.back() == 'c') && icontains(name, "alD3dVert");
+    t.skinned = ascii_icontains(name, "RSkin") || ascii_icontains(name, "B4I4");
+    t.tangent_frame = ascii_icontains(name, "U3U3");
+    t.uv_sets = ascii_icontains(name, "U2") ? 1 : 0;
+    t.color = !name.empty() && (name.back() == 'C' || name.back() == 'c') && ascii_icontains(name, "alD3dVert");
     return vertex_layout_for(name, t);
 }
 
@@ -115,7 +106,7 @@ uint32_t anisotropy_level(uint32_t level, uint32_t device_cap) {
 }
 
 rhi::SamplerKey to_rhi_sampler(const materials::SamplerKey& k, uint32_t max_anisotropy_cap, uint32_t anisotropy_override) {
-    // [port] bits 8..15 of the override: Texture detail = top mip levels skipped (Renderer::set_texture_reduction).
+    // [port] bits 8..15 of the override: Texture detail = top mip levels skipped (RendererCore::set_texture_reduction).
     const uint32_t mip_skip = (anisotropy_override >> 8) & 0xFFu;
     anisotropy_override &= 0xFFu;
     rhi::SamplerKey r;

@@ -25,6 +25,9 @@ target_include_directories(alamo_miniaudio SYSTEM PUBLIC "${ALAMO_MINIAUDIO_DIR}
 # helpers on the engine side (all data comes through the VFS as memory).
 target_compile_definitions(alamo_miniaudio PUBLIC MA_NO_FLAC MA_NO_ENCODING MA_NO_GENERATION)
 target_compile_features(alamo_miniaudio PRIVATE cxx_std_20)
+# tst1: vendored, built without alamo_engine_flags (/fp:precise), so the shared PCH (ALAMO_PCH, on without the compiler
+# cache) does not fit it: MSVC warned C4651 ('/D_M_FP_PRECISE' specified for precompiled header) on every fresh compile.
+set_property(TARGET alamo_miniaudio PROPERTY DISABLE_PRECOMPILE_HEADERS ON)
 if(MSVC)
   target_compile_options(alamo_miniaudio PRIVATE /W0)
 else()
@@ -59,7 +62,7 @@ if(TARGET alamo_lua)
 endif()
 
 add_executable(alamo_audio_tests tests/test_audio.cpp)
-target_link_libraries(alamo_audio_tests PRIVATE alamo_audio)
+target_link_libraries(alamo_audio_tests PRIVATE alamo_audio alamo_test_support)
 # Coverage reports (XML fields, sample resolution, decode sample) go to <project>/logs/audio_*.txt.
 target_compile_definitions(alamo_audio_tests PRIVATE "ALAMO_AUDIO_LOG_DIR=\"${PROJECT_SOURCE_DIR}/logs\"")
 add_test(NAME alamo_audio_tests COMMAND alamo_audio_tests)
@@ -67,7 +70,18 @@ set_tests_properties(alamo_audio_tests PROPERTIES TIMEOUT 300)
 
 # Game-host layer: ambience (weather / map), conversations, GameAudio event hooks, Lua bridge via GameAudio.
 add_executable(alamo_audio_game_tests tests/test_game_audio.cpp)
-target_link_libraries(alamo_audio_game_tests PRIVATE alamo_audio)
+target_link_libraries(alamo_audio_game_tests PRIVATE alamo_audio alamo_test_support)
 target_compile_definitions(alamo_audio_game_tests PRIVATE "ALAMO_AUDIO_LOG_DIR=\"${PROJECT_SOURCE_DIR}/logs\"")
 add_test(NAME alamo_audio_game_tests COMMAND alamo_audio_game_tests)
 set_tests_properties(alamo_audio_game_tests PROPERTIES TIMEOUT 300)
+
+# ums0 t05: shader_files_from_vfs and default_sfx_megs on the VFS layers equal the pre-ums0 code on the reference
+# mods (data-driven; skip code 77 without ALAMO_FOC_DATA). Needs the materials module for the shader half.
+if(TARGET alamo_materials)
+  add_executable(alamo_audio_layer_equivalence_tests tests/test_layer_equivalence.cpp)
+  target_link_libraries(alamo_audio_layer_equivalence_tests PRIVATE alamo_audio alamo_materials alamo_test_support)
+  add_test(NAME alamo_audio_layer_equivalence_tests COMMAND alamo_audio_layer_equivalence_tests)
+  set_tests_properties(alamo_audio_layer_equivalence_tests PROPERTIES TIMEOUT 300 SKIP_RETURN_CODE 77)
+else()
+  message(STATUS "alamo_audio_layer_equivalence_tests not built: needs the materials module")
+endif()

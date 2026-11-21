@@ -34,6 +34,8 @@ Runs on the AI player's first T7 slot after the mode starts, not at mode creatio
 | Execution slot 6 (0x526120) | creates `LandExecutionPathFinderClass` (zone graph) and runs Recompute_All_Pairs once; next recompute staggered per player (PHASE2_ANSWERS §11). Then starts the free store (slot 0xa8 → script start, §4). [H] | no path finder (only modes 0 and 1 create one); free store start. [H] |
 | Template init | picks the mode's template list from AIPlayerType `Templates/Land` or `/Space` (shipped: `Test_Land`, `Test_Space`). [H] | same |
 
+Space skirmish (skai t22, 2026-11-16): the start stations are missing from the threat grid for the whole battle, so `DistanceToNearest*` starbase tokens answer 1e18 until an upgrade; the commit cadence, goal re-evaluation and hysteresis, and what a dying plan thread does to its goal: SKAI_T22_SPACE_AI_RE.md.
+
 **Tactical credit transfer (land only)** [H code; M field names]
 - At land slot 6 (0x6b87e0): if the mode under the land mode in the GMM stack is **galactic** (campaign battle) and the AI player is not human, `0x612b00` runs on the **galactic** context's budget: for each budget category, `take = min(allowance(+0x5c) × available(+0x44), available)` when both are positive; subtract `take` from the category's available and pool; `Σtake` becomes the player's credits, and `credits − Σtake` is saved at budget +0x88 (flag +0x84).
 - At land slot 7 (battle end, 0x6b8860 → 0x614a70): player credits = saved; then `Add_Credits(leftover − released(+0x8c), aiGain=true)` — so tactical leftovers go back through `Add_Credits`, which multiplies positive AI gains by `Credit_Multiplier` (0x27f370) [H; the multiplication of returned leftovers is a quirk to keep].
@@ -182,7 +184,7 @@ Side tables kept by the same admission path [H code, M purpose]:
 - 0x4d3070: visible objects without a build pad that this faction can use (0x372c10) — candidate garrisons [L].
 
 ### 5.2 Removal [H]
-Object destroyed or owner changed (signals), or taken by a task force: erase from the map, decrement the per-type counter, unsubscribe (0x4d5000). Plan end and `Release_Unit` / `Release_Forces` re-admit units (AI_GALACTIC §1.9.4).
+Object destroyed or owner changed (signals), or taken by a task force: erase from the map, decrement the per-type counter, unsubscribe (0x4d5000). Plan end and `Release_Unit` / `Release_Forces` re-admit units (AI_GALACTIC §1.9.4). **Corrected (SKAI_T22_SPACE_AI_RE Part 5.2):** a `Produce_Force` hand-over does not erase the entry in land or space (store +0x48 = 0): the task-force member stays on the store, reserved by its plan, so release only clears the reservation.
 
 ### 5.3 Service cadence and order (0x4d5a70, every Execution service = 3 frames) [H]
 - `now = (float)F × (1/30)` seconds of mode time; `FreeStoreService()` (the script's `main` loop: one call per resume) runs when `now − LastService > ServiceRate`; `On_Unit_Service(unit)` runs for each free-store entry **in the map's list order** whose entry field +0x30 is 0 (+0x30 = the owning PotentialPlan, not the `Lock_Current_Orders` lock; the loop has no lock test: A1_READINGS §28), when `now − LastUnitService > UnitServiceRate`. Both stamps start at 0, so both fire on the first service with now > rate.
@@ -523,7 +525,9 @@ retail posts it from the death / removal signal (before the plan runs again).
   otherwise it returns **nil**.
 - 0x570a50 returns false (so nil, no block) for every gate refusal: no object, argument count ≠ 2, name not a
   string / unknown, the unit lacks the ability (0x3986b0), not ready (0x39bbd0), `Can_Activate` (0x39b480(obj, t, 1))
-  fails, wrong argument type, "not hooked up to special ability logic", dead target object.
+  fails, wrong argument type, "not hooked up to special ability logic", dead target object. Of these, the count,
+  name, argument-type and "not hooked up" refusals are script errors that also end the script (cu8k t10,
+  CU8K_T04_COORDINATOR_TRACES "Which check ends the script"); a dead target object is a warning.
 - After the gates it builds and executes the command at once. Its return value then depends on the ability family
   (case lists from the second switch, decimal ids of ABILITIES_HARDPOINTS §2.1):
 
@@ -535,7 +539,7 @@ retail posts it from the death / removal signal (before the plan runs again).
 | 50 67 71 73 74 (position) | 57-style: spawns `Dummy_Barrage_Target` at the position (0x29f810), then 0x429da0 / 0x429960 | **always** once executed |
 | 1 3 7 9 11 29 32 33 39 40 43 48 52 54 56 60 62 63 65 68 69 70 (none / bool) | 43 | **never** (nil even on success) |
 | 14 23 24 25 35 36 38 44 46 49 57 61 72 | 43 with **no** position (zeroed) | never |
-| 5 26 28 42 (position), 6 10 12 (optional target), 19 (object) | 43 | never |
+| 5 26 28 42 (position), 6 10 12 (a bool, value ignored; corrected cu8k t10), 19 (object) | 43 | never |
 
   Correction for ABILITIES_HARDPOINTS §2.9 (applied there 2026-11-02): the "target position (command 57,
   `Dummy_Barrage_Target`)" row is ids 50, 67, 71, 73, 74, not 14, 23, … 72; those take command 43 with no
@@ -568,6 +572,8 @@ So a block that the ability **refused after the gates** (only possible for DEPLO
 a block regardless) **stays pending until the unit gets a new order (0xb), any ability on it ends (0x29) or it
 dies (0x10)**. An object-target block whose pending ability never fires (target died before the unit got in range)
 likewise waits for one of the three [M: the pending-ability clear path on target death was not traced].
+
+**skai t19 (2026-11-16), see `docs/re/SKAI_T19_MDU_DEPLOY_BLOCK.md` Q1**: the TARGETING stop below is on the **off** path only; on = leave every coordinator, adopt (arrived position-block formation, no plan), then `Deploy(true)`. Locomotor vf +0x2b0 is the hyperspace-state test (Walk 0x42c640), not "moving". [H]
 
 **3. DEPLOY and 0x29** [H]. Only the Walk locomotor implements deploy (locomotor vf +0x118 = 0x61d300 in
 `WalkLocomotorBehaviorClass`; every other locomotor class has the empty 0x1fa90). FoC deployers (the three Mobile
@@ -732,12 +738,95 @@ from retail:
     3. θ = the player's reinforcement entry facing in degrees (mode +0x288, 12-byte records indexed by player +0x48, field +8). Start direction u = (−cos θ, −sin θ).
     4. Up to 10 tries: P = T + R·u, x and y each clamped into the playable box (mode vf 0x208: centre ± half extents), z = 0. Test `SpaceMode` vf80 0x4d6fd0(player, P, type, force 0) (TACTICAL_GAPS §4.2: rejected when P is fogged for the player (0x35f3b0, force 1, so the AI's own fog counts), inside a non-allied prevention radius, or outside the playable box; then the occupancy sweep from P − `Space_Reinforcement_Collision_Check_Distance` (FoC 200) × (cos θ, sin θ) to P over frames [now, now + 115] on the type's `Space_Layer` (default 4) and layer 8). Pass → spawn. With R = 0 only this one try is made. Otherwise rotate u by **+36°** (x' = x·cos36 − y·sin36, y' = x·sin36 + y·cos36) and retry.
     5. All tries failed → R += **500** (the next poll tries the next ring).
-    6. Spawn: 0x2bf2d0(GOM, unit, P, player) (hyperspace arrival), subscribe to its arrival signal 0x19, +0x78 += 1, pop the entry, then reset R to 1000 (T inside a prevention radius) or 0. **At most one unit per call.**
-  - Arrival (signal 0x19, 0x723ac0): +0x78 −= 1, and the unit joins the TF (TF Lua event).
+    6. Spawn: 0x2bf2d0(GOM, unit, P, player) (hyperspace arrival, §7.4.1), subscribe to its arrival signal 0x19, +0x78 += 1, pop the entry, then reset R to 1000 (T inside a prevention radius) or 0. **At most one unit per call.** When the status's owner is not a task force, the spawned unit is also taken off its owner's AI free store at once (free store vf+0xa0, the removal) [H 0x722e80].
+  - Arrival (signal 0x19, 0x723ac0; details §7.4.1): +0x78 −= 1, and the unit joins the TF (TF Lua event).
+
+#### 7.4.1 Space reinforcement spawn and arrival time (aitac t05 RE, 2026-11-19) [H unless tagged]
+
+**What 0x2bf2d0(GOM, id, P, player) creates.**
+- Orientation: the player's reinforcement entry record (mode +0x288, 12 bytes per player index +0x48), the same record
+  whose field +8 gives θ in step 3.
+- **Skirmish** (no galactic parent mode): `id` names a type. In skirmish (0x28afb0) the player's pool must hold it
+  (0x2ad0a0 ≠ −1), else nothing is spawned. Then by the type's team fields:
+  - a plain unit: created at (P.x, P.y, 0) (0x29f810);
+  - `Company_Units` (+0x960): the company is built by 0x2bfdd0 at P;
+  - `Squadron_Units` (+0x978 list, count +0x980 ≥ 1): each member is created at a free spot found within **2500** of P
+    (0x2a9670; P itself when the search returns the zero vector), then a team container is made from them (0x2a5a60).
+  - The pool entry is consumed afterwards (0x2862b0(player, type)) [M: name].
+- **Campaign battle**: `id` is a galactic object id in the player's reinforcement list (galactic mode +0x40 by player);
+  the list slot is set to 0x3FFFFF (used) and the galactic object is spawned by kind (plain, transport-carried company,
+  or fleet: every member placed near P with the same 2500 search, then a container). Each created object's parent id
+  (obj +0x54) := the galactic object's id (+0x50), so it keeps its galactic link.
+- Every created object is registered (0x29bcd0) [M: name].
+- Then the arriving object's locomotor (for a team, the container's) gets **vf +0x290 (vf82) with argument 1**: the
+  reinforcement form of the hyperspace arrival (below).
+- Last, `Apply_Elevated_Vulnerability` (0x3a8550) on the object, or on each member of a TEAM, with the space pair
+  (MCX4_T10_RE_ANSWERS §16a: FoC −3.0 for 5 s).
+
+**vf82(1), the reinforcement arrival start** (SimpleSpace 0x6251d0, Fighter 0x5cb020, TeamLocomotor 0x62f800):
+- SimpleSpace and Fighter: suspend the locomotor (vf +0x200; SimpleSpace also leaves its movement coordinator,
+  0x426d50); locomotor pack +0x4c := 0; **pack +0x2b2 := 1** (the "reinforcement arrival" flag); attach the
+  **INVULNERABLE** behaviour by name (0x4c3520 → `Add_Behavior` 0x38c570, duration 0); destination (pack +0x2c..+0x34)
+  := the spawn position; start point and velocity from vf +0x2a0 (the point back along the arrival line), teleport there
+  (0x3a8f90), velocity stored (pack +0x14..+0x1c); **timer pack +0x5c := 0**; model hidden and obj +0x3a2 bit 0 set
+  (unless sync-test playback 0x140b1574e); **state := 4 directly**; SimpleSpace only: registered with the mode's
+  vf +0x238 manager (0x53ae20) [M: purpose]; movement lock +1 (0x3a8e50(obj, 1)).
+- TeamLocomotor (squadrons): leave the coordinator, lock +1, suspend, then vf82(1) on every member's locomotor.
+- **Difference from the start-fleet arrival** (CU8K_T03_T08_T09_RE §1.9, vf82(0)): vf82(0) only suspends and sets state
+  5; state 5 (0x627590) then widens the arrival min / max globals and sets timer −1, and state 4's first frame computes
+  a distance-based start timer clamp(`int(1, 4)` + 5·int(4f), 0, 24) with **one synced draw**. vf82(1) skips state 5:
+  the timer starts at 0, **no draw**, the min / max globals are not widened, and only this path sets +0x2b2 and attaches
+  INVULNERABLE. The rest of the state 4 machine (L1_S4_REMAINING §3.4) is shared.
+
+**State 4 per update (SimpleSpace 0x626c80) with +0x2b2 set** [H]:
+- While the story hold flag 0x140b27d5f is set the timer does not advance (model kept hidden).
+- timer += 1 each update; position = position + velocity × profile(timer) (table 0x140b27a10).
+- timer < 25: hidden, REVEAL suspended. 25..34: kept hidden because +0x2b2 is set.
+- **timer = 35**: arrival SFX (faction +0x6b0); shown, unless the unit is not allied to the local player, has REVEAL and
+  is fogged for the local player with fog active. Then, only with +0x2b2: 0x3a8bd0(obj, 6), 0x3a8b70(obj, zero vector),
+  0x3a8ba0(obj, 115 / (4 × FPS)), 0x39f2a0(obj) [L: a fade-in / scale-up effect, not read], and **the INVULNERABLE
+  behaviour is detached** (0x3a54c0).
+- timer = 120: REVEAL resumed.
+- timer reaches **150** (> 149) and pack +0x260 == 1 (the locomotor is still suspended [M]): finish 0x624dc0.
+
+**Finish 0x624dc0** [H]: snap to the destination, pack +0x2b2 := 0, state 0, orientation restored, movement lock
+released, locomotor resumed (vf +0x208) and idle (vf +0x138(0)), arrival min / max globals reset (0x140b27bbc :=
+FLT_MAX, 0x140b27bc0 := 0), **signal 0x19 raised on the object** (no data), leave the coordinator, a new coordinator
+with a Move_To to its own position (kind 1, mask 0x3f), and REVEAL pack +0x56 := 1.
+- A squadron: each fighter finishes its own arrival; the container's TeamLocomotor update (0x630210 → 0x630390) waits
+  until no member locomotor has pack +0x260 set, then lock −1, resume, **signal 0x19 on the container**, new
+  coordinator + Move_To its own position. The block status listens on the container (the object 0x2bf2d0 returned), so
+  for a squadron 0x19 comes once, after the last fighter [H code; M for the Fighter state-4 timing, not read].
+
+**Arrival handler 0x723ac0** (SignalListener at status +0x30; it does not test the signal number and does not
+unsubscribe): in-flight count +0x78 −= 1; then
+- owner is a TaskForce: the unit is wrapped with the TF's player (0x5751d0), the TF's `Add_Force` (vf +0xa0) gets a
+  one-entry list, and the unit is removed from the plan player's free store (vf +0xa0, the removal 0x4d5000 / space
+  override);
+- otherwise: the wrapped unit is appended to the status's result list (+0x40) and removed from its owner's AI free store.
+
+**When 0x19 fires.** The spawn happens inside a Lua poll (`IsFinished`) at frame S. The timer counts locomotor updates
+from 0, so 0x19 is raised on the **150th state-4 update after the spawn**, i.e. frame S + 150 when the first update is on
+frame S + 1 [H count; M one-frame alignment against the script service order], longer while the story hold flag is set.
+
+**Before arrival** [H unless tagged]:
+- The unit exists in the object manager from frame S, is hidden (obj +0x3a2 bit 0, read by audio only,
+  STORYB_T17_HIDDEN_UNITS §1) and is **still a valid target**: no targeting code tests the hidden bit.
+- It takes no weapon or area damage until timer 35 (INVULNERABLE, OBJECT_SCRIPTS §10.2). The elevated vulnerability
+  (4× damage, 5 s) is applied at the spawn, so about 3.8 s of it remain after timer 35 [M: its timer counts from the
+  spawn frame].
+- It moves only by the arrival profile; its locomotor is suspended and movement-locked, so orders do not move it.
+- It is **not** in the task force (+0x78 counts it as in flight) until 0x19. For a TF owner nothing takes it off the
+  free store before 0x19, so it sits there if the object-add path admitted it (§5.1) [H for the removal points; M for
+  the admission and whether the free store's Lua can order it meanwhile].
   - `IsFinished` = timed out (0 ≤ +0x74 ≤ now) **or** (no pending entry left and +0x78 < 1). `Result` (vf20 0x723d00) = true when every pending entry was placed.
   - Lua side: `QuickReinforce` (PGTaskForce.lua) in space calls `BlockOnCommand(tf.Reinforce(tf), 3, Anti_Idle_Taskforce)` (then the escort TF, then fall-backs), so each attempt has 3 s of polls: rings 0, 500, 1000, … around the target until a ring point is visible to the AI, outside enemy prevention radii and free of reservations.
   - **Why a port rejects many AI space drops:** issuing the drop exactly at T (the land model) fails whenever T is fogged for the AI, inside an enemy station's or other non-allied object's `Reinforcement_Prevention_Radius`, outside the playable box, or on reserved space. Vanilla never issues an invalid drop: it tries the ring points in order and only spawns at a point that passes vf80. Space has no reinforcement points (`Use_Reinforcement_Points` is the land rule).
 - `QuickReinforce` (Lua) is the only AI caller pattern; there is no separate engine "AI reinforce" logic.
+- Optional task forces and queue order (skai t17, `SKAI_T17_SPACE_BUILD_RE.md`). A plan task force that the solve gave no
+  selection, and that lacks `TaskForceRequired`, is not created: no Lua global, no `<TF>_Thread`. So a
+  `Secure_Build_Pad_Space` EscortForce with no unit never reaches QuickReinforce's `ScriptExit`. `Produce_Force` queues in
+  team order of the TaskForce definition, not pick order.
 
 ### 7.5 Building structures (land) [H]
 - Build plans name under-construction types (`UC_*`) in their task force; the PotentialPlan's TacticalBuild marshaller reserves (pad, type) pairs (AI_GALACTIC §1.9.3).
@@ -917,6 +1006,10 @@ GuardForce loops `Escort(GuardForce, MainForce)` forever. The plan ends, and eve
    higher-effective-desire Tactical_Targeted proposals take the category's slots. `Time_Limit` (30 s) does **not** end
    a running tactical plan: it is only an activation test (`0 < AllowedTime < ETA`), and the AllowedTime < ETA
    maintenance drop is galactic-only.
+   The re-test in full is in SKAI_T15_PLAN_RETEST (skai t15). It runs at every commit, on the kept, old-candidate and
+   maintenance paths. It counts the PP's stored selection: `Produce_Force` leaves that selection as it is, and a dead unit
+   still counts at full power. The `tf=?` count-0 PEXIT that a drop leaves comes from `Release_Forces(1.0)` raising
+   `No_Units_Remaining` synchronously.
 4. **Plan events.** `Default_No_Units_Remaining` and `Default_Original_Target_Owner_Changed` call `ScriptExit()`;
    `Default_Original_Target_Destroyed` does not (the block's signal ends the thread).
 5. **Other plans.** `Purge_Goals` from `BurnUnitsLand` (and the tech plans) ends every other running plan.
@@ -1016,9 +1109,63 @@ The two games differ here, and this is where the end game is decided.
 There is no engine-side "AI ability brain" in tactical: abilities are triggered by Lua (plans, PGEvents handlers, free store) and by the unit's own autofire (TACTICAL_COMBAT §5). [H]
 - `Try_Ability(thing, name [, target])` = `Use_Ability_If_Able` after a chance gate that always passes (`GetChanceAllowed` returns 100 for all difficulties; `Chance(seed, 100)` is true for any seed ≥ 0). For a unit it checks `Has_Ability`, `Is_Ability_Ready` and not `Is_Ability_Active`; a task force skips the checks. No RNG.
 - Event-driven uses (PGEvents.lua): on `Target_In_Range` → Power_To_Weapons, SPREAD_OUT, BARRAGE, BUZZ_DROIDS, FULL_SALVO, STIM_PACK (hull > 0.5), weapon switch; on `Unit_Damaged` → INVULNERABILITY (shield < 0.2), Defend (shield < 0.8), SENSOR_JAMMING / MISSILE_SHIELD / LASER_DEFENSE by incoming projectile type, DEPLOY_TROOPERS when not good vs the attacker, and the flee kit (Turbo, JET_PACK, SPRINT, SPOILER_LOCK, STEALTH, FORCE_CLOAK, EJECT_VEHICLE_THIEF, REPLENISH_WINGMEN). Cancelled SPOILER_LOCK / Turbo are re-enabled on `Unit_Ability_Ready`.
-- `Try_Weapon_Switch`: fixed rules for T4B, Bossk, Destroyer Droid, MAL (MAL uses `GameRandom.Get_Float() > 0.8`, a synced draw evaluated only after the category test passes), else `Should_Switch_Weapons(target)`.
+- `Try_Weapon_Switch`: fixed rules for T4B, Bossk, Destroyer Droid, MAL (MAL uses `GameRandom.Get_Float() > 0.8`, a synced draw evaluated only after the category test passes), else `Should_Switch_Weapons(target)` (body: §8.1).
 - Hero managers (PalpatineManager, *Assists, Droids…) use `ConsiderDivertAndAOE` → `Find_Best_Local_Threat_Center` (synced draws) and `FindTarget`.
 - Special weapons and superweapons: `Fire_Special_Weapon`, `Fire_Orbital_Bombardment`, `Bombing_Run`, Death Star / ion cannon / hypervelocity plans (GroundToSpace*, FireDeathStar).
+
+### 8.1 `GameObjectWrapper.Should_Switch_Weapons(target)` (0x580c50) (aitac t06 RE, 2026-11-19) [H unless tagged]
+
+Registered in the GameObjectWrapper method table (0x56d4c0). It answers "would another entry of my `Projectile_Types`
+list do more damage to the target's current defence layer than the entry I am firing now". Steps, in this order:
+
+1. **No object** behind the wrapper (wrapper +0x60 null): returns no value (Lua nil), no error.
+2. **Self is a TEAM container** (TEAM slot byte obj +0x348 ≠ 0xFF): self is replaced by the team's first member (team
+   pack obj +0x110 → list +0x10, count +0x18; 0x4ec820). An empty team returns **false**.
+3. **Fewer than two projectile types** on self's type (`Projectile_Types` resolved list, type +0xc40 / count +0xc48 < 2):
+   returns **false**. This comes **before** the argument checks, so such a unit returns false for any call, even with no
+   argument or a wrong one, and logs nothing.
+4. **Argument count** ≠ 1: error "GameObjectWrapper::Should_Switch_Weapons -- invalid number of parameters.  Expected
+   1, got %d." and no value.
+5. **Argument type**: a GameObjectWrapper or an AITargetLocationWrapper. Anything else: error "... -- invalid type for
+   parameter 1.  Expected object or ai target.", no value. A wrapper with no object, or an AI target with no location
+   (+0x38): error "... -- target is already dead.", no value. An AI target whose location gives no game object
+   (location vf +0x30; region targets always give none, §3.2): error "... -- ai target %s does not represent a game
+   object (requried for this function)." with the target's name, no value.
+6. **Target is a TEAM container**: replaced by its first member; an empty team returns **false**.
+7. **Defence layer.** s = the target's shield fraction (0x3976f0: 0 without a SHIELDED pack, else current / max
+   clamped to 0..1).
+   - s ≤ 0: armour A = target type `Armor_Type` (+0x438); a projectile counts only if `Projectile_Does_Hitpoint_Damage`
+     (+0x47) is true.
+   - s > 0: A = `Shield_Armor_Type` (+0x43c); a projectile counts only if `Projectile_Does_Shield_Damage` (+0x45) is true.
+8. **Current entry.** P = self type's `Projectile_Types[i]` with i = obj +0x324 (the current weapon index; SWAP_WEAPONS
+   flips it, TACTICAL_COMBAT §3.1.1). The index is read from the **wrapper's own object**
+   (the container when self was a team, read at 0x580f97) while the list is the resolved member's type. Index out of
+   range: no value (nil).
+   - cur = `Projectile_Damage` (P +0x474) × `Damage_To_Armor_Mod`[P `Damage_Type` (+0x440)][A] (0x2c7d80: 1.0 for an
+     unknown type or a negative cell, TACTICAL_COMBAT §3.2).
+   - cur = 0 when P does not count for the layer (step 7).
+9. **Alternatives**, j = 0 … count − 1 in list order, skipping j equal to the resolved self's obj +0x324, null entries and
+   entries that do not count for the layer:
+   - alt = max(`Projectile_Damage` +0x474, `Projectile_Blast_Area_Damage` +0x47c) × `Damage_To_Armor_Mod`[its
+     `Damage_Type`][A];
+   - **cur < alt (strict)** → return **true** at once.
+10. No alternative beats cur → **false**.
+
+What it does not read [H]: no SWAP_WEAPONS behaviour or ability check (only the list length), no range or distance, no
+target category, priority set or `Is_Good_Against` table, no health of either side, no fire rate or pulse count, and
+**no random draw**.
+
+Notes:
+- The current entry is scored on `Projectile_Damage` alone, the alternatives on the larger of direct and blast-area
+  damage. So a current entry with blast damage can lose to an identical alternative [H formula; M whether shipped data
+  has such pairs].
+- Equal scores give false (no switch).
+- For a team container the "current" index comes from the container's +0x324 (0 from the GameObject ctor unless
+  something swapped the container itself) and the skip in step 9 uses the member's +0x324; for an ordinary unit both are
+  the same object [H reads; M whether they ever differ in play].
+- Port: `Should_Switch_Weapons` in `engine/lua/src/bind_ai_tactical.cpp` (a stub returning false) should follow these
+  steps; the score needs the projectile type's damage, blast damage, damage type and the two layer flags, and the
+  target's shield fraction and two armour types.
 
 ---
 
@@ -1069,12 +1216,12 @@ Lua short-circuit order matters: `(GameRandom.Get_Float() > 0.5) and Try_Ability
 3. LandMovementBlockStatus / SpaceMovementBlockStatus completion rules (arrival radius, what counts as finished for attack-move and guard), and `Explore_Area`, `Prepare_Ambush`, `Bombing_Run`, `Fire_Special_Weapon`, `Find_Closest_Enemy` bodies. **`Prepare_Ambush` done (S7 t18, §7.3.1); empty-task-force `Move_To` / position done (S7 t17, §7.3.2); land `Fire_Special_Weapon` done (s78f t04, 2026-11-03, §7.3.4; [M] left: the unit AI target's position getter and the hint-zone centre z).** Still open from §7.3.1/§7.3.2: the mode box vf +0x1f8 vs the playable box vf +0x208; the lost 5th signal id of the ambush member subscription [L: 0x1a]; ~~the meaning of the type flags +0x13 / +0x14 / bit 0x37 in the No_Units_Remaining test~~ (done 2026-11-02, §7.3.3: named hero, generic hero, Land LOBBING_SUPERWEAPON; +0x1e = Is_Special_Weapon_In_Space); whether a plan can start with a 0-unit optional team. Still open from §7.3.3: whether an object-target ability's pending entry is cleared when its target dies (else its block waits for 0xb / 0x10 / any 0x29); the meaning of locomotor vf +0x2b0 in the DEPLOY gate.
 4. Reinforcement landing positions (0x6eaf60) and the land ReinforceBlockStatus finish/fail rules. (Space resolved by refixf t06, §7.4: ring search in SpaceReinforceBlockStatus; 0x2b03e0 is the population-room test.)
 5. Free-store admission bit meanings (type bitfield +0x790 bits 0x20, 0x5b, 0x5f; obj +0x2b0/+0xf8; mode +0x38 set) and the +0x30 lock field writer; `Lua_Is_Object_On_Free_Store` / `Get_Object_Count`. **+0x30 writers/readers and the two Lua methods: done, A1_READINGS §28** (+0x30 = owning PP; `Lock_Current_Orders` is obj +0x3a8).
-6. `Project_By_Unit_Range`, `Get_Self_Threat_Max/Sum`, `Get_AI_Power_Vs_Unit`, `Should_Switch_Weapons`, `Is_Good_Against`, `Get_Time_Till_Dead` (used by every land plan and PGEvents).
+6. `Project_By_Unit_Range`, `Get_Self_Threat_Max/Sum`, `Get_AI_Power_Vs_Unit`, `Should_Switch_Weapons`, `Is_Good_Against`, `Get_Time_Till_Dead` (used by every land plan and PGEvents). **`Should_Switch_Weapons` done (aitac t06, 2026-11-19, §8.1).**
 7. AIBuildTask tactical path (FREESTORE_ALLOC vs purchase vs HIJACK_UNIT ordering) — confirm with a probe. ~~Skirmish purchase into the reinforcement pool vs spawn at the factory~~: pool, never at the factory (SKIRMISH_SETUP §3.1, q6 t19) [H code].
 8. Event code ↔ name table (shared with AI_GALACTIC open item 8) — needed to dispatch `Unit_Damaged`, `Target_In_Range`, etc. in the right order relative to combat.
 9. Confirm `Has_Space_Evaluator` on own type at space init vs representative type at runtime (§3.1) and the conflict-record attacker/defender offsets (§1.2).
 10. Probe: a skirmish AI-vs-AI land and space run logging per-frame synced-RNG counts and AI orders would validate §2, §5.3 and §10 (Gabriel launches; kit under `tools/probe_mod/`).
-11. From §7.7 (q6, 2026-11-04): confirm on the original that a 1-unit `Destroy_Structure` task force is what the AI sends against a command centre with no defenders, and that MainForce grows only while the escort list is unmet [M]; whether a released unit keeps its current attack order (no order call was found on the release path) [M]; `Number_Resource_Structures_Land` / `TacticalBuiltStructureCount` semantics for structures under construction (they gate TR's `Is_Initial_Skirmish_State_Established`).
+11. From §7.7 (q6, 2026-11-04): confirm on the original that a 1-unit `Destroy_Structure` task force is what the AI sends against a command centre with no defenders, and that MainForce grows only while the escort list is unmet [M]; whether a released unit keeps its current attack order (no order call was found on the release path) [M]; `Number_Resource_Structures_Land` / `TacticalBuiltStructureCount` semantics for structures under construction (they gate TR's `Is_Initial_Skirmish_State_Established`): **answered 2026-11-12, they count from the build start** (SKAI_T06_LAND_RUNS §7).
 12. Probe (Gabriel): a TR AI-vs-AI `_MP_LAND_BLOOD_GULCH` run on the original, logging how long the last CC survives, would show whether TR's slow end (§7.7.6) is retail behaviour.
 
 ---

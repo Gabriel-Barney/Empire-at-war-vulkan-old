@@ -5,8 +5,11 @@
 // game type, else Kuat on Space, else row 0), the map remembered on every selection change, that Start sends the selected
 // row's map id through the filtered / sorted view, the preview image with the numbered start markers, the hidden description
 // box and the colour combos (items, default = slot index, the slot-order clash rule, colours carried in StartSkirmish).
-// Data-free.
+// ccpgt t02: the third game type, Capture Control Points (rows sorted by text, land maps with the CONTROL tag only, the land
+// map memory shared with Land, game type 4 in StartSkirmish). Data-free.
 #include "test_gui_screens_common.hpp"
+
+#include "alamo/data/game_database.hpp"  // mcx4 t19: CampaignDef
 
 namespace test_gui_screens_t {
 
@@ -40,14 +43,41 @@ BEGIN
     COMBOBOX        IDC_PLAYER_COLOR_0,520,68,75,216,CBS_DROPDOWN | WS_VSCROLL | WS_TABSTOP
     COMBOBOX        IDC_PLAYER_COLOR_1,520,100,75,216,CBS_DROPDOWN | WS_VSCROLL | WS_TABSTOP
     COMBOBOX        IDC_PLAYER_COLOR_2,520,132,75,216,CBS_DROPDOWN | WS_VSCROLL | WS_TABSTOP
+    COMBOBOX        IDC_PLAYER_NAME_0,410,300,100,128,CBS_DROPDOWNLIST | WS_TABSTOP
+    COMBOBOX        IDC_PLAYER_NAME_1,410,320,100,128,CBS_DROPDOWNLIST | WS_TABSTOP
+    COMBOBOX        IDC_PLAYER_NAME_2,410,340,100,128,CBS_DROPDOWNLIST | WS_TABSTOP
+    COMBOBOX        IDC_PLAYER_FACTION_0,300,300,100,128,CBS_DROPDOWNLIST | WS_TABSTOP
+    COMBOBOX        IDC_PLAYER_FACTION_1,300,320,100,128,CBS_DROPDOWNLIST | WS_TABSTOP
+    COMBOBOX        IDC_PLAYER_FACTION_2,300,340,100,128,CBS_DROPDOWNLIST | WS_TABSTOP
+    PUSHBUTTON      "x",IDC_SELECT_OPTIONS,240,398,150,24
+END
+
+IDD_INTERNET_STAGING_DIALOG_ADVANCED_SKIRMISH_OPTIONS DIALOGEX 0, 0, 598, 377
+STYLE DS_SETFONT | DS_MODALFRAME | DS_CENTER | WS_POPUP
+CAPTION "Dialog"
+FONT 8, "Arial", 400, 0, 0x0
+BEGIN
+    PUSHBUTTON      "x",IDC_CANCEL_BUTTON,24,333,160,24
+    PUSHBUTTON      "x",IDC_BUTTON_ACCEPT,410,333,160,24
+    CONTROL         "",IDC_SKIRMISH_CREDITS_SLIDER,"msctls_trackbar32",TBS_BOTH | TBS_NOTICKS | WS_TABSTOP,134,202,322,14
+    LTEXT           "0",IDC_SKIRMISH_CREDITS_VALUE,465,204,87,18
+    PUSHBUTTON      "x",IDC_DEFAULTS_BUTTON,217,333,160,24
+    CONTROL         "x",IDC_ALLOW_HEROES,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,37,54,329,16
+    CONTROL         "x",IDC_ALLOW_STARTING_UNIT_PURCHASE,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,37,85,329,16
+    CONTROL         "x",IDC_ALLOW_SUPER_WEAPONS,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,37,114,329,16
+    CONTROL         "x",IDC_PRE_BUILT_BASE,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,37,145,329,16
+    COMBOBOX        IDC_WIN_CONDITION_COMBO,134,261,322,95,CBS_DROPDOWN | CBS_SORT | WS_VSCROLL | WS_TABSTOP
 END
 )RC";
+constexpr const char* kSkirmishOptions = "IDD_INTERNET_STAGING_DIALOG_ADVANCED_SKIRMISH_OPTIONS";
 
 constexpr const char* kSingle = "IDD_SINGLE_PLAYER_GAMES_MENU_DIALOG";
 constexpr const char* kStaging = "IDD_SKIRMISH_STAGING_DIALOG";
 
-SkirmishMapInfo map_row(std::string id, std::string key, uint32_t players, bool space, bool custom, std::u32string label = {}) {
+SkirmishMapInfo map_row(std::string id, std::string key, uint32_t players, bool space, bool custom, std::u32string label = {},
+                        bool control = false) {
     SkirmishMapInfo m;
+    m.control = control;
     m.map = std::move(id);
     m.name_key = std::move(key);
     m.players = players;
@@ -82,13 +112,16 @@ struct Rig {
     std::vector<SkirmishMapInfo> maps;
     std::vector<MenuAction> acts;
     std::vector<std::string> previews_asked;  // map ids the preview provider was called with
-    explicit Rig(std::vector<SkirmishMapInfo> m, bool palette = true, bool preview = true) : maps(std::move(m)) {
+    explicit Rig(std::vector<SkirmishMapInfo> m, bool palette = true, bool preview = true,
+                 const std::function<void(MenuProviders&)>& extra = {})
+        : maps(std::move(m)) {
         env.script.merge(kSkirmishRc);
         env.text.add("TEXT_MAP_NAME_KUAT", u"Kuat");
         env.text.add("TEXT_MAP_NAME_ALPHA", u"Alpha");
         env.text.add("TEXT_MAP_NAME_ENDOR", u"Endor");
         env.text.add("TEXT_GAME_TYPE_TEAM_LAND", u"Ground Battle");
         env.text.add("TEXT_GAME_TYPE_TEAM_SPACE", u"Space Battle");
+        env.text.add("TEXT_GAME_TYPE_CAPTURE_CONTROL_POINTS", u"Capture Control Points");
         env.text.add("TEXT_GAME_DESCRIPTION_TEAM_LAND", u"Land desc");
         env.text.add("TEXT_GAME_DESCRIPTION_TEAM_SPACE", u"Space desc");
         MenuProviders p;
@@ -102,11 +135,14 @@ struct Rig {
                 pv.starts = {{0.25f, 0.5f}, {0.75f, 0.5f}, {0.5f, 0.1f}};
                 return pv;
             };
+        if (extra) extra(p);
         fe.init(env.gui, {}, p);
     }
-    void game_type(bool space) {
-        env.gui.find(kStaging)->set_selected("IDC_GAME_TYPE_LIST", space ? 1 : 0);
-        fe.update(std::vector<GuiEvent>{event(GuiEvent::Kind::SelectionChanged, kStaging, "IDC_GAME_TYPE_LIST", space ? 1 : 0)}, InputFrame{}, acts);
+    void game_type(bool space) { set_type(space ? kSkirmishGameSpace : kSkirmishGameLand); }
+    void set_type(int32_t type) {  // selects the row of `type` (the rows are sorted by text)
+        const int32_t row = fe.skirmish_game_type_row(type);
+        env.gui.find(kStaging)->set_selected("IDC_GAME_TYPE_LIST", row);
+        fe.update(std::vector<GuiEvent>{event(GuiEvent::Kind::SelectionChanged, kStaging, "IDC_GAME_TYPE_LIST", row)}, InputFrame{}, acts);
     }
     void colour(int32_t slot, int32_t value) {
         const std::string id = "IDC_PLAYER_COLOR_" + std::to_string(slot);
@@ -159,9 +195,13 @@ void test_skirmish_maps() {
     const GuiDialog* d = rig.env.gui.find(kStaging);
     CHECK(d && d->get("IDC_SELECT_OFFICIAL_MAPS")->visible && d->get("IDC_SELECT_CUSTOM_MAPS")->visible);
 
-    // The game type list (t01): Land, Space from the text database; a first opening is on Land (UI.md 9.7).
-    CHECK(rig.control("IDC_GAME_TYPE_LIST")->items == (std::vector<std::u32string>{U"Ground Battle", U"Space Battle"}));
-    CHECK(!rig.fe.skirmish_space_type() && rig.control("IDC_GAME_TYPE_LIST")->selected == 0);
+    // The game type list (t01, ccpgt t02): Land, Space and Capture Control Points from the text database, sorted by text (LBS_SORT);
+    // a first opening is on Land (UI.md 9.7).
+    CHECK(rig.control("IDC_GAME_TYPE_LIST")->items ==
+          (std::vector<std::u32string>{U"Capture Control Points", U"Ground Battle", U"Space Battle"}));
+    CHECK(rig.fe.skirmish_game_type_row(kSkirmishGameControl) == 0 && rig.fe.skirmish_game_type_row(kSkirmishGameLand) == 1 &&
+          rig.fe.skirmish_game_type_row(kSkirmishGameSpace) == 2 && rig.fe.skirmish_game_type_row(1) == -1);
+    CHECK(!rig.fe.skirmish_space_type() && rig.fe.skirmish_game_type() == kSkirmishGameLand && rig.control("IDC_GAME_TYPE_LIST")->selected == 1);
 
     // Official tab on open, Land type: the land maps by row text; "(N) " + the localised name.
     const std::vector<std::u32string> official_space = {U"(2) TEXT_NO_SUCH_KEY", U"(4) Kuat"};
@@ -184,11 +224,11 @@ void test_skirmish_maps() {
     rig.game_type(false);
     CHECK(selected_of(rig.env.gui) == 6);
 
-    // Space type: only the space maps; nothing remembered for Space yet, so Kuat.
+    // Space type: only the space maps; nothing remembered for Space yet, so row 0 (UI.md 9.7; modc t19: no map by name).
     rig.game_type(true);
-    CHECK(rig.fe.skirmish_space_type() && items_of(rig.env.gui) == official_space && selected_of(rig.env.gui) == 1);
+    CHECK(rig.fe.skirmish_space_type() && items_of(rig.env.gui) == official_space && selected_of(rig.env.gui) == 0);
     CHECK(rig.fe.skirmish_map_row("_mp_space_kuat") == 1 && rig.fe.skirmish_map_row("_MP_LAND_ENDOR") == -1 && rig.fe.skirmish_map_row("nope") == -1);
-    CHECK(rig.start() == "_MP_SPACE_KUAT");
+    CHECK(rig.start() == "_MP_SPACE_ABC");
 
     // UI.md 9.5: the map follows the list selection, not Start. Pick a row on each type without starting; after switching away
     // and back the row picked is selected again.
@@ -212,21 +252,21 @@ void test_skirmish_maps() {
     rig.select(2);
     CHECK(rig.start() == "Data/Art/Maps/Short_Two.ted");
     CHECK(rig.fe.skirmish_map_row("Data/Art/Maps/Short_Two.ted") == 2 && rig.fe.skirmish_map_row("_MP_LAND_ENDOR") == -1);
-    // Space type on the Custom tab: the one custom space map; no Kuat.
+    // Space type on the Custom tab: the one custom space map.
     rig.game_type(true);
     CHECK(items_of(rig.env.gui) == (std::vector<std::u32string>{U"CSPACE"}) && selected_of(rig.env.gui) == 0);
     CHECK(rig.start() == "DATA\\CUSTOMMAPS\\CSPACE.TED");
-    // Back to Official: Space's remembered map is the custom one, not listed here, so Kuat (which is remembered then).
+    // Back to Official: Space's remembered map is the custom one, not listed here, so row 0 (which is remembered then).
     rig.click(kStaging, "IDC_SELECT_OFFICIAL_MAPS");
-    CHECK(!rig.fe.skirmish_custom_tab() && items_of(rig.env.gui) == official_space && selected_of(rig.env.gui) == 1);
+    CHECK(!rig.fe.skirmish_custom_tab() && items_of(rig.env.gui) == official_space && selected_of(rig.env.gui) == 0);
 
     // Closing and reopening the dialog: the Official tab again, on the game type selected last (Space), with its remembered map.
     rig.click(kStaging, "IDC_CANCEL_BUTTON");
     CHECK(rig.fe.top() == kSingle);
     rig.click(kSingle, "IDC_SKIRMISH_GAMES_BUTTON");
     CHECK(rig.fe.top() == kStaging && !rig.fe.skirmish_custom_tab() && rig.fe.skirmish_space_type() && items_of(rig.env.gui) == official_space &&
-          selected_of(rig.env.gui) == 1);
-    CHECK(rig.control("IDC_GAME_TYPE_LIST")->selected == 1);
+          selected_of(rig.env.gui) == 0);
+    CHECK(rig.control("IDC_GAME_TYPE_LIST")->selected == 2);
     rig.select(0);
     // The type is remembered when it is selected, not when a game is started: switch to Land and leave without Start.
     rig.game_type(false);
@@ -234,7 +274,7 @@ void test_skirmish_maps() {
     rig.select(6);
     rig.click(kStaging, "IDC_CANCEL_BUTTON");
     rig.click(kSingle, "IDC_SKIRMISH_GAMES_BUTTON");
-    CHECK(!rig.fe.skirmish_space_type() && selected_of(rig.env.gui) == 6 && rig.control("IDC_GAME_TYPE_LIST")->selected == 0);  // Land again
+    CHECK(!rig.fe.skirmish_space_type() && selected_of(rig.env.gui) == 6 && rig.control("IDC_GAME_TYPE_LIST")->selected == 1);  // Land again
     CHECK(rig.start() == "_MP_LAND_LABELED");
     rig.game_type(true);
     CHECK(selected_of(rig.env.gui) == 0);  // Space's remembered ABC
@@ -264,6 +304,47 @@ void test_skirmish_maps() {
     Rig empty(std::vector<SkirmishMapInfo>{});
     empty.open_staging();
     CHECK(items_of(empty.env.gui).empty() && selected_of(empty.env.gui) == -1 && empty.start().empty());
+}
+
+// ccpgt t02 (UI.md 9.4 / 9.7): Capture Control Points lists only the land maps with the CONTROL tag (never a space map, on either
+// tab), shares the remembered land map with Land (retail's one LastInternetMapLand key), is remembered as the type on reopening,
+// and Start sends game type 4; Land and Space send 2 and 3.
+void test_skirmish_control_points() {
+    Rig rig({map_row("_MP_LAND_ALPHA", "TEXT_MAP_NAME_ALPHA", 2, false, false, {}, true),
+             map_row("_MP_LAND_ENDOR", "TEXT_MAP_NAME_ENDOR", 4, false, false),  // no CONTROL tag
+             map_row("_MP_LAND_TWIN_A", "", 2, false, false, U"Twin", true),
+             map_row("_MP_SPACE_KUAT", "TEXT_MAP_NAME_KUAT", 4, true, false, {}, true),  // a space map is never listed under type 4
+             map_row("MY_CONTROL", "", 2, false, true, {}, true), map_row("MY_PLAIN", "", 2, false, true)});
+    rig.open_staging();
+    auto start_type = [&] {
+        rig.acts.clear();
+        rig.click(kStaging, "IDC_SKIRMISH_START_GAME_BUTTON");
+        return rig.acts.size() == 1 ? rig.acts[0].game_type : -1;
+    };
+    CHECK(rig.fe.skirmish_game_type() == kSkirmishGameLand && items_of(rig.env.gui).size() == 3 && start_type() == kSkirmishGameLand);
+    rig.select(2);  // Land: Twin A (remembered for the land key)
+    rig.set_type(kSkirmishGameControl);
+    CHECK(rig.fe.skirmish_game_type() == kSkirmishGameControl && !rig.fe.skirmish_space_type());
+    CHECK(rig.control("IDC_GAME_TYPE_LIST")->selected == 0);
+    CHECK(items_of(rig.env.gui) == (std::vector<std::u32string>{U"(2) Alpha", U"Twin"}) && selected_of(rig.env.gui) == 1);
+    CHECK(rig.start() == "_MP_LAND_TWIN_A" && start_type() == kSkirmishGameControl);
+    rig.select(0);  // Alpha: the land key now holds Alpha, so Land selects it too
+    rig.game_type(false);
+    CHECK(selected_of(rig.env.gui) == 0 && rig.start() == "_MP_LAND_ALPHA" && start_type() == kSkirmishGameLand);
+    rig.select(1);  // Endor (no CONTROL tag): not listed under type 4, so row 0 there, which becomes the land map
+    rig.set_type(kSkirmishGameControl);
+    CHECK(selected_of(rig.env.gui) == 0 && rig.start() == "_MP_LAND_ALPHA");
+    rig.game_type(true);
+    CHECK(items_of(rig.env.gui) == (std::vector<std::u32string>{U"(4) Kuat"}) && start_type() == kSkirmishGameSpace);
+    rig.set_type(kSkirmishGameControl);
+    // Custom tab: only the custom land map with the tag.
+    rig.click(kStaging, "IDC_SELECT_CUSTOM_MAPS");
+    CHECK(items_of(rig.env.gui) == (std::vector<std::u32string>{U"MY_CONTROL"}) && rig.start() == "MY_CONTROL");
+    // Reopening: on Capture Control Points, the Official tab.
+    rig.click(kStaging, "IDC_CANCEL_BUTTON");
+    rig.click(kSingle, "IDC_SKIRMISH_GAMES_BUTTON");
+    CHECK(rig.fe.skirmish_game_type() == kSkirmishGameControl && rig.control("IDC_GAME_TYPE_LIST")->selected == 0 &&
+          items_of(rig.env.gui) == (std::vector<std::u32string>{U"(2) Alpha", U"Twin"}));
 }
 
 // t03 / t04 / p4uis: IDC_IMAGE follows the selected row (texture from the host, the start positions as the white numbers 1..N),
@@ -303,8 +384,9 @@ void test_skirmish_preview() {
           !bare.control("IDC_SCENARIO_DESCRIPTION_TEXT_BOX")->visible && bare.control("IDC_SCENARIO_DESCRIPTION_TEXT_BOX")->text.empty());
 }
 
-// p4uia t01 / t02, p4uis t03: IDC_PLAYER_COLOR_n of the used slots hold the 9 palette entries as U+25A0 glyphs, the default colour
-// is the slot index, the colour clash rule runs in slot order (UI.md 9.7), and StartSkirmish carries the chosen indices.
+// p4uia t01 / t02, p4uis t03: IDC_PLAYER_COLOR_n of the used slots hold the 9 palette entries as U+25A0 glyphs (drawn as text in
+// the entry's colour, no filled box: UI.md 3.7.1), the default colour is the slot index, the colour clash rule runs in slot order
+// (UI.md 9.7), and StartSkirmish carries the chosen indices.
 void test_skirmish_colours() {
     Rig rig({map_row("_MP_LAND_X", "", 2, false, false)});
     rig.open_staging();
@@ -314,6 +396,23 @@ void test_skirmish_colours() {
         CHECK(c->item_colors == palette9() && c->selected == slot && rig.fe.skirmish_colour(slot) == slot);
     }
     CHECK(!rig.control("IDC_PLAYER_COLOR_2")->visible && rig.fe.skirmish_colour(2) == -1);
+    {  // UI.md 3.7.1: the selected glyph is drawn as text in its palette colour, with no filled box behind it (no preview
+       // here, so no start marker can carry a palette colour)
+        Rig flat({map_row("_MP_LAND_X", "", 2, false, false)}, true, false);
+        flat.open_staging();
+        HudDrawList dl;
+        flat.env.gui.build(dl, flat.env.now);
+        const Rgba8 c0 = palette9()[0], c1 = palette9()[1];
+        bool glyph0 = false, glyph1 = false, box = false;
+        for (uint32_t layer = 0; layer < kHudLayers; ++layer) {
+            for (const HudQuad& q : dl.items(layer, HudList::Text)) {
+                glyph0 = glyph0 || q.color == c0;
+                glyph1 = glyph1 || q.color == c1;
+            }
+            for (const HudQuad& q : dl.items(layer, HudList::Alpha)) box = box || q.color == c0 || q.color == c1;
+        }
+        CHECK(glyph0 && glyph1 && !box);
+    }
     auto colours = [&] {
         rig.acts.clear();
         rig.click(kStaging, "IDC_SKIRMISH_START_GAME_BUTTON");
@@ -350,6 +449,265 @@ void test_skirmish_colours() {
     bare.acts.clear();
     bare.click(kStaging, "IDC_SKIRMISH_START_GAME_BUTTON");
     CHECK(bare.acts.size() == 1 && bare.acts[0].colors == (std::vector<int32_t>{0, 1}));
+}
+
+// modc t47 (SKIRMISH_SETUP §2.8): the staging dialog opens slot 0 on the profile's faction (by name; row 0 when none is
+// stored or the list lacks it) and colour; the AI slot takes that row XOR 1 (0 when the list has no such row) and colour 1,
+// or 2 when the local colour is 1.
+void test_skirmish_slot_defaults() {
+    SkirmishProfile prof;
+    auto with = [&prof](std::vector<SkirmishFaction> factions) {
+        return [&prof, factions](MenuProviders& p) {
+            p.skirmish_factions = factions;
+            p.skirmish_profile = [&prof] { return prof; };
+        };
+    };
+    const std::vector<SkirmishFaction> three = {{"Rebel", ""}, {"Empire", ""}, {"Underworld", ""}};
+    struct Want {
+        int32_t f0, f1, c0, c1;
+    };
+    auto check = [&](const std::vector<SkirmishFaction>& factions, Want w) {
+        Rig rig({map_row("_MP_LAND_X", "", 2, false, false)}, true, false, with(factions));
+        rig.open_staging();
+        const bool ok = rig.control("IDC_PLAYER_FACTION_0")->selected == w.f0 && rig.control("IDC_PLAYER_FACTION_1")->selected == w.f1 &&
+                        rig.fe.skirmish_colour(0) == w.c0 && rig.fe.skirmish_colour(1) == w.c1;
+        if (!ok)
+            std::printf("slot defaults: factions %d / %d, colours %d / %d\n", rig.control("IDC_PLAYER_FACTION_0")->selected,
+                        rig.control("IDC_PLAYER_FACTION_1")->selected, rig.fe.skirmish_colour(0), rig.fe.skirmish_colour(1));
+        return ok;
+    };
+    CHECK(check(three, {0, 1, 0, 1}));  // a fresh profile: rows 0 / 1, colours 0 / 1
+    prof = {"Empire", 1};
+    CHECK(check(three, {1, 0, 1, 2}));  // retail run 2026-11-17: index 1 -> AI row 0; local colour 1 -> AI colour 2
+    prof = {"Underworld", 4};
+    CHECK(check(three, {2, 0, 4, 1}));  // 2 XOR 1 = 3: no such row -> 0
+    prof = {"Chiss", -1};
+    CHECK(check(three, {0, 1, 0, 1}));  // a faction the list lacks: row 0; no colour stored: the slot indices
+    prof = {"Rebel", 0};
+    CHECK(check({{"Rebel", ""}}, {0, 0, 0, 1}));  // one faction: the AI row 0 XOR 1 does not exist -> 0
+}
+
+// skm1 t02 / t06: the staging screen's Select Options opens IDD_INTERNET_STAGING_DIALOG_ADVANCED_SKIRMISH_OPTIONS (retail
+// 0xea8d0, not the campaign dialog) with the host's defaults; the win condition rows follow the game type (UI.md 9.7: Land
+// 0x12..0x14 with 0x13 selected, Space 0x12 / 0x16 with 0x16, Control 0x15 only); HQ forces the pre-built base on and disables
+// it, Space unchecks and disables it; Accept stores the values and StartSkirmish carries them; a game type change steps the win
+// condition back to the type's default. t06: slot 1 offers TEXT_EASY / MEDIUM / HARD_AI_PLAYER (Medium first), slot 2
+// TEXT_OPEN_PLAYER then the three; Start carries each playing slot's difficulty and slot 1's as `difficulty`.
+void test_skirmish_options() {
+    Rig rig({map_row("_MP_LAND_X", "", 3, false, false), map_row("_MP_SPACE_X", "", 3, true, false)});
+    rig.env.text.add("TEXT_WIN_CONDITION_ALL_ENEMY_UNITS_DESTROYED", u"Units");
+    rig.env.text.add("TEXT_WIN_CONDITION_ALL_ENEMY_STRUCTURES_DESTROYED", u"Structures");
+    rig.env.text.add("TEXT_WIN_CONDITION_ENEMY_COMMAND_HQ_DESTROYED", u"HQ");
+    rig.env.text.add("TEXT_WIN_CONDITION_CONTROL_POINT_DOMINATION", u"Control");
+    rig.env.text.add("TEXT_WIN_CONDITION_SPACE_ENEMY_STARBASE_DESTROYED", u"Starbase");
+    rig.env.text.add("TEXT_EASY_AI_PLAYER", u"Easy");
+    rig.env.text.add("TEXT_MEDIUM_AI_PLAYER", u"Medium");
+    rig.env.text.add("TEXT_HARD_AI_PLAYER", u"Hard");
+    rig.env.text.add("TEXT_OPEN_PLAYER", u"Open");
+    rig.open_staging();
+    rig.select(0);
+    // t06: the AI slot combos
+    CHECK(rig.control("IDC_PLAYER_NAME_1")->items == (std::vector<std::u32string>{U"Easy", U"Medium", U"Hard"}) &&
+          rig.control("IDC_PLAYER_NAME_1")->selected == 1);
+    CHECK(rig.control("IDC_PLAYER_NAME_2")->items == (std::vector<std::u32string>{U"Open", U"Easy", U"Medium", U"Hard"}) &&
+          rig.control("IDC_PLAYER_NAME_2")->selected == 0);
+    auto opts = [&](const GuiDialog* o, const char* id) { return o ? o->get(id) : nullptr; };
+    // Select Options on Land: the skirmish dialog, the defaults, the Land rows with 0x13 selected.
+    rig.click(kStaging, "IDC_SELECT_OPTIONS");
+    CHECK(rig.fe.top() == kSkirmishOptions);
+    const GuiDialog* o = rig.env.gui.find(kSkirmishOptions);
+    CHECK(o != nullptr);
+    if (!o) return;
+    CHECK(opts(o, "IDC_WIN_CONDITION_COMBO")->items == (std::vector<std::u32string>{U"Units", U"Structures", U"HQ"}) &&
+          opts(o, "IDC_WIN_CONDITION_COMBO")->selected == 1);
+    CHECK(opts(o, "IDC_ALLOW_HEROES")->checked && opts(o, "IDC_PRE_BUILT_BASE")->checked && opts(o, "IDC_PRE_BUILT_BASE")->enabled);
+    // HQ: the pre-built base forced on and disabled.
+    rig.env.gui.find(kSkirmishOptions)->set_checked("IDC_PRE_BUILT_BASE", false);
+    rig.env.gui.find(kSkirmishOptions)->set_selected("IDC_WIN_CONDITION_COMBO", 2);
+    rig.fe.update(std::vector<GuiEvent>{event(GuiEvent::Kind::SelectionChanged, kSkirmishOptions, "IDC_WIN_CONDITION_COMBO", 2)}, InputFrame{}, rig.acts);
+    CHECK(opts(o, "IDC_PRE_BUILT_BASE")->checked && !opts(o, "IDC_PRE_BUILT_BASE")->enabled);
+    rig.env.gui.find(kSkirmishOptions)->set_checked("IDC_ALLOW_HEROES", false);
+    rig.env.gui.find(kSkirmishOptions)->set_value("IDC_SKIRMISH_CREDITS_SLIDER", 4);
+    rig.click(kSkirmishOptions, "IDC_BUTTON_ACCEPT");
+    CHECK(rig.fe.top() == kStaging);
+    // t06: slot 1 Hard, slot 2 Easy (playing)
+    rig.env.gui.find(kStaging)->set_selected("IDC_PLAYER_NAME_1", 2);
+    rig.env.gui.find(kStaging)->set_selected("IDC_PLAYER_NAME_2", 1);
+    rig.acts.clear();
+    rig.click(kStaging, "IDC_SKIRMISH_START_GAME_BUTTON");
+    CHECK(rig.acts.size() == 1);
+    if (rig.acts.size() == 1) {
+        const MenuAction& a = rig.acts[0];
+        std::printf("skirmish options: set %d credits %d win 0x%x heroes %d prebuilt %d; difficulties", a.skirmish_options.set ? 1 : 0,
+                    a.skirmish_options.credits, a.skirmish_options.win_condition, a.skirmish_options.heroes ? 1 : 0,
+                    a.skirmish_options.prebuilt_base ? 1 : 0);
+        for (const int32_t v : a.difficulties) std::printf(" %d", v);
+        std::printf(" (slot 1: %d)\n", a.difficulty);
+        CHECK(a.skirmish_options.set && a.skirmish_options.credits == 4000 && a.skirmish_options.win_condition == kWinCommandHq &&
+              !a.skirmish_options.heroes && a.skirmish_options.prebuilt_base && a.skirmish_options.starting_units);
+        CHECK(a.difficulties == (std::vector<int32_t>{1, 2, 0}) && a.difficulty == 2 && a.factions.size() == 3);
+    }
+    // Space: the win condition steps back to the type's default (0x16) and the pre-built base is off and disabled.
+    rig.game_type(true);
+    rig.click(kStaging, "IDC_SELECT_OPTIONS");
+    o = rig.env.gui.find(kSkirmishOptions);
+    CHECK(o && opts(o, "IDC_WIN_CONDITION_COMBO")->items == (std::vector<std::u32string>{U"Units", U"Starbase"}) &&
+          opts(o, "IDC_WIN_CONDITION_COMBO")->selected == 1 && !opts(o, "IDC_PRE_BUILT_BASE")->checked && !opts(o, "IDC_PRE_BUILT_BASE")->enabled);
+    rig.click(kSkirmishOptions, "IDC_CANCEL_BUTTON");
+    // Control points: one row.
+    rig.set_type(kSkirmishGameControl);
+    rig.click(kStaging, "IDC_SELECT_OPTIONS");
+    o = rig.env.gui.find(kSkirmishOptions);
+    CHECK(o && opts(o, "IDC_WIN_CONDITION_COMBO")->items == (std::vector<std::u32string>{U"Control"}));
+}
+
+// mcx4 t19 (docs/re/MCX5_RE_ANSWERS.md Q3.1 [H], readers 0xed4b0 / 0xed610): the advanced game options' tech sliders
+// span the selected campaign's [Min_Custom_Tech_Level - adj, Max_Custom_Tech_Level - adj], adj = the selected faction's
+// Displayed_Tech_Level_Adjustment; the campaign ctor's 1 / 5 when the campaign sets neither.
+// ledger: verifies Campaign.Min_Custom_Tech_Level
+// ledger: verifies Campaign.Max_Custom_Tech_Level
+void test_custom_tech_range() {
+    // The campaign fields reach the menu choice (ctor defaults when absent).
+    data::CampaignDef plain, custom;
+    plain.name = "GC_Plain";
+    plain.campaign_set = "Set_Plain";
+    plain.starting_active_player = "Empire";
+    plain.raw.emplace_back("Supports_Custom_Settings", "True");
+    custom = plain;
+    custom.name = "GC_Custom";
+    custom.campaign_set = "Set_Custom";
+    custom.starting_active_player = "Rebel";
+    custom.raw.emplace_back("Min_Custom_Tech_Level", " 2 ");
+    custom.raw.emplace_back("Max_Custom_Tech_Level", "4");
+    const data::CampaignDef* defs[] = {&plain, &custom};
+    const CampaignMenu built = build_campaign_menu(std::span<const data::CampaignDef* const>(defs));
+    CHECK(built.custom.size() == 2u);
+    if (built.custom.size() == 2u) {
+        const CampaignChoice& a = built.custom[0].factions.at(0);
+        const CampaignChoice& b = built.custom[1].factions.at(0);
+        CHECK(a.min_custom_tech == 1 && a.max_custom_tech == 5 && b.min_custom_tech == 2 && b.max_custom_tech == 4);
+    }
+    // The range: shifted by the adjustment, hi never below lo.
+    CampaignChoice c{"GC", "Rebel", 1, 5};
+    CHECK(tech_slider_range(c, 0) == (TechSliderRange{1, 5, 0}));
+    CHECK(tech_slider_range(c, 1) == (TechSliderRange{0, 4, 1}));
+    CHECK(tech_slider_range(CampaignChoice{"GC", "Rebel", 4, 2}, 0) == (TechSliderRange{4, 4, 0}));
+
+    // Through the dialogs: custom staging -> Select Options for each faction of one set.
+    constexpr const char* kTechRc = R"RC(
+IDD_CUSTOM_CAMPAIGN_STAGING_DIALOG DIALOGEX 0, 0, 620, 441
+STYLE DS_SETFONT | DS_MODALFRAME | DS_CENTER | WS_POPUP
+CAPTION "Dialog"
+FONT 8, "Arial", 400, 0, 0x0
+BEGIN
+    PUSHBUTTON      "x",IDC_CANCEL_BUTTON,19,398,190,24
+    PUSHBUTTON      "x",IDC_PLAY_BUTTON,405,398,190,24
+    PUSHBUTTON      "x",IDC_SELECT_OPTIONS,240,398,150,24
+    LISTBOX         IDC_STAGING_MAP_LIST,18,68,380,327,LBS_NOINTEGRALHEIGHT | WS_VSCROLL | WS_TABSTOP
+    COMBOBOX        IDC_FACTION_COMBO,410,68,150,128,CBS_DROPDOWNLIST | WS_TABSTOP
+END
+
+IDD_CAMPAIGN_ADVANCED_OPTIONS_DIALOG DIALOGEX 0, 0, 400, 300
+STYLE DS_SETFONT | DS_MODALFRAME | DS_CENTER | WS_POPUP
+CAPTION "Dialog"
+FONT 8, "Arial", 400, 0, 0x0
+BEGIN
+    CONTROL         "",IDC_SKIRMISH_CREDITS_SLIDER,"msctls_trackbar32",TBS_BOTH | TBS_NOTICKS | WS_TABSTOP,10,10,300,14
+    LTEXT           "0",IDC_SKIRMISH_CREDITS_VALUE,320,10,60,14
+    CONTROL         "",IDC_SKIRMISH_STARTING_TECH_LEVEL_SLIDER,"msctls_trackbar32",TBS_BOTH | TBS_NOTICKS | WS_TABSTOP,10,40,300,14
+    LTEXT           "0",IDC_SKIRMISH_STARTING_TECH_LEVEL_VALUE,320,40,60,14
+    CONTROL         "",IDC_SKIRMISH_MAX_TECH_LEVEL_SLIDER,"msctls_trackbar32",TBS_BOTH | TBS_NOTICKS | WS_TABSTOP,10,70,300,14
+    LTEXT           "0",IDC_SKIRMISH_MAX_TECH_LEVEL_VALUE,320,70,60,14
+    COMBOBOX        IDC_ALLOW_AUTORESOLVE_COMBO,10,100,200,95,CBS_DROPDOWN | WS_VSCROLL | WS_TABSTOP
+    CONTROL         "x",IDC_ALLOW_RANDOM_EVENTS,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,10,130,200,16
+    PUSHBUTTON      "x",IDC_BUTTON_ACCEPT,10,260,100,24
+    PUSHBUTTON      "x",IDC_CANCEL_BUTTON,120,260,100,24
+    PUSHBUTTON      "x",IDC_DEFAULTS_BUTTON,230,260,100,24
+END
+)RC";
+    constexpr const char* kCustom = "IDD_CUSTOM_CAMPAIGN_STAGING_DIALOG";
+    constexpr const char* kOptions = "IDD_CAMPAIGN_ADVANCED_OPTIONS_DIALOG";
+    Env env;
+    env.script.merge(kTechRc);
+    for (int32_t n = 1; n <= 5; ++n)
+        env.text.add("TEXT_TECH_LEVEL_" + std::to_string(n), u"Tech " + std::u16string(1, static_cast<char16_t>(u'0' + n)));
+    CampaignMenu menu;
+    CampaignSetInfo set;
+    set.set = "Set_Custom";
+    set.custom = true;
+    set.factions = {{"GC_Empire", "Empire", 1, 5}, {"GC_Rebel", "Rebel", 1, 5}};
+    menu.custom.push_back(set);
+    MenuProviders p;
+    p.tech_adjustment = [](std::string_view f) { return f == "Rebel" ? 1 : 0; };  // FoC: Rebel +1
+    p.game_option_defaults.start_tech = 1;
+    p.game_option_defaults.max_tech = 5;
+    FrontEnd fe;
+    fe.init(env.gui, menu, p);
+    std::vector<MenuAction> acts;
+    const auto click = [&](const char* dialog, const char* control) {
+        fe.update(std::vector<GuiEvent>{event(GuiEvent::Kind::Clicked, dialog, control)}, InputFrame{}, acts);
+    };
+    env.gui.open(kCustom);
+    GuiDialog* staging = env.gui.find(kCustom);
+    CHECK(staging != nullptr);
+    if (!staging) return;
+    staging->set_items("IDC_STAGING_MAP_LIST", {U"Set_Custom"}, 0);
+    staging->set_items("IDC_FACTION_COMBO", {U"Empire", U"Rebel"}, 0);
+    const auto slider = [&](const char* id) { return env.gui.find(kOptions) ? env.gui.find(kOptions)->get(id) : nullptr; };
+    // Empire (adjustment 0): 1..5, the defaults as they are.
+    click(kCustom, "IDC_SELECT_OPTIONS");
+    const GuiControl* st = slider("IDC_SKIRMISH_STARTING_TECH_LEVEL_SLIDER");
+    const GuiControl* mx = slider("IDC_SKIRMISH_MAX_TECH_LEVEL_SLIDER");
+    CHECK(st && mx && st->range_min == 1 && st->range_max == 5 && st->value == 1 && mx->value == 5);
+    click(kOptions, "IDC_CANCEL_BUTTON");
+    // Rebel (adjustment +1): 0..4; the default max 5 is clamped to 4; the label shows the displayed level (value + 1).
+    staging->set_selected("IDC_FACTION_COMBO", 1);
+    click(kCustom, "IDC_SELECT_OPTIONS");
+    st = slider("IDC_SKIRMISH_STARTING_TECH_LEVEL_SLIDER");
+    mx = slider("IDC_SKIRMISH_MAX_TECH_LEVEL_SLIDER");
+    CHECK(st && mx && st->range_min == 0 && st->range_max == 4 && st->value == 1 && mx->value == 4);
+    const GuiControl* label = slider("IDC_SKIRMISH_MAX_TECH_LEVEL_VALUE");
+    CHECK(label && label->text == U"Tech 5");
+    env.gui.find(kOptions)->set_value("IDC_SKIRMISH_STARTING_TECH_LEVEL_SLIDER", 0);
+    fe.update(std::vector<GuiEvent>{event(GuiEvent::Kind::ValueChanged, kOptions, "IDC_SKIRMISH_STARTING_TECH_LEVEL_SLIDER", 0)},
+              InputFrame{}, acts);
+    click(kOptions, "IDC_BUTTON_ACCEPT");
+    acts.clear();
+    click(kCustom, "IDC_PLAY_BUTTON");
+    CHECK(acts.size() == 1u && acts[0].faction == "Rebel" && acts[0].game_options.set && acts[0].game_options.start_tech == 0 &&
+          acts[0].game_options.max_tech == 4);
+
+    // mcx8 t10 (docs/re/AI_GALACTIC_TOKENS.md §4 [H]): `set` is retail's flag 0x20 "an option was changed", not "accepted".
+    // The start above copied the options and cleared it: a second start in the same run uses the campaign's own values.
+    acts.clear();
+    click(kCustom, "IDC_PLAY_BUTTON");
+    CHECK(acts.size() == 1u && !acts[0].game_options.set && acts[0].game_options.start_tech == 0);
+    // Accepting without a change keeps it clear; the dialog shows the values accepted last; random events are cleared
+    // and greyed (FoC: flag 0x10 is never set).
+    click(kCustom, "IDC_SELECT_OPTIONS");
+    st = slider("IDC_SKIRMISH_STARTING_TECH_LEVEL_SLIDER");
+    const GuiControl* random = slider("IDC_ALLOW_RANDOM_EVENTS");
+    CHECK(st && st->value == 0 && random && !random->checked && !random->enabled);
+    click(kOptions, "IDC_BUTTON_ACCEPT");
+    acts.clear();
+    click(kCustom, "IDC_PLAY_BUTTON");
+    CHECK(acts.size() == 1u && !acts[0].game_options.set);
+    // A slider event sets it, Defaults clears it again.
+    click(kCustom, "IDC_SELECT_OPTIONS");
+    fe.update(std::vector<GuiEvent>{event(GuiEvent::Kind::ValueChanged, kOptions, "IDC_SKIRMISH_MAX_TECH_LEVEL_SLIDER", 3)},
+              InputFrame{}, acts);
+    click(kOptions, "IDC_DEFAULTS_BUTTON");
+    click(kOptions, "IDC_BUTTON_ACCEPT");
+    acts.clear();
+    click(kCustom, "IDC_PLAY_BUTTON");
+    CHECK(acts.size() == 1u && !acts[0].game_options.set && !acts[0].game_options.random_events);
+    // Changed and accepted: set, random events off (Game.InterventionsEnabled 0.0 in the session).
+    click(kCustom, "IDC_SELECT_OPTIONS");
+    fe.update(std::vector<GuiEvent>{event(GuiEvent::Kind::ValueChanged, kOptions, "IDC_SKIRMISH_CREDITS_SLIDER", 4)}, InputFrame{}, acts);
+    click(kOptions, "IDC_BUTTON_ACCEPT");
+    acts.clear();
+    click(kCustom, "IDC_PLAY_BUTTON");
+    CHECK(acts.size() == 1u && acts[0].game_options.set && !acts[0].game_options.random_events);
 }
 
 }  // namespace test_gui_screens_t

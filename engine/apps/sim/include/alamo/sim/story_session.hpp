@@ -81,17 +81,16 @@
 // MISSION_LOST, BUY_BLACK_MARKET, GALACTIC_SABOTAGE, OPEN_CORRUPTION; queued and routed at the next T9
 // after the galactic stream and the host events, one "T ... Ui<Kind>" line each.
 //   BattleWon / BattleLost / BattleRetreat (S10)  STORY_WIN_BATTLES / STORY_LOSE_BATTLES / STORY_RETREAT,
-//                        player-scoped to the winner / loser / retreating player (Param2 location and Param3
-//                        composition of WIN/LOSE_BATTLES not modelled)
-//                        (wave 2a) with Param2 location = the event's value (1 land / 2 space) + "base" and
-//                        Param3 composition from the battle snapshot (begin_battle) when it is the same planet
+//                        player-scoped to the winner / loser / retreating player; WIN/LOSE_BATTLES carry the location
+//                        (the event's value, 1 land / 2 space) and (mcx6 t03) the orbit record's Ship_Class lists
+//                        (record_battle_composition) with the local player, for the Param3 test of space battles
 //   BattleLost (land)    (wave 2a) also STORY_INVASION_BOUNCED to the loser's plot sets when the loser was the
 //                        invader (the snapshot's attacker; without one: not the planet's owner at the previous
 //                        service) [inferred], Enter family: planet, owner = loser, units = the invader's types
 //
 // L1/S4 wave 2a - BATTLES AND THE TACTICAL STORY (the original keeps one story manager per game mode, STORY.md 0):
 //   begin_battle (battle host, at the tactical push): snapshot of the battle (planet, kind, attacker / defender,
-//     per-player unit categories and type names, base present) for the later WIN/LOSE_BATTLES / INVASION_BOUNCED
+//     per-player type names) for the later INVASION_BOUNCED
 //     routing; STORY_SPACE_TACTICAL / STORY_LAND_TACTICAL dispatched at once to the participants' galactic plot
 //     sets (STORY.md 4.1: these types are never queued; Param2 planet, StartTactical [inferred]); then the
 //     tactical plot set is loaded (one StoryModel + one LuaVm per scripted plot, on the battle's store and
@@ -108,7 +107,7 @@
 // not feed. Wave 2b (SCRIPT_GAPS.md §4): DIFFICULTY_LEVEL is never dispatched (as in 1.121);
 // CORRUPTION_TACTICAL_COMPLETE / FAILED at end_battle of a pending corruption mission (set_corruption_mission);
 // FILTER_* compare factions (StoryModel::faction_of); the original vf3 rules of the wave-2a [inferred] types. SPEECH_DONE's 60 s
-// Timeout still runs [L] when no speech end is reported (the game host reports AudioSystem speech ends). Galactic notifications raised while a
+// Timeout expires without firing (storyb t17, STORY.md §8 item 4) when no speech end is reported (the game host reports AudioSystem speech ends). Galactic notifications raised while a
 // tactical mode runs are routed at once (the galactic sim emits nothing then).
 //
 // Lua bridge families attached to every story VM of the session (L1 stage 3):
@@ -134,12 +133,16 @@
 #include <cstdint>
 #include <functional>
 #include <memory>
+#include <optional>
+#include <span>
 #include <string>
 #include <string_view>
 #include <utility>
 #include <vector>
 
 #include "alamo/core/parallel.hpp"
+#include "alamo/core/sim_rng.hpp"  // mcx6 RANDOM_STORY stream
+#include "alamo/galactic/campaign.hpp"  // StoryGates (STY1)
 #include "alamo/galactic/galactic_events.hpp"
 
 namespace alamo {
@@ -163,6 +166,7 @@ struct ObjectHandle;
 }  // namespace alamo::objects
 namespace alamo::lua {
 class StoryModel;
+class StoryTable;  // storyb t10
 class StoryHolocron;
 class LuaVm;
 class LuaPlayerWorld;
@@ -199,6 +203,11 @@ struct StoryStart {
 
 // Host events (not from the galactic stream).
 enum class StoryHostEvent : uint8_t { TacticalStarted = 0, TacticalEnded = 1 };
+
+// bkc1 t01: the PortExtension subtype of the local player's story Esc (no payload; StorySession::handle_esc). Defined
+// here so every host applies the same command: alamo_game (game story_ui.hpp story_esc_event) and alamo_headless's
+// --story-esc-at (tst2 t02).
+inline constexpr uint16_t kStoryEscSubtype = 0x5345;  // "SE"
 
 // UI / player-action notifications (StorySession::notify_ui). Story type and evaluator (STORY.md 0.1, 5):
 //   SelectUnit       STORY_SELECT_UNIT (SingleObjectName: name = the object's type, filter on its owner)
@@ -269,7 +278,7 @@ struct StoryBattleStart {
 //   Destroyed          STORY_TACTICAL_DESTROY (Destroy: Param1 type names, empty = any; Param3 count) + a named
 //                      hero (or a team carrying one) STORY_DEFEAT_HERO
 //   HardpointDestroyed STORY_ATTACK_HARDPOINT (name = the hardpoint's name; filter owner = the attacker's: `other`
-//                      object or `player`)  [S9 CombatSystem::hardpoint_events / AbilitySystem hardpoint_destroyed]
+//                      object or `player`)  [S9 CombatSystem::hardpoint_events / AbilitySystem hardpoint_offline]
 //   Reinforced         STORY_REINFORCE        UnitArrived  STORY_UNIT_ARRIVED     FullStop  STORY_FULL_STOP
 //   Garrisoned         STORY_GARRISON_UNIT    HeroCaptured STORY_CAPTURE_HERO
 //   StructureCaptured  STORY_CAPTURE_STRUCTURE (generic rule, Param1 = type name)
@@ -282,7 +291,7 @@ struct StoryBattleStart {
 //   SpeechDone         STORY_SPEECH_DONE} acting player
 enum class TacticalStoryEvent : uint8_t {
     Destroyed = 0, HardpointDestroyed, Reinforced, UnitArrived, FullStop, Garrisoned, HeroCaptured, StructureCaptured,
-    UnitCommanded, UnitGuarding, BaseDestroyed, LoadTacticalMap, SelectUnit, ClickGui, SpeechDone, Count
+    UnitCommanded, UnitGuarding, BaseDestroyed, LoadTacticalMap, SelectUnit, ClickGui, SpeechDone, Generic, Count
 };
 std::string_view tactical_story_event_name(TacticalStoryEvent e);  // "Destroyed", ...
 std::string_view tactical_story_event_type(TacticalStoryEvent e);  // "STORY_TACTICAL_DESTROY", ...
@@ -346,9 +355,49 @@ struct StorySwitchControl {
     std::string ai_type;      // Reward_Param2, trimmed
 };
 
+// STY1 lane B (docs/re/STORY_REWARDS_GALACTIC.md §2): the tutorial rewards' state. GUI event kinds of ENABLE_EVENT /
+// DISABLE_EVENT (Reward_Param1): TUTORIAL_CLICK_GUI 1, TUTORIAL_CLICK_PLANET 2, TUTORIAL_DRAG_FLEET 3, TUTORIAL_ZOOM 4,
+// TUTORIAL_ALL 5. The gate (0x446220) has two modes: mode "all allowed" blocks the listed records; mode "only listed" allows
+// the listed records. The GUI handlers ask gui_event_allowed() before they raise a tutorial notification.
+struct StoryGuiRecord {
+    int32_t kind = 0;
+    std::string name1, name2;
+    friend bool operator==(const StoryGuiRecord&, const StoryGuiRecord&) = default;
+};
+struct StoryTutorialState {
+    bool all_allowed = true;                // gate mode 1 (default)
+    std::vector<StoryGuiRecord> allowed;    // used in mode 0
+    std::vector<StoryGuiRecord> blocked;    // used in mode 1
+    std::vector<int32_t> marked_players;    // TUTORIAL_PLAYER: players whose "tutorial" byte is set (player +0x3c0), mark order
+    std::vector<std::string> finished;      // FINISHED_TUTORIAL names (upper-case text as written), first-seen order; the host
+                                            // persists them with the profile (retail: options key TutorialsPlayed)
+    bool skirmish_rules = false;            // SKIRMISH_RULES 1 (retail only lifts the credit cap in non-skirmish modes [L])
+    uint32_t filter_resets = 0;             // RESET_GALACTIC_FILTERS count (the galaxy GUI resets its four filters)
+    uint32_t sandbox_requests = 0;          // SET_SANDBOX_OBJECTIVES count (retail body not decoded [L])
+    bool is_default() const {
+        return all_allowed && allowed.empty() && blocked.empty() && marked_players.empty() && finished.empty() &&
+               !skirmish_rules && filter_resets == 0 && sandbox_requests == 0;
+    }
+};
+
+// LOAD_CAMPAIGN (§2.1): retail stores a pending campaign record; the story controller's per-frame update ends the running
+// game and starts it (modc t45). The port queues the request here; the game host takes it (StorySession::take_load_campaign)
+// on the next frame and starts that campaign.
+struct StoryLoadCampaign {
+    uint64_t frame = 0;
+    std::string name;       // Reward_Param1, as written (selects the campaign set)
+    int32_t side = 0;       // Reward_Param2: a faction index (faction list order); the set member it starts as active player
+    std::string upper_name; // the name upper-cased (the campaign table key)
+    int32_t difficulty = -1;  // Reward_Param3 when 0..2 (the new game's difficulty), else -1 (difficulty 1)
+    int32_t tech = -1;        // Reward_Param4 when 0..5 (every player's tech level), else -1 (the campaign's own)
+};
+
 class StorySession {
 public:
-    static constexpr int kMaxRounds = 8;
+    // mcx5 (MCX5_RE_ANSWERS Q4.3 [H]): retail fires a reward's dependants and the notifications it raises synchronously,
+    // with no round cap (only RESET_BRANCH nests at most 3); was 8 here. A cascade that never settles waits a service.
+    // limit: guard T9 drain rounds per service (retail: no cap; a runaway cascade is deferred, not dropped)
+    static constexpr int kMaxRounds = 1024;
 
     // `store` = the galactic mode's primary store (scripts' object handles); all references must outlive
     // the session.
@@ -396,6 +445,17 @@ public:
     // tactical VMs / plot set are released (their log lines stay). No-op without an attached battle.
     void end_battle(int32_t winner, uint64_t frame);
     bool battle_attached() const;
+    // bkc1 t01 (docs/re/BKC1_RE_ANSWERS.md Q1 [H]): the Esc key during a story cinematic. esc_goes_to_story(): the
+    // cinematic camera is on (Lua Start_Cinematic_Camera: the controller's state 4) and no Lua Bink movie plays (an Esc
+    // then only stops the movie); the host sends the key here instead of opening the pause menu. handle_esc(): for every
+    // active plot of the current mode's story manager (the attached battle's tactical plot set when a battle runs, which
+    // may have none; else the galactic sets in set order), in plot-table order, calls the plot script's global
+    // Story_Handle_Esc() when it is a Lua function: no arguments, results ignored, a missing function is no error.
+    // Returns the number of calls made. Retail calls it from the message pump between ticks; the port applies it as a
+    // port command (game story_ui.hpp kStoryEscSubtype) before the next tick's systems, so threads it creates first
+    // run at that tick's T9, as in retail.
+    bool esc_goes_to_story() const;
+    uint32_t handle_esc();
     // Tactical notification (battle host, sim thread): names / owners resolved now from the battle's store,
     // queued and routed at the next service. Ignored without an attached battle.
     void notify_tactical(const TacticalStoryNotification& n);
@@ -461,16 +521,79 @@ public:
     }
     // --- OI galactic (owner: galactic agent): BT §1.6 story lock 0x4472a0 ("this planet's battle must be fought"),
     // written by the story rewards DISABLE_AUTORESOLVE / ENABLE_AUTORESOLVE (global flag +0x41) and
-    // RESTRICT_AUTORESOLVE (Param1 planet, Param2 1 add / 0 remove: the planet list +0x308) [M: field wiring]. Source for
-    // CampaignBattles' `autoresolve_locked` seam (the host sets it: [&](PlanetIndex p) { return story.autoresolve_locked(p); }).
+    // RESTRICT_AUTORESOLVE (Param1 planet, Param2 1 add / 0 remove: the planet list +0x308) [M: field wiring]. Read by
+    // CampaignBattles' conflict decision through SimHost::story() (a locked human-involved conflict is fought).
     // No source is specified for the story-sequence-active flag (0x140b154d0), so none is offered. Not hashed. ---
     bool autoresolve_locked(PlanetIndex planet) const;
+    // mcx6 t03 (docs/re/STORY.md §5 "Battle composition", mcx6 Q14): the story manager's orbit record 0x449f10. The battle
+    // host calls it from the decide state of a space conflict the local player attacks or defends
+    // (galactic::ConflictManager::on_space_decide), before the fight / auto-resolve choice. Both lists are cleared, then
+    // every live fleet in orbit of `planet` (orbit order) adds the Ship_Class of each of its contents (-1 when the type
+    // has none) to the local list when the fleet's owner is the local player, else to the other list. The lists stay
+    // until the next record (AI-vs-AI conflicts record nothing, so they go stale), are saved (version 7) and are what
+    // WIN/LOSE_BATTLES' Param3 test reads for fought and auto-resolved space battles alike. Not hashed: they are derived
+    // from the hashed galactic state, and what they change (fired events) is hashed. [port] the port's orbit list holds
+    // fleets only (no starbase object in orbit).
+    void record_battle_composition(PlanetIndex planet);
+    const std::vector<int32_t>& battle_composition(bool local) const { return local ? comp_local_ : comp_other_; }
+    // mcx6 t03: the Raid_Force_* test (0x432e20, ConflictManager::raid_force) the Enter family's Param7 ("raid fleets
+    // only") asks about the dispatched fleet's contents. The battle host installs it. Unset: no fleet is raid capable.
+    void set_raid_test(std::function<bool(int32_t player, const std::vector<objects::ObjectHandle>& units)> fn) {
+        raid_test_ = std::move(fn);
+    }
+    // --- STY1 lane B: story rewards that change campaign rules (docs/re/STORY_REWARDS_GALACTIC.md) ---
+    // The rules the galactic rewards switch (planet restrictions, invasion / sabotage / corruption locks, fleet combining,
+    // bounty collection, victory movie, power table, reinforcement switches). The session owns, saves and hashes them and
+    // hands every change to the sim (GalacticSim::set_story_gates).
+    const galactic::StoryGates& gates() const { return gates_; }
+    // True when the story did not disable `player`'s reinforcements (DISABLE_REINFORCEMENTS; default enabled).
+    bool reinforcements_enabled(int32_t player) const;
+    // ui2 t06: true when the story did not disable `player`'s retreat (DISABLE_RETREAT, a faction-keyed list in retail; default enabled).
+    bool retreat_enabled(int32_t player) const;
+    const StoryTutorialState& tutorial() const { return tutorial_; }
+    // The tutorial's GUI event gate (0x446220): the GUI handlers drop a tutorial event that is not allowed.
+    bool gui_event_allowed(int32_t kind, std::string_view name1 = {}, std::string_view name2 = {}) const;
+    // LOAD_CAMPAIGN: the queued request (one at a time, newest wins), cleared by taking it.
+    const std::optional<StoryLoadCampaign>& pending_load_campaign() const { return load_campaign_; }
+    std::optional<StoryLoadCampaign> take_load_campaign();
+    // Tactical rewards of the tactical plot set the battle host applies to its battle (STY1 t06): CHANGE_OWNER,
+    // DESTROY_OBJECT, BOMBARD_DELAY, with Reward_Param1..N as text. Unset: the reward does nothing.
+    void set_tactical_reward_hook(std::function<void(const std::string& type, const std::vector<std::string>& params)> fn) {
+        tactical_reward_ = std::move(fn);
+    }
+    // mcx6 (docs/re/STORY_REWARDS_GALACTIC.md §1.11 - §1.13, §1.20): FORCE_RETREAT, SET_HEALTH, SET_SPAWN and
+    // DISABLE_SPECIAL_STRUCTURE act on the current mode: while a battle is attached they go to the same hook (any plot
+    // set), after the session checked their required parameters.
+    // mcx6 PICK_PLANET / RANDOM_STORY change plot definitions; the session keeps the changes in order (saved, hashed once
+    // any exists) and replays them on load: definition_edits(). One made while a battle is attached changes the battle's
+    // tactical plot set only (`tactical`); it is replayed when a load rebuilds that battle and dropped when the battle
+    // ends. A load replaces the session's edits with the save's (the ones that differ are undone, then the save's
+    // applied), after every other check of the save passed.
+    struct DefinitionEdit {
+        uint8_t kind = 0;      // 0 = a RANDOM_STORY plot (set, name a, xml b); 1 = a PICK_PLANET substitution (a -> b)
+        uint32_t set = 0;      // plot set number (kind 0; the tactical set's for a tactical edit)
+        std::string a, b;
+        bool tactical = false;  // made while a battle was attached: the tactical plot set's (story save v8)
+        friend bool operator==(const DefinitionEdit&, const DefinitionEdit&) = default;
+    };
+    const std::vector<DefinitionEdit>& definition_edits() const { return def_edits_; }
+    uint32_t random_story_count() const { return random_story_count_; }
+    // --- end STY1 lane B ---
     // --- end OI galactic ---
 
     // ---- attached Lua families (nullptr in builds without engine/lua / the players family) ----
     lua::PresentationLog* presentation();
     lua::ObjectBridge* object_bridge();
     lua::LuaPlayerWorld* player_world();
+    // storyb t10: the galactic mode's plot table (every galactic plot set; null before the sets load) and the first set's
+    // model (AI story flags are raised on every set's model, StoryModel::raise_ai_flag), for the galactic AI's plan VMs.
+    lua::StoryTable* galactic_story_table();
+    lua::StoryModel* first_story_model();
+
+    // ref5 t02: the Reward_Type names apply_reward has a handler for (exact, upper case), in registration order. The
+    // coverage test checks them against story_reward_table()'s Session rows.
+    static bool has_reward_handler(std::string_view name);
+    static std::vector<std::string_view> reward_names();
 
     // ---- results ----
     const std::vector<StoryTrigger>& triggers() const { return triggers_; }
@@ -524,7 +647,7 @@ public:
     void write_players(ByteWriter& w) const;
     bool read_players(ByteReader& r);
     // "story.presentation" (N1 stage 2): the lua::PresentationLog shared by the story VMs (open / finished blocks the
-    // VMs wait on, presentation state, undrained events); its write / read through write_if_saveable.
+    // VMs wait on, presentation state, undrained events); its write / read through write_system.
     void write_presentation(ByteWriter& w) const;
     bool read_presentation(ByteReader& r);
 
@@ -535,25 +658,25 @@ private:
     std::vector<std::pair<std::string, lua::StoryNotification>> notifications(const StoryTrigger& t) const;
     std::string planet_type_name(uint32_t planet) const;
     void poll(size_t set);
-    // a2j t05: one created object for the load-time CONSTRUCT notifications (starting forces, captured when start() begins).
+    // a2j t05: one created object for the load-time CONSTRUCT notifications (starting forces, captured when start() begins;
+    // a2k t12: in retail L8 order, planet by planet).
     struct LoadConstruct {
-        int32_t player = -1;
         PlanetIndex planet = 0;
         uint32_t type = 0;
-        int32_t level = 0;  // CONSTRUCT_LEVEL value as of the object's creation (starbase level / ground base level)
     };
     std::vector<LoadConstruct> starting_forces() const;
+    int32_t planet_owner(PlanetIndex planet) const;  // a2k t12: the CONSTRUCT filter's owner (kNoPlayer: none)
     // A2i t01 + a2j t05: the load-time story pass at the end of start() (header comment): starting-force CONSTRUCT, then
     // STORY_TECH_LEVEL per player; the stream the load rewards raise is routed after each step.
     void load_pass(const std::vector<LoadConstruct>& forces);
-    // STORY_CONSTRUCT (+ STORY_CONSTRUCT_LEVEL for a starbase / ground structure type) for `type` created by `player` at
-    // `planet` (STORY.md §5, 0x326cd0). level < 0: the planet's current level.
-    void construct_notifications(int32_t player, PlanetIndex planet, uint32_t type, int32_t level,
+    // STORY_CONSTRUCT (+ STORY_CONSTRUCT_LEVEL for a starbase type) for `type` created at `planet`, judged by the planet
+    // owner `owner` (STORY.md §5, 0x326cd0; A2K_T07_STORY_LOAD_RE.md §3, §5).
+    void construct_notifications(int32_t owner, PlanetIndex planet, uint32_t type,
                                  std::vector<std::pair<std::string, lua::StoryNotification>>& out) const;
-    void dispatch_construct(int32_t player, PlanetIndex planet, uint32_t type, int32_t level);  // every plot set, no log
+    void dispatch_construct(PlanetIndex planet, uint32_t type, int32_t owner);  // every plot set, no log
     void route_load_events();               // a2j t05: drain + route the galactic stream inside the load pass
     void collect_all(std::string_view via);  // collect() for every galactic plot set, set order
-    bool loading_ = false;                   // a2j t05: inside load_pass (reward spawns raise CONSTRUCT at once)
+    std::shared_ptr<StorySession*> self_;   // a2k t12: the sim's spawn hook reaches this session through it
     void collect(size_t set, std::string_view via);  // log new fired entries, drain script errors
     void apply_reward(Set& s, const std::string& type, const std::vector<std::string>& params);
     void invade_planet_reward(int32_t plot_player, PlanetIndex planet, const std::string& company);  // a1h t04
@@ -598,14 +721,138 @@ private:
     std::function<void(int, const std::vector<galactic::GalacticEvent>&)> drain_tap_;  // OI host
     std::function<void(const std::vector<galactic::GalacticEvent>&)> scoring_tap_;    // q6 t09
     std::function<void(const StorySwitchControl&)> switch_control_;               // q6: SWITCH_CONTROL reward hook
+    // STY1 lane B
+    galactic::StoryGates gates_;
+    StoryTutorialState tutorial_;
+    std::vector<uint8_t> reinforce_off_;  // per player: DISABLE_REINFORCEMENTS (1 = disabled); sized on first write
+    std::vector<uint8_t> retreat_off_;    // per player: DISABLE_RETREAT (1 = cannot retreat), ui2 t06 (save v5); sized on first write
+    std::optional<StoryLoadCampaign> load_campaign_;
+    std::function<void(const std::string&, const std::vector<std::string>&)> tactical_reward_;
+    // mcx6: the planet (type name) of the notification firing the rewarded event (STATISTIC_CHANGE without P3), set by
+    // apply_reward for each reward; definition edits (PICK_PLANET, RANDOM_STORY) and the RANDOM_STORY plot counter.
+    std::string reward_firing_planet_;
+    std::vector<DefinitionEdit> def_edits_;
+    // What each applied edit changed (parallel to def_edits_; not saved: a load rebuilds it as it applies): a PICK_PLANET
+    // substitution's previous parameter texts, model = the galactic set's index in sets_ or kTacticalModel.
+    struct EditChange {
+        uint32_t model = 0, plot = 0, event = 0, index = 0;
+        bool reward = false;
+        std::string before;
+    };
+    static constexpr uint32_t kTacticalModel = 0xFFFFFFFFu;
+    std::vector<std::vector<EditChange>> def_undo_;
+    size_t tactical_applied_ = 0;  // the tactical edits of def_edits_ (in order) applied to the attached tactical set
+    uint32_t random_story_count_ = 0;
+    // mcx6 RANDOM_STORY's own stream (STORY_REWARDS_GALACTIC §1.15 [port]): retail draws its unsynced RNG; the port's
+    // generated plots are sim state (hashed, saved), so they draw from this generator, seeded from the synced RNG's state
+    // (no draw) at the first RANDOM_STORY, saved (story save v8) and hashed with the edits. Unused (and absent from the
+    // hash) until a RANDOM_STORY fires.
+    SimRng random_story_rng_;
+    void pick_planet(const std::vector<std::string>& params);
+    void random_story(Set& s);
+    // Applies one edit (`undo` gets what it changed, `log` PICK_PLANET's "EVENT ..." lines); false = cannot be applied.
+    bool apply_definition_edit(const DefinitionEdit& e, std::vector<EditChange>* undo, std::vector<std::string>* log = nullptr);
+    void undo_definition_edit(const DefinitionEdit& e, const std::vector<EditChange>& undo);
+    void add_definition_edit(DefinitionEdit e, std::vector<std::string>* log = nullptr);  // applied, then kept
+    void drop_tactical_edits();  // the battle's tactical plot set goes
+    void sync_gates() { sim_->set_story_gates(gates_); }
+    PlanetIndex reward_planet(const std::string& type_name) const;  // first row whose planet type is named so, else invalid
+    // ref5 t02: apply_reward's handlers, one per Reward_Type name (reward_handlers() in story_session.cpp). The STY1 families
+    // (galactic, tutorial, Underworld rules, tactical) are defined in src/story_rewards_apply.cpp; a tactical-set reward is
+    // one whose Set is the attached tactical story's.
+    using RewardFn = void (StorySession::*)(Set& s, const std::string& type, const std::vector<std::string>& params);
+    struct RewardHandler {
+        std::string_view name;
+        RewardFn fn;
+    };
+    static std::span<const RewardHandler> reward_handlers();
+    int32_t set_player(const Set& s) const;   // the plot set's player
+    bool tactical_set(const Set& s) const;    // `s` is the attached tactical story's set
+    void reward_set_tech_level(Set& s, const std::string& type, const std::vector<std::string>& params);
+    void reward_credits(Set& s, const std::string& type, const std::vector<std::string>& params);
+    void reward_link_tactical(Set& s, const std::string& type, const std::vector<std::string>& params);
+    void reward_enable_fow(Set& s, const std::string& type, const std::vector<std::string>& params);
+    void reward_switch_control(Set& s, const std::string& type, const std::vector<std::string>& params);
+    void reward_enable_victory(Set& s, const std::string& type, const std::vector<std::string>& params);
+    void reward_set_tactical_map(Set& s, const std::string& type, const std::vector<std::string>& params);
+    void reward_give_black_market(Set& s, const std::string& type, const std::vector<std::string>& params);
+    void reward_sabotage_structure(Set& s, const std::string& type, const std::vector<std::string>& params);
+    void reward_invade_planet(Set& s, const std::string& type, const std::vector<std::string>& params);
+    void reward_lock_unit(Set& s, const std::string& type, const std::vector<std::string>& params);
+    void reward_buildable_unit(Set& s, const std::string& type, const std::vector<std::string>& params);
+    void reward_enable_buildable(Set& s, const std::string& type, const std::vector<std::string>& params);
+    void reward_remove_corruption(Set& s, const std::string& type, const std::vector<std::string>& params);
+    void reward_reveal_planet(Set& s, const std::string& type, const std::vector<std::string>& params);
+    void reward_reveal_all_planets(Set& s, const std::string& type, const std::vector<std::string>& params);
+    void reward_enable_galactic_reveal(Set& s, const std::string& type, const std::vector<std::string>& params);
+    void reward_set_planet_visibility_level(Set& s, const std::string& type, const std::vector<std::string>& params);
+    void reward_disable_buildable(Set& s, const std::string& type, const std::vector<std::string>& params);
+    void reward_unique_unit(Set& s, const std::string& type, const std::vector<std::string>& params);
+    void reward_set_max_tech_level(Set& s, const std::string& type, const std::vector<std::string>& params);
+    void reward_disable_autoresolve(Set& s, const std::string& type, const std::vector<std::string>& params);
+    void reward_restrict_autoresolve(Set& s, const std::string& type, const std::vector<std::string>& params);
+    void reward_trigger_ai(Set& s, const std::string& type, const std::vector<std::string>& params);
+    void reward_pick_planet(Set& s, const std::string& type, const std::vector<std::string>& params);
+    void reward_random_story(Set& s, const std::string& type, const std::vector<std::string>& params);
+    void reward_set_planet_restricted(Set& s, const std::string& type, const std::vector<std::string>& params);
+    void reward_planet_faction(Set& s, const std::string& type, const std::vector<std::string>& params);
+    void reward_force_respawn(Set& s, const std::string& type, const std::vector<std::string>& params);
+    void reward_remove_unit(Set& s, const std::string& type, const std::vector<std::string>& params);
+    void reward_new_power_for_all(Set& s, const std::string& type, const std::vector<std::string>& params);
+    void reward_move_fleet(Set& s, const std::string& type, const std::vector<std::string>& params);
+    void reward_disable_direct_invasion(Set& s, const std::string& type, const std::vector<std::string>& params);
+    void reward_set_planet_spawn(Set& s, const std::string& type, const std::vector<std::string>& params);
+    void reward_set_weather(Set& s, const std::string& type, const std::vector<std::string>& params);
+    void reward_switch_sides(Set& s, const std::string& type, const std::vector<std::string>& params);
+    void reward_statistic_change(Set& s, const std::string& type, const std::vector<std::string>& params);
+    void reward_force_retreat(Set& s, const std::string& type, const std::vector<std::string>& params);
+    void reward_load_campaign(Set& s, const std::string& type, const std::vector<std::string>& params);
+    void reward_tutorial_player(Set& s, const std::string& type, const std::vector<std::string>& params);
+    void reward_finished_tutorial(Set& s, const std::string& type, const std::vector<std::string>& params);
+    void reward_disable_event(Set& s, const std::string& type, const std::vector<std::string>& params);
+    void reward_skirmish_rules(Set& s, const std::string& type, const std::vector<std::string>& params);
+    void reward_reset_galactic_filters(Set& s, const std::string& type, const std::vector<std::string>& params);
+    void reward_set_sandbox_objectives(Set& s, const std::string& type, const std::vector<std::string>& params);
+    void reward_enable_invasion(Set& s, const std::string& type, const std::vector<std::string>& params);
+    void reward_restrict_sabotage(Set& s, const std::string& type, const std::vector<std::string>& params);
+    void reward_restrict_corruption(Set& s, const std::string& type, const std::vector<std::string>& params);
+    void reward_enable_fleet_combine(Set& s, const std::string& type, const std::vector<std::string>& params);
+    void reward_enable_bounty_collection(Set& s, const std::string& type, const std::vector<std::string>& params);
+    void reward_enable_campaign_victory_movie(Set& s, const std::string& type, const std::vector<std::string>& params);
+    void reward_enable_sabotage(Set& s, const std::string& type, const std::vector<std::string>& params);
+    void reward_enable_combat_cinematic(Set& s, const std::string& type, const std::vector<std::string>& params);
+    void reward_restrict_black_market(Set& s, const std::string& type, const std::vector<std::string>& params);
+    void reward_restrict_all_abilities(Set& s, const std::string& type, const std::vector<std::string>& params);
+    void reward_disable_reinforcements(Set& s, const std::string& type, const std::vector<std::string>& params);
+    void reward_disable_retreat(Set& s, const std::string& type, const std::vector<std::string>& params);
+    void reward_change_owner(Set& s, const std::string& type, const std::vector<std::string>& params);
+    void reward_planet_flag(const std::string& type, const std::vector<std::string>& params, uint8_t bit, bool invert);
+    void reward_global_flag(const std::vector<std::string>& params, bool& field);
+    struct Sty1Save {
+        galactic::StoryGates gates;
+        StoryTutorialState tutorial;
+        std::vector<uint8_t> reinforce_off;
+        std::vector<uint8_t> retreat_off;  // save v5
+    };
+    void write_sty1(ByteWriter& w) const;
+    static bool read_sty1(ByteReader& r, Sty1Save& out, uint32_t version);
+    void hash_sty1(StateHasher& h) const;
+    void note(const std::string& text) { lua_messages_.push_back(std::to_string(frame_) + " story: " + text); }
     bool autoresolve_disabled_ = false;              // OI galactic: story lock global flag (+0x41)
     std::vector<PlanetIndex> autoresolve_planets_;   // OI galactic: story lock planet list (+0x308), insertion order
+    std::vector<int32_t> comp_local_, comp_other_;   // mcx6 t03: the orbit record (+0x90 / +0xa8), Ship_Class values
+    std::function<bool(int32_t, const std::vector<objects::ObjectHandle>&)> raid_test_;  // mcx6 t03: Enter Param7
+    // mcx6 t03: the Enter-family fleet fields of a notification (STORY.md §5 "Enter family match") for `fleets` (the
+    // dispatched fleet, or the owner's fleets in orbit when it merged on arrival) and the P4 orbit names of `planet`.
+    void enter_fleet(lua::StoryNotification& n, const std::vector<uint32_t>& fleets, int32_t owner) const;
+    void orbit_names(PlanetIndex planet, std::vector<std::string>& out) const;
     void route_corruption_mission(int32_t winner, uint64_t frame);
     void collect_set(Set& s, uint32_t number, std::string_view via);  // + the other galactic sets (q6 t03)
     void collect_one(Set& s, uint32_t number, std::string_view via);
     void service_script_in(Set& s, uint32_t number, Script& sc, uint64_t frame, double seconds);
     void start_threads_at_load(Set& s, uint32_t number, Script& sc, double seconds);  // q6: the first resume (header comment)
     void service_tactical(uint64_t frame);
+    void service_sandbox(uint64_t frame);  // mcx4 t09: the sandbox spawner objectives (MCX4_GAL2_RE_ANSWERS Q5)
     void route_tactical(uint64_t frame);
     void poll_tactical();
     // number_override: the set number of a resumed battle (N1 stage 2); default = after the galactic sets and headers.
@@ -617,6 +864,11 @@ private:
         int32_t player = -1;
         uint32_t number = 0;
         std::string file;
+        // v9 (mcx4 t09): the sandbox spawner objectives (Tactical::sandbox*); has_sandbox false = an older save
+        bool has_sandbox = false, sandbox = false, sandbox_built = false;
+        int32_t sandbox_player = -1;
+        std::vector<uint32_t> sandbox_types;
+        std::vector<uint8_t> sandbox_paid;
     };
     std::unique_ptr<TacticalResume> resume_tactical_;
     void attach_tactical(const StoryBattleStart& s, uint64_t frame);  // tactical_ for a battle (begin_battle)

@@ -31,7 +31,7 @@ default key table), P1_DOUBLE_CLICK_MOVE.md (double-click move, not covered here
 5. **Land splines are always active** when `Use_Splines` is set. The spline fraction starts at 1.0 (zoomed out), so a
    land battle starts at pitch 55 / distance 460 from the splines, not at Pitch_Default 50. [H]
 6. **Galactic wheel = discrete planet zoom.** Wheel up zooms into the hovered or selected planet. Wheel down zooms back
-   out. There is no continuous galactic zoom range. `Max_Galactic_Zoom_Distance`, `Min/Max_Galactic_Zoom_Speed` and
+   out. There is no continuous galactic zoom range. `Max_Galactic_Zoom_Distance`, `Min_Galactic_Zoom_Speed` / `Max_Galactic_Zoom_Speed` and
    `Galactic_Zoom_Acceleration` have no reader. [H for the behaviour, M for "no reader"]
 7. **A plain left click on nothing deselects**: it submits a "set selection = empty" event. [H; M for which click
    classes count as "nothing"]
@@ -289,7 +289,8 @@ At pose build an extra margin is subtracted, depending on view height, pitch and
 - **Wheel up** (0x3e4660), gated by the tutorial input lock (0x446220 id 4) [M]:
   - zoom state 0: select the hovered planet (HUD +0x2030), or the planet of the hovered fleet. Then, if a planet is
     selected and nothing blocks it (0x3d4130), start the zoom-in (0x3c3ee0) and open the planet panel;
-  - state 3: a further wheel up runs 0x3c5fc0 [L: probably the next planet level].
+  - state 3: a further wheel up runs 0x3c5fc0, which opens the FoC planet map ("Base Layout"; GALACTIC_PLANET_MAP.md §1,
+    ui4 t09, 2026-11-17). Wheel down with the map open closes only the map.
 - **Wheel down** (0x3e48a0): from state 3, zoom out (0x3c4080; the planet sub-view first closes via 0x3ce970 if open).
 - So there is no continuous galactic zoom: the port's "0.5–1 × pullback" range should become the two-state planet
   zoom. `Max_Galactic_Zoom_Distance` / `Min/Max_Galactic_Zoom_Speed` / `Galactic_Zoom_Acceleration` are parsed only. [M]
@@ -340,3 +341,31 @@ Probe suggestion (tools/probe_mod, Gabriel to run): a land and a space skirmish.
 held right-arrow at default zoom and at max zoom (expected ≈ 345 and 345 × distance ratio u/s, ×1.2 for up),
 (b) a middle-drag across the full screen width with and without Ctrl (pan ≈ 4 × distance; rotate 150°),
 (c) a middle click (camera reset), (d) one wheel notch on land (spline step 1/15).
+
+## 8. Port-side check run (2026-10-28)
+
+Moved here from `tools/probe_mod/p1_camera_input/RESULTS_port_2026-10-28.md` (2026-11-07). `alamo_game.exe` with every
+P1 change, 1280×720 window, `--no-intro`, default options, FoC data, driven with Claude computer use; land skirmish
+`_MP_LAND_TATOOINE` (Rebel vs AI Empire) and the Heart of the Maw galactic conquest (Zann Consortium). The computer-use
+tools cannot hold the middle or right button while moving, so P1 steps 2–3, P2 and the facing drags were not run and
+P7 / P8 only partly.
+
+| Check | Result | What was seen |
+|---|---|---|
+| P1 middle mouse | partly | Middle click: angle back to default, position kept (§3, reset keeps the look-at). Middle-drag pan / Ctrl rotate not run. |
+| P2 drag amounts | not run | Tool limit. |
+| P3 scroll speed | matches | Port scroll keys are W A S D [port: Gabriel]; 1 s of D at the start zoom moved about one screen width, W moved further; the minimap outline followed. The left arrow rotates [port: Gabriel]. |
+| P4 wheel on land | matches | The start view is the widest zoom (wheel out does nothing); each notch in changes tilt and distance together; about 15 notches from overhead to the close-up. |
+| P5 galaxy map | matches (edge scroll inconclusive) | Wheel zooms into / out of a planet; D scrolls and stops a little past Yavin 4. Edge scroll did not trigger 13 px inside the window edge (the spec's region is 2 px). |
+| P6 empty-ground click | matches | Land and galaxy: a left click on empty ground / space cleared the selection. |
+| P7 double-click (land) | not verified | The selection was empty (units destroyed); needs a rerun with live units. |
+| P8 double-click (space) | not run | No space battle. |
+| P9 modifier moves | partly | Ctrl+right and Ctrl+Alt+right gave moves with path lines; attack vs guard not distinguishable on screen; three Alt right-clicks showed a path line to the last point only. |
+
+Seen outside P1: the battle only advances while the window has focus; the `_MP_LAND_TATOOINE` load screen showed a
+default green planet with a station ring and the HUD planet name read KUAT; a left click on the tactical minimap did not
+move the camera; an instant drag (press, move, release in one step) selected nothing while a slow drag worked.
+
+Still for Gabriel (needs real mouse drags): P1 steps 2–3 and P2 (middle-drag pan, Ctrl + middle-drag rotation), P7 / P8
+with a mixed fast / slow selection on land and in space, land right-drag facing, and the same checks on the original FoC
+(`tools/probe_mod/p1_camera_input/README.md`).

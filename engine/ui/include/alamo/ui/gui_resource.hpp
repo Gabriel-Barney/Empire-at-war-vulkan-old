@@ -175,6 +175,9 @@ struct GuiData {
     ResourceIds ids;
     GuiSkin skin;
 };
-bool load_gui_data(const FileProvider& files, GuiData& out, std::string* error = nullptr);
+// `failed` (optional) receives which of the two required files did not load (mcx2 t07: the caller can retry with the
+// next layer's copy): kGuiRcFailed for GUIDialogs.rc, kGuiXmlFailed for GUIDialogs.xml.
+inline constexpr uint32_t kGuiRcFailed = 1u, kGuiXmlFailed = 2u;
+bool load_gui_data(const FileProvider& files, GuiData& out, std::string* error = nullptr, uint32_t* failed = nullptr);
 
 }  // namespace alamo::ui

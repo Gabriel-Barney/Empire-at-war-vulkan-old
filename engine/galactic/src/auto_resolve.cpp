@@ -1,27 +1,15 @@
 #include "alamo/galactic/auto_resolve.hpp"
+#include "alamo/core/sim_crc.hpp"
 
 #include <algorithm>
+#include <iterator>
 
+#include "alamo/core/ascii.hpp"
 #include "alamo/objects/type_fields.hpp"
 
 namespace alamo::galactic {
 
 namespace {
-
-char upper(char c) { return (c >= 'a' && c <= 'z') ? static_cast<char>(c - 'a' + 'A') : c; }
-
-bool iequal(std::string_view a, std::string_view b) {
-    if (a.size() != b.size()) return false;
-    for (size_t i = 0; i < a.size(); ++i)
-        if (upper(a[i]) != upper(b[i])) return false;
-    return true;
-}
-
-std::string_view trim(std::string_view s) {
-    while (!s.empty() && (s.front() == ' ' || s.front() == '\t' || s.front() == '\r' || s.front() == '\n')) s.remove_prefix(1);
-    while (!s.empty() && (s.back() == ' ' || s.back() == '\t' || s.back() == '\r' || s.back() == '\n')) s.remove_suffix(1);
-    return s;
-}
 
 // Items of a Lua table constructor "{a, b, c}" on one line: quoted strings or numbers, as written.
 std::vector<std::string> table_items(std::string_view line) {
@@ -33,7 +21,7 @@ std::vector<std::string> table_items(std::string_view line) {
     while (i < body.size()) {
         const size_t comma = body.find(',', i);
         const size_t end = comma == std::string_view::npos ? body.size() : comma;
-        std::string_view item = trim(body.substr(i, end - i));
+        std::string_view item = ascii_trim(body.substr(i, end - i));
         if (item.size() >= 2 && (item.front() == '"' || item.front() == '\'')) item = item.substr(1, item.size() - 2);
         if (!item.empty()) out.emplace_back(item);
         i = end + 1;
@@ -62,9 +50,30 @@ float ContrastTable::contrast(size_t row, std::string_view type_name, uint64_t c
     if (row >= rows.size()) return 0.0f;
     for (const ContrastRow::Entry& e : rows[row].friendly) {
         if ((e.mask & categories) != 0) return e.weight;
-        if (!type_name.empty() && iequal(e.name, type_name)) return e.weight;
+        if (!type_name.empty() && ascii_iequals(e.name, type_name)) return e.weight;
     }
     return 0.0f;
+}
+
+float ContrastTable::ai_weight(size_t row, std::string_view type_name, uint64_t categories) const {
+    if (row >= rows.size()) return 0.0f;
+    float sum = 0.0f;
+    int32_t count = 0;
+    bool matched = false;
+    for (const ContrastRow::Entry& e : rows[row].friendly) {
+        if (e.mask == 0) {
+            if (!type_name.empty() && ascii_iequals(e.name, type_name)) return e.weight;
+            continue;
+        }
+        if ((e.mask & categories) == 0) continue;
+        matched = true;
+        if (e.weight != 1.0f) {
+            sum += e.weight;
+            ++count;
+        }
+    }
+    if (count > 0) return sum / static_cast<float>(count);
+    return matched ? 1.0f : 0.0f;
 }
 
 bool ContrastTable::parse_lua(std::string_view src, const std::function<uint64_t(std::string_view)>& category_mask,
@@ -83,7 +92,7 @@ bool ContrastTable::parse_lua(std::string_view src, const std::function<uint64_t
         std::string_view line = src.substr(i + 1, e - i - 1);
         const size_t comment = line.find("--");
         if (comment != std::string_view::npos) line = line.substr(0, comment);
-        const std::string_view t = trim(line);
+        const std::string_view t = ascii_trim(line);
         i = e;
         if (t == "end") break;  // end of the function (column-0 "end" in the shipped script)
         if (t.rfind("EnemyContrastTypes[", 0) == 0) {
@@ -244,15 +253,30 @@ AutoResolveResult auto_resolve(const AutoResolveInput& in, const ContrastTable& 
     }
 
     // ---- exchange of fire (0x60d2a0), once per side ----
+    // Unit strength bonus table (MCX4_T09_RE_ANSWERS Q9) [H]: a static 32-float table cleared at each call (per firing
+    // side) and raised to max(entry, factor - 1) by every (bit, factor) pair of the side's combatants.
+    float strength_table[32] = {};
+    // Q9 apply step 1-2 (0x60ad90): the firing type's own CategoryMask bits, lowest first, with a running b that already
+    // includes the +1 (a later bit replaces b only when its entry exceeds b) [H].
+    auto strength_bonus = [&strength_table](uint64_t categories) {
+        float b = 0.0f;
+        for (uint32_t k = 0; k < 32; ++k)
+            if ((categories >> k) & 1u)
+                if (strength_table[k] > b) b = strength_table[k] + 1.0f;
+        return b;
+    };
     auto fire = [&](const ArPiece& p, std::vector<double>& R) {
         const float pw = p.power;
+        const float b = strength_bonus(p.categories);
+        const float pb = b != 0.0f ? b * pw : pw;
         int32_t best = -1;
         double best_score = 0.0;
         float best_c = 0.0f;
         for (size_t j = 0; j < K; ++j) {
             const double Rj = R[2 + j];
             if (!(Rj > 0.0)) continue;
-            const float c = ct.contrast(j, p.name, p.categories);
+            // 0x5f1f90 keyed by row j's enemy category mask (A2L_T03_RE_ANSWERS Q6.3) [H]: ContrastTable::ai_weight.
+            const float c = ct.ai_weight(j, p.name, p.categories);
             if (!(c > 0.0f)) continue;
             const double pc = static_cast<double>(pw) * static_cast<double>(c);
             const double m = std::max(Rj, pc);
@@ -265,21 +289,28 @@ AutoResolveResult auto_resolve(const AutoResolveInput& in, const ContrastTable& 
             }
         }
         if (best < 0) {
-            R[tot] -= static_cast<double>(pw);
+            R[tot] -= static_cast<double>(pb);  // Q9 step 3: the bonus included
             return;
         }
-        const float bonus = 1.0f;  // planet modifier table (open item 7)
-        const float d = pw * best_c * bonus;
+        const float d = pb * best_c;  // Q9: d = c_j x p' (the 0x5f22c0 second factor is not modelled [L])
         double& Rj = R[2 + static_cast<size_t>(best)];
         const double a = std::min(static_cast<double>(d), Rj);
         Rj -= a;
         const double left = d > 0.0f ? (1.0 - a / static_cast<double>(d)) * static_cast<double>(pw) : static_cast<double>(pw);
         R[tot] -= a + left;
     };
-    for (int s = 0; s < 2; ++s)
+    for (int s = 0; s < 2; ++s) {
+        std::fill(std::begin(strength_table), std::end(strength_table), 0.0f);
+        for (size_t i = 0; i < n; ++i)
+            if (side_of[i] == s)
+                for (const auto& [bit, factor] : in.combatants[i].strength_bonus) {
+                    const float v = factor - 1.0f;
+                    if (bit < 32 && v > strength_table[bit]) strength_table[bit] = v;
+                }
         for (size_t i = 0; i < n; ++i)
             if (side_of[i] == s)
                 for (const ArPiece& p : in.combatants[i].pieces) fire(p, r.rem[1 - s]);
+    }
 
     // ---- winner (0x60c010) ----
     if (super[0] && !killer[1] && retreating < 0) retreating = r.side_player[1];

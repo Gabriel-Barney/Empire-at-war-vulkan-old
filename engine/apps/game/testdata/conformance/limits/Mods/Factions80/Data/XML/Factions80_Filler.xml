@@ -1,0 +1,292 @@
+<?xml version="1.0"?>
+<!-- mcx5 t06: 72 inert factions (no AI, no planets, not playable). Written by hand; see ../../../../README.md. -->
+<Factions>
+	<Faction Name="Filler_00">
+		<Is_Playable>false</Is_Playable>
+		<Is_Neutral> No </Is_Neutral>
+	</Faction>
+	<Faction Name="Filler_01">
+		<Is_Playable>false</Is_Playable>
+		<Is_Neutral> No </Is_Neutral>
+	</Faction>
+	<Faction Name="Filler_02">
+		<Is_Playable>false</Is_Playable>
+		<Is_Neutral> No </Is_Neutral>
+	</Faction>
+	<Faction Name="Filler_03">
+		<Is_Playable>false</Is_Playable>
+		<Is_Neutral> No </Is_Neutral>
+	</Faction>
+	<Faction Name="Filler_04">
+		<Is_Playable>false</Is_Playable>
+		<Is_Neutral> No </Is_Neutral>
+	</Faction>
+	<Faction Name="Filler_05">
+		<Is_Playable>false</Is_Playable>
+		<Is_Neutral> No </Is_Neutral>
+	</Faction>
+	<Faction Name="Filler_06">
+		<Is_Playable>false</Is_Playable>
+		<Is_Neutral> No </Is_Neutral>
+	</Faction>
+	<Faction Name="Filler_07">
+		<Is_Playable>false</Is_Playable>
+		<Is_Neutral> No </Is_Neutral>
+	</Faction>
+	<Faction Name="Filler_08">
+		<Is_Playable>false</Is_Playable>
+		<Is_Neutral> No </Is_Neutral>
+	</Faction>
+	<Faction Name="Filler_09">
+		<Is_Playable>false</Is_Playable>
+		<Is_Neutral> No </Is_Neutral>
+	</Faction>
+	<Faction Name="Filler_10">
+		<Is_Playable>false</Is_Playable>
+		<Is_Neutral> No </Is_Neutral>
+	</Faction>
+	<Faction Name="Filler_11">
+		<Is_Playable>false</Is_Playable>
+		<Is_Neutral> No </Is_Neutral>
+	</Faction>
+	<Faction Name="Filler_12">
+		<Is_Playable>false</Is_Playable>
+		<Is_Neutral> No </Is_Neutral>
+	</Faction>
+	<Faction Name="Filler_13">
+		<Is_Playable>false</Is_Playable>
+		<Is_Neutral> No </Is_Neutral>
+	</Faction>
+	<Faction Name="Filler_14">
+		<Is_Playable>false</Is_Playable>
+		<Is_Neutral> No </Is_Neutral>
+	</Faction>
+	<Faction Name="Filler_15">
+		<Is_Playable>false</Is_Playable>
+		<Is_Neutral> No </Is_Neutral>
+	</Faction>
+	<Faction Name="Filler_16">
+		<Is_Playable>false</Is_Playable>
+		<Is_Neutral> No </Is_Neutral>
+	</Faction>
+	<Faction Name="Filler_17">
+		<Is_Playable>false</Is_Playable>
+		<Is_Neutral> No </Is_Neutral>
+	</Faction>
+	<Faction Name="Filler_18">
+		<Is_Playable>false</Is_Playable>
+		<Is_Neutral> No </Is_Neutral>
+	</Faction>
+	<Faction Name="Filler_19">
+		<Is_Playable>false</Is_Playable>
+		<Is_Neutral> No </Is_Neutral>
+	</Faction>
+	<Faction Name="Filler_20">
+		<Is_Playable>false</Is_Playable>
+		<Is_Neutral> No </Is_Neutral>
+	</Faction>
+	<Faction Name="Filler_21">
+		<Is_Playable>false</Is_Playable>
+		<Is_Neutral> No </Is_Neutral>
+	</Faction>
+	<Faction Name="Filler_22">
+		<Is_Playable>false</Is_Playable>
+		<Is_Neutral> No </Is_Neutral>
+	</Faction>
+	<Faction Name="Filler_23">
+		<Is_Playable>false</Is_Playable>
+		<Is_Neutral> No </Is_Neutral>
+	</Faction>
+	<Faction Name="Filler_24">
+		<Is_Playable>false</Is_Playable>
+		<Is_Neutral> No </Is_Neutral>
+	</Faction>
+	<Faction Name="Filler_25">
+		<Is_Playable>false</Is_Playable>
+		<Is_Neutral> No </Is_Neutral>
+	</Faction>
+	<Faction Name="Filler_26">
+		<Is_Playable>false</Is_Playable>
+		<Is_Neutral> No </Is_Neutral>
+	</Faction>
+	<Faction Name="Filler_27">
+		<Is_Playable>false</Is_Playable>
+		<Is_Neutral> No </Is_Neutral>
+	</Faction>
+	<Faction Name="Filler_28">
+		<Is_Playable>false</Is_Playable>
+		<Is_Neutral> No </Is_Neutral>
+	</Faction>
+	<Faction Name="Filler_29">
+		<Is_Playable>false</Is_Playable>
+		<Is_Neutral> No </Is_Neutral>
+	</Faction>
+	<Faction Name="Filler_30">
+		<Is_Playable>false</Is_Playable>
+		<Is_Neutral> No </Is_Neutral>
+	</Faction>
+	<Faction Name="Filler_31">
+		<Is_Playable>false</Is_Playable>
+		<Is_Neutral> No </Is_Neutral>
+	</Faction>
+	<Faction Name="Filler_32">
+		<Is_Playable>false</Is_Playable>
+		<Is_Neutral> No </Is_Neutral>
+	</Faction>
+	<Faction Name="Filler_33">
+		<Is_Playable>false</Is_Playable>
+		<Is_Neutral> No </Is_Neutral>
+	</Faction>
+	<Faction Name="Filler_34">
+		<Is_Playable>false</Is_Playable>
+		<Is_Neutral> No </Is_Neutral>
+	</Faction>
+	<Faction Name="Filler_35">
+		<Is_Playable>false</Is_Playable>
+		<Is_Neutral> No </Is_Neutral>
+	</Faction>
+	<Faction Name="Filler_36">
+		<Is_Playable>false</Is_Playable>
+		<Is_Neutral> No </Is_Neutral>
+	</Faction>
+	<Faction Name="Filler_37">
+		<Is_Playable>false</Is_Playable>
+		<Is_Neutral> No </Is_Neutral>
+	</Faction>
+	<Faction Name="Filler_38">
+		<Is_Playable>false</Is_Playable>
+		<Is_Neutral> No </Is_Neutral>
+	</Faction>
+	<Faction Name="Filler_39">
+		<Is_Playable>false</Is_Playable>
+		<Is_Neutral> No </Is_Neutral>
+	</Faction>
+	<Faction Name="Filler_40">
+		<Is_Playable>false</Is_Playable>
+		<Is_Neutral> No </Is_Neutral>
+	</Faction>
+	<Faction Name="Filler_41">
+		<Is_Playable>false</Is_Playable>
+		<Is_Neutral> No </Is_Neutral>
+	</Faction>
+	<Faction Name="Filler_42">
+		<Is_Playable>false</Is_Playable>
+		<Is_Neutral> No </Is_Neutral>
+	</Faction>
+	<Faction Name="Filler_43">
+		<Is_Playable>false</Is_Playable>
+		<Is_Neutral> No </Is_Neutral>
+	</Faction>
+	<Faction Name="Filler_44">
+		<Is_Playable>false</Is_Playable>
+		<Is_Neutral> No </Is_Neutral>
+	</Faction>
+	<Faction Name="Filler_45">
+		<Is_Playable>false</Is_Playable>
+		<Is_Neutral> No </Is_Neutral>
+	</Faction>
+	<Faction Name="Filler_46">
+		<Is_Playable>false</Is_Playable>
+		<Is_Neutral> No </Is_Neutral>
+	</Faction>
+	<Faction Name="Filler_47">
+		<Is_Playable>false</Is_Playable>
+		<Is_Neutral> No </Is_Neutral>
+	</Faction>
+	<Faction Name="Filler_48">
+		<Is_Playable>false</Is_Playable>
+		<Is_Neutral> No </Is_Neutral>
+	</Faction>
+	<Faction Name="Filler_49">
+		<Is_Playable>false</Is_Playable>
+		<Is_Neutral> No </Is_Neutral>
+	</Faction>
+	<Faction Name="Filler_50">
+		<Is_Playable>false</Is_Playable>
+		<Is_Neutral> No </Is_Neutral>
+	</Faction>
+	<Faction Name="Filler_51">
+		<Is_Playable>false</Is_Playable>
+		<Is_Neutral> No </Is_Neutral>
+	</Faction>
+	<Faction Name="Filler_52">
+		<Is_Playable>false</Is_Playable>
+		<Is_Neutral> No </Is_Neutral>
+	</Faction>
+	<Faction Name="Filler_53">
+		<Is_Playable>false</Is_Playable>
+		<Is_Neutral> No </Is_Neutral>
+	</Faction>
+	<Faction Name="Filler_54">
+		<Is_Playable>false</Is_Playable>
+		<Is_Neutral> No </Is_Neutral>
+	</Faction>
+	<Faction Name="Filler_55">
+		<Is_Playable>false</Is_Playable>
+		<Is_Neutral> No </Is_Neutral>
+	</Faction>
+	<Faction Name="Filler_56">
+		<Is_Playable>false</Is_Playable>
+		<Is_Neutral> No </Is_Neutral>
+	</Faction>
+	<Faction Name="Filler_57">
+		<Is_Playable>false</Is_Playable>
+		<Is_Neutral> No </Is_Neutral>
+	</Faction>
+	<Faction Name="Filler_58">
+		<Is_Playable>false</Is_Playable>
+		<Is_Neutral> No </Is_Neutral>
+	</Faction>
+	<Faction Name="Filler_59">
+		<Is_Playable>false</Is_Playable>
+		<Is_Neutral> No </Is_Neutral>
+	</Faction>
+	<Faction Name="Filler_60">
+		<Is_Playable>false</Is_Playable>
+		<Is_Neutral> No </Is_Neutral>
+	</Faction>
+	<Faction Name="Filler_61">
+		<Is_Playable>false</Is_Playable>
+		<Is_Neutral> No </Is_Neutral>
+	</Faction>
+	<Faction Name="Filler_62">
+		<Is_Playable>false</Is_Playable>
+		<Is_Neutral> No </Is_Neutral>
+	</Faction>
+	<Faction Name="Filler_63">
+		<Is_Playable>false</Is_Playable>
+		<Is_Neutral> No </Is_Neutral>
+	</Faction>
+	<Faction Name="Filler_64">
+		<Is_Playable>false</Is_Playable>
+		<Is_Neutral> No </Is_Neutral>
+	</Faction>
+	<Faction Name="Filler_65">
+		<Is_Playable>false</Is_Playable>
+		<Is_Neutral> No </Is_Neutral>
+	</Faction>
+	<Faction Name="Filler_66">
+		<Is_Playable>false</Is_Playable>
+		<Is_Neutral> No </Is_Neutral>
+	</Faction>
+	<Faction Name="Filler_67">
+		<Is_Playable>false</Is_Playable>
+		<Is_Neutral> No </Is_Neutral>
+	</Faction>
+	<Faction Name="Filler_68">
+		<Is_Playable>false</Is_Playable>
+		<Is_Neutral> No </Is_Neutral>
+	</Faction>
+	<Faction Name="Filler_69">
+		<Is_Playable>false</Is_Playable>
+		<Is_Neutral> No </Is_Neutral>
+	</Faction>
+	<Faction Name="Filler_70">
+		<Is_Playable>false</Is_Playable>
+		<Is_Neutral> No </Is_Neutral>
+	</Faction>
+	<Faction Name="Filler_71">
+		<Is_Playable>false</Is_Playable>
+		<Is_Neutral> No </Is_Neutral>
+	</Faction>
+</Factions>

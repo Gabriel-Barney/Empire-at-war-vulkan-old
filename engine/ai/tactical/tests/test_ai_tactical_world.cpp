@@ -40,20 +40,15 @@
 #include "alamo/lua/object_bridge.hpp"
 #include "alamo/objects/behaviors.hpp"
 #include "alamo/objects/game_object_types.hpp"
+#include "alamo/test/support.hpp"
 
 using namespace alamo;
 using namespace alamo::ai;
 using namespace alamo::ai::tactical;
 
-static int g_fail = 0;
+using ::alamo::test::g_fail;
 static bool g_write_golden = false;
-#define CHECK(c)                                                     \
-    do {                                                             \
-        if (!(c)) {                                                  \
-            std::printf("FAIL %s:%d: %s\n", __FILE__, __LINE__, #c); \
-            ++g_fail;                                                \
-        }                                                            \
-    } while (0)
+static std::string g_golden_out;  // wr1 t05: --golden-out DIR writes the golden into DIR
 
 namespace {
 
@@ -106,7 +101,10 @@ const char* kTemplates = R"(<AITemplates>
              <Goal_Category>Tactical_Untargeted</Goal_Category></Plans></Turn_On>
   </Syn_Space>
 </AITemplates>)";
+// skai t12: GoalSetExtensionSize 1 keeps these scenarios at one new goal per category and commit (they were written
+// with the goal system's config default 1; the tactical AI now takes the tag from the AIPlayerType, default 2).
 const char* kPlayer = R"(<AIPlayerType><Name>%s</Name>
+  <GoalSetExtensionSize>1</GoalSetExtensionSize>
   <SpaceFreeStoreScript>SynTacticalFreeStore</SpaceFreeStoreScript>
   <GoalProposalFunctionSets>SynSpaceSet</GoalProposalFunctionSets>
   <Templates><Space>Syn_Space</Space></Templates>
@@ -178,6 +176,12 @@ end
 )";
 // Destroy a unit: free-store units + pool reinforcements, the goal equation re-checked with the AI target, then
 // Attack_Target(Target, "Random") (space: one Get_Int(0, 13) draw).
+// ref5 t05: under the retail contrast rules (AI_GALACTIC_TOKENS 9.8a) a typed row that is met no longer scores, so after
+// the first frigate the picks follow the free store / pool scores and a 3-unit team of this synthetic world can miss the
+// untyped enemy total (default tolerance 0.27). Scenarios that need SYNDESTROY to run early with a given force set
+// MinContrastScale = 0.5 (tolerance 2/3): kPlanGroupAttack, kPlanAmbush, and kPlanEmptyTf in test_no_units_remaining_heroes
+// (g_empty_tf_tolerance). kPlanAbility names its frigate and corvette teams instead, which its tests need (frigates fail
+// SPRINT, corvettes activate it); test_landing_wait gives the mock a population cap of 10. Fixture data, not retail.
 const char* kPlanDestroy = R"(
 require("SynAICommands")
 ScriptPoolCount = 2
@@ -327,6 +331,7 @@ require("SynAICommands")
 ScriptPoolCount = 1
 function Definitions()
   Category = "Syn_Destroy_Unit"
+  MinContrastScale = 0.5  -- ref5 t05: fixture tolerance 2/3 (see kPlanDestroy)
   TaskForce = { { "MainForce", "Frigate | Corvette = 2,3" } }
 end
 function MainForce_Thread()
@@ -357,12 +362,16 @@ end
 function SweepForce_Thread()
   SweepForce.Add_Opportunity_Fire_Event_Subscription("HARD_POINT_WEAPON_LASER")
   BlockOnCommand(SweepForce.Produce_Force())
-  while (OppHits or 0) < 2 do Sleep(1) end
+  while (OppHits or 0) < 2 or (DmgHits or 0) < 1 do Sleep(1) end
   SweepForce.Set_Plan_Result(true)
   ScriptExit()
 end
 function SweepForce_Hardpoint_Opportunity_Target_Acquired(tf, unit, target)
   if TestValid(unit) and TestValid(target) then OppHits = (OppHits or 0) + 1 end
+end
+-- skai t15: plan event 14 Unit_Damaged(tf, unit, attacker, deliberate)
+function SweepForce_Unit_Damaged(tf, unit, attacker, deliberate)
+  if TestValid(unit) and TestValid(attacker) and deliberate == true then DmgHits = (DmgHits or 0) + 1 end
 end
 )";
 // Variants 5-7 (the S7 plans): no escort plan. Since a1g t01 (free-store reservations at accept) the escort's Lead /
@@ -453,7 +462,7 @@ function SweepForce_Thread()
   BlockOnCommand(SweepForce.Produce_Force())
   SweepForce.Collect_All_Free_Units("Corvette")
   for i, u in pairs(SweepForce.Get_Unit_Table()) do
-    if u.Get_Type().Get_Name() ~= "Syn_Corvette" then error("COLLECT took " .. u.Get_Type().Get_Name()) end
+    if u.Get_Type().Get_Name() ~= "SYN_CORVETTE" then error("COLLECT took " .. u.Get_Type().Get_Name()) end
   end
   SweepForce.Set_Targeting_Priorities("Syn_Sweep_Set")
   Sleep(15)
@@ -486,6 +495,7 @@ function Report(m) error(m) end
 ScriptPoolCount = 1
 function Definitions()
   Category = "Syn_Destroy_Unit"
+  MinContrastScale = 0.5  -- ref5 t05: fixture tolerance 2/3 (see kPlanDestroy)
   TaskForce = { { "MainForce", "Frigate | Corvette = 1,3" } }
 end
 function MainForce_Thread()
@@ -526,7 +536,7 @@ function Report(m) error(m) end
 ScriptPoolCount = 1
 function Definitions()
   Category = "Syn_Destroy_Unit"
-  TaskForce = { { "MainForce", "Frigate | Corvette = 2,3" } }
+  TaskForce = { { "MainForce", "Frigate = 1,1", "Corvette = 1,2" } }
 end
 function MainForce_Thread()
   MainForce.Set_As_Goal_System_Removable(false)
@@ -605,6 +615,84 @@ function MainForce_Thread()
   Report(string.format("AMRESULT player=%d res=%s valid=%s", PlayerObject.Get_ID(), tostring(res), tostring(TestValid(Target))))
 end
 )";
+// aitac t07 (L1_S4_REMAINING §2.3.1, variant 12): the task force explores its target's area.
+const char* kPlanExplore = R"(
+require("SynAICommands")
+function Report(m) error(m) end
+ScriptPoolCount = 1
+function Definitions()
+  Category = "Syn_Destroy_Unit"
+  TaskForce = { { "MainForce", "Frigate | Corvette = 2,3" } }
+end
+function MainForce_Thread()
+  if Reported then
+    while true do Sleep(10) end
+  end
+  BlockOnCommand(MainForce.Produce_Force())
+  if not TestValid(Target) then ScriptExit() end
+  local res = BlockOnCommand(MainForce.Explore_Area(Target), 10)
+  Reported = true
+  Report(string.format("EXRESULT player=%d res=%s", PlayerObject.Get_ID(), tostring(res)))
+end
+)";
+// ref5 t07 (variant 13, space): the in-frame trap of a frame snapshot. The task force wants four corvettes: the free store
+// gives two, Produce_Force leaves two pool entries pending; the population cap leaves room for ONE more corvette. The plan
+// polls its space Reinforce block twice in the same Lua run (two polls in one AI frame, AI_TACTICAL §7.4: one unit per
+// poll). The first poll drops a corvette (the mock spawns it at once, used + 1); the second must see the new population and
+// place nothing. A facts object captured once per frame would still see the old population and drop the second one.
+const char* kPlanSameFrame = R"(
+require("SynAICommands")
+function Report(m) error(m) end
+ScriptPoolCount = 1
+function Definitions()
+  Category = "Syn_Destroy_Unit"
+  MinContrastScale = 0.5
+  TaskForce = { { "MainForce", "Corvette = 4,4" } }
+end
+function MainForce_Thread()
+  MainForce.Set_As_Goal_System_Removable(false)
+  if Reported then
+    while true do Sleep(10) end
+  end
+  BlockOnCommand(MainForce.Produce_Force())
+  local home = FindTarget(MainForce, "One", "Friendly_Structure", 1.0)
+  if not home then ScriptExit() end
+  local before = MainForce.Get_Force_Count()
+  local st = MainForce.Reinforce(home)
+  if not st then ScriptExit() end
+  local t0 = GetCurrentTime()
+  local a = st.IsFinished()
+  local one = MainForce.Get_Force_Count()
+  local b = st.IsFinished()
+  Reported = true
+  Report(string.format("SAMEFRAME player=%d before=%d one=%d two=%d same=%s fin=%s", PlayerObject.Get_ID(), before, one,
+    MainForce.Get_Force_Count(), tostring(GetCurrentTime() == t0), tostring(a or b)))
+  while true do Sleep(10) end
+end
+)";
+// mcx6 t06 (LUA_API.md "Task force: Enable_Attack_Positioning", variant 11, land): the land task force sets the UnitAI
+// attack-positioning flag on its members, then attack-moves on the target; Release_Reinforcements on the accepted plan.
+const char* kPlanAttackPos = R"(
+require("SynAICommands")
+function Report(m) error(m) end
+ScriptPoolCount = 1
+function Definitions()
+  Category = "Syn_Destroy_Unit"
+  TaskForce = { { "MainForce", "Frigate | Corvette = 2,3" } }
+end
+function MainForce_Thread()
+  if Reported then
+    while true do Sleep(10) end
+  end
+  MainForce.Release_Reinforcements()
+  BlockOnCommand(MainForce.Produce_Force())
+  if not TestValid(Target) then ScriptExit() end
+  local on = MainForce.Enable_Attack_Positioning(true)
+  local res = BlockOnCommand(MainForce.Attack_Move(Target), 90)
+  Reported = true
+  Report(string.format("ATTACKPOS player=%d on=%s", PlayerObject.Get_ID(), tostring(on)))
+end
+)";
 const char* kFreeStore = R"(
 require("SynBase")
 function Base_Definitions()
@@ -651,11 +739,16 @@ struct MockUnit {
     int32_t ordered = -1;  // ordered attack target
     int32_t target = -1;   // current target
     float hp = 0.0f, max_hp = 1.0f;
+    int32_t reprojection_stamp = 0;  // UnitAI data pack +0x20, drawn at creation (A1_READINGS §14)
+    int32_t attack_position_stamp = 0;  // mcx6 t06: +0x34, the second draw of the same pack
+    int32_t goal_object = -1;           // mcx6 t06: the formation attack target (Attack, AttackMove on an object)
 };
 
 // S7 t33: run the same plans as a land battle (Land store and mode; the SpaceMode plans copied to LandMode; the objects
 // have the land evaluator) and, variant 6, a Move_To(Target, 5000) before the ambushes (test_prepare_ambush_land).
+bool g_station_outside_grid = false;  // skai t22: the stations carry PerceptionObject::no_owner_list
 bool g_land = false;
+bool g_explore_fog = false;  // aitac t07: the mock fogs every point (test_explore_area)
 // a1j t01: land landings in the mock (g_land runs): 0 off (Reinforce spawns at once), 1 a Reinforce unloads its unit
 // kLandingDelay frames later with a signal 0x19 record, 2 the landing dies before its unit is out (a record without units).
 int g_landing = 0;
@@ -663,10 +756,15 @@ int g_landing = 0;
 // the Defensive BudgetAllocation, Tactical_Untargeted -2) and a Tactical_Budget_Allowance-only Hero entry.
 bool g_budget = false;
 constexpr uint32_t kLandingDelay = 60;
+float g_pop_cap = 6.0f;  // ref5 t05: MockHost::population_cap
+// ref5 t07 (test_facts_same_frame): the population cap leaves room for one corvette per AI frame (the population at the
+// frame's start + 1); the mock's facts are captured once per AI frame and read from that capture during the update.
+bool g_room_for_one = false;
+bool g_frame_snapshot = false;
 
 class MockHost final : public TacticalAiHost {
 public:
-    MockHost(objects::ObjectStore& s) : store_(s) {
+    MockHost(objects::ObjectStore& s, GameRandom& rng) : store_(s), rng_(&rng) {
         const char* names[] = {"Syn_Frigate", "Syn_Corvette", "Syn_Station", "Syn_Pad", "UC_Syn_Turret"};
         const float power[] = {1000.0f, 400.0f, 2000.0f, 0.0f, 0.0f};
         const char* cats[] = {"Frigate", "Corvette", "Structure", "Structure", "Structure"};
@@ -683,6 +781,65 @@ public:
         types_[tCorvette].build_time_seconds = 8;
         types_[tTurret].build_time_seconds = 1;
         contrast_ = make_contrast();
+        wire_facts();
+    }
+    // ref5 t07: the mock's answers as BattleFacts rules (read live; a test may capture them and read the snapshot)
+    void wire_facts() {
+        using Key2 = std::pair<int32_t, int32_t>;
+        facts_.pool.set_rule([this](const int32_t& p) { return pool_[p]; });
+        facts_.reinforce_ok.set_rule([](const int32_t&) { return true; });
+        facts_.pop_cap.set_rule([this](const int32_t& p) { return g_room_for_one ? frame_used_[p & 1] + 1.0f : g_pop_cap; });
+        facts_.pop_used.set_rule([this](const int32_t& p) { return population_used(p); });
+        facts_.damage_live = &dt_;
+        facts_.contrast_table = &contrast_;
+        facts_.pad_check.live = [](int32_t, int32_t, int32_t) { return PadCheck::Blocked; };
+        facts_.pads.live = [this](int32_t p) { return build_pads(p); };
+        facts_.can_build.set_rule([this](const Key2& k) { return can_build_now(k.first, k.second); });
+        facts_.builders.set_rule([this](const Key2& k) { return tactical_builders(k.first, k.second); });
+        // refixf t06 (AI_TACTICAL §7.4): with ring_test the space drop test refuses every point with |x| > 3200 (the strips
+        // behind both stations), so a reinforcement at a station needs the ring search; entry facing 0 -> first direction -x.
+        facts_.drop_frame.set_rule([this](const int32_t&) -> std::optional<SpaceDropFrame> {
+            if (!ring_test) return std::nullopt;
+            SpaceDropFrame f;
+            f.has_box = true;
+            f.min_x = f.min_y = -4000.0f;
+            f.max_x = f.max_y = 4000.0f;
+            return f;
+        });
+        facts_.space_drop.live = [this](int32_t, int32_t, Vec3f p, float, float sweep) {
+            ++drop_tests;
+            if (ring_test && sweep != 200.0f) return false;  // the GameConstants default reaches the host
+            return !ring_test || (p.x >= -3200.0f && p.x <= 3200.0f);
+        };
+        // S7 t21: movement-locked ids. a1j t01: the Reinforce's landing has not unloaded yet.
+        facts_.locked.set_rule([this](const int32_t& id) { return std::find(locked.begin(), locked.end(), id) != locked.end(); });
+        facts_.in_flight.set_rule([this](const Key2& k) {
+            return std::any_of(landings_.begin(), landings_.end(), [&](const MockLanding& l) { return l.player == k.first && l.key == k.second; });
+        });
+        facts_.base_alive.live = [this](int32_t) { return base_alive; };  // skm1 t03
+    }
+    BattleFacts& facts() override { return facts_; }
+    BattleFacts facts_;
+    float frame_used_[2] = {0.0f, 0.0f};  // g_room_for_one: the population at the start of the AI frame
+    void begin_ai_frame() {
+        frame_used_[0] = population_used(0);
+        frame_used_[1] = population_used(1);
+    }
+    // g_frame_snapshot: the table families captured for both players now, read from the capture until set_snapshot(false)
+    // (the queries keep their live answers: the mock's are fixed rules).
+    void capture_facts() {
+        const std::vector<int32_t> players = {0, 1};
+        facts_.pool.capture(players);
+        facts_.reinforce_ok.capture(players);
+        facts_.pop_cap.capture(players);
+        facts_.pop_used.capture(players);
+        facts_.drop_frame.capture(players);
+        facts_.space_drop.snapshot = facts_.space_drop.live;
+        facts_.base_alive.snapshot = facts_.base_alive.live;
+        facts_.pads.snapshot = facts_.pads.live;
+        facts_.pad_check.snapshot = facts_.pad_check.live;
+        facts_.captured();
+        facts_.set_snapshot(true);
     }
     static uint64_t category(const char* n) {
         // GameObjectCategoryType bits as the default perception table resolves them.
@@ -712,6 +869,12 @@ public:
         u.type = type;
         u.pos = {x, y, 0.0f};
         u.max_hp = u.hp = type == tFrigate ? 900.0f : type == tCorvette ? 400.0f : type == tStation ? 4000.0f : 1.0e9f;
+        // cu12 t06: the UnitAI data pack's two synced draws at creation, like the battle host (battle_ai.cpp).
+        if (type != tPad) {
+            const UnitAiStamps s = draw_unit_ai_stamps(rng_->synced(), build_frame_);
+            u.reprojection_stamp = s.reprojection_check;
+            u.attack_position_stamp = s.second;  // mcx6 t06
+        }
         units_.push_back(u);
         if (type != tPad) dt_.enable(u.id, u.max_hp, 0.0f);
         return u.id;
@@ -722,8 +885,8 @@ public:
         builder_ = builder;
         types_[tCorvette].tactical_cost = 100.0f;
     }
-    bool can_build_now(int32_t player, int32_t type) override { return produce_ && player == 0 && type == tCorvette; }
-    std::vector<int32_t> tactical_builders(int32_t player, int32_t type) override {
+    bool can_build_now(int32_t player, int32_t type) const { return produce_ && player == 0 && type == tCorvette; }
+    std::vector<int32_t> tactical_builders(int32_t player, int32_t type) const {
         if (!can_build_now(player, type)) return {};
         return {pad_, builder_};  // the pad does not build corvettes: the host refuses it, the station accepts
     }
@@ -819,6 +982,7 @@ public:
 
     // ---- TacticalAiHost ----
     void fill(PerceptionWorld& w, std::vector<TacticalAiObject>& f) override {
+        if (g_explore_fog && !w.point_fogged) w.point_fogged = [](int32_t, float, float) { return true; };  // aitac t07
         if (w.types.empty()) {
             w.mode = g_land ? TacticalMode::Land : TacticalMode::Space;
             w.map = {-4000.0f, -4000.0f, 4000.0f, 4000.0f};
@@ -840,6 +1004,7 @@ public:
             o.owner = u.owner;
             o.type = u.type;
             o.has_unit_ai = u.type != tPad;
+            o.no_owner_list = g_station_outside_grid && u.type == tStation;  // skai t22
             o.mobile = u.type <= tCorvette;
             o.speed = u.has_goal ? speed_of(u.type) * 30.0f : 0.0f;
             o.position = u.pos;
@@ -865,6 +1030,13 @@ public:
             a.moving = u.has_goal;
             a.attack_target = u.target;
             a.damage_tracking = u.type != tPad;
+            a.reprojection_stamp = u.reprojection_stamp;
+            a.attack_position_stamp = u.attack_position_stamp;  // mcx6 t06
+            if (const MockUnit* g = u.goal_object >= 0 ? unit(u.goal_object) : nullptr) {
+                a.formation_target = g->id;
+                a.formation_target_point = g->pos;
+                a.formation_target_extent = 40.0f;
+            }
             f.push_back(a);
         }
         w.players[0].pop_used = static_cast<int32_t>(population_used(0));
@@ -887,6 +1059,7 @@ public:
                         u->goal = {ev.f("x"), ev.f("y"), 0.0f};
                         u->has_goal = true;
                         u->ordered = -1;
+                        u->goal_object = -1;  // mcx6 t06: a position block
                         ++n;
                     }
                 r = n ? R::None : R::InvalidUnit;
@@ -902,6 +1075,7 @@ public:
                 for (const uint32_t id : ev.ids("attackers"))
                     if (MockUnit* u = own(id)) {
                         u->ordered = t->id;
+                        u->goal_object = t->id;  // mcx6 t06
                         u->goal = t->pos;
                         u->has_goal = speed_of(u->type) > 0.0f;
                         ++n;
@@ -933,6 +1107,7 @@ public:
                 for (MockUnit* u : movers) {
                     u->goal = t ? t->pos : Vec3f{std::bit_cast<float>(u32(8)), std::bit_cast<float>(u32(12)), 0.0f};
                     u->has_goal = true;
+                    u->goal_object = t && ev.u("subtype") - 0x4C00u == 2u ? t->id : -1;  // mcx6 t06: attack-move
                 }
                 line += " sub " + std::to_string(ev.u("subtype") - 0x4C00u) + " units " + std::to_string(movers.size());
                 break;
@@ -969,19 +1144,22 @@ public:
         executed.push_back(line + (r == R::None ? "" : " REJECTED"));
         return r;
     }
-    std::vector<TacticalReinforcement> reinforcement_pool(int32_t player) override { return pool_[player]; }
-    bool can_reinforce(int32_t) override { return true; }
-    float population_cap(int32_t) override { return 6.0f; }
-    float population_used(int32_t player) override {
+    float population_used(int32_t player) const {
         float n = 0.0f;
         for (const MockUnit& u : units_)
             if (u.owner == player) n += u.type == tFrigate ? 2.0f : u.type == tCorvette ? 1.0f : 0.0f;
         return n;
     }
-    const DamageTrackingStore* damage_tracking() override { return &dt_; }
-    const galactic::ContrastTable* contrast() override { return &contrast_; }
-    PadCheck build_pad_check(int32_t, int32_t, int32_t) override { return PadCheck::Blocked; }
-    std::vector<TacticalPad> build_pads(int32_t player) override {
+    // ref5 t07: the six signal lists (only opportunity, damaged, ability_finished and unloaded are emitted here)
+    void frame_events(uint32_t kinds, FrameEvents& out) override {
+        if (kinds & FrameEvents::kOpportunity) out.opportunity = opportunity_targets();
+        if (kinds & FrameEvents::kAttackStates) out.attack_states.clear();
+        if (kinds & FrameEvents::kDamaged) out.damaged = unit_damaged_signals();
+        if (kinds & FrameEvents::kAbilityFinished) out.ability_finished = ability_finished();
+        if (kinds & FrameEvents::kUnloaded) out.unloaded = reinforcements_unloaded();
+        if (kinds & FrameEvents::kProduced) out.produced.clear();
+    }
+    std::vector<TacticalPad> build_pads(int32_t player) {
         if (player != 0) return {};  // the Empire's pad
         TacticalPad p;
         p.id = pad_;
@@ -991,7 +1169,7 @@ public:
     }
     // STRATEGIC_GAPS §5.3 variant: every 30 frames each Empire corvette reports a laser (5) and a torpedo (7)
     // acquisition of the nearest Rebel unit.
-    std::vector<OpportunityTargetEvent> opportunity_targets() override {
+    std::vector<OpportunityTargetEvent> opportunity_targets() {
         std::vector<OpportunityTargetEvent> out;
         if (!emit_opportunity || ++opp_frame % 30 != 0) return out;
         for (const MockUnit& u : units_) {
@@ -1002,6 +1180,22 @@ public:
             if (!best) continue;
             out.push_back({u.id, best->id, 5});
             out.push_back({u.id, best->id, 7});
+        }
+        return out;
+    }
+    // skai t15 variant: every 30 frames each Empire corvette reports two deliberate hits from the nearest Rebel unit (the
+    // second one is dropped while the first is still queued for its task force).
+    std::vector<UnitDamagedSignal> unit_damaged_signals() {
+        std::vector<UnitDamagedSignal> out;
+        if (!emit_opportunity || ++dmg_frame % 30 != 0) return out;
+        for (const MockUnit& u : units_) {
+            if (u.owner != 0 || u.type != tCorvette) continue;
+            const MockUnit* best = nullptr;
+            for (const MockUnit& e : units_)
+                if (e.owner == 1 && e.type != tPad && (!best || dist(u, e) < dist(u, *best))) best = &e;
+            if (!best) continue;
+            out.push_back({u.id, best->id, true});
+            out.push_back({u.id, best->id, true});
         }
         return out;
     }
@@ -1020,33 +1214,14 @@ public:
     }
     // a1k t01 (A1_READINGS §39.2): task-force leaves (0x5ff610), in call order with unit_released in `calls`.
     void unit_left_task_force(int32_t object_id) override { calls.emplace_back(build_frame_, object_id, 0); }
-    // refixf t06 (AI_TACTICAL §7.4): with ring_test the space drop test refuses every point with |x| > 3200 (the strips
-    // behind both stations), so a reinforcement at a station needs the ring search; entry facing 0 -> first direction -x.
-    bool space_drop_frame(int32_t, SpaceDropFrame& f) override {
-        if (!ring_test) return false;
-        f = SpaceDropFrame{};
-        f.has_box = true;
-        f.min_x = f.min_y = -4000.0f;
-        f.max_x = f.max_y = 4000.0f;
-        return true;
-    }
-    bool space_drop_ok(int32_t, int32_t, const Vec3f& p, float, float sweep) override {
-        ++drop_tests;
-        if (ring_test && sweep != 200.0f) return false;  // the GameConstants default reaches the host
-        return !ring_test || (p.x >= -3200.0f && p.x <= 3200.0f);
-    }
-    // S7 t15 A1: signal 0x29 ids queued by the test for the next AI frame. S7 t21: movement-locked ids.
-    std::vector<int32_t> ability_finished() override {
+    // S7 t15 A1: signal 0x29 ids queued by the test for the next AI frame.
+    std::vector<int32_t> ability_finished() {
         std::vector<int32_t> out = std::move(ability_signals);
         ability_signals.clear();
         return out;
     }
-    bool movement_locked(int32_t id) override { return std::find(locked.begin(), locked.end(), id) != locked.end(); }
-    // a1j t01: the Reinforce's landing has not unloaded yet; the signal 0x19 records of this frame's tick.
-    bool reinforce_in_flight(int32_t player, int32_t key) override {
-        return std::any_of(landings_.begin(), landings_.end(), [&](const MockLanding& l) { return l.player == player && l.key == key; });
-    }
-    std::vector<ReinforcementsUnloaded> reinforcements_unloaded() override {
+    // a1j t01: the signal 0x19 records of this frame's tick.
+    std::vector<ReinforcementsUnloaded> reinforcements_unloaded() {
         std::vector<ReinforcementsUnloaded> out = std::move(unloaded_);
         unloaded_.clear();
         return out;
@@ -1092,6 +1267,7 @@ public:
         locked = o.locked;
         built = o.built;
         opp_frame = o.opp_frame;
+        dmg_frame = o.dmg_frame;
         hijacks = o.hijacks;
         released = o.released;
         calls = o.calls;
@@ -1108,9 +1284,11 @@ public:
     const DamageTrackingStore& damage_store() const { return dt_; }
     bool emit_opportunity = false, allow_hijack = false;
     bool ring_test = false;   // refixf t06
+    bool base_alive = true;   // skm1 t03: space_reinforce_base_alive
     uint32_t drop_tests = 0;
     uint32_t built = 0;
     uint32_t opp_frame = 0;
+    uint32_t dmg_frame = 0;  // skai t15
     std::vector<std::string> hijacks;
     std::vector<std::tuple<int32_t, int32_t, int32_t>> released;  // (player, object id, UnitRelease)
     std::vector<std::tuple<uint32_t, int32_t, int32_t>> calls;     // a1k t01: (frame, object id, 0 left task force | 1 + UnitRelease)
@@ -1141,6 +1319,7 @@ public:
 
 private:
     objects::ObjectStore& store_;
+    GameRandom* rng_;
     std::vector<PerceptionType> types_;
     std::map<int32_t, std::vector<TacticalReinforcement>> pool_;
     DamageTrackingStore dt_;
@@ -1275,7 +1454,12 @@ using RunHook = std::function<void(int32_t frame, MockHost& host, TacticalAiWorl
 const std::vector<TacticalAiDifficulty>* g_difficulties = nullptr;
 // The SynType object types for the store (variant 7: Syn_Corvette lists SPRINT in Unit_Abilities_Data).
 bool g_hero_frigate = false;  // S7 t26: Syn_Frigate is Is_Named_Hero (test_no_units_remaining_heroes)
+bool g_ai_lane = false;  // sp3: TacticalAiConfig::ai_lane of the SaveSession worlds (test_ai_lane_save)
 bool g_original_timing = false;  // a1k t01: TacticalAiConfig::stagger / pp_streams off (the original's planning timing)
+bool g_plan_retest = false;  // skai t15: TacticalAiConfig::plan_retest (test_plan_retest)
+bool g_log_decisions = true;  // REF1 t04: TacticalAiConfig::log_decisions (test_logging_off)
+bool g_no_starbase = false;  // skm1 t03: MockHost::base_alive false (test_space_reinforce_needs_starbase)
+bool g_empty_tf_tolerance = false;  // ref5 t05: the variant 5 plan with MinContrastScale 0.5 (test_no_units_remaining_heroes)
 bool syn_object_types(MemoryFiles& tf, objects::ObjectTypeDatabase& raw, objects::GameObjectTypes& types, bool abilities) {
     const char* names[] = {"Syn_Frigate", "Syn_Corvette", "Syn_Station", "Syn_Pad", "UC_Syn_Turret"};
     std::string xml = "<SpaceUnits>";
@@ -1299,7 +1483,14 @@ RunResult run(int32_t frames, int32_t difficulty0, int variant = 0, std::vector<
     syn_data(files, defs, eqs, variant == 3);
     if (variant == 2) files.add("Data\\Scripts\\AI\\SpaceMode\\SynBuild.lua", kPlanProduce);
     if (variant == 4) files.add("Data\\Scripts\\AI\\SpaceMode\\SynDestroy.lua", kPlanGroupAttack);
-    if (variant == 5) files.add("Data\\Scripts\\AI\\SpaceMode\\SynDestroy.lua", kPlanEmptyTf);
+    if (variant == 5) {
+        std::string plan = kPlanEmptyTf;
+        if (g_empty_tf_tolerance) {  // ref5 t05 (test_no_units_remaining_heroes): MinContrastScale 0.5, see kPlanDestroy
+            const std::string at = "  Category = \"Syn_Destroy_Unit\"\n";
+            plan.insert(plan.find(at) + at.size(), "  MinContrastScale = 0.5\n");
+        }
+        files.add("Data\\Scripts\\AI\\SpaceMode\\SynDestroy.lua", plan);
+    }
     if (variant == 6) {
         std::string plan = kPlanAmbush;
         if (g_land) {
@@ -1310,6 +1501,9 @@ RunResult run(int32_t frames, int32_t difficulty0, int variant = 0, std::vector<
     }
     if (variant == 7) files.add("Data\\Scripts\\AI\\SpaceMode\\SynDestroy.lua", kPlanAbility);
     if (variant == 10) files.add("Data\\Scripts\\AI\\SpaceMode\\SynDestroy.lua", kPlanAttackResult);  // q6 t19
+    if (variant == 11) files.add("Data\\Scripts\\AI\\SpaceMode\\SynDestroy.lua", kPlanAttackPos);     // mcx6 t06
+    if (variant == 12) files.add("Data\\Scripts\\AI\\SpaceMode\\SynDestroy.lua", kPlanExplore);       // aitac t07
+    if (variant == 13) files.add("Data\\Scripts\\AI\\SpaceMode\\SynDestroy.lua", kPlanSameFrame);     // ref5 t07
     if (variant == 8) files.add("Data\\Scripts\\AI\\LandMode\\SynLandOnly.lua", kPlanLanding);  // replaces kPlanLandOnly
     if (variant == 9) {  // a1k t01
         files.add("Data\\Scripts\\AI\\SpaceMode\\SynSweep.lua", kPlanCollect);
@@ -1327,9 +1521,10 @@ RunResult run(int32_t frames, int32_t difficulty0, int variant = 0, std::vector<
     objects::IdCounter ids;
     objects::ObjectStore store(g_land ? objects::ModeKind::Land : objects::ModeKind::Space, objects::StoreKind::Primary, types, &ids);
     GameRandom rng(2027u, 5u);
-    MockHost host(store);
+    MockHost host(store, rng);
     host.emit_opportunity = host.allow_hijack = variant == 1;
     host.ring_test = variant == 4;  // refixf t06
+    host.base_alive = !g_no_starbase;  // skm1 t03
     // Player 0 (Empire) at -x, player 1 (Rebel) at +x; a pad; pools.
     const int32_t station0 = host.spawn(0, tStation, -3500.0f, 0.0f);
     host.spawn(0, tFrigate, -3000.0f, -200.0f);
@@ -1364,6 +1559,8 @@ RunResult run(int32_t frames, int32_t difficulty0, int variant = 0, std::vector<
     cfg.attacker = 1;
     cfg.defender = 0;
     cfg.map = {-4000.0f, -4000.0f, 4000.0f, 4000.0f};
+    cfg.plan_retest = g_plan_retest;  // skai t15
+    cfg.log_decisions = g_log_decisions;  // REF1 t04
     if (g_original_timing) {  // a1k t01: the OPT2 t01 / t10 timing knobs off (test_replan_and_priority_lifetime)
         cfg.stagger = false;
         cfg.pp_streams = false;
@@ -1392,7 +1589,10 @@ RunResult run(int32_t frames, int32_t difficulty0, int variant = 0, std::vector<
         host.tick(static_cast<uint32_t>(f));
         if (f == 2 && out.lock_probe >= 0)
             out.lock_kept = world.object_bridge().state(static_cast<objects::ObjectId>(station0)).orders_locked;
+        if (g_room_for_one) host.begin_ai_frame();  // ref5 t07
+        if (g_frame_snapshot) host.capture_facts();
         world.update(f, static_cast<uint32_t>(f));
+        host.facts_.set_snapshot(false);
         if (hook) hook(f, host, world);
         if (f == 1) {
             out.opponent0 = world.opponent(0);
@@ -1459,6 +1659,14 @@ void test_opportunity_and_hijack() {
     for (size_t i = 0; i < r.errors.size() && i < 5; ++i) std::printf("  lua error: %s\n", r.errors[i].c_str());
     CHECK(r.errors.empty());
     CHECK(opp > 0);       // laser acquisitions of TF members raise plan event 17 (torpedo ones are not subscribed)
+    // skai t15 (SKAI_T15_UNIT_DAMAGED): a TF member's damage queues plan event 14, at most one waiting per task force
+    size_t raised = 0;
+    for (const auto& [k, v] : r.stats)
+        if (k.rfind("event Unit_Damaged", 0) == 0) raised += v;
+    const size_t swept = count("SYNSWEEP ended success");
+    std::printf("unit damaged: %zu raised, %zu sweep plans ended after a handled one\n", raised, swept);
+    CHECK(raised > 0);
+    CHECK(swept > 0);  // the sweep plan waits for a handled Unit_Damaged before it ends with success
     CHECK(hijacked > 0);  // the MagicPlan's Corvette came through the host's HIJACK hook
     bool reinforced = false;
     for (const std::string& e : r.executed) reinforced = reinforced || (e.find("p0 Reinforce key 50") != std::string::npos);
@@ -1809,6 +2017,66 @@ void test_potential_plan() {
         std::printf(", defenders 3000: solved %d (failed %s)\n", short_of, r.last_veto.c_str());
         CHECK(!short_of && r.last_veto == "Contrast");
     }
+    // 8. a2k t11: the tactical solve weighs with the AI PotentialPlan weight 0x5f1f90 (ContrastTable::ai_weight, the solver
+    //    0x6c3da0 is shared with galactic; A2K_T02_RE_ANSWERS Q2(b)) [H]: the mean of the matching entries != 1.0. Two Frigate
+    //    entries 0.25 and 2.75 -> 1.5: one frigate (1000 x 1.5) meets a corvette target of 400 x 1.5; with only 0.25 it fails.
+    {
+        PpFixture f;
+        f.plan({{"MainForce", "Syn_Frigate = 1"}});
+        auto solve = [&](bool both, TacticalPpResult& r) {
+            galactic::ContrastTable ct;
+            galactic::ContrastRow row;
+            row.enemy = "Corvette";
+            row.enemy_mask = f.mask("Corvette");
+            row.friendly.push_back({"Frigate", f.mask("Frigate"), 0.25f});
+            if (both) row.friendly.push_back({"Frigate", f.mask("Frigate"), 2.75f});
+            ct.rows.push_back(row);
+            CHECK(ct.ai_weight(0, "Syn_Frigate", f.mask("Frigate")) == (both ? 1.5f : 0.25f));
+            TacticalPpInput in = f.input(TacticalMode::Space);
+            in.has_target = true;
+            in.target_object = 900;
+            in.target_position = {0.0f, 0.0f, 0.0f};
+            in.contrast = &ct;
+            in.enemy_strength = [](uint64_t) { return 400.0; };
+            in.free_units = {{11, 0, {100.0f, 0.0f, 0.0f}, 1.0f, false}};
+            return solve_tactical_pp(in, r);
+        };
+        TacticalPpResult r;
+        CHECK(solve(true, r) && r.picks.size() == 1);
+        CHECK(!solve(false, r) && r.last_veto == "Contrast");
+    }
+    // 9. ref5 t05 slice 2 (AI_GALACTIC_TOKENS §9.8a): a pair counts only with P > 0, w > 0 and R > 0, and after v <= 0 the
+    //    plan-wide gate lets a candidate in only while an untyped total of its layer is still open. Frigates (1000 x
+    //    weight 1.5) against a corvette row of 400 and an untyped enemy total of 2000: frigate 1 meets the row (scores),
+    //    frigate 2 is allowed by the open total (1000 left), frigate 3 is vetoed (row met, total met) although the team
+    //    takes 3. The old rules scored the met row at full weight and took all three.
+    {
+        PpFixture f;
+        f.plan({{"MainForce", "Syn_Frigate = 1,3"}});
+        galactic::ContrastTable ct;
+        galactic::ContrastRow row;
+        row.enemy = "Corvette";
+        row.enemy_mask = f.mask("Corvette");
+        row.friendly.push_back({"Frigate", f.mask("Frigate"), 1.5f});
+        ct.rows.push_back(row);
+        const uint64_t corvettes = f.mask("Corvette");
+        TacticalPpInput in = f.input(TacticalMode::Space);
+        in.has_target = true;
+        in.target_object = 900;
+        in.target_position = {0.0f, 0.0f, 0.0f};
+        in.contrast = &ct;
+        in.enemy_strength = [corvettes](uint64_t m) { return m == corvettes ? 400.0 : 2000.0; };
+        in.free_units = {{11, 0, {100.0f, 0.0f, 0.0f}, 1.0f, false},
+                         {12, 0, {200.0f, 0.0f, 0.0f}, 1.0f, false},
+                         {13, 0, {300.0f, 0.0f, 0.0f}, 1.0f, false}};
+        TacticalPpResult r;
+        const bool solved = solve_tactical_pp(in, r);
+        std::printf("  retail contrast rules: solved %d, %zu picks (row met by 1, total by 2)\n", solved, r.picks.size());
+        CHECK(solved && r.picks.size() == 2);
+        // The untyped total is what lets frigate 2 in: with the total at the row's strength only frigate 1 is taken.
+        in.enemy_strength = [](uint64_t) { return 400.0; };
+        CHECK(solve_tactical_pp(in, r) && r.picks.size() == 1);
+    }
     // 6. Team expansion: category masks over types (mask overlap), names, exclusions.
     {
         PpFixture f;
@@ -1973,21 +2241,11 @@ void test_skirmish() {
     std::printf("  easy: countdown after the first commit %d\n", e.countdown_easy);
     CHECK(e.countdown_easy == 15 * 30);
     const std::string text = golden_text(a);
-    const std::string path = std::string(ALAMO_AI_TACTICAL_GOLDEN_DIR) + "/ai_tactical_world_crc.txt";
+    const std::string path =
+        (g_golden_out.empty() ? std::string(ALAMO_AI_TACTICAL_GOLDEN_DIR) : g_golden_out) + "/ai_tactical_world_crc.txt";
     if (g_write_golden) {
         std::ofstream(std::filesystem::path(path), std::ios::binary) << text;
         std::printf("  wrote %s\n", path.c_str());
-    } else {
-        std::ifstream in(std::filesystem::path(path), std::ios::binary);
-        std::string want((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
-        want.erase(std::remove(want.begin(), want.end(), '\r'), want.end());
-        const bool same = want == text;
-        std::printf("  golden %s: %s\n", path.c_str(), same ? "MATCH" : (want.empty() ? "MISSING" : "DIFFERS"));
-        if (!same) {
-            std::ofstream(std::filesystem::path(path + ".actual"), std::ios::binary) << text;
-            std::printf("  actual written to %s.actual\n", path.c_str());
-        }
-        CHECK(same);
     }
 }
 
@@ -2249,7 +2507,7 @@ struct SaveSession {
     objects::IdCounter ids;
     objects::ObjectStore store{g_land ? objects::ModeKind::Land : objects::ModeKind::Space, objects::StoreKind::Primary, types, &ids};
     GameRandom rng{2027u, 5u};
-    MockHost host{store};
+    MockHost host{store, rng};
     std::unique_ptr<TacticalAiWorld> world;
 
     explicit SaveSession(int variant) {
@@ -2270,6 +2528,7 @@ struct SaveSession {
         if (variant == 5) files.add("Data\\Scripts\\AI\\SpaceMode\\SynDestroy.lua", quiet(kPlanEmptyTf));
         if (variant == 6) files.add("Data\\Scripts\\AI\\SpaceMode\\SynDestroy.lua", quiet(kPlanAmbush));
         if (variant == 8) files.add("Data\\Scripts\\AI\\LandMode\\SynLandOnly.lua", quiet(kPlanLanding));  // a1j t01 (g_land)
+        if (variant == 11) files.add("Data\\Scripts\\AI\\SpaceMode\\SynDestroy.lua", quiet(kPlanAttackPos));  // mcx6 t06 (g_land)
         if (variant >= 5) files.add("Data\\Scripts\\AI\\SpaceMode\\SynEscort.lua", kPlanEscortOff);
         if (variant == 1) {
             files.add("Data\\Scripts\\AI\\SpaceMode\\SynDestroy.lua", kPlanMagic);
@@ -2295,6 +2554,7 @@ struct SaveSession {
         host.add_pool(1, 2002, tFrigate, 2.0f);
         TacticalAiConfig cfg;
         cfg.mode = g_land ? TacticalMode::Land : TacticalMode::Space;
+        cfg.ai_lane = g_ai_lane;  // sp3
         cfg.players = {{0, "SynEmpire", 1}, {1, "SynRebel", 1}};
         cfg.difficulties = {{"Easy_Default", 15.0f, 15.0f, 0.67f, 0.75f}, {"Normal_Default", 0.0f, 0.0f, 1.0f, 1.0f}};
         lua::LuaPlayerSetup a, b;
@@ -2357,6 +2617,54 @@ struct SaveSession {
 };
 
 std::string decision_line(const TacticalAiDecision& d) { return std::to_string(d.frame) + " p" + std::to_string(d.player) + " " + d.text; }
+
+void test_save_load(int variant, int32_t save_at, int32_t frames);
+uint32_t first_u32(const std::vector<uint8_t>& b) {
+    return b.size() < 4 ? 0u : static_cast<uint32_t>(b[0]) | (static_cast<uint32_t>(b[1]) << 8) | (static_cast<uint32_t>(b[2]) << 16) |
+                                   (static_cast<uint32_t>(b[3]) << 24);
+}
+
+// sp3 (TacticalAiConfig::ai_lane): an AI-lane world draws from its own stream, not the session's, and saves it (version 19
+// since mcx6 t06, 17 since skai t15) so a load continues identically; a lane-off save (version 18) loads into a lane-on
+// world; a lane-on save does not load into a lane-off world; the lane-off bytes keep version 18.
+void test_ai_lane_save() {
+    const int32_t save_at = 30 * 35;
+    g_ai_lane = false;
+    std::vector<uint8_t> off_image;
+    uint64_t off_session_draws = 0;
+    {
+        SaveSession a(0);
+        for (int32_t f = 1; f <= save_at; ++f) a.step(f);
+        off_image = a.ai_bytes();
+        off_session_draws = a.rng.synced().draws();
+    }
+    CHECK(first_u32(off_image) == 18u);
+    g_ai_lane = true;
+    test_save_load(1, 30 * 30, 30 * 60);  // round trip and continuation with the lane on (variant 0's corruption offsets are v12's)
+    SaveSession a(0);
+    for (int32_t f = 1; f <= save_at; ++f) a.step(f);
+    const std::vector<uint8_t> on_image = a.ai_bytes();
+    CHECK(first_u32(on_image) == 19u);
+    // The AI's own draws left the session stream (what remains are the host's).
+    CHECK(a.rng.synced().draws() < off_session_draws);
+    {
+        SaveSession b(0);  // a lane-off image into a lane-on world
+        g_ai_lane = false;
+        SaveSession from(0);
+        for (int32_t f = 1; f <= save_at; ++f) from.step(f);
+        CHECK(b.restore_host(from) && b.load_ai(off_image));
+        CHECK(first_u32(b.ai_bytes()) == 19u);
+    }
+    {
+        g_ai_lane = false;
+        SaveSession c(0);  // a lane-on image is refused by a lane-off world
+        CHECK(c.restore_host(a) && !c.load_ai(on_image, true));
+    }
+    g_ai_lane = false;
+    std::printf("sp3 ai_lane save: lane-off image %zu bytes (v12), lane-on %zu bytes (v13); session draws %llu off, %llu on\n",
+                off_image.size(), on_image.size(), static_cast<unsigned long long>(off_session_draws),
+                static_cast<unsigned long long>(a.rng.synced().draws()));
+}
 
 // A battle saved mid-fight (plans running with Lua threads suspended in their task-force loops, task forces holding
 // units, free stores, PotentialPlan reservations, the threat grid and leaf cache filled; variant 1 adds opportunity-fire
@@ -2506,6 +2814,9 @@ void test_damage_tracking_save() {
 // bus was never saved, continues identically) this is the whole contract of the bus.
 // refixf t06: a task force's Attack_Move is ONE PortExtension order carrying all its movable units (MOVEMENT §6.3: one
 // coordinator), and Attack_Target(x, "Shield_Generator") orders hard-point type 1 (ref2 = 1 + type) [M: short name form].
+// tst2 t05 (b0210): the battle runs the retail goal cadence (TacticalAiConfig::retail_cadence, the default since bkx1 t01);
+// it reaches Attack_Target(Shield_Generator) at both difficulties. The earlier [port]-cadence run was dropped: it
+// tested the same plan under a knob no host uses.
 void test_group_orders() {
     const RunResult r = run(30 * 120, 1, 4);
     size_t groups = 0, single = 0, shield = 0;
@@ -2542,6 +2853,48 @@ void test_group_orders() {
     CHECK(r.errors.empty());
     CHECK(groups > 0);
     CHECK(shield > 0);
+    // Easy (difficulty 0): its own goal-cadence timing, the same orders reached.
+    const RunResult easy = run(30 * 120, 0, 4);
+    size_t easy_groups = 0, easy_shield = 0;
+    for (const std::string& e : easy.executed) {
+        if (e.find("PortExtension sub 2 units ") != std::string::npos && std::atoi(e.c_str() + e.find(" units ") + 7) >= 2) ++easy_groups;
+        if (e.find(" Attack ref2 2") != std::string::npos) ++easy_shield;
+    }
+    std::printf("group orders (Easy): %zu attack-move group orders, %zu Shield_Generator attacks, %zu Lua errors\n", easy_groups,
+                easy_shield, easy.errors.size());
+    CHECK(easy.errors.empty() && easy_groups > 0 && easy_shield > 0);
+}
+
+// skm1 t03 (AI_TACTICAL §7.4, 0x6e8620): a space skirmish TF.Reinforce with no live allied DUMMY_STAR_BASE (the host's
+// space_reinforce_base_alive false) returns nil: no SpaceReinforceBlockStatus, so no drop is tested or executed. The same
+// run with the starbase drops (test_group_orders). skm1 t04: the world reports each AI player's build-time multiplier of
+// its difficulty adjustment for the tactical build queue (Easy 1.5 / Normal 1.0 in space here).
+void test_space_reinforce_needs_starbase() {
+    g_no_starbase = true;
+    const RunResult r = run(30 * 120, 1, 4);
+    g_no_starbase = false;
+    size_t drops = 0;
+    for (const std::string& e : r.executed) drops += e.find(" Reinforce key ") != std::string::npos ? 1u : 0u;
+    size_t refused = 0;
+    for (const std::string& d : r.decisions) refused += d.find("Reinforce refused: no allied starbase") != std::string::npos ? 1u : 0u;
+    std::printf("space reinforce without a starbase: %zu refusals, %zu drops, %zu Lua errors\n", refused, drops, r.errors.size());
+    CHECK(refused > 0 && drops == 0);
+    std::vector<TacticalAiDifficulty> diffs(2);
+    diffs[0].name = "Easy_Default";
+    diffs[0].space_build_time = 1.5f;
+    diffs[0].land_build_time = 1.25f;
+    diffs[1].name = "Normal_Default";
+    g_difficulties = &diffs;
+    float easy = -1.0f, normal = -1.0f, none = -1.0f;
+    (void)run(3, 0, 0, nullptr, false, [&](int32_t, MockHost&, TacticalAiWorld& world) {
+        easy = world.build_time_multiplier(0);
+        normal = world.build_time_multiplier(1);
+        none = world.build_time_multiplier(5);
+    });
+    g_difficulties = nullptr;
+    std::printf("tactical build-time multiplier: Easy %.2f, Normal %.2f, no AI %.2f\n", static_cast<double>(easy), static_cast<double>(normal),
+                static_cast<double>(none));
+    CHECK(easy == 1.5f && normal == 1.0f && none == 1.0f);
 }
 
 // The Empire's first Report line of a plan (`tag` player=0 ...), and whether every Lua error is a Report line of that tag
@@ -2579,6 +2932,45 @@ size_t count_decisions(const RunResult& r, const std::string& needle) {
     return n;
 }
 int32_t decision_frame(const std::string& line) { return std::atoi(line.c_str()); }
+
+// ref5 t07 (BattleFacts, battle_facts.hpp): the lane-off AI reads its battle live, so an order it gives inside an AI frame
+// changes what it reads later in the same frame. Variant 13 (kPlanSameFrame) polls a space Reinforce block twice in one Lua
+// run while the population cap leaves room for one corvette per frame (g_room_for_one): the first poll drops a corvette,
+// the second sees the new population and drops nothing. The same run with the mock's facts captured once per AI frame
+// (g_frame_snapshot: the design t07 rules out for the lane-off AI) drops both - the proof that this test sees a stale read.
+struct SameFrameReport {
+    int32_t before = -1, one = -1, two = -1;
+    bool same = false;
+};
+SameFrameReport same_frame_report(const RunResult& r) {
+    SameFrameReport out;
+    const std::string line = report_of(r, "SAMEFRAME");
+    const size_t at = line.find("SAMEFRAME player=0 ");
+    if (at == std::string::npos) return out;
+    int pl = -1, before = -1, one = -1, two = -1;
+    char same[8] = {};
+    if (std::sscanf(line.c_str() + at, "SAMEFRAME player=%d before=%d one=%d two=%d same=%7s", &pl, &before, &one, &two, same) == 5) {
+        out.before = before;
+        out.one = one;
+        out.two = two;
+        out.same = std::strcmp(same, "true") == 0;
+    }
+    return out;
+}
+void test_facts_same_frame() {
+    auto run_one = [](bool frame_snapshot) {
+        g_room_for_one = true;
+        g_frame_snapshot = frame_snapshot;
+        const RunResult r = run(30 * 60, 1, 13);
+        g_room_for_one = g_frame_snapshot = false;
+        return same_frame_report(r);
+    };
+    const SameFrameReport live = run_one(false), snap = run_one(true);
+    std::printf("facts in one frame: live %d -> %d -> %d (same frame %d), frame snapshot %d -> %d -> %d (same frame %d)\n", live.before,
+                live.one, live.two, live.same ? 1 : 0, snap.before, snap.one, snap.two, snap.same ? 1 : 0);
+    CHECK(live.same && live.before >= 0 && live.one == live.before + 1 && live.two == live.one);
+    CHECK(snap.same && snap.before >= 0 && snap.one == snap.before + 1 && snap.two == snap.one + 1);
+}
 
 // S7 t20 (AI_TACTICAL §7.3.2): the empty task force. 5 frames after MainForce is complete (its Activate_Ability marker),
 // every Empire mobile unit dies;
@@ -2746,6 +3138,8 @@ void test_replan_and_priority_lifetime() {
 // S7 t21 (AI_TACTICAL §7.3.1): Prepare_Ambush through the space task force. The first ambush order goes to the target's
 // position - 1000 x facing (+x: "back" = -x), every unit of the force; while flying it re-plans (> 150 frames since
 // the last plan, polled by BlockOnCommand); the block finishes (movement finished for every mover, or a death rule).
+// tst2 t05 (b0210): under the retail goal cadence (the default since bkx1 t01) an Empire instance's movers arrive
+// (Unit_Move_Finished) before its report; the earlier [port]-cadence run was dropped.
 void test_prepare_ambush() {
     bool checked = false, point_ok = false;
     const RunResult r = run(30 * 120, 1, 6, nullptr, false, [&](int32_t, MockHost& host, TacticalAiWorld& world) {
@@ -2774,10 +3168,12 @@ void test_prepare_ambush() {
     CHECK(count_decisions(r, "p0 tf MainForce ambush: no point") >= 1);  // the "front" call with tolerance -1
     CHECK(rep_line.find("errors=true nopoint=true imm=false fin=true") != std::string::npos);
     CHECK(only_reports(r, "AMBUSH"));
-    // S7 t27: the four argument errors are script errors counted in lua_errors (per reporting instance)
+    // S7 t27: the four argument errors are script errors counted in lua_errors (per reporting instance). An instance whose
+    // target died during the block gets "Target object is already dead" for the calls that take the target.
     const size_t n_amb = script_errors(r, "Invalid number of parameters") + script_errors(r, "Unrecognized direction sideways") +
                          script_errors(r, "Parameter 3 is not a positive number") +
-                         script_errors(r, "Parameter 1 is not a game object or an AI target");
+                         script_errors(r, "Parameter 1 is not a game object or an AI target") +
+                         script_errors(r, "Target object is already dead");
     std::printf("  ambush script errors %zu, reports %zu\n", n_amb, count_reports(r, "AMBUSH"));
     CHECK(n_amb >= 4 && n_amb % 4 == 0);
     bool arrived = false;  // an Empire instance saw its movers arrive (Unit_Move_Finished from the ambush block)
@@ -2824,7 +3220,12 @@ void test_prepare_ambush_land() {
     std::printf("prepare ambush (land): Move_To with the tolerance %zu, ambush moves %zu, paired (target - 1000 x) %zu; %s\n",
                 to_target.size(), ambush.size(), paired, rep_line.c_str());
     CHECK(!to_target.empty() && !ambush.empty() && paired >= 1);
-    CHECK(rep_line.find("errors=true") != std::string::npos && only_reports(r, "AMBUSH"));
+    // The script reaches its report in some instance (either player: which one gets there within 120 s follows the
+    // battle), and every non-script error is such a report.
+    std::string any_rep;
+    for (const std::string& e : r.errors)
+        if (any_rep.empty() && e.find("SCRIPT ERROR: ") == std::string::npos && e.find("AMBUSH player=") != std::string::npos) any_rep = e;
+    CHECK(any_rep.find("errors=true") != std::string::npos && count_reports(r, "AMBUSH") + script_errors(r, "") == r.errors.size());
     CHECK(again.crc == r.crc && again.decisions == r.decisions);
 }
 
@@ -2883,7 +3284,11 @@ void test_ability_finished() {
 void test_landing_wait(bool lost) {
     g_land = true;
     g_landing = lost ? 2 : 1;
+    // ref5 t05: under the retail contrast rules MainForce is accepted only after the free units fought (one of them dies
+    // during the wait at the cap 6); with room for 10 its force is all pool landings, so the counts measure only them.
+    g_pop_cap = 10.0f;
     const RunResult r = run(30 * 60, 1, 8);
+    g_pop_cap = 6.0f;
     g_land = false;
     g_landing = 0;
     const std::string rep_line = report_of(r, "LANDING");
@@ -2974,6 +3379,65 @@ void test_ability_order_replaced() {
     CHECK(count_decisions(r, "p0 event Unit_Ability_Finished (tf MainForce)") == 0);
 }
 
+// aitac t01 (SIM_PARALLEL_DESIGN 11.5): the story session's world reaches the tactical AI - its Suspend_AI pauses the AI
+// (no order while suspended), its Purge_Goals ends the player's running plans and its GiveDesireBonus requests are taken
+// (the story world's queues are drained; one for a player without a tactical AI is dropped).
+void test_story_world() {
+    lua::LuaPlayerWorld story;  // outlives the AI world (run() ends the battle before it returns)
+    uint64_t orders_suspended = 0, orders_resumed = 0;
+    size_t plans_before = 0, plans_at_drain = 0;
+    int32_t drained_at = -1;
+    run(30 * 60, 1, 0, nullptr, false, [&](int32_t f, MockHost&, TacticalAiWorld& world) {
+        if (f == 1) {
+            world.attach_story_world(&story);
+            CHECK(world.context(0) && world.context(0)->goals.config().like_sets);  // aitac t04: Is_Like in the battle goals
+        }
+        if (f == 600) {
+            story.set_ai_suspended(true);
+            orders_suspended = world.orders_issued();
+        }
+        if (f == 1200) {
+            orders_resumed = world.orders_issued();
+            story.set_ai_suspended(false);
+            plans_before = world.running_plans();
+            story.purge_goal_requests.push_back(0);
+            lua::DesireBonusRequest r;
+            r.player = 7;  // no tactical AI
+            r.goal = "Syn_Goal";
+            r.bonus = 1.0;
+            story.desire_bonuses.push_back(r);
+        }
+        if (f > 1200 && drained_at < 0 && story.purge_goal_requests.empty() && story.desire_bonuses.empty()) {
+            drained_at = f;
+            plans_at_drain = world.running_plans();
+        }
+    });
+    std::printf("story world: orders %llu at the suspend, %llu at the resume; plans %zu before the purge, %zu after (frame %d)\n",
+                static_cast<unsigned long long>(orders_suspended), static_cast<unsigned long long>(orders_resumed), plans_before,
+                plans_at_drain, drained_at);
+    CHECK(orders_suspended > 0 && orders_resumed == orders_suspended);
+    CHECK(drained_at > 1200 && drained_at <= 1230);
+    CHECK(plans_before > 0 && plans_at_drain < plans_before);
+}
+
+// aitac t07 (L1_S4_REMAINING §2.3.1): Explore_Area picks a fogged threat cell of the target's area (a unit target: the square
+// of half-side its max attack range; every cell never seen, so the first in scan order) and moves the task force there; with
+// nothing fogged no cell qualifies and the block finishes at once with true, no move.
+void test_explore_area() {
+    const RunResult clear = run(30 * 40, 1, 12);
+    g_explore_fog = true;
+    const RunResult fog = run(30 * 40, 1, 12);
+    g_explore_fog = false;
+    std::string rep;
+    for (const std::string& e : clear.errors)
+        if (rep.empty() && e.find("EXRESULT player=") != std::string::npos) rep = e;
+    const size_t moves_clear = count_decisions(clear, "explore area to ("), moves_fog = count_decisions(fog, "explore area to (");
+    std::printf("explore area: no fog %zu move(s), %s; all fogged %zu move(s)\n", moves_clear, rep.empty() ? "(no report)" : rep.c_str(),
+                moves_fog);
+    CHECK(moves_clear == 0 && rep.find("res=true") != std::string::npos);
+    CHECK(moves_fog >= 1);
+}
+
 // S7 t27 (AI_TACTICAL §7.3.3 item 5): the land Prepare_Ambush step = Land_FOW_Reveal_Range x weather sight factor (not a
 // terrain factor), else the max attack range; <= 0 -> no walk.
 // S7 t26 (AI_TACTICAL §7.3.3 item 4): No_Units_Remaining fires when every remaining entry is a hero / special weapon.
@@ -2992,10 +3456,14 @@ void test_no_units_remaining_heroes() {
         };
     };
     int32_t k_plain = -1, k_hero = -1;
+    // ref5 t05: under the retail contrast rules MainForce at the default tolerance is accepted after the sweep plans took
+    // the corvettes (it holds only the frigate, so no member dies); MinContrastScale 0.5 lets it take all three first.
+    g_empty_tf_tolerance = true;
     const RunResult plain = run(30 * 20, 1, 5, nullptr, false, kill_corvettes(k_plain));
     g_hero_frigate = true;
     const RunResult hero = run(30 * 20, 1, 5, nullptr, false, kill_corvettes(k_hero));
     g_hero_frigate = false;
+    g_empty_tf_tolerance = false;
     int32_t lost_frame = -1;
     for (const std::string& d : hero.decisions)
         if (lost_frame < 0 && d.find("p0 tf MainForce no units remaining") != std::string::npos) lost_frame = decision_frame(d);
@@ -3115,42 +3583,303 @@ void test_attack_move_result() {
     CHECK(rep_line.find("res=nil") != std::string::npos && rep_line.find("valid=false") != std::string::npos);
 }
 
+// aitac t05 (A1_READINGS §33.2 signal 0xb rows): a task force's Attack_Move block on an enemy unit ends (Result nil) when
+// the target is given a new order (signal 0xb of the object), the target still alive; and a block whose units all get other
+// orders (0xb of each unit, not a task-force order of this AI) ends too.
+void test_block_new_order_signals() {
+    g_land = true;
+    for (const bool units : {false, true}) {
+        int32_t target = -1, signal_frame = -1;
+        const RunResult r = run(30 * 60, 1, 10, nullptr, false, [&](int32_t f, MockHost& host, TacticalAiWorld& world) {
+            if (signal_frame >= 0) return;
+            for (const TacticalAiDecision& d : world.decision_log()) {
+                const size_t at = d.text.find(" attack-move ");
+                const size_t obj = d.text.find(" obj ", at == std::string::npos ? 0 : at);
+                if (at == std::string::npos || obj == std::string::npos || d.text.find("tf MainForce") == std::string::npos) continue;
+                if (f < d.frame + 30) return;
+                target = std::atoi(d.text.c_str() + obj + 5);
+                if (!units) {
+                    world.order_replaced(target);
+                } else {
+                    for (const MockUnit& u : host.units_)
+                        if (u.owner == d.player) world.order_replaced(u.id);
+                }
+                signal_frame = f;
+                return;
+            }
+        });
+        const char* why = units ? "ended: every unit given another order" : "ended: target given a new order";
+        const size_t ended = count_decisions(r, why);
+        std::printf("block 0xb (%s): target %d signalled at %d, %zu block(s) %s\n", units ? "units" : "target", target, signal_frame,
+                    ended, why);
+        CHECK(target >= 0 && signal_frame > 0 && ended >= 1);
+    }
+    g_land = false;
+}
+
+// skai t15 (SKAI_T15_PLAN_RETEST §1): TacticalAiConfig::plan_retest runs the running-plan contrast re-test at every commit
+// and on the old-candidate path. A re-test that passes changes nothing: in this world no plan's target gains enemies its
+// selection does not cover within 30 s, so the run with the switch on is the run with it off, frame for frame. The failing
+// case (a plan ended at the next commit) is alamo_headless_skirmish_plan_retest (the headless synthetic skirmish, frame 302).
+// skai t22: 30 s (was 60 s). Since space task-force members stay reserved free-store entries (SKAI_T22_SPACE_AI_RE Part 5),
+// this space world's plans lose units to other accepts (the stolen test, frames 678 / 700, in both runs alike), and a
+// SYNDESTROY re-test fails at frame 943.
+void test_plan_retest() {
+    g_plan_retest = true;
+    const RunResult on = run(30 * 30, 1);
+    g_plan_retest = false;
+    const RunResult off = run(30 * 30, 1);
+    uint32_t failed = 0;
+    for (const auto& [k, v] : on.stats)
+        if (k.find("running-plan contrast re-test failed") != std::string::npos) failed += v;
+    CHECK(failed == 0);
+    CHECK(!on.crc.empty() && on.crc == off.crc);
+    CHECK(on.decisions == off.decisions);
+}
+
+// skai t22 (SKAI_T22_SPACE_AI_RE Q1.1, Part 3): an object the host marks no_owner_list (a space skirmish's
+// team-marker start station) still projects its threat: the Rebel's danger at the Empire station is the same with the
+// flag on and off, and the run is otherwise the same. (The owner-list side: test_ai_tactical_perception, grid projection.)
+void test_outside_owner_lists() {
+    float in_lists = -1.0f, outside = -1.0f;
+    for (const bool out : {false, true}) {
+        g_station_outside_grid = out;
+        run(60, 1, 0, nullptr, false, [&](int32_t frame, MockHost&, TacticalAiWorld& world) {
+            if (frame == 60) (out ? outside : in_lists) = world.point_danger(1, -3500.0f, 0.0f);
+        });
+    }
+    g_station_outside_grid = false;
+    std::printf("outside_owner_lists: Rebel danger at the Empire station %.3f listed, %.3f not listed\n",
+                static_cast<double>(in_lists), static_cast<double>(outside));
+    CHECK(in_lists > 0.0f && outside == in_lists);
+}
+
+// mcx6 t06 (LUA_API.md "Task force: Enable_Attack_Positioning and Release_Reinforcements"), variant 11 (land): the task
+// force's members get the UnitAI attack-positioning flag. A flagged member whose formation attacks an object computes,
+// when its +0x34 stamp is due (at once: the drawn stamp lies in the past), the centre of the lowest-threat 40 x 40 square at
+// the target (the target's extent 40 < half the unit's range) and, being at least its max attack range from that point,
+// walks there alone (a move of that unit only). Only flagged units move so; the run is deterministic.
+void test_attack_positioning() {
+    struct Move {
+        int32_t frame = -1, unit = -1, target = -1;
+        double x = 0.0, y = 0.0;
+        bool flagged = false, moved = false, at_target = false, out_of_range = false;
+    };
+    std::vector<Move> moves;
+    size_t seen = 0;
+    g_land = true;
+    const RunResult r = run(30 * 60, 1, 11, nullptr, false, [&](int32_t f, MockHost& host, TacticalAiWorld& world) {
+        const std::vector<TacticalAiDecision>& dl = world.decision_log();
+        for (; seen < dl.size(); ++seen) {
+            const size_t at = dl[seen].text.find("attack position unit ");
+            if (at == std::string::npos) continue;
+            Move m;
+            m.frame = f;
+            if (std::sscanf(dl[seen].text.c_str() + at, "attack position unit %d target %d -> (%lf, %lf)", &m.unit, &m.target, &m.x,
+                            &m.y) != 4)
+                continue;
+            m.flagged = world.attack_positioning(m.unit);
+            const MockUnit* u = host.unit(m.unit);
+            const MockUnit* t = host.unit(m.target);
+            m.moved = dl[seen].text.find(" rejected ") == std::string::npos;  // the host executed the unit's move
+            m.at_target = t && std::fabs(std::fabs(m.x - t->pos.x) - 20.0) < 0.06 && std::fabs(std::fabs(m.y - t->pos.y) - 20.0) < 0.06;
+            if (u) {
+                const double dx = m.x - u->pos.x, dy = m.y - u->pos.y;
+                m.out_of_range = std::sqrt(dx * dx + dy * dy) >= static_cast<double>(MockHost::range_of(u->type));
+            }
+            moves.push_back(m);
+        }
+    });
+    const RunResult again = run(30 * 60, 1, 11);
+    g_land = false;
+    const size_t on = count_decisions(r, "attack positioning on"), released = count_decisions(r, "release reinforcements");
+    size_t ok = 0;
+    std::map<int32_t, int32_t> last;
+    bool spaced = true;
+    for (const Move& m : moves) {
+        ok += m.flagged && m.moved && m.at_target && m.out_of_range ? 1u : 0u;
+        if (const auto it = last.find(m.unit); it != last.end()) spaced = spaced && m.frame - it->second >= 150;
+        last[m.unit] = m.frame;
+    }
+    std::string rep;
+    for (const std::string& e : r.errors)
+        if (rep.empty() && e.find("ATTACKPOS player=") != std::string::npos) rep = e;
+    std::printf("attack positioning: %zu flag call(s), %zu release call(s), %zu attack-position move(s), %zu as specified, %zu "
+                "unit(s); %s\n", on, released, moves.size(), ok, last.size(), rep.empty() ? "(no report)" : rep.c_str());
+    CHECK(on >= 1 && released >= 1);
+    CHECK(!moves.empty() && ok == moves.size() && spaced);
+    CHECK(rep.empty() || rep.find("on=nil") != std::string::npos);  // no return value
+    CHECK(again.crc == r.crc && again.decisions == r.decisions);
+}
+
+// mcx6 t06: a land battle saved right after an attack-position move (the flags set, the +0x34 stamps advanced) loads into
+// a rebuilt session with the same CRC and bytes, keeps the flags, and continues identically.
+void test_attack_positioning_save() {
+    g_land = true;
+    SaveSession a(11);
+    int32_t save_at = -1, unit = -1;
+    size_t seen = 0;
+    for (int32_t f = 1; f <= 30 * 120 && save_at < 0; ++f) {
+        a.step(f);
+        const std::vector<TacticalAiDecision>& dl = a.world->decision_log();
+        for (; seen < dl.size() && save_at < 0; ++seen)
+            if (const size_t at = dl[seen].text.find("attack position unit "); at != std::string::npos) {
+                save_at = f;
+                unit = std::atoi(dl[seen].text.c_str() + at + 21);
+            }
+    }
+    CHECK(save_at > 0 && a.world->attack_positioning(unit));
+    // Release_Reinforcements before Produce_Force (the session has reinforcement pools): the accepted plan's pool slots are
+    // freed (Produce_Force then gathers its picks all the same, so nothing is taken back at a later Commit here).
+    size_t freed = 0;
+    for (const TacticalAiDecision& d : a.world->decision_log())
+        if (const size_t at = d.text.find("release reinforcements: pp "); at != std::string::npos) {
+            const size_t fr = d.text.find(" frees ", at);
+            if (fr != std::string::npos && std::atoi(d.text.c_str() + fr + 7) > 0) ++freed;
+        }
+    CHECK(freed >= 1);
+    if (save_at < 0) {
+        g_land = false;
+        return;
+    }
+    const std::vector<uint8_t> image = a.ai_bytes();
+    SaveSession b(11);
+    CHECK(b.restore_host(a) && b.load_ai(image));
+    CHECK(b.crc() == a.crc() && b.ai_bytes() == image && b.world->attack_positioning(unit));
+    const size_t dec_a = a.world->decision_log().size(), dec_b = b.world->decision_log().size();
+    int32_t first_diff = -1;
+    for (int32_t f = save_at + 1; f <= save_at + 30 * 30; ++f) {
+        a.step(f);
+        b.step(f);
+        if (first_diff < 0 && a.crc() != b.crc()) first_diff = f;
+    }
+    std::vector<std::string> da, db;
+    for (size_t i = dec_a; i < a.world->decision_log().size(); ++i) da.push_back(decision_line(a.world->decision_log()[i]));
+    for (size_t i = dec_b; i < b.world->decision_log().size(); ++i) db.push_back(decision_line(b.world->decision_log()[i]));
+    std::printf("attack positioning save: saved at frame %d after unit %d's move; %zu decisions after the load %s\n", save_at, unit,
+                da.size(), first_diff < 0 && da == db ? "identical" : "DIVERGED");
+    CHECK(first_diff < 0 && da == db && b.ai_bytes() == a.ai_bytes());
+    g_land = false;
+}
+
+// mcx6 t07 (LUA_API.md "Discovery scans list *.lua only"): the plan discovery asks every plan folder for *.lua only, so a
+// plan that exists only as .lc is never found (a VFS-like lister: the folder prefix and the pattern's extension).
+void test_plan_discovery_lua_only() {
+    const std::vector<std::string> files = {"Data\\Scripts\\AI\\A.lua", "Data\\Scripts\\AI\\B.lc", "Data\\Scripts\\AI\\LandMode\\C.lc",
+                                            "Data\\Scripts\\AI\\LandMode\\D.lua", "Data\\Scripts\\AI\\SpaceMode\\E.lc"};
+    std::vector<std::string> globs;
+    const auto lister = [&](std::string_view glob) {
+        globs.emplace_back(glob);
+        const std::string g(glob);
+        const std::string dir = g.substr(0, g.find('*')), ext = g.substr(g.find('*') + 1);
+        std::vector<std::string> out;
+        for (const std::string& f : files)
+            if (f.rfind(dir, 0) == 0 && f.size() >= ext.size() && f.compare(f.size() - ext.size(), ext.size(), ext) == 0) out.push_back(f);
+        return out;
+    };
+    const std::vector<std::string> got = tactical_plan_files(TacticalMode::Land, lister);
+    bool lua_only = !globs.empty();
+    for (const std::string& g : globs) lua_only = lua_only && g.size() > 5 && g.compare(g.size() - 5, 5, "*.lua") == 0;
+    size_t lc = 0;
+    for (const std::string& f : got)
+        lc += f.size() > 3 && (f.compare(f.size() - 3, 3, ".lc") == 0 || f.compare(f.size() - 3, 3, ".LC") == 0) ? 1u : 0u;
+    std::printf("plan discovery: %zu folder pattern(s), %zu plan file(s) found\n", globs.size(), got.size());
+    CHECK(lua_only && lc == 0 && got.size() == 2);
+}
+
+// REF1 t04: with TacticalAiConfig::log_decisions off the world keeps no decision log and no stats (their text is built only
+// while the log is on), and plays the same battle: same CRC stream, same executed orders.
+void test_logging_off() {
+    const RunResult on = run(30 * 30, 1);
+    g_log_decisions = false;
+    const RunResult off = run(30 * 30, 1);
+    g_log_decisions = true;
+    CHECK(!on.decisions.empty() && on.stats.size() > 1);
+    CHECK(off.decisions.empty());
+    CHECK(off.stats.size() == 1 && off.stats.count("~ evaluations") == 1);  // the evaluation counter only
+    CHECK(!on.crc.empty() && on.crc == off.crc && on.executed == off.executed);
+    std::printf("logging off: %zu decisions / %zu stats keys with the log on, %zu / %zu off; CRC stream and %zu orders identical\n",
+                on.decisions.size(), on.stats.size(), off.decisions.size(), off.stats.size(), on.executed.size());
+}
+
 int main(int argc, char** argv) {
-    for (int i = 1; i < argc; ++i)
+    // --only <name>: run only the scenarios whose name contains <name> (ref5 t05: one scenario per run while iterating;
+    // --list prints the names). ctest runs them all.
+    const char* only = nullptr;
+    bool list = false;
+    for (int i = 1; i < argc; ++i) {
         if (std::strcmp(argv[i], "--write-golden") == 0) g_write_golden = true;
-    test_potential_plan();
-    test_mod_category_enum();  // q6 t03
-    test_space_layer_categories();  // q6 t03
-    test_nominal_allowed_time();  // A2g t06
-    test_skirmish();
-    test_battle_budget();  // q6 (AI_GALACTIC_TOKENS 9.3)
-    test_opportunity_and_hijack();
-    test_group_orders();
-    test_tactical_production();
-    test_reinforce_landing();
-    test_script_evaluators();
+        if (std::strcmp(argv[i], "--golden-out") == 0 && i + 1 < argc) {  // wr1 t05
+            g_write_golden = true;
+            g_golden_out = argv[++i];
+        }
+        if (std::strcmp(argv[i], "--only") == 0 && i + 1 < argc) only = argv[++i];
+        if (std::strcmp(argv[i], "--list") == 0) list = true;
+    }
+    if (g_write_golden && g_golden_out.empty()) {
+        std::printf("%s: --regen / --write-golden needs --golden-out DIR (wr1 t07: no stored goldens in the source tree)\n", "alamo_ai_tactical_world_tests");
+        return 2;
+    }
+    size_t ran = 0;
+    const auto scenario = [&](const char* name, const std::function<void()>& fn) {
+        if (list) {
+            std::printf("%s\n", name);
+            return;
+        }
+        if (only && !std::strstr(name, only)) return;
+        ++ran;
+        fn();
+    };
+    scenario("potential_plan", test_potential_plan);
+    scenario("mod_category_enum", test_mod_category_enum);  // q6 t03
+    scenario("space_layer_categories", test_space_layer_categories);  // q6 t03
+    scenario("nominal_allowed_time", test_nominal_allowed_time);  // A2g t06
+    scenario("skirmish", test_skirmish);
+    scenario("battle_budget", test_battle_budget);  // q6 (AI_GALACTIC_TOKENS 9.3)
+    scenario("opportunity_and_hijack", test_opportunity_and_hijack);
+    scenario("group_orders", test_group_orders);
+    scenario("space_reinforce_needs_starbase", test_space_reinforce_needs_starbase);  // skm1 t03 / t04
+    scenario("facts_same_frame", test_facts_same_frame);  // ref5 t07
+    scenario("tactical_production", test_tactical_production);
+    scenario("reinforce_landing", test_reinforce_landing);
+    scenario("script_evaluators", test_script_evaluators);
     // N1 stage 2: save / load mid-battle
-    test_damage_tracking_save();
-    test_save_load(0, 30 * 35, 30 * 120);  // the golden skirmish (2 plans running at frame 1050)
-    test_save_load(1, 30 * 30, 30 * 60);   // opportunity-fire subscriptions, HIJACK spawns
-    test_save_load(3, 30 * 40, 30 * 80);   // Script_ evaluator VMs
-    test_pp_pending_save();               // OPT2 t10
-    test_order_results_bounded(0, 30 * 120);
-    test_order_results_bounded(1, 30 * 60);  // with the opportunity-fire and HIJACK plans
+    scenario("damage_tracking_save", test_damage_tracking_save);
+    scenario("save_load_0", [] { test_save_load(0, 30 * 35, 30 * 120); });  // the golden skirmish (2 plans running at frame 1050)
+    scenario("save_load_1", [] { test_save_load(1, 30 * 30, 30 * 60); });   // opportunity-fire subscriptions, HIJACK spawns
+    scenario("save_load_3", [] { test_save_load(3, 30 * 40, 30 * 80); });   // Script_ evaluator VMs
+    scenario("pp_pending_save", test_pp_pending_save);  // OPT2 t10
+    scenario("ai_lane_save", test_ai_lane_save);        // sp3
+    scenario("order_results_bounded_0", [] { test_order_results_bounded(0, 30 * 120); });
+    scenario("order_results_bounded_1", [] { test_order_results_bounded(1, 30 * 60); });  // with the opportunity-fire and HIJACK plans
     // S7 t20 / t21 / t15 A1
-    test_empty_task_force();
-    test_prepare_ambush();
-    test_land_ambush_step();     // S7 t27
-    test_prepare_ambush_land();  // S7 t33
-    test_ability_order_replaced();  // S7 t26
-    test_no_units_remaining_heroes();  // S7 t26
-    test_ability_finished();
-    test_save_load(6, 30 * 4, 30 * 40);  // an ambush block in flight (member / moving lists, plan frame)
-    test_landing_wait(false);  // a1j t01
-    test_landing_wait(true);
-    test_landing_save();
-    test_replan_and_priority_lifetime();  // a1k t01
-    test_attack_move_result();            // q6 t19
+    scenario("empty_task_force", test_empty_task_force);
+    scenario("prepare_ambush", test_prepare_ambush);
+    scenario("land_ambush_step", test_land_ambush_step);  // S7 t27
+    scenario("prepare_ambush_land", test_prepare_ambush_land);  // S7 t33
+    scenario("ability_order_replaced", test_ability_order_replaced);  // S7 t26
+    scenario("story_world", test_story_world);  // aitac t01
+    scenario("block_new_order_signals", test_block_new_order_signals);  // aitac t05
+    scenario("explore_area", test_explore_area);  // aitac t07
+    scenario("no_units_remaining_heroes", test_no_units_remaining_heroes);  // S7 t26
+    scenario("ability_finished", test_ability_finished);
+    scenario("save_load_6", [] { test_save_load(6, 30 * 4, 30 * 40); });  // an ambush block in flight (member / moving lists, plan frame)
+    scenario("landing_wait_unloaded", [] { test_landing_wait(false); });  // a1j t01
+    scenario("landing_wait_lost", [] { test_landing_wait(true); });
+    scenario("landing_save", test_landing_save);
+    scenario("replan_and_priority_lifetime", test_replan_and_priority_lifetime);  // a1k t01
+    scenario("plan_retest", test_plan_retest);  // skai t15
+    scenario("logging_off", test_logging_off);  // REF1 t04
+    scenario("outside_owner_lists", test_outside_owner_lists);  // skai t22
+    scenario("attack_move_result", test_attack_move_result);  // q6 t19
+    scenario("attack_positioning", test_attack_positioning);  // mcx6 t06
+    scenario("attack_positioning_save", test_attack_positioning_save);  // mcx6 t06
+    scenario("plan_discovery_lua_only", test_plan_discovery_lua_only);  // mcx6 t07
+    if (list) return 0;
+    if (only && ran == 0) {
+        std::printf("alamo_ai_tactical_world_tests: no scenario matches --only %s (--list prints the names)\n", only);
+        return 1;
+    }
     std::printf(g_fail ? "alamo_ai_tactical_world_tests: %d FAILED\n" : "alamo_ai_tactical_world_tests: OK\n", g_fail);
     return g_fail ? 1 : 0;
 }

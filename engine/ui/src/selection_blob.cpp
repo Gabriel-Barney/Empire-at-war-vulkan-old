@@ -84,20 +84,18 @@ render::Instance selection_blob_instance(const render::GpuModel& model, const Se
     return in;
 }
 
-std::vector<terrain::ShadowBlob> land_selection_blobs(std::span<const SelectionBlob> blobs,
-                                                      const std::vector<terrain::ShadowBlobMaterial>& materials) {
-    std::vector<terrain::ShadowBlob> out;
-    out.reserve(blobs.size());
-    for (const SelectionBlob& b : blobs) {
-        if (!b.land) continue;
-        terrain::ShadowBlob s;
-        s.position[0] = b.center.x;
-        s.position[1] = b.center.y;
-        s.width = s.height = 2.0f * b.radius;
-        s.material = terrain::find_blob_material(materials, b.material);
-        out.push_back(s);
-    }
-    return out;
+render::Instance selection_blob_ground_instance(const render::GpuModel& model, const SelectionBlob& blob,
+                                                const std::function<float(float, float)>& height) {
+    render::Instance in = selection_blob_instance(model, blob);
+    if (!height) return in;
+    const float r = blob.radius > 0.0f ? blob.radius : 1.0f;
+    const float x = blob.center.x, y = blob.center.y;
+    const float gx = (height(x + r, y) - height(x - r, y)) / (2.0f * r);
+    const float gy = (height(x, y + r) - height(x, y - r)) / (2.0f * r);
+    in.transform.m[2][0] = gx * r;  // X axis (r, 0, gx r), Y axis (0, r, gy r): the ground's local plane
+    in.transform.m[2][1] = gy * r;
+    in.transform.m[2][3] = height(x, y) + kSpaceBlobLift;
+    return in;
 }
 
 }  // namespace alamo::ui

@@ -11,12 +11,6 @@
 
 namespace alamo::galactic {
 
-commands::EventData fleet_management_event(FleetOp op, uint32_t target, uint32_t fleet, uint32_t unit) {
-    commands::EventData e(commands::EventType::FleetManagement);
-    e.set("target", target).set("fleet", fleet).set("unit", unit).set("op", static_cast<uint32_t>(op));
-    return e;
-}
-
 // ---- income ticks --------------------------------------------------------------------------------------------
 
 uint32_t GalacticSim::add_income_hook(IncomeHook hook) {
@@ -26,23 +20,19 @@ uint32_t GalacticSim::add_income_hook(IncomeHook hook) {
     return id;
 }
 
-void GalacticSim::remove_income_hook(uint32_t id) {
-    income_hooks_.erase(std::remove_if(income_hooks_.begin(), income_hooks_.end(),
-                                       [id](const std::pair<uint32_t, IncomeHook>& h) { return h.first == id; }),
-                        income_hooks_.end());
-}
-
-uint32_t GalacticSim::add_production_service_hook(std::function<void(PlanetIndex)> hook) {
+uint32_t GalacticSim::add_credit_notify_hook(CreditNotifyHook hook) {
     const uint32_t id = next_hook_id_++;
     if (next_hook_id_ == 0) next_hook_id_ = 1;
-    production_hooks_.emplace_back(id, std::move(hook));
+    credit_hooks_.emplace_back(id, std::move(hook));
     return id;
 }
 
-void GalacticSim::remove_production_service_hook(uint32_t id) {
-    production_hooks_.erase(std::remove_if(production_hooks_.begin(), production_hooks_.end(),
-                                           [id](const auto& h) { return h.first == id; }),
-                            production_hooks_.end());
+// 0x4b0310 [H]: only for a player with an AI system (player +0x360); the galactic budget is told whatever the current
+// mode is (A2K_T10_CREDIT_NOTIFY_RE Q1).
+void GalacticSim::notify_ai_credits(int32_t player, float applied) {
+    if (!valid_player(player) || !players_[static_cast<size_t>(player)].ai) return;
+    const std::vector<std::pair<uint32_t, CreditNotifyHook>> hooks = credit_hooks_;  // a listener may register another
+    for (const auto& h : hooks) h.second(player, applied);
 }
 
 float GalacticSim::last_income(int32_t player) const {
@@ -89,7 +79,9 @@ ObjectHandle GalacticSim::spawn_unit(int32_t player, PlanetIndex planet, uint32_
         return {};
     last_spawn_ = {};
     if (!create_unit(player, planet, type)) return {};
-    return last_spawn_;
+    const ObjectHandle made = last_spawn_;  // the hook may spawn again
+    if (spawn_hook_) spawn_hook_(player, planet, type);
+    return made;
 }
 
 bool GalacticSim::steal_unit(int32_t player, uint32_t type, PlanetIndex destination, bool include_destination) {
@@ -270,7 +262,7 @@ RejectReason GalacticSim::fleet_management(int32_t player, const commands::Event
                 continue;
             }
             out.push_back(s.contents[i]);
-            carried.push_back(i < s.carried.size() ? s.carried[i] : 0);
+            carried.push_back(i < s.carried.size() ? s.carried[i] : uint8_t{0});
             s.contents.erase(s.contents.begin() + static_cast<std::ptrdiff_t>(i));
             if (i < s.carried.size()) s.carried.erase(s.carried.begin() + static_cast<std::ptrdiff_t>(i));
         }
@@ -333,6 +325,7 @@ RejectReason GalacticSim::fleet_management(int32_t player, const commands::Event
             for (size_t i = 0; i < moved.size(); ++i) {
                 fleets_[dst].contents.push_back(moved[i]);
                 fleets_[dst].carried.push_back(carried[i]);
+                fleet_member_joined(dst, moved[i]);
             }
             return RejectReason::None;
         }
@@ -340,6 +333,7 @@ RejectReason GalacticSim::fleet_management(int32_t player, const commands::Event
         planets_[p].surface.erase(std::remove(planets_[p].surface.begin(), planets_[p].surface.end(), unit), planets_[p].surface.end());
         fleets_[dst].contents.push_back(unit);
         fleets_[dst].carried.push_back(0);
+        fleet_member_joined(dst, unit);
         return RejectReason::None;
     }
     case kFleetMoveNew:
@@ -351,20 +345,28 @@ RejectReason GalacticSim::fleet_management(int32_t player, const commands::Event
         std::vector<ObjectHandle> moved;
         std::vector<uint8_t> carried;
         const uint32_t from = holder_at(p, unit);
+        bool launched = false;
         if (from != kNoFleet) {
             take(from, unit, moved, carried);
         } else if (surface_planet_of(unit) == p) {  // launch first
             planets_[p].surface.erase(std::remove(planets_[p].surface.begin(), planets_[p].surface.end(), unit), planets_[p].surface.end());
             moved.push_back(unit);
             carried.push_back(0);
+            launched = true;
         } else {
             return RejectReason::InvalidUnit;
         }
         const uint32_t nf = create_fleet(player, p);
         fleets_[nf].contents = std::move(moved);
+        for (const ObjectHandle u : fleets_[nf].contents) fleet_member_joined(nf, u);  // mcx4 t20
         fleets_[nf].carried = std::move(carried);
+        // ui4 t13: a launch from the surface is retail's op 4 (launch: the reveal, REMAINING_GAPS 6.1) then op 0 (a new
+        // fleet: the space conflict in a hostile orbit), as kFleetLaunch runs them (GALACTIC_PLANET_MAP §6.2 rules 2 / 4).
+        // [port] the conflict only for a fleet that stays: one moving on leaves the orbit (a lone ground unit is no attacker).
+        if (launched) launch_reveal(p, unit);
         if (dest == p) {
             slot_new_fleet(nf);
+            if (launched) new_fleet_conflict(p);
             return RejectReason::None;
         }
         if (want_slot < static_cast<uint32_t>(kOrbitSlots)) {  // the slot it takes on arrival at `dest`
@@ -404,10 +406,14 @@ RejectReason GalacticSim::fleet_management(int32_t player, const commands::Event
         for (size_t i = 0; i < moved.size(); ++i) {
             fleets_[occupant].contents.push_back(moved[i]);
             fleets_[occupant].carried.push_back(carried[i]);
+            fleet_member_joined(occupant, moved[i]);
         }
         return RejectReason::None;
     }
     case kFleetMerge: {  // the source fleet (or one of its units) into the target fleet
+        // ENABLE_FLEET_COMBINE 0 (STY1; the human's drop-onto-own-fleet merge, STORY_REWARDS_GALACTIC §3.4).
+        if (!story_gates_.fleet_combine && valid_player(player) && players_[static_cast<size_t>(player)].human)
+            return RejectReason::NotAllowed;
         const uint32_t dst = fleet_of(find(ev.u("target")));
         if (!own_idle(src)) return RejectReason::InvalidUnit;
         if (!own_idle(dst) || dst == src || fleets_[dst].planet != fleets_[src].planet) return RejectReason::InvalidTarget;
@@ -418,6 +424,7 @@ RejectReason GalacticSim::fleet_management(int32_t player, const commands::Event
         for (size_t i = 0; i < moved.size(); ++i) {
             fleets_[dst].contents.push_back(moved[i]);
             fleets_[dst].carried.push_back(carried[i]);
+            fleet_member_joined(dst, moved[i]);
         }
         return RejectReason::None;
     }
@@ -435,6 +442,7 @@ RejectReason GalacticSim::fleet_management(int32_t player, const commands::Event
             take(from, unit, moved, carried);
             const uint32_t nf = create_fleet(player, p);
             fleets_[nf].contents = std::move(moved);
+            for (const ObjectHandle u : fleets_[nf].contents) fleet_member_joined(nf, u);  // mcx4 t20
             fleets_[nf].carried = std::move(carried);
             slot_new_fleet(nf);
             new_fleet_conflict(p);  // OI galactic: a new fleet in a hostile orbit starts a space conflict (SG 1.7 op 0)
@@ -448,6 +456,7 @@ RejectReason GalacticSim::fleet_management(int32_t player, const commands::Event
         for (size_t i = 0; i < moved.size(); ++i) {
             fleets_[src].contents.push_back(moved[i]);
             fleets_[src].carried.push_back(carried[i]);
+            fleet_member_joined(src, moved[i]);
         }
         return RejectReason::None;
     }
@@ -465,6 +474,7 @@ RejectReason GalacticSim::fleet_management(int32_t player, const commands::Event
         take(from, unit, moved, carried);
         const uint32_t nf = create_fleet(player, p);
         fleets_[nf].contents = std::move(moved);
+        for (const ObjectHandle u : fleets_[nf].contents) fleet_member_joined(nf, u);  // mcx4 t20
         fleets_[nf].carried = std::move(carried);
         slot_new_fleet(nf);
         return RejectReason::None;
@@ -502,6 +512,7 @@ RejectReason GalacticSim::fleet_management(int32_t player, const commands::Event
         planets_[p].surface.erase(std::remove(planets_[p].surface.begin(), planets_[p].surface.end(), unit), planets_[p].surface.end());
         fleets_[dst].contents.push_back(unit);
         fleets_[dst].carried.push_back(0);
+        fleet_member_joined(dst, unit);
         launch_reveal(p, unit);  // REMAINING_GAPS 6.1
         if (fleets_.size() != fleets_before) {
             slot_new_fleet(dst);

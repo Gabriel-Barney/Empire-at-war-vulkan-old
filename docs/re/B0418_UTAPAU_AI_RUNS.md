@@ -1,0 +1,180 @@
+# b0418: Empire and Underworld AI on Utapau, port runs and the retail kit (2026-11-14)
+
+Backlog b0418 asked for retail's length and winner of an Empire vs Underworld AI land skirmish on `_MP_LAND_UTAPAU`, the
+configuration of the port test `alamo_headless_skirmish_ai_foc_land_empire_underworld_seed*`. This page records why that
+exact measurement does not exist, what the port does instead, and the retail runs that can be compared. Retail findings go
+in section 5 after the runs.
+
+## 1. AI vs AI has no retail counterpart
+
+A FoC skirmish always gives the local player a slot and has no spectator slot (`tools/probe_mod/q2_traces/README.md`,
+"AI vs AI is not possible in a FoC skirmish"). The port's two-AI test therefore cannot be checked against retail directly.
+The comparable configuration is one AI against an idle human: the human sends no commands and its units only react
+automatically. The port has the same mode (`--skirmish-ai foc-land --human H --ai A`).
+
+## 2. The port's two-AI runs (dev 522bef97, MSVC, 4 workers, 70000 ticks)
+
+Seeds 1-10: the Underworld wins 8 (frames 26830-51427); seeds 1 and 2 are still fighting at 70000; the Empire never wins.
+
+Why the Empire is weak, seed 5 (AI log, `--ai-log`):
+1. Its two starting Stormtrooper squads die in its first Clear_Infantry plan (371-4115).
+2. `Tactical_Multiplayer_Build_Infantry_Emergency` (task force `Infantry | LandHero = 1`, a build plan) buys
+   `Boba_Fett_Team_Land_MP` at 4088.
+3. Fett's force (500) is above the emergency equation's limit (`200 > Non_Structure_Force_Unnormalized`), so no further
+   emergency build runs.
+4. `BobaFettFlameInfantry` takes Fett at 4809 and marks itself not removable; it holds him until a Burn_Units_Land purge at
+   24854.
+5. `Secure_Contestable` (task force `Infantry | LandHero = 1`, not a build plan, so it does not buy) has no free unit. No
+   mineral-processor pad is captured, `Number_Resource_Structures_Land` stays 0, so `Is_Initial_Skirmish_State_Established`
+   stays 0, and that blocks `Tactical_Multiplayer_Should_Build_Units_Generic_Land`.
+6. The Empire's credits grow from 5800 to 11065 (frames 4201-23401) while it starts no plan between 4809 and 19487.
+
+Every step follows the shipped XML / Lua; whether retail's plan solver also picks Fett in step 2 (rather than a
+Stormtrooper squad) is the open question. It decides whether the stall is a port difference (tier 2).
+
+## 3. The port against an idle human (dev 522bef97, MSVC, 4 workers, 36000 ticks, seeds 1-3)
+
+| | Empire AI vs idle Underworld | Underworld AI vs idle Empire |
+|---|---|---|
+| Winner / end frame | Empire 3 of 3: 27604, 24879, 26499 | Underworld 2 of 3: 35199, 26887; seed 2 still fighting at 36000 |
+| First mineral processor ordered | only seed 2, at 11615 | 1454 in all three (second at 8153-8549) |
+| First purchases | `EL_Increased_Mobility_Upgrade` and `EC_Level_Two_Tech_Upgrade` at about 4805; Dark Troopers, `Imperial_Anti_Aircraft_Company` (and in seed 1 Boba Fett) at about 7045 | `Bossk_Team` at 365, `UC_Level_Two_Tech_Upgrade` at 1820, `UL_Bounty_Upgrade` at 3299, skiffs / MDUs / pod walkers at about 7028 |
+| Lua errors | 1 in seeds 1 and 3 (`BOBAFETTFLAMEINFANTRY ... Move_To -- Target is already dead`, see section 6) | 0 |
+
+Retail's Rebel AI on the same map built its first Mineral Processor at 1909 (`SKAI_T06_LAND_RUNS.md` §6), so a first
+refinery at 11615 or never, as in the port's Empire AI runs, would be a large difference.
+
+## 4. The retail kit
+
+`tools/probe_mod/q2_traces/`, the skai t02 land trace with the plan hooks extended for this question (`make_plan_hooks.py`
+now also hooks `BobaFettFlameInfantry` and `AI_Plan_ExpansionGeneric_BuildMDUItem`). Two runs, about 22 min each, by-hand
+menu clicks, hands off afterwards:
+
+| Run | Clicks (Single Player - Skirmish Battles - Land - Utapau, Advanced... Default) |
+|---|---|
+| `run_skirmish_land_empire_ai.cmd` | you = Underworld (slot 1), slot 2 = Empire, Medium AI |
+| `run_skirmish_land_underworld_ai.cmd` | you = Empire (slot 1), slot 2 = Underworld, Medium AI |
+
+Read each run with `analysis\land_attack.py out\<run>`; the plan records (`PSTART` / `PDONE` / `PFAIL` with task-force
+types) give the AI's purchases and plans. Compare against section 3:
+- the first Mineral Processor frame of each AI (port: Empire 11615 or never, Underworld 1454);
+- what the Empire's first Build_Infantry_Emergency buys, if it runs, and whether Flame_Infantry then holds Fett;
+- the winner and the end frame within 36000 ticks.
+
+## 5. Retail results (2026-11-14, driven by Claude)
+
+Two runs of the q2 land kit, FoC 1.121, Utapau Heights (`_MP_LAND_UTAPAU`), Advanced Default, 36000 ticks each, both ended by
+the kit at the tick limit (exit 0, mod removed, profile restored): `out\20261114-210208-skirmish-vanilla-lua` (Empire AI, human
+Underworld idle) and `out\20261114-212910-skirmish-vanilla-lua` (Underworld AI, human Empire idle). Frames are `lframe` × 30
+from the `TBUILT` / `TKILL` records.
+
+| | Retail Empire AI | Port Empire AI (§3) | Retail Underworld AI | Port Underworld AI (§3) |
+|---|---|---|---|---|
+| Battle end | **not within 36000**; the AI killed the idle Underworld vehicle factory 23255, droid works 25154, barracks 26153, then no more base kills | Empire wins at 24879-27604 (3 of 3) | **not within 36000**; first base kill 24447 (comm array), then factories, shield, power, barracks, research 30835-33870 | Underworld wins at 26887 and 35199; 1 of 3 still fighting at 36000 |
+| First mineral processor | built 2565 (4 more by 13305, plus a mining facility 12792) | ordered 11615 in 1 of 3, never in 2 of 3 | built 2451 (4 more by 10417) | ordered 1454 |
+| Tech 2 / tech 3 | 7674 / 17617 | ordered at about 4805 | 3510 / 20242 | ordered 1820 |
+| Hero | Boba Fett team 2875 (Flame_Infantry from 121 s, one start; Mara Jade in Land_Heroes) | Boba Fett with the units at about 7045 in seed 1 | Bossk team 597 (again 14550); Hutt palace 4878 | Bossk team ordered 365 |
+
+Retail opening of the Empire AI (plan records): at 12 s it starts **two** Secure_Contestable plans, one per starting
+Stormtrooper team, one on the `SKIRMISH_OUTPOST_PAD` and one on a `SKIRMISH_MINERAL_PROCESSOR_PAD` (that one exits at 85.8 s,
+when the processor is done), and a third on a Reinforcement_Point at 72.8 s; Land_Scout_Area starts only at 96 s, and the
+first Build_Econ_Structure at 60 s. The port's Empire AI at frame 371 (12.4 s) starts **one** Secure_Contestable (the outpost
+pad, object 757) and two Land_Scout_Area plans, which take the other starting squads; its next Secure_Contestable is at
+18115. So the port's late or missing refinery is a tier-2 difference in the opening plan choice (Secure_Contestable vs
+Land_Scout_Area for the second team), not the Boba Fett trap of §2: retail buys Fett too (2875), but by then it already has
+its refinery.
+
+The emergency infantry build (`Tactical_Multiplayer_Build_Infantry_Emergency`) did not run in either retail run; Boba Fett came
+from another purchase path. Retail's AI does not finish an idle base within 36000 ticks with either faction, while the port's
+does in 5 of 6 runs.
+
+**Second Empire AI run (2026-11-16, skai t15 hook kit, `out\20261116-005957-skirmish-vanilla-lua`):** same lobby, same
+opening (refinery 2569, Fett 2875, tech 2 7678, tech 3 19390), but the Empire AI **did** destroy the idle Underworld base: vehicle
+factory 14368, droid works 17366, palace 24378, barracks 25499, defeat screen at about 25707. So retail's Empire AI ends an
+idle Underworld base in one of two runs; the port's (with the force-sum rule) ends at 18429-19629 in 3 of 3. Plan ends of both
+runs: SKAI_T15_PLAN_RETEST.md, "Retail hook runs".
+
+## 6. b0419: `Move_To -- Target is already dead` in BobaFettFlameInfantry (no port difference)
+
+`MoveUntilDone` tests `TestValid(target)` in its loop condition, calls `PumpEvents()` (which yields to the engine:
+`coroutine.yield` in `PGBASE.LUA`), then, once its timeout has passed, calls `fett.Move_To(target)` again without testing
+the target. Retail `GameObjectWrapper.Is_Valid` tests only that the wrapper's object pointer (+0x60) is non-null
+(`OBJECT_RUNTIME.md`), and `Move_Internal` raises "Target is already dead." for a GameObjectWrapper argument whose +0x60 is
+null (`LUA_API.md`, Move_To / Attack_Move / Guard_Target). Both read the same field, so a target that dies during the yield
+raises the error in retail too. The port tests both with the same predicate (`object_alive`). The error is the shipped
+script's own behaviour, and how often it happens follows from the battle, not from a separate rule.
+
+## 7. b0421: the opening pad captures (fixed 2026-11-14)
+
+Cause: the goal system's Commit (0x6c8710, one routine for every mode) resolves the categories in descending normalised
+budget weight, equal weights in category order (AI_GALACTIC §1.6 step 3, BKG3_RE_ANSWERS Q6 [H]). The port's tactical AI
+resolved them in category index order. `Test_Land` weighs Map_Control `Medium_High` (35) against Tactical_Targeted
+`GenericSpaceTargetedOffensiveBudgetAllocation` (`Game.ForceVisibility`, at most 1): normalised 0.174 and 0.005 at the first
+commit. In index order Tactical_Targeted (enum 5) came first, so two Land_Scout_Area plans took two of the Empire's four
+squads, the outpost pad's Secure_Contestable took the other two (main force and escort), and the mineral pad's
+Secure_Contestable found no unit. The Rebels start with six teams, so they had enough for both categories and their opening
+was right either way (SKAI_T06_LAND_RUNS §7).
+
+Fix: `category_order` of the tactical AI sorts by the budget weight, as the galactic AI already did. Port against an idle
+human (dev + fix, MSVC, 4 workers, 36000 ticks, seeds 1-3):
+
+| | Retail | Port before (§3) | Port after |
+|---|---|---|---|
+| Empire AI first commit | two Secure_Contestable (outpost pad, mineral pad), main + escort each, no scout | one Secure_Contestable, two Land_Scout_Area | two Secure_Contestable (outpost 757, mineral 756), main + escort each, no scout |
+| Empire AI Build_Econ_Structure on the mineral pad | starts 1815 (60.5 s) | 11615 in 1 of 3, never in 2 | 2215 in all three |
+| Empire AI end | not within 36000 | wins 24879-27604 | wins 20069 / 21523 / 24474 |
+| Underworld AI first commit | two Secure_Contestable, two Destroy_Structure, Build_Infantry_Emergency | (as after) | two Secure_Contestable, Build_Infantry_Emergency, one Land_Scout_Area |
+| Underworld AI end | not within 36000 | wins 26887 and 35199, 1 still fighting | wins 25156, 2 still fighting |
+
+The opening matches. Both AIs still finish an idle base sooner than retail (b0422); the Empire now does so earlier,
+because it has its refinery.
+
+AI against AI after the fix (test seeds re-pinned in `engine/apps/CMakeLists.txt`): Rebel vs Empire, 30000 ticks, Rebel
+wins seeds 1 / 5 / 6 (28354 / 25577 / 29480) and seeds 2-4 are still fighting; Empire vs Underworld, 70000 ticks,
+Underworld wins seeds 1 / 3 / 8 / 9 / 10 (37408-53654) and five seeds are still fighting, 0 Lua errors; space station seeds
+1-7 end (Rebel, 9402-13446), seed 8 reaches the cap.
+
+## 8. b0422: why the port finishes an idle base sooner (2026-11-15; the force-sum rule landed, the plan length is open)
+
+Retail runs of §5, port at dev 052cb39a, Empire AI against an idle Underworld, seed 1 unless stated.
+
+**Tech climbs twice as fast in the port.** `Skirmish_Upgrade_Tech` (the Tech_Upgrade_Emergency desire) needs
+`Variable_Self.FriendlyForceUnnormalized > 400` for tech 2 and `> 3000` for tech 3. The port's sum is 2452 at the start:
+252 of units and 2200 of pre-placed base structures. So tech 2 is ordered at 2588, when the first refinery stands, and tech 3
+at 8678; Phase III dark troopers, Lancets, an AT-AT and Mara Jade are all ordered at 11846. Retail's PSTART records carry the
+equation values (`nsf` = Non_Structure_Force_Unnormalized, `ut` = Skirmish_Upgrade_Tech): `ut` = 0 at 1815 and 2184 with
+a refinery and `nsf` 252, and turns 1 at 2904, after a refinery (2565) and a turret (2875) were built on pads. Tech 2 is ordered
+at 5874 and tech 3 at 15066; the same unit types come at 18097-27838. This is the skai t12 "narrow rule" (SKAI_T06_LAND_RUNS
+§7): objects with DUMMY_GROUND_STRUCTURE (the pre-placed base) are not in the per-player list the force sums walk. It now
+rests on three retail traces, two Rebel AI and this Empire AI. Commit 0d1e12c0 had it and 96bea816 reverted it.
+
+**The rule is on dev again (2026-11-15, Gabriel: "land the rule"; DECISIONS.md "AI-vs-AI land skirmish tests do not need a
+battle end")**, idle-human Utapau, 36000 ticks, seeds 1-3:
+
+| | Retail | Port dev | Port + rule |
+|---|---|---|---|
+| Empire AI tech 2 / tech 3 ordered | 5874 / 15066 | 2588 / 8678 | 6791-6797 / 12311-13214 |
+| Empire AI end | none | wins 20069-24474 | wins 18429-19629 |
+| Underworld AI end | none | wins 1 of 3 | none in 3 of 3 |
+| Rebel AI end | none | wins (SKAI_T06) | wins 1 of 3 (33956) |
+
+AI against AI with the rule: Rebel vs Empire seeds 1-6 and Empire vs Underworld seeds 1 / 3 / 8 / 9 all still fighting at the
+limit (36000 / 70000), with 0 Lua errors. That is why skai held the rule back: those tests needed an end. They now play
+the whole run with 0 Lua errors (`alamo_headless_skirmish_ai_foc_land_full*`, renamed from `..._end*`, and
+`..._empire_underworld_seed*`).
+
+**Still different with the rule: how long a Destroy_Structure plan holds its units.**
+- Retail starts a Destroy_Structure plan at almost every commit after 19000. Most end by ScriptExit about 400 frames after
+  they start, and its AT-STs never stay on one structure. The vehicle factory took until 23255 to die with 50 Empire objects
+  within 1500 of the Underworld base.
+- In the port with the rule, plan 14 (4847-9896) keeps its AT-STs on the vehicle factory for 5000 frames, at 400-700
+  damage per 600 frames.
+- Not causes: drop placement (retail and port both drop pool units at 2305,4465 and nearby) and the Attack_Move threat
+  argument (unused without useZonePath, B0173_RE_ANSWERS Q2).
+- Open: what ends retail's land object Attack_Move block that soon (AI_TACTICAL §7.7.3 lists the ways).
+- Without the rule the port's Destroy_Structure solves mostly fail Contrast or Plan after 14597 (236 of 245), and
+  Burn_Units_Land's whole-army Attack_Move kills the base.
+
+**Not a difference:** after a structure dies, the port's trace lists a full-health object of the same type at the same
+place. It is the death clone (S9 t04: the dying type itself), not a rebuilt structure, and the AI does not target it.
+Retail's reader does not list death clones.

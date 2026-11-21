@@ -21,6 +21,7 @@
 #include "alamo/core/log.hpp"
 #include "alamo/lua/gc_schedule.hpp"
 #include "alamo/lua/lua_vm.hpp"
+#include "alamo/test/support.hpp"
 #ifdef ALAMO_LUA_HAVE_JOBS
 #include "alamo/jobs/job_system.hpp"
 #endif
@@ -30,14 +31,7 @@
 using namespace alamo;
 using namespace alamo::lua;
 
-static int g_fail = 0;
-#define CHECK(c)                                                     \
-    do {                                                             \
-        if (!(c)) {                                                  \
-            std::printf("FAIL %s:%d: %s\n", __FILE__, __LINE__, #c); \
-            ++g_fail;                                                \
-        }                                                            \
-    } while (0)
+using ::alamo::test::g_fail;
 
 static std::string run(LuaVm& vm, const std::string& code) {
     std::string err;
@@ -55,9 +49,11 @@ static double gnum(LuaVm& vm, const char* name) {
 }
 
 // A script VM that allocates garbage every tick. The proxy is a collection sentinel: its finalizer counts the
-// collection (inside a script call = automatic, else = the schedule's run_finalizers) and arms a new proxy. `keep`
-// grows slowly, so the heap and with it the threshold changes over the run. Collections during the setup chunk
-// are not counted.
+// collection (automatic = during any script call, including the compile of the Step chunk; else = the schedule's
+// collect_scheduled, which tick_range brackets with in_script = false) and arms a new proxy. `keep` grows slowly, so
+// the heap and with it the threshold changes over the run. Collections during the setup chunk are not counted.
+// (mcx8 t12: the flag used to be cleared at the end of Step, so an automatic collection while the next Step chunk
+// compiled counted as a scheduled one - a heap-layout accident that one global less in every VM exposed.)
 static const char* const kScript = R"(
 auto_gc, sched_gc, in_script = 0, 0, true
 local function arm()
@@ -76,13 +72,20 @@ function Step(tick, n)
     acc = acc + table.getn(t)
   end
   if math_mod(tick, 7) == 0 then table.insert(keep, 'k' .. tick) end
-  in_script = false
 end
 function math_mod(a, b) return a - b * floor_div(a, b) end
 function floor_div(a, b) local q = 0 while (q + 1) * b <= a do q = q + 1 end return q end
 collectgarbage(64)
-auto_gc, sched_gc, in_script = 0, 0, false
+auto_gc, sched_gc, in_script = 0, 0, true
 )";
+
+// Sets the script's in_script flag without running a chunk (the key is interned already: no allocation).
+static void set_in_script(LuaVm& vm, bool on) {
+    lua_State* L = vm.state();
+    lua_pushstring(L, "in_script");
+    lua_pushboolean(L, on ? 1 : 0);
+    lua_rawset(L, LUA_GLOBALSINDEX);
+}
 
 static std::unique_ptr<LuaVm> make_vm(uint32_t i) {
     LuaVmOptions opt;
@@ -120,7 +123,11 @@ static void tick_range(std::vector<std::unique_ptr<LuaVm>>& vms, uint64_t from, 
     for (auto& v : vms) list.push_back(v.get());
     for (uint64_t t = from; t < to; ++t) {
         for (uint32_t i = 0; i < vms.size(); ++i) step(*vms[i], t, load.base + load.stride * i);
+        if (schedule)
+            for (LuaVm* v : list) set_in_script(*v, false);
         const uint32_t n = schedule ? collect_scheduled(list, t, pf, policy) : 0u;
+        if (schedule)
+            for (LuaVm* v : list) set_in_script(*v, true);
         r.scheduled += n;
         std::string line = std::to_string(n);
         for (auto& v : vms) {
@@ -287,6 +294,7 @@ static void test_busy() {
     GcPolicy every;
     every.period = 1;
     every.fill_percent = 1;
+    set_in_script(*vm, false);  // the schedule's collection (tick_range brackets it the same way)
     CHECK(collect_scheduled(list, 5, serial_for, every) == 1);
     CHECK(gnum(*vm, "sched_gc") == 1.0);
     g_busy_vm = nullptr;

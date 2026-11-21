@@ -56,6 +56,7 @@ using detail::ModeGate;
 // own gate (bind_objects.cpp).
 constexpr std::pair<std::string_view, ModeGate> kMethodGates[] = {
     {"GameObjectWrapper.Get_Energy", ModeGate::Tactical},     {"GameObjectWrapper.Get_Hull", ModeGate::Tactical},
+    {"GameObjectWrapper.Get_Health", ModeGate::Tactical},  // mcx8 t12: the same function as Get_Hull (MCX8_BINDINGS_OBJECTS)
     {"GameObjectWrapper.Get_Shield", ModeGate::Tactical},     {"GameObjectWrapper.Hyperspace_Away", ModeGate::Tactical},
     {"GameObjectWrapper.Make_Invulnerable", ModeGate::Tactical}, {"GameObjectWrapper.Stop", ModeGate::Tactical},
     {"GameObjectWrapper.Teleport", ModeGate::Tactical},       {"GameObjectWrapper.Teleport_And_Face", ModeGate::Tactical},
@@ -67,6 +68,7 @@ constexpr std::pair<std::string_view, ModeGate> kMethodGates[] = {
 // only supported in ..." text. Keyed by the global or method name.
 constexpr std::pair<std::string_view, const char*> kGateTexts[] = {
     {"Find_Nearest", "Find_Nearest - this function may only be used in tactical modes."},
+    {"Promote_To_Space_Cinematic_Layer", "Command only valid in a tactical game."},  // mcx6 (MCX6_T05_CINEMATIC_BINDINGS §3)
     {"Find_Nearest_Space_Field", "Find_Nearest_Space_Field -- may only be used in space mode"},
     {"Are_On_Opposite_Sides_Of_Shield", "Are_On_Opposite_Sides_Of_Shield -- only valid in land mode"},
     {"Spawn_Special_Weapon", "Spawn_Special_Weapon -- only available in space tactical mode"},
@@ -75,6 +77,12 @@ constexpr std::pair<std::string_view, const char*> kGateTexts[] = {
     {"Get_Energy", "GameObjectWrapper::Get_Energy -- only valid in tactical mode"},
     {"Hyperspace_Away", "GameObjectWrapper::Hyperspace_Away -- only valid in space mode"},
     {"Get_AI_Power_Vs_Unit", "Get_AI_Power_Vs_Unit -- only valid in tactical mode"},
+    // mcx8 t12 (docs/re/MCX8_BINDINGS_OBJECTS.md, Hide_Object / Get_Hull / Get_Shield) [H]: Hide_Object's copy-pasted
+    // prefix; Get_Health is registered to Get_Hull's function, so it prints "Get_Hull".
+    {"Hide_Object", "LuaTransitionCinematicTargetKey -- Command only valid in a tactical game."},
+    {"Get_Hull", "GameObjectWrapper::Get_Hull -- this command is only supported in tactical modes."},
+    {"Get_Health", "GameObjectWrapper::Get_Hull -- this command is only supported in tactical modes."},
+    {"Get_Shield", "GameObjectWrapper::Get_Shield -- this command is only supported in tactical modes."},
 };
 // LUA_API.md "Dead or null wrappers": GameObjectWrapper methods whose dead wrapper is not the silent default.
 constexpr std::pair<std::string_view, DeadRule> kDeadRules[] = {
@@ -92,9 +100,12 @@ constexpr std::pair<std::string_view, DeadRule> kDeadRules[] = {
     // warning "this object is dead!"
     {"Change_Owner", DeadRule::WarnNothing}, {"Despawn", DeadRule::WarnNothing},
     {"Mark_Parent_Mode_Object_For_Death", DeadRule::WarnNothing}, {"Set_Importance", DeadRule::WarnNothing},
-    {"Set_Selectable", DeadRule::WarnNothing}, {"Take_Damage", DeadRule::WarnNothing},
+    {"Set_Selectable", DeadRule::WarnNothing}, {"Take_Damage", DeadRule::Binding},  // warns after its count check
     {"Set_Targeting_Priorities", DeadRule::WarnNothing}, {"Set_Targeting_Stickiness_Time_Threshold", DeadRule::WarnNothing},
     {"Get_Rate_Of_Damage_Taken", DeadRule::WarnZero}, {"Get_Time_Till_Dead", DeadRule::WarnZero},
+    // mcx8 t12 (docs/re/MCX8_BINDINGS_OBJECTS.md) [H]: Take_Damage / Is_Ability_Ready test the argument count before the
+    // dead wrapper, Get_Name answers "" for a dead wrapper (the bindings test it); a dead Get_Shield is 0, no message.
+    {"Get_Name", DeadRule::Binding}, {"Is_Ability_Ready", DeadRule::Binding}, {"Get_Shield", DeadRule::SilentZero},
 };
 
 template <class List>
@@ -110,7 +121,6 @@ struct Registry {
     std::vector<detail::ImplFn> global_fn;  // per table row (globals only)
     std::vector<detail::ModeGate> global_gate;  // per table row (globals only)
     std::map<std::string, uint32_t, std::less<>> global_rows;
-    std::vector<uint32_t> extra_counter;  // per slot: counter index for extra slots
     uint32_t user_var = detail::kNoClass;
 
     Registry() {
@@ -148,10 +158,6 @@ struct Registry {
             if (methods_by_class[c].count(e.name)) continue;
             add_slot(detail::kNoBinding, c, e.name, e.fn);
         }
-        extra_counter.assign(slots.size(), detail::kNoBinding);
-        uint32_t next = static_cast<uint32_t>(std::size(kTable));
-        for (uint32_t s = 0; s < slots.size(); ++s)
-            if (slots[s].row == detail::kNoBinding) extra_counter[s] = next++;
     }
     uint32_t id(std::string_view c) const {
         const auto it = std::lower_bound(classes.begin(), classes.end(), c);
@@ -187,13 +193,33 @@ const Registry& reg() {
 
 std::span<const BindingInfo> binding_table() { return kTable; }
 
+const char* to_string(BindingEffect e) {
+    switch (e) {
+        case BindingEffect::Full: return "full";
+        case BindingEffect::Recorded: return "recorded";
+        case BindingEffect::NoopRetail: return "noop-retail";
+        case BindingEffect::NoopGap: return "noop-gap";
+        case BindingEffect::Partial: return "partial";
+    }
+    return "?";
+}
+
+bool binding_effect_gap(const BindingInfo& b) {
+    if (b.effect == BindingEffect::NoopGap || b.effect == BindingEffect::Partial) return true;
+    return b.effect == BindingEffect::Recorded && (b.consumer == nullptr || b.consumer[0] == '\0');
+}
+
 bool is_host_value_global(std::string_view name) {
     return std::find(std::begin(kHostValues), std::end(kHostValues), name) != std::end(kHostValues);
 }
 
+// binding-effect: Declare_Goal_Type noop-retail not registered by the exe, so the global stays nil (docs/re/MCX8_BINDINGS_PLAYERS_STORY.md "Declare_Goal_Type") [H]
+bool is_unregistered_global(std::string_view name) { return name == "Declare_Goal_Type"; }
+
 bool binding_implemented(const BindingInfo& b) {
     const Registry& r = reg();
     if (b.kind == BindingKind::Global) {
+        if (is_unregistered_global(b.name)) return true;  // nil, as retail
         const auto it = r.global_rows.find(std::string_view(b.name));
         return it != r.global_rows.end() && r.global_fn[it->second] != nullptr;
     }
@@ -275,15 +301,6 @@ uint32_t global_row(std::string_view name) {
     return it == reg().global_rows.end() ? kNoBinding : it->second;
 }
 
-size_t counter_slots() {
-    size_t n = std::size(kTable);
-    for (const MethodSlot& s : reg().slots)
-        if (s.row == kNoBinding) ++n;
-    return n;
-}
-
-uint32_t extra_counter_slot(uint32_t method_slot) { return reg().extra_counter[method_slot]; }
-
 uint32_t cls_game_object() {
     static const uint32_t c = class_id("GameObjectWrapper");
     return c;
@@ -304,20 +321,20 @@ uint32_t cls_user_var() {
     static const uint32_t c = class_id("LuaUserVar");
     return c;
 }
+uint32_t cls_position() {
+    static const uint32_t c = class_id("PositionWrapper");
+    return c;
+}
+uint32_t cls_target() {
+    static const uint32_t c = class_id("AITargetLocationWrapper");
+    return c;
+}
 
 int32_t to_int(double d) {
     if (!(d == d)) return 0;
     if (d >= 2147483647.0) return 2147483647;
     if (d <= -2147483648.0) return -2147483647 - 1;
     return static_cast<int32_t>(d);
-}
-
-int Call::fail(const char* fmt, ...) {
-    va_list ap;
-    va_start(ap, fmt);
-    std::vsnprintf(err, err_cap, fmt, ap);
-    va_end(ap);
-    return -1;
 }
 
 int Call::script_error_stop(const char* fmt, ...) {
@@ -365,7 +382,7 @@ objects::ObjectStore* parent_store_of(LuaVm::Impl& vm) {
     return b ? b->parent_store : nullptr;
 }
 
-// The store a game-object wrapper belongs to, from outside a binding (tostring, sweep).
+// The store a game-object wrapper belongs to, from outside a binding (tostring).
 const objects::ObjectStore* wrapper_store(LuaVm::Impl& vm, const Ud& ud) {
     if (store_tag_of(ud) == vm.store_tag) return vm.host.store;
     return store_tag_of(ud) == kParentStoreTag ? parent_store_of(vm) : nullptr;
@@ -396,7 +413,7 @@ struct Invocation {
     LuaVm::Impl* vm;
     const Ud* self;
     ImplFn fn;
-    uint32_t counter;   // unbound counter slot
+    uint32_t counter;   // unbound counter slot: the binding row (kNoBinding = none)
     const char* label;  // binding name for messages
     ModeGate gate;      // q6 t11: tested first
     bool object;        // a GameObjectWrapper method: `dead` applies
@@ -435,26 +452,29 @@ struct StoreSwap {
 
 // q6 t11 (LUA_API.md "Binding error model across all bindings"): the mode gate (a script error), then a dead
 // GameObjectWrapper's rule, then the implementation. Only the port's own failures return -1 (raised by the caller): an
-// unbound binding, a C++ exception, a legacy Call::fail.
+// unbound binding or a C++ exception; `err` then holds the message.
 int invoke(lua_State* L, const Invocation& inv, char* err, size_t cap) noexcept {
     const StoreSwap swap(inv.vm, inv.self);
-    Call c{L, inv.vm, inv.self, inv.first, inv.nargs, err, cap};
+    Call c{L, inv.vm, inv.self, inv.first, inv.nargs};
     if (gate_fails(*inv.vm, inv.gate)) {
         for (const auto& [name, text] : kGateTexts)
             if (name == inv.method) return c.script_error_stop("%s", text);
         const char* who = inv.object ? "GameObjectWrapper::" : "";
-        return c.script_error_stop(inv.gate == ModeGate::Tactical ? "%s%s -- this command is only supported in tactical modes"
+        return c.script_error_stop(inv.gate == ModeGate::Tactical ? "%s%s -- this command is only supported in tactical modes."
                                                                    : "%s%s -- this command is only supported in galactic mode",
                                    who, inv.method);
     }
     if (inv.object && inv.dead != DeadRule::Binding && !object_alive(*inv.vm, *inv.self)) {
         switch (inv.dead) {
             case DeadRule::Error:
-                return c.script_error_stop("GameObjectWrapper::%s -- this object is already dead", inv.method);
+                return c.script_error_stop("GameObjectWrapper::%s -- this object is already dead.", inv.method);
             case DeadRule::WarnNothing:
                 return c.script_warning("GameObjectWrapper::%s -- this object is dead!", inv.method);
             case DeadRule::WarnZero:
                 c.script_warning("GameObjectWrapper::%s -- this object is dead!", inv.method);
+                lua_pushnumber(L, 0);
+                return 1;
+            case DeadRule::SilentZero:
                 lua_pushnumber(L, 0);
                 return 1;
             default:
@@ -504,8 +524,8 @@ int method_call(lua_State* L) {
     // q6 t11: the gate and the dead-wrapper rule of the slot (kMethodGates / kDeadRules above). The receiver's class
     // decides whether the dead rule applies (a GameObjectWrapper); the slot's class only names the rule.
     const bool object = ud->cls == cls_game_object();
-    const uint32_t counter = s.row != kNoBinding ? s.row : extra_counter_slot(slot);
-    const Invocation inv{vm, ud, s.fn, counter, s.label.c_str(), s.gate, object, s.dead, name, 1, lua_gettop(L)};
+    // An extra (implemented-only) method is never unbound, so it has no counter.
+    const Invocation inv{vm, ud, s.fn, s.row, s.label.c_str(), s.gate, object, s.dead, name, 1, lua_gettop(L)};
     const int n = invoke(L, inv, err, sizeof err);
     if (n < 0) return raise(L, err);
     return n;
@@ -554,13 +574,13 @@ int mt_tostring(lua_State* L) {
         if (alive && types) {
             const uint32_t mt = member_view_type(*vm, *ud);  // refix t04: a member view prints its member type
             const objects::TypeIndex t = mt != objects::kNone ? mt : st->type(object_handle(*ud));
-            if (t < types->raw().type_count()) type_name = types->raw().types().name[t];
+            if (t < types->raw().type_count()) type_name = types->name(t);
         }
         std::snprintf(buf, sizeof buf, "GameObject %.*s (id %d)%s", static_cast<int>(type_name.size()),
                       type_name.data(), ud->id, alive ? "" : " [dead]");
     } else if (ud->cls == cls_type()) {
         std::string_view n = "?";
-        if (types && ud->value < types->raw().type_count()) n = types->raw().types().name[ud->value];
+        if (types && ud->value < types->raw().type_count()) n = types->name(static_cast<objects::TypeIndex>(ud->value));
         std::snprintf(buf, sizeof buf, "GameObjectType %.*s", static_cast<int>(n.size()), n.data());
     } else if (ud->cls == cls_player()) {
         std::snprintf(buf, sizeof buf, "Player %d", ud->id);
@@ -619,6 +639,7 @@ void install_globals(lua_State* L, LuaVm::Impl& /*vm*/, bool with_script) {
     for (uint32_t row = 0; row < table.size(); ++row) {
         const BindingInfo& b = table[row];
         if (b.kind != BindingKind::Global || is_host_value_global(b.name)) continue;
+        if (is_unregistered_global(b.name)) continue;
         Ud ud;
         ud.cls = *b.cls ? class_id(b.cls) : cls_user_var();
         for (const auto& [name, cls] : kPortGlobalClasses)
@@ -678,6 +699,22 @@ void push_cached_userdata(lua_State* L, const Ud& ud, lua_Number key) {
     push_cached_in_top(L, key, ud);
 }
 
+std::vector<objects::ObjectHandle> script_objects(const objects::ObjectStore& st) {
+    std::vector<objects::ObjectHandle> out;
+    out.reserve(st.all_objects().size());
+    for (const objects::ObjectHandle h : st.all_objects())
+        if ((st.flags(h) & objects::kFlagMapDecoration) == 0) out.push_back(h);
+    return out;
+}
+
+std::vector<objects::ObjectHandle> script_objects_newest_first(const objects::ObjectStore& st) {
+    std::vector<objects::ObjectHandle> out = st.objects_newest_first();
+    out.erase(std::remove_if(out.begin(), out.end(),
+                             [&st](objects::ObjectHandle h) { return (st.flags(h) & objects::kFlagMapDecoration) != 0; }),
+              out.end());
+    return out;
+}
+
 void push_object(lua_State* L, LuaVm::Impl& vm, objects::ObjectHandle h) {
     const objects::ObjectStore* st = vm.host.store;
     if (!st || !h || !st->exists(h)) {
@@ -711,7 +748,10 @@ objects::ObjectStore* parent_store(LuaVm::Impl& vm) { return parent_store_of(vm)
 // refix t04: company member views (vm_internal.hpp).
 lua_Number object_cache_key(const Ud& ud) {
     if (!is_member_view(ud)) return static_cast<lua_Number>(ud.id);
-    return -(static_cast<lua_Number>(ud.id) * static_cast<lua_Number>(kMaxMemberViews) + static_cast<lua_Number>(member_index(ud)) + 1.0);
+    const auto id = static_cast<lua_Number>(ud.id);  // < 2^32
+    const auto index = static_cast<lua_Number>(member_index(ud));
+    if (member_index(ud) < 256u) return -(id * 256.0 + index + 1.0);  // < 2^40 + 256
+    return -(1099511627776.0 + id * 65536.0 + index);                 // 2^40 + ... < 2^49: exact
 }
 
 void push_member_view(lua_State* L, LuaVm::Impl& vm, objects::ObjectHandle h, uint32_t index) {
@@ -734,7 +774,7 @@ uint32_t member_view_type(const LuaVm::Impl& vm, const Ud& ud) {
     const objects::GameObjectTypes* types = vm.host.types;
     const objects::ObjectHandle h = object_handle(ud);
     if (!st || !types || !st->exists(h)) return objects::kNone;
-    const std::vector<objects::TypeIndex> members = types->get_type_refs(st->type(h), "Company_Units");
+    const std::vector<objects::TypeIndex> members = types->get_type_refs(st->type(h), objects::tags::Company_Units);
     const uint32_t i = member_index(ud);
     return i < members.size() ? members[i] : objects::kNone;
 }
@@ -766,28 +806,6 @@ std::span<const NamedCFunction> runtime_cfunctions_bindings() {
 }
 
 }  // namespace detail
-
-// Drops cache entries of dead objects. Removal only (assigning nil to existing keys during next()
-// is allowed), so the visiting order cannot change any result.
-void LuaVm::sweep_dead_wrappers() {
-    check_owner();
-    lua_State* L = impl_->L;
-    for (const char* key : {detail::kObjCacheKey, detail::kObjCacheParentKey}) {
-        lua_pushstring(L, key);
-        lua_rawget(L, LUA_REGISTRYINDEX);
-        lua_pushnil(L);
-        while (lua_next(L, -2) != 0) {
-            const auto* ud = static_cast<const detail::Ud*>(lua_touserdata(L, -1));
-            lua_pop(L, 1);
-            if (!ud || !detail::alive_in(detail::wrapper_store(*impl_, *ud), *ud)) {
-                lua_pushvalue(L, -1);
-                lua_pushnil(L);
-                lua_rawset(L, -4);
-            }
-        }
-        lua_pop(L, 1);
-    }
-}
 
 void LuaVm::reinstall_engine_globals() {
     check_owner();

@@ -8,24 +8,56 @@
 //   campaigns  build_galaxy_map of every campaign: the campaigns with no planets or with skipped locations / routes
 //   missing    files the data names that no layer has: entries of the Data\XML\*Files.xml lists, and the
 //              Space_ / Land_ / Galactic_Model_Name models of the object types (Data\Art\Models)
-//   xml tags   element tags below an object type that neither the original's field tables nor its sub-object elements
-//              know (objects/coverage.hpp): the original ignores them, so does the port; listed per tag with counts
+//   xml tags   element tags the original does not read, per database: below an object type, tags that neither the
+//              original's field tables nor its sub-object elements know (objects/coverage.hpp); below an entry of the
+//              other databases the port loads (factions, campaigns, trade routes, hard points, GameConstants, SFX /
+//              music / speech events, ...; kXmlDatabases in mod_check.cpp), tags that neither the original's table for
+//              that class (objects/field_schema.hpp) nor the port's loader reads. The original ignores them, so does
+//              the port; listed per database and tag with counts
 //   lua        every Data\Scripts\**\*.lua compiled by the engine's Lua 5.0 VM; each entry script (under a script root
 //              other than Library) that compiles also has its main chunk run once in its own VM (require through the VFS,
-//              no session: what loading the script runs); and a static scan of every script for engine functions /
-//              methods the port does not bind yet
-// Every finding of the last three sections says whether it comes from a file in a mod folder (in_mod), so a mod's own
-// problems can be told from the base game's (base FoC itself names missing cinematic models and unread tags).
+//              no session: what loading the script runs; one GlobalValue store shared by the runs, as in a session);
+//              and a static scan of every script for engine functions / methods the port does not bind yet. A main
+//              chunk that fails after reading a GlobalValue key that is unset here but that some script sets
+//              (GlobalValue.Set with that literal key, e.g. in a Base_Definitions the session calls at startup) depends
+//              on session state: it is listed apart (lua_session_errors), not as a load warning (modc t12). A main chunk
+//              that fails on a require of a script no layer has fails in retail too (stock Lua 5.0.2 require raises
+//              "could not load package"; docs/re/MODC_LOADER.md section 6): a warning when the data loads the script, an
+//              unused-script lead (lua_unused_scripts, info) when it is a mod's own script that nothing names (modc t24)
+//   shaders    with a mod mounted, first the .fx prebuild (prebuild_mod_effects, modc t36: per source compiled or why
+//              not); then materials::audit_effects over every effect the shader directories reach (mod or base): each
+//              materials::ShaderIssue (docs/MODS.md section 4.1) with, for a Data\Art\Shaders\ effect, how many of the
+//              object types' models name it in a material, so the report says whether anything draws it (modc t21)
+//   submod     a mod whose own data names files no layer has, while an installed mod (Steam workshop item or
+//              <game>\Mods folder) outside the stack has most of them: likely a submod meant to be stacked on that
+//              parent (modc t16). Found from the files only; a modinfo.json naming the parent's workshop id is noted
+// Every finding of the xml tags, missing files and lua sections says whether it comes from a file in a mod folder (in_mod),
+// so a mod's own problems can be told from the base game's (base FoC itself names missing cinematic models and unread tags).
 // It does not run a session: run-time gaps past a script's main chunk (functions the session calls later) show up in
 // alamo_headless --story / --galactic-ai runs.
-// format_mod_report_json: the machine-readable summary, schema "alamo.mod_report" version 1 (docs/MODS.md §5.1).
+//   compat     (version 4, mcx0 t06; docs/MOD_COMPAT_DESIGN.md §12.1) what the port does less than retail for this data:
+//              honour gaps (tags the data sets that the tag ledger says the port does not act on), calls to bindings
+//              with an effect gap, story rewards the port lacks and event types it dispatches partly, perception token
+//              paths its galactic resolver does not evaluate, the findings retail shares (retail_equivalent), and the
+//              static part of the compatibility grade. None of it counts as a warning.
+// format_mod_report_json: the machine-readable summary, schema "alamo.mod_report" version 4 (docs/MODS.md §5.1).
 // Used by alamo_mod_check (tools/mod_check_main.cpp) and its tests. Render-free.
 #pragma once
 #include <cstdint>
 #include <string>
+#include <string_view>
+#include <utility>
 #include <vector>
 
+#include "alamo/core/compat_issue.hpp"
+#include "alamo/game/asset_audit.hpp"
 #include "alamo/game/game_data.hpp"
+#include "alamo/game/mod_resolve.hpp"  // SubmodHint (ums4 t05)
+#include "alamo/vfs/vfs.hpp"
+
+namespace alamo::vfs {
+struct InstallLocations;
+}
 
 namespace alamo::game {
 
@@ -33,8 +65,27 @@ struct ModCheckOptions {
     bool campaigns = true;  // build every campaign's galaxy map
     bool lua = true;        // compile every script and scan it for unbound engine calls
     bool lua_run = true;    // with lua: run each compiling script's main chunk in its own VM
+    // with lua_run: the instruction budget of each main chunk run (lua::LuaVmOptions::script_budget); < 0 = the VM's
+    // default. A chunk stopped by it is a run error and (with compat) a ScriptRunaway issue.
+    int lua_script_budget = -1;
     bool files = true;      // missing files named by list files and object type model tags
-    bool xml_tags = true;   // unknown XML tags of the object types
+    bool xml_tags = true;   // unknown XML tags of the object types and the other databases
+    bool submod = true;     // look for the parent of a mod whose own data names missing files
+    bool shaders = true;    // audit every effect (materials::audit_effects; needs the materials module)
+    bool compat = true;     // mcx0 t06: honour gaps, story ledger, perception token coverage, grade (report version 4)
+    bool assets = true;     // with compat: decode every asset the mod layers serve (mcx2 t01, asset_audit.hpp)
+    bool strict = false;    // --strict: an asset that loads only under a salvage rule counts as rejected (mod authors)
+    std::string asset_cache_dir;  // --corpus-cache: the asset audit's content-hash cache folder; "" = none
+    bool shader_compile = true;  // with shaders: also compile each translated pass with the runtime DXC when it loads
+    bool fx_prebuild = true;     // with shaders and a mod mounted: prebuild_mod_effects first (modc t36)
+    std::string fx_cache_dir;    // the FxCache the prebuild and the audit use; empty = the default (tests set their own)
+    // Steam library folders searched for installed workshop items (submod parents), e.g.
+    // vfs::default_install_at(game).steam_libraries (install_locations.hpp). Empty: no workshop item is considered (tests).
+    // <game>\Mods\* is always searched.
+    std::vector<std::string> workshop_libraries;
+    // ums4: the install's catalog when the caller has it (the picker and --resolve scan it once for the resolver and the
+    // report); null: the submod check scans <root> with workshop_libraries itself. Not owned; must outlive the check.
+    const vfs::ModCatalog* catalog = nullptr;
 };
 
 // A file the data names that no VFS layer has. Grouped by path: `references` counts the naming places, `referenced_by`
@@ -46,20 +97,34 @@ struct MissingFile {
     bool in_mod = false;  // at least one naming file is in a mod folder
 };
 
-// An element tag below an object type that the original does not read (TagCoverage::unknown()).
+// An element tag that the original does not read: below an object type (TagCoverage::unknown()), or below an entry of
+// another database (not in the original's table for that class, not read by the port's loader).
 struct UnknownXmlTag {
+    std::string database;     // "object types", "factions", "campaigns", "game constants", ... (kXmlDatabases)
     std::string tag;          // first spelling seen
     uint32_t occurrences = 0;
-    uint32_t types = 0;       // distinct type definitions using it
+    uint32_t types = 0;       // distinct entries using it (type definitions, factions, campaigns, ...)
     std::string first_file;   // first file using it
     bool in_mod = false;      // at least one file using it is in a mod folder
 };
 
 // A script that does not compile, or whose main chunk raises an error.
 struct LuaIssue {
+    LuaIssue() = default;
+    LuaIssue(std::string p, std::string e, bool m) : path(std::move(p)), error(std::move(e)), in_mod(m) {}
     std::string path;     // game-relative, upper case
     std::string error;    // the VM's message
     bool in_mod = false;  // the script file is in a mod folder
+    // Session-dependent run errors only (ModCheckReport::lua_session_errors): the GlobalValue key the chunk read while
+    // it was unset (the first such key, by byte order, that a script sets) and the first script (path order) setting it.
+    std::string global_value;
+    std::string set_by;
+    // Run errors only (modc t24): the script name of a require that found no file (the innermost one when a required
+    // library requires it; "" for other errors), and the first place that names the failing script so the data loads
+    // it: "<xml file> (<tag>)" for an XML script tag, "require in <script>", "AI plan folder" (scripts the original
+    // enumerates), "base script" (the path is also in a base layer), "" when nothing does.
+    std::string missing_require;
+    std::string named_by;
     std::string text() const { return path + ": " + error; }
 };
 
@@ -78,6 +143,127 @@ struct ModFolderStats {
     uint32_t overrides = 0;  // a lower layer has the path: the mod's file wins
 };
 
+// A materials::ShaderIssue of the effect audit (modc t21) and what draws the effect.
+struct ShaderIssueEntry {
+    std::string kind;      // materials::shader_issue_kind_name(): source_only, source_shadowed, load_failed, ...
+    std::string effect;    // upper-case base name
+    std::string path;      // game path of the file concerned
+    bool in_mod = false;   // that file is reached through a mod
+    std::string detail;    // loader / translator / DXC message ("" when the kind says it all)
+    // "models": an effect in Data\Art\Shaders, which models name in their materials; "terrain": one in Shaders\Terrain,
+    // which the terrain renderer selects by name; "engine": one in Shaders\Engine or one of the device-init engine
+    // effects (materials::engine_effect_load_sequence(): GLOBAL, ALAMOENGINE, the Prim* effects, ...), the engine's own.
+    std::string drawn_by;
+    uint32_t models = 0;   // drawn_by "models": object-type models whose materials name the effect
+    std::string first_model;  // the first of them (model path order)
+};
+// modc t36: the .fx prebuild that runs when a mod is mounted (prebuild_mod_effects; docs/MODS.md §4.1 "Effect sources").
+struct FxPrebuildSource {
+    std::string path;      // game path of the .fx the loader takes
+    bool ok = false;       // compiled now or found compiled in the FxCache: the loader takes it in place of the .fxo
+    bool cached = false;   // the cache already had the result (nothing ran)
+    std::string error;     // !ok: the first fxc error line, or why nothing was compiled (fxc.exe not found, unreadable source)
+};
+struct FxPrebuild {
+    bool ran = false;      // a mod is mounted and the build has the materials module (else nothing below is filled)
+    std::string fxc;       // materials::fxc_identity of the fxc.exe used, "" when none was found (the t11 fallback stays)
+    std::string cache;     // the FxCache folder
+    std::vector<FxPrebuildSource> sources;  // by path
+    double ms = 0;
+};
+// Compiles every .fx the loader would take for `d` into the FxCache (fx_cache_dir, empty = $ALAMO_FX_CACHE else
+// %LOCALAPPDATA%\alamo\fx) with fxc.exe ($ALAMO_FXC, a test build's fxc\fxc.exe, else the toolchain's), when d has a
+// VFS with at least one mod folder; an unchanged source is not compiled again. Without fxc the cached results still
+// count and the other sources say they are not compiled (the loader keeps the t11 fallback for them). alamo_game runs
+// it before the renderer loads effects, check_mod_data before the shader audit.
+FxPrebuild prebuild_mod_effects(const GameData& d, const std::string& fx_cache_dir = {});
+
+struct ShaderCheck {
+    bool checked = false;  // the audit ran (built with the materials module and ModCheckOptions::shaders)
+    FxPrebuild fx_prebuild;  // modc t36: run before the audit (ModCheckOptions::fx_prebuild)
+    size_t effects = 0, mod_effects = 0, loaded = 0, translated_passes = 0, translated_ok = 0;  // materials::EffectAudit
+    bool compiled = false;    // the runtime DXC compiled the translated passes
+    size_t fx_sources = 0, fx_sources_compiled = 0;  // EffectAudit::sources / sources_compiled (modc t23 FxCache)
+    size_t models_read = 0;   // object-type models read for the cross-reference (0 when no issue is a model effect)
+    std::vector<ShaderIssueEntry> issues;  // audit order: by effect, then kind
+};
+
+// ---- mcx0 t06: report version 4 (docs/MOD_COMPAT_DESIGN.md §12.1). Not counted in errors / warnings: the findings
+// below are what the port does less than retail (or what retail refuses too), and feed the compatibility grade.
+// first_file / first_script of a finding with in_mod is the first file in a mod folder (a light mod's finding cites the
+// mod's file even when base FoC sets the tag earlier in load order); without in_mod, the first file.
+
+// A tag of retail's descriptor tables that the data sets (a value other than empty, TBD or the class default) but the
+// port does not act on (tag ledger state unread / stored, objects/tag_ledger.hpp).
+struct HonourGap {
+    std::string cls;          // ledger class (descriptor segment owner)
+    std::string tag;          // ledger spelling
+    std::string state;        // "unread" / "stored"
+    uint32_t uses = 0;        // elements setting it
+    uint32_t entries = 0;     // distinct entries (types, factions, ...) setting it
+    std::string first_file;
+    bool in_mod = false;      // at least one setting file is in a mod folder
+    uint32_t tier = 1;
+    uint32_t base_uses = 0;   // ledger: how often base FoC writes it
+    std::string spec;         // ledger: the docs/re page naming it
+};
+// A finding retail shares: it refuses or ignores the same thing, so it never lowers the grade.
+struct RetailEquivalentFinding {
+    std::string kind;     // "unread_tag", "script_error", "unknown_reward", "dropped_event", "noop_binding", "unknown_call",
+                          // "unregistered_token"
+    std::string subject;
+    uint32_t uses = 0;
+    std::string first_file;
+    bool in_mod = false;
+    std::string detail;   // why retail does the same
+};
+// Calls to a binding whose effect the port does not give (lua::binding_effect_gap): recorded with no consumer in
+// alamo_game, a no-op where retail acts, or partial.
+struct BindingGapCall {
+    std::string name;      // "Hide_Sub_Object", "LandTaskForceClass.Enable_Attack_Positioning" (methods: every class with a gap)
+    std::string effect;    // lua::to_string(BindingEffect)
+    std::string detail;    // consumer "" / spec or reason
+    uint32_t call_sites = 0, scripts = 0;
+    std::string first_script;
+    bool in_mod = false;
+};
+struct StoryUse {
+    std::string name;      // reward or event type name, upper case
+    uint32_t uses = 0;
+    std::string first_file;
+    bool in_mod = false;
+    std::string note;
+};
+struct StoryCheck {
+    uint32_t files = 0;            // XML files with story events
+    uint32_t rewards_used = 0;     // distinct Reward_Type names
+    uint32_t events_used = 0;      // distinct Event_Type names
+    std::vector<StoryUse> rewards_missing;  // retail rewards the port lacks (sim::StoryRewardOwner::Missing)
+    std::vector<StoryUse> events_partial;   // event types the port dispatches with a documented gap
+};
+struct TokenGap {
+    std::string token;          // "Variable_Target.EnemyForce.Foo" (root and path as the equations write them)
+    uint32_t equations = 0;     // equations using it
+    std::string first_equation;
+    std::string first_file;
+    bool in_mod = false;
+};
+struct TokenCoverage {
+    bool checked = false;       // AI data loaded and the build has the galactic AI
+    uint32_t equations = 0, leaves = 0;  // parsed equations; distinct token paths
+    std::vector<TokenGap> missing;       // paths neither the galactic registry nor the tactical leaf tables evaluate
+};
+struct LimitHit {
+    std::string limit;
+    uint64_t value = 0, needed = 0;
+};
+struct CompatGrade {
+    std::string grade;                 // "G0" (errors) or "G1" (loads); G2+ need runs (corpus runner, mcx7)
+    bool g3_static = false;            // no blocking finding in the mod's own content
+    std::vector<std::string> blocking; // "<issue kind> <subject>" of the findings that block G3
+    std::vector<std::string> check_errors;  // a version 4 check that threw (not counted as errors; G3 stays open)
+};
+
 struct ModCheckReport {
     std::string game;                        // the FoC folder checked
     std::vector<std::string> args;           // the VFS command line (MODPATH= ...)
@@ -85,7 +271,7 @@ struct ModCheckReport {
     std::string error;    // why not
     std::string vfs_layers;                  // Vfs::describe()
     std::vector<std::string> vfs_warnings;   // Vfs::warnings()
-    std::vector<std::string> mod_dirs;       // effective mod search list
+    std::vector<std::string> mod_dirs;       // effective mod search list (host folders)
     std::vector<ModFolderStats> mod_folders; // sorted by folder
     std::vector<GameData::LoadStage> stages;
     std::vector<std::string> diagnostics;    // GameData::diagnostics (stages index into it)
@@ -95,28 +281,91 @@ struct ModCheckReport {
         size_t official_maps = 0, custom_maps = 0;
         bool ai = false;  // AI data loaded
     } counts;
+    // mcx7 t01: the skirmish rows (skirmish_map_rows, menu order: the Official tab, then the Custom tab) for the corpus
+    // runner's map pick.
+    struct SkirmishMap {
+        std::string map;      // SkirmishMapEntry::map
+        bool land = false;    // kind 1 (else space)
+        uint32_t players = 0;
+        bool in_mod = false;  // the .ted resolves to a mod folder
+        bool custom = false;  // a Custom tab row
+    };
+    std::vector<SkirmishMap> skirmish_maps;
     size_t campaigns_checked = 0;
+    // No Locations / no planet resolves. Retail lists such a campaign in the Galactic Conquest menu (a header or notice
+    // row; docs/re/MODC_LOADER.md section 4), so it is a warning: a menu entry that cannot be started. An error only
+    // when no checked campaign has planets (no_startable_campaign()).
     std::vector<std::string> campaigns_without_planets;
+    std::vector<std::string> campaigns_startable;  // mcx7 t01: the checked campaigns with planets, database order
     std::vector<std::string> campaign_warnings;  // build_galaxy_map diagnostics, one line per message with its campaigns
     size_t campaign_warning_count = 0;           // the diagnostics behind campaign_warnings (per campaign)
     std::vector<MissingFile> missing_files;      // sorted by path
-    std::vector<UnknownXmlTag> unknown_xml_tags;  // most occurrences first, then by tag
+    std::vector<UnknownXmlTag> unknown_xml_tags;  // most occurrences first, then by database and tag
     size_t lua_scripts = 0;
     std::vector<LuaIssue> lua_errors;            // does not compile
     size_t lua_run = 0;                          // main chunks run (entry scripts that compile)
-    std::vector<LuaIssue> lua_run_errors;        // compiles, its main chunk raises an error
+    std::vector<LuaIssue> lua_run_errors;        // compiles, its main chunk raises an error (not session-dependent)
+    std::vector<LuaIssue> lua_session_errors;    // the same after reading an unset GlobalValue that a script sets (info)
+    std::vector<LuaIssue> lua_unused_scripts;    // fails on a missing require, a mod's own script nothing names (info)
     std::vector<UnboundLuaCall> unbound_lua_calls;  // most call sites first, then by name
+    ShaderCheck shaders;                         // effect audit issues (warnings)
+    SubmodHint submod;                           // empty unless the mod's own data names missing files
+    // mcx3 (docs/MOD_COMPAT_DESIGN.md 5): the mounted mods (GameData::mods, mod_dirs order) and, when `args` came from
+    // resolve_mod_stack (mod_resolve.hpp; alamo_mod_check --resolve), that resolution (resolved = true): its errors count as errors, its
+    // warnings as warnings.
+    std::vector<vfs::ModDescriptor> mods;
+    bool resolved = false;
+    vfs::ModStack stack;
+    bool base_eaw = false;         // D1: a mounted mod is tagged EAW and not FOC: refused before loading (error, G0)
+    // 5.4 heuristic [port], a warning only: "<key>: ..." when a mod's own GameObjectFiles.xml names none of the files
+    // FoC's list has and EaW's lacks (both lists read from the install; empty when either is missing).
+    std::string base_eaw_suspect;
     std::vector<std::string> check_errors;       // a check above that threw: "<check>: exception: <what>"
+    // mcx0 t06 (version 4). `issues` holds every finding below as core CompatIssue records; the lists are its views for
+    // the report. Layer: 0 = any mod folder (the report does not tell stacked mods apart yet: mcx3 provenance),
+    // kBaseLayer = base game.
+    IssueSink issues;
+    std::vector<HonourGap> honour_gaps;            // most uses first, then class and tag
+    std::vector<RetailEquivalentFinding> retail_equivalent;  // by kind, then most uses
+    uint32_t binding_calls = 0;                    // distinct engine bindings the scripts call
+    std::vector<BindingGapCall> binding_gaps;      // most call sites first
+    StoryCheck story;
+    TokenCoverage token_coverage;
+    std::vector<LimitHit> limits;                  // mcx5 t05: data that reaches a guard (factions > sim::kMaxPlayers)
+    AssetAudit assets;                             // mcx2 t01: the `assets` section (ran = false when not checked)
+    CompatGrade grade;
 
-    // Errors: the load failed or a step threw / failed, a campaign has no planets, a check threw. Warnings: loader and
-    // VFS diagnostics, skipped campaign rows, missing files, unknown XML tags (one per tag), scripts that do not compile
-    // or whose main chunk errors, unbound engine calls (one per name). The original loads with all of these; its Lua
+    // Errors: the load failed or a step threw / failed, no campaign has planets (one error), a check threw. Warnings:
+    // campaigns without planets when another one has planets, loader and
+    // VFS diagnostics, skipped campaign rows, missing files, unknown XML tags (one per database and tag), scripts that
+    // do not compile or whose main chunk errors, unbound engine calls (one per name), shader issues. Not counted (info):
+    // session-dependent main-chunk errors, unused-script leads and the submod hint. The original loads with all of these; its Lua
     // 5.0 rejects the same scripts, and mods ship unused ones, e.g. Thrawn's Revenge's Lua 5.1 unit-test specs.
     size_t error_count() const;
+    bool no_startable_campaign() const { return campaigns_checked > 0 && campaigns_without_planets.size() == campaigns_checked; }
     size_t warning_count() const;
 };
 
 ModCheckReport check_mod_data(const std::string& root, const std::vector<std::string>& args, const ModCheckOptions& options = {});
+// ums4 t07: the game file a loader diagnostic line names (its `loader_diagnostic` issue's source): the first "Data\..."
+// path (any case and separator, also the Data folder inside an absolute host path; up to ':', ',', ';', a quote, a
+// bracket or white space, a trailing full stop dropped), else a bare "<name>.xml" that `v` has as Data\XML\<name>.
+// Normalised; "" when the line names none.
+std::string loader_diagnostic_file(std::string_view text, const vfs::Vfs* v);
+// mcx7 t01 (alamo_mod_check --list-mods): the installed mods (scan_mod_catalog) as JSON, one object per descriptor
+// in registry order: key, arg, kind, id, variant, root, name, version, has_data, game_tag, content_hash (16 hex digits),
+// dependencies [{modtype, identifier}]. Schema "alamo.mod_list", version 1.
+std::string format_mod_list_json(const vfs::ModCatalog& catalog);
+// ums1 t05 (alamo_mod_check --list --json): the install and the catalog's rows, everything a launcher shows. Schema
+// "alamo.mod_catalog", version 1: install {foc, eaw, mods_dir, steam_roots [], steam_libraries [], workshop_dirs [] (the
+// libraries' FoC workshop content folders that exist), mod_folders []}, mods [{key (catalog key), save_key
+// (ModDescriptor::key), arg, kind "workshop" | "local" | "path", id, variant, root, name, named, summary, version, icon,
+// published_id, has_modinfo, has_data, game_tag, content_hash (16 hex digits, "0000000000000000" when not hashed),
+// languages [{code, support}], layout, dependencies [{modtype, identifier, name}], dependency_roots [] (ums4: the root of
+// each installed mod a declared dependency names, ModCatalog::find_dependency, in declaration order; none for a missing
+// one), modinfo_numbers [] (ums4: every digit run of the folder's modinfo.json, ModDescriptor::modinfo_numbers),
+// warnings []}] in catalog order.
+std::string format_mod_catalog_json(const vfs::ModCatalog& catalog, const vfs::InstallLocations& where);
 // Human-readable report (sections in the order of the file comment). verbose: every diagnostic, else the first 20 of each
 // step and campaign / Lua list.
 std::string format_mod_report(const ModCheckReport& report, bool verbose = false);

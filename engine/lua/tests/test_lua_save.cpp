@@ -24,6 +24,7 @@
 
 #include "alamo/core/bytes.hpp"
 #include "alamo/core/file_provider.hpp"
+#include "alamo/core/host_fs.hpp"
 #include "alamo/core/hash.hpp"
 #include "alamo/core/log.hpp"
 #include "alamo/core/sim_crc.hpp"
@@ -38,6 +39,7 @@
 #include "alamo/objects/game_object_types.hpp"
 #include "alamo/objects/object_store.hpp"
 #include "alamo/objects/object_types.hpp"
+#include "alamo/test/support.hpp"
 #ifdef ALAMO_LUA_HAVE_VFS
 #include "alamo/vfs/vfs.hpp"
 #endif
@@ -50,14 +52,7 @@ using namespace alamo;
 using namespace alamo::lua;
 namespace fs = std::filesystem;
 
-static int g_fail = 0;
-#define CHECK(c)                                                     \
-    do {                                                             \
-        if (!(c)) {                                                  \
-            std::printf("FAIL %s:%d: %s\n", __FILE__, __LINE__, #c); \
-            ++g_fail;                                                \
-        }                                                            \
-    } while (0)
+using ::alamo::test::g_fail;
 
 static std::string run(LuaVm& vm, const std::string& code) {
     std::string err;
@@ -89,10 +84,7 @@ static bool contains(const std::vector<std::string>& v, const std::string& s, si
         if (v[i] == s) return true;
     return false;
 }
-static void write_file(const fs::path& p, const std::string& s) {
-    fs::create_directories(p.parent_path());
-    std::ofstream(p, std::ios::binary) << s;
-}
+using ::alamo::test::write_file;
 static std::string env(const char* name) {
 #ifdef _MSC_VER
     char* v = nullptr;
@@ -643,12 +635,30 @@ static void test_bridges() {
         a.watch_ability(4);
         a.ability_finished(9);
         a.ability_finished(9);
+        {  // mcx6 t04 (bridge save version 3): presentation only - no script state entry, no change to the state hash
+            StateHasher before, after;
+            a.hash(before);
+            const size_t states = a.state_count();
+            a.set_sub_object_hidden(2, "NEWGUN", true);
+            a.set_sub_object_hidden(2, "GUN", true);
+            a.set_sub_object_hidden(11, "AXE", true);
+            a.set_sub_object_hidden(11, "AXE", false);  // shown again: no entry left
+            a.hash(after);
+            CHECK(before.digest() == after.digest() && a.state_count() == states && a.hidden_sub_objects(11).empty());
+        }
+        a.state(5).end_cinematic_suspended = true;          // mcx6 Do_End_Cinematic_Cleanup (bridge save version 4)
         ByteWriter w;
         a.write(w);
         ObjectBridge b;
         ByteReader r(w.bytes());
         CHECK(b.read(r) && r.done());
         CHECK(b.ability_signals(9) == 2 && b.ability_signals(4) == 0 && b.watch_ability(4) == 0);
+        {
+            const std::span<const std::string> h = b.hidden_sub_objects(2);
+            CHECK(std::vector<std::string>(h.begin(), h.end()) == std::vector<std::string>({"GUN", "NEWGUN"}));
+            CHECK(b.hidden_sub_objects(7).empty() && b.find_state(11) == nullptr);
+        }
+        CHECK(b.find_state(5) && b.find_state(5)->end_cinematic_suspended && !b.find_state(2)->end_cinematic_suspended);
         StateHasher ha, hb;
         a.hash(ha);
         b.hash(hb);

@@ -14,6 +14,29 @@ option(ALAMO_COMPILER_CACHE "Compile through toolchain/sccache when it is instal
 if(ALAMO_COMPILER_CACHE AND NOT "$ENV{ALAMO_COMPILER_CACHE}" STREQUAL "OFF" AND NOT CMAKE_CXX_COMPILER_LAUNCHER AND EXISTS "${CMAKE_SOURCE_DIR}/toolchain/sccache/sccache.exe")
   set(CMAKE_CXX_COMPILER_LAUNCHER "${CMAKE_SOURCE_DIR}/toolchain/sccache/sccache.exe")
   message(STATUS "Compiler cache: ${CMAKE_CXX_COMPILER_LAUNCHER}")
+  # Worktree stale-deps fix (bo1 t03, 2026-11-13): sccache replays the cached /showIncludes output of the compile that filled
+  # the entry, so a hit from another checkout path wrote that checkout's header paths into this tree's .ninja_deps (missing
+  # files: every build relinked ~350 targets; existing files: header edits ignored). sccache keys on the preprocessed text
+  # (an unused -D does not show up in it), so a forced-included header declares a type alias named after a hash of this
+  # source path: entries then match only inside one checkout, and all its build trees still share them. No object changes.
+  string(MD5 _alamo_src_id "${CMAKE_SOURCE_DIR}")
+  string(SUBSTRING "${_alamo_src_id}" 0 12 _alamo_src_id)
+  # Only rewritten when the content changes: a new mtime would rebuild every object after each reconfigure.
+  set(_alamo_scope_text "#pragma once
+using alamo_cache_scope_${_alamo_src_id} = int;
+")
+  set(_alamo_scope_old "")
+  if(EXISTS "${CMAKE_BINARY_DIR}/alamo_cache_scope.h")
+    file(READ "${CMAKE_BINARY_DIR}/alamo_cache_scope.h" _alamo_scope_old)
+  endif()
+  if(NOT _alamo_scope_old STREQUAL _alamo_scope_text)
+    file(WRITE "${CMAKE_BINARY_DIR}/alamo_cache_scope.h" "${_alamo_scope_text}")
+  endif()
+  if(MSVC)
+    add_compile_options("/FI${CMAKE_BINARY_DIR}/alamo_cache_scope.h")
+  else()
+    add_compile_options(-include "${CMAKE_BINARY_DIR}/alamo_cache_scope.h")
+  endif()
 endif()
 
 # Static CRT so the tools run on any Windows box without the VC++ redistributable. Applies to every
@@ -27,6 +50,17 @@ if(MSVC)
   add_compile_options(/utf-8 /permissive- /Zc:__cplusplus /EHsc)
 endif()
 
+# Symbols for crash dumps (engine/apps/crash, docs/BUILD.md "Crash dumps"): -DALAMO_RELEASE_PDB=ON or the environment variable
+# ALAMO_RELEASE_PDB=1 at configure time makes MSVC Release builds write a PDB next to each exe. /Z7 keeps the debug info in the
+# objects (works with sccache) and changes no generated code; /DEBUG would switch the linker to /OPT:NOREF,NOICF, so REF and ICF
+# are named again to keep the shipped binary's layout. Off by default: it costs compile and link time in every tree.
+option(ALAMO_RELEASE_PDB "MSVC Release: write PDBs (/Z7 + /DEBUG) so crash dumps show function names" OFF)
+if(MSVC AND (ALAMO_RELEASE_PDB OR "$ENV{ALAMO_RELEASE_PDB}" STREQUAL "1"))
+  message(STATUS "Release PDBs: on")
+  add_compile_options($<$<CONFIG:Release>:/Z7>)
+  add_link_options($<$<CONFIG:Release>:/DEBUG> $<$<CONFIG:Release>:/OPT:REF> $<$<CONFIG:Release>:/OPT:ICF> $<$<CONFIG:Release>:/INCREMENTAL:NO>)
+endif()
+
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
 
 enable_testing()
@@ -36,3 +70,13 @@ add_subdirectory(tools/shaders/cpp)
 
 # Phase 2: headless engine core.
 add_subdirectory(engine)
+
+# Q4 behavioural parity harness (tools/parity, roadmap q4h): its selftest, and the reference-run comparisons when
+# alamo_headless is built.
+add_subdirectory(tools/parity)
+
+# Fuzzing of the mod-file readers (tools/fuzz, docs/BUILD.md "Fuzzing"): the seeded mutation harness alamo_fuzz_smoke is
+# in every tree (a slow ctest entry, mcx2 t08); the libFuzzer targets only with ALAMO_FUZZ, which build_fuzz.cmd turns on
+# in a clang tree with ASan + fuzzer instrumentation.
+option(ALAMO_FUZZ "Configure the libFuzzer targets in tools/fuzz (clang only, build_fuzz.cmd)" OFF)
+add_subdirectory(tools/fuzz)

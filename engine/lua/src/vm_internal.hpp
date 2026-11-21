@@ -5,11 +5,9 @@
 //   * binding implementations (ImplFn) never call lua_error / luaL_check*. q6 t11 (docs/re/LUA_API.md "Binding error
 //     model across all bindings"): a binding never raises a Lua error at all. An error-level diagnostic is
 //     Call::script_error_stop (log, set the script's stop flag, return no values), a warning Call::script_warning (log
-//     only); the legacy Call::fail (writes Call::err, returns -1: the dispatcher raises it, pcall catches it) is no
-//     longer used by any binding;
+//     only);
 //   * the dispatcher's outermost frame (no C++ locals) raises the Lua error for the port's own failures only (an
-//     unbound binding, a C++ exception, a legacy fail()) after the implementation has returned and destroyed
-//     everything.
+//     unbound binding, a C++ exception) after the implementation has returned and destroyed everything.
 // Only allocation failures inside lua_push* can still longjmp out of an implementation.
 #pragma once
 #include <cstdint>
@@ -32,6 +30,8 @@
 #include "alamo/lua/lua_vm.hpp"
 
 namespace alamo::lua {
+
+struct AiArg;  // ai_bridge.hpp
 
 namespace detail {
 
@@ -57,6 +57,23 @@ private:
     bool outer_;
     profile::Scope scope_;
 };
+
+// mcx6 t08: the runaway-script guard (LuaVmOptions::script_budget). A count hook armed on the lua_State that is about
+// to run raises a Lua error tagged kRunawayTag after `budget` VM instructions; the error unwinds to the resume / pcall
+// that started the run (only Lua's own frames: the hook fires inside luaV_execute). Armed around each entry and put
+// back afterwards, so no hook is left on a state between runs (a saved state may not carry one, vm_persist.cpp). An entry
+// nested in a run on the same state (its budget already armed) does not re-arm: it counts against the outer budget. Once
+// a budget is spent the hook raises on every further instruction of that state until the arming entry restores it.
+inline constexpr std::string_view kRunawayTag = "script_runaway";
+struct BudgetSave {
+    lua_Hook hook = nullptr;
+    int mask = 0;
+    int count = 0;
+    bool armed = false;  // this entry armed the budget (restore puts the saved hook back)
+};
+BudgetSave arm_script_budget(lua_State* L, int budget);  // budget <= 0: nothing armed
+void restore_script_budget(lua_State* L, const BudgetSave& saved);
+inline bool is_runaway_error(std::string_view message) { return message.find(kRunawayTag) != std::string_view::npos; }
 
 inline constexpr uint32_t kNoBinding = 0xFFFFFFFFu;
 inline constexpr uint32_t kNoClass = 0xFFFFFFFFu;
@@ -97,6 +114,17 @@ std::span<const ImplEntry> impl_script_remaining();  // bind_script_remaining.cp
 // force's units (AiScriptHost::tf_units) and its player (§1.5 upgrade gate; -1 = the first unit's owner). Pushes the
 // result (the firing unit, or false / nothing on a script error) and returns the value count, like an ImplFn.
 int task_force_fire_special_weapon(Call& c, bool space, const std::vector<objects::ObjectHandle>& units, int32_t player);
+// bind_script_remaining.cpp: the neutral player id (the galactic sim's, else the first neutral-faction player); -1 unknown.
+int32_t neutral_player_id(Call& c);
+// storyb t17 (STORYB_T17_SPAWNS_AND_DEATH.md §1.2 / §1.3 / §2.2 [H]): an effect object of `type` made for `parent` in the
+// parent's store, at the parent's position and facing (+ `z_offset` and the type's Layer_Z_Adjust when `layer_z`), owned
+// by `owner`. When the parent has a model (object_has_model) it is attached to it (dies with it, objects::SpawnParams::
+// attach_parent); [port] the render attachment to a bone is not kept: the object draws at its own position.
+objects::ObjectHandle spawn_attached_effect(Call& c, objects::ObjectHandle parent, objects::TypeIndex type, int32_t owner,
+                                            float z_offset, bool layer_z);
+// [port] retail tests the object's render model (obj +0x2a0); the port: the type names a model for the store's mode and
+// is not a MARKER (markers make no model in the game).
+bool object_has_model(Call& c, objects::ObjectHandle h);
 // bind_script_remaining.cpp: calls GameObjectWrapper.<name> of `unit` with `nargs` arguments at stack index `first` (the
 // task-force variants delegate to the object bindings). The results are dropped; returns the first result's truth (false
 // on an error, whose message is discarded [port: the original logs per unit]).
@@ -130,6 +158,10 @@ struct AiTargetArg {
 AiTargetArg ai_target_arg(Call& c, int i);
 // A task force at argument i (any TaskForceClass kind): true and its live units in host order (empty without a host).
 bool ai_task_force_units(Call& c, int i, std::vector<objects::ObjectHandle>& out);
+// mcx8 t12, bind_ai.cpp: GiveDesireBonus through the attached AI host (AiScriptHost::give_desire_bonus). Pushes the
+// blocking status and returns 1 when the host took it; 0 (nothing pushed) without a host or when it declined.
+int ai_give_desire_bonus(Call& c, int32_t player, std::string_view goal, objects::ObjectHandle target, double bonus,
+                         double seconds);
 // bind_ai_tactical.cpp: EvaluatePerception(name, player [, target at target_index; 0 = none]) through the attached
 // tactical AI host (AI targets and task forces accepted). Pushes the result and returns 1; -2 = no tactical host.
 int tactical_evaluate_perception(Call& c, std::string_view name, int32_t player, int target_index);
@@ -155,6 +187,7 @@ enum class DeadRule : uint8_t {
     Error,        // script error "this object is already dead" (Call::script_error_stop)
     WarnNothing,  // warning "this object is dead!", returns nothing
     WarnZero,     // warning "this object is dead!", returns 0
+    SilentZero,   // no message, returns 0 (Get_Shield, docs/re/MCX8_BINDINGS_OBJECTS.md)
 };
 
 struct MethodSlot {
@@ -172,9 +205,6 @@ uint32_t find_method(uint32_t cls, std::string_view name);
 ImplFn global_impl(uint32_t row);
 // Row of a global by name (kNoBinding if not in the table).
 uint32_t global_row(std::string_view name);
-// Number of rows + extra methods (size of the unbound counter array).
-size_t counter_slots();
-uint32_t extra_counter_slot(uint32_t method_slot);
 
 }  // namespace detail
 
@@ -195,7 +225,8 @@ struct LuaVm::Impl {
     double time = 0.0;
     uint32_t frame = 0;
     std::vector<std::string> messages, errors;
-    std::vector<uint32_t> unbound;  // per binding row (then extra slots)
+    uint32_t runaways = 0;          // mcx6 t08: runs stopped by options.script_budget
+    std::vector<uint32_t> unbound;  // per binding row (binding_table())
     uint64_t unbound_total = 0;
     std::map<int32_t, ThreadRec> threads;  // id order = service order
     int32_t next_thread = 0;
@@ -226,8 +257,6 @@ struct Call {
     const Ud* self;  // the receiver (methods) or the global userdata (calls)
     int first;
     int nargs;
-    char* err;
-    size_t err_cap;
 
     int idx(int i) const { return first + i - 1; }
     bool has(int i) const { return i >= 1 && i <= nargs; }
@@ -239,9 +268,6 @@ struct Call {
         return s ? std::string_view(s, lua_strlen(L, idx(i))) : std::string_view();
     }
     const Ud* userdata(int i, uint32_t cls) const;  // nullptr unless an engine userdata of `cls`
-    // Legacy (unwinds): writes err, returns -1; the dispatcher raises it as a Lua error that pcall catches. q6 t11: not
-    // the original's behaviour; no binding uses it (kept for the port's own failures).
-    int fail(const char* fmt, ...);
     // q6 t03 / t11 (LUA_API.md "What an error does to the script", "Binding error model across all bindings"): the
     // original's script error 0x248190, used for every error-level diagnostic of every binding. Logs "SCRIPT ERROR:
     // <text>" and sets the script's exited flag (+0x121, LuaVm::Impl::exit_requested, the flag ScriptExit sets), with no
@@ -256,13 +282,17 @@ struct Call {
 
 // Pushers. Wrappers are cached per VM: the same engine entity gives the SAME userdata every time, so
 // scripts can key tables by wrappers (Lua 5.0 table lookup is raw identity; __eq is not consulted).
-//   objects: cache keyed by object id (ids are never reused); dead entries dropped by
-//            LuaVm::sweep_dead_wrappers(); a stale entry (same id, other handle) is replaced;
+//   objects: cache keyed by object id (ids are never reused), kept for the VM's lifetime (dead entries are not
+//            dropped: cu14 t09); a stale entry (same id, other handle) is replaced;
 //   types:   keyed by type index, kept for the VM's lifetime;
 //   players and the other entity wrappers (story plots/events, ...): push_cached_userdata, keyed by
 //            (class, key), kept for the VM's lifetime (their entities live as long as the session).
 // Value wrappers (PositionWrapper, BlockingStatus, created instances) are new userdata per call.
 void push_object(lua_State* L, LuaVm::Impl& vm, objects::ObjectHandle h);
+// storyb t16 [port]: the store's objects a Lua search walks - all but the map decorations (objects::kFlagMapDecoration),
+// which retail keeps in the secondary store no search reads. Store order / newest first, as the store's own lists.
+std::vector<objects::ObjectHandle> script_objects(const objects::ObjectStore& st);
+std::vector<objects::ObjectHandle> script_objects_newest_first(const objects::ObjectStore& st);
 // L1/S4 wave 2b: the wrapper of object `h` of the parent mode's store (ObjectBridge::parent_store; nil without
 // one). Its methods run on that store (the dispatcher swaps LuaVm::Impl::host.store, kParentStoreTag).
 void push_parent_object(lua_State* L, LuaVm::Impl& vm, objects::ObjectHandle h);
@@ -281,6 +311,10 @@ int32_t to_int(double d);
 // function, or a global function NAME resolved when GetEvent pops it) with the table at
 // `params_index` as its GetEvent.Params() (0 = no parameters). bind_engine.cpp.
 void queue_event(lua_State* L, int fn_index, int params_index);
+// skai t15 (SKAI_T15_UNIT_DAMAGED §2.2): the same with a tag kept on the entry (field 3), and whether an entry with that
+// tag is still waiting (not yet popped by GetEvent).
+void queue_event_tagged(lua_State* L, int fn_index, int params_index, const std::string& tag);
+bool queue_has_tag(lua_State* L, const std::string& tag);
 
 // BlockingStatus kinds (Ud::reserved of a BlockingStatus userdata; BlockOnCommand polls IsFinished):
 // 0 order / 1 reinforcement / 2 forever are answered by bind_objects.cpp; the galactic waits by the
@@ -322,6 +356,11 @@ bool black_market_allows(Call& c, int32_t player, std::string_view ability_name,
 // company: the members are the company's views, no member objects). Null when not handled (no galactic sim, not a
 // planet, a type without a galactic role): the caller then creates the object directly.
 objects::ObjectHandle galactic_spawn_unit(Call& c, uint32_t type, int32_t player, objects::ObjectHandle location);
+// bkg3 t04: the container of an object of the galactic sim's store (GalacticSim::container_of: a unit's fleet, a
+// stationary fleet's planet, a landed unit's / structure's planet), for VMs without an ObjectBridge::container_of hook
+// (the galactic AI's plan and free-store VMs: the sim keeps fleet membership outside the store's container links).
+// False when the VM's store is not a galactic sim's store.
+bool galactic_container_of(Call& c, objects::ObjectHandle object, objects::ObjectHandle& out);
 
 // Store tag of a GameObjectWrapper's object (Ud::reserved, LuaVm::Impl::store_tag): 0 the VM's store, 1 the parent
 // mode's store (L1/S4 wave 2b, Get_Parent_Mode_Object).
@@ -337,11 +376,14 @@ inline constexpr int32_t kParentStoreTag = 1;
 // on the company object [port]. Views are cached in the object cache under object_cache_key (negative keys).
 inline constexpr int32_t kStoreTagMask = 0xff;
 inline constexpr int32_t kMemberViewFlag = 0x100;
-inline constexpr uint32_t kMaxMemberViews = 256;  // Company_Units entries past this get no view
+// mcx5 t04: member views are made on demand for any Company_Units entry (the original keeps one object per entry, no
+// cap); the index has 16 bits in Ud::reserved, so entries from 65536 on get no view (nil) - far above any company.
+inline constexpr uint32_t kMaxMemberViews = 65536;  // limit: guard (16-bit index in Ud::reserved)
 inline int32_t store_tag_of(const Ud& ud) { return ud.reserved & kStoreTagMask; }
 inline bool is_member_view(const Ud& ud) { return (ud.reserved & kMemberViewFlag) != 0; }
 inline uint32_t member_index(const Ud& ud) { return static_cast<uint32_t>(ud.reserved) >> 16; }
-// The object-cache key of a GameObjectWrapper: its id, or -(id * 256 + index + 1) for a member view.
+// The object-cache key of a GameObjectWrapper: its id, or for a member view -(id * 256 + index + 1) (index < 256, the
+// keys used before mcx5) or -(2^40 + id * 65536 + index) (index >= 256): disjoint ranges, exact in a lua_Number.
 lua_Number object_cache_key(const Ud& ud);
 // Pushes the cached member view of company object `h`, Company_Units entry `index` (nil for a missing object).
 void push_member_view(lua_State* L, LuaVm::Impl& vm, objects::ObjectHandle h, uint32_t index);
@@ -377,15 +419,29 @@ bool write_heap(lua_State* L, const void* vm_self, const std::vector<lua_State*>
 bool read_heap(ByteReader& r, lua_State* L_old, void* vm_self, lua_CFunction panic,
                const std::vector<uint32_t>& thread_index, std::vector<lua_State*>& thread_states, lua_State*& out,
                std::string& err);
-struct HeapStats {
-    uint32_t serial = 0;
-    uint64_t bytes = 0, threshold = 0;
-    uint32_t strings = 0;
-};
-HeapStats heap_stats(lua_State* L);
+LuaVm::HeapInfo heap_stats(lua_State* L);  // LuaVm::heap_info (reads the patched lstate.h G(L))
 // The persistence name table's aliases ("name=saved name": names of a C function that is saved under another name,
 // e.g. the shared dispatchers, or functions the linker folded together). Diagnostics / tests.
 std::vector<std::string> cfunction_aliases();
+
+// A host pointer kept in the VM registry under a string key, as a light userdata (nullptr stores nil: detached). The
+// attach_* functions set it, the families read it back (nullptr when nothing is attached).
+inline void set_registry_ptr(lua_State* L, const char* key, void* p) {
+    lua_pushstring(L, key);
+    if (p)
+        lua_pushlightuserdata(L, p);
+    else
+        lua_pushnil(L);
+    lua_rawset(L, LUA_REGISTRYINDEX);
+}
+template <class T>
+T* registry_ptr(lua_State* L, const char* key) {
+    lua_pushstring(L, key);
+    lua_rawget(L, LUA_REGISTRYINDEX);
+    void* p = lua_type(L, -1) == LUA_TLIGHTUSERDATA ? lua_touserdata(L, -1) : nullptr;
+    lua_pop(L, 1);
+    return static_cast<T*>(p);
+}
 
 // Fixed class ids used by the implementations.
 uint32_t cls_game_object();
@@ -393,6 +449,40 @@ uint32_t cls_type();
 uint32_t cls_player();
 uint32_t cls_script();
 uint32_t cls_user_var();
+uint32_t cls_position();  // PositionWrapper
+uint32_t cls_target();    // AITargetLocationWrapper
+// bind_ai.cpp: any task force class (TaskForceClass, GalacticTaskForceClass, SpaceTaskForceClass, LandTaskForceClass).
+bool is_task_force_class(uint32_t cls);
+// bind_ai.cpp: script argument i as the AI host sees it - a live game object, an AI target, a task force or a player
+// (nothing present for a missing argument, a dead object or any other value).
+AiArg ai_arg(Call& c, int i);
+
+// bind_objects.cpp: a PositionWrapper is a value userdata (a new one per push; __eq compares the bits): x / y float
+// bits in Ud::value (x low, y high), z float bits in Ud::id.
+void push_position(lua_State* L, Vec3 p);
+Vec3 position_of(const Ud& u);
+
+// ref5 t03: the small result helpers every binding family shares (were copied into each bind_*.cpp).
+inline int push_nil(Call& c) {
+    lua_pushnil(c.L);
+    return 1;
+}
+inline int push_bool(Call& c, bool b) {
+    lua_pushboolean(c.L, b ? 1 : 0);
+    return 1;
+}
+inline bool is_bool(const Call& c, int i) { return c.has(i) && lua_type(c.L, c.idx(i)) == LUA_TBOOLEAN; }
+
+// ref5 t03: "something which defines a position" (LUA_API.md), one rule for every binding family (bind_objects.cpp):
+//   GameObjectWrapper        alive: its position (`object` = it); dead: Dead;
+//   PositionWrapper          its value;
+//   AITargetLocationWrapper  its live object's position (`object` = it), else the AI host's target position (a region or
+//                            marker target, mcx8 t01), else Dead (no AI host, an invalid target);
+//   task force               its first live unit (`object` = it) [port], else Dead;
+//   anything else            NotPosition.
+// A family that accepts fewer kinds tests the argument's class itself before converting it.
+enum class PosArg : uint8_t { Ok, Dead, NotPosition };
+PosArg position_arg(Call& c, int i, Vec3& out, objects::ObjectHandle* object = nullptr);
 
 }  // namespace detail
 }  // namespace alamo::lua

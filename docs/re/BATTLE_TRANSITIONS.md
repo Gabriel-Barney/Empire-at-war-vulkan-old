@@ -160,8 +160,9 @@ Inputs:
 
 Single-player rules (space; land 0x2b76a0 is the same with ground strengths):
 
-1. If the local player is attacker or defender, a story "battle pending at planet" notification is
-   posted (0x449f10) and the battle is *human-involved*.
+1. If the local player is attacker or defender, the battle is *human-involved*. In space the story manager also
+   records the orbit composition of both sides (0x449f10, read by WIN/LOSE_BATTLES; corrected mcx6 Q14, STORY.md §5
+   "Battle composition"). The land machine 0x2b76a0 does not call 0x449f10.
 2. Overrun check, only when the multiple ≠ 0 and the battle is not story-locked:
    - defender strength = 0x2ab880 (orbit units of the defender + starbase power; land: surface units + every
      D+0x158 structure + the persisted-record sum, AI_GALACTIC_TOKENS §9.12);
@@ -211,8 +212,10 @@ it is 0), and every exit releases it (0x28c720). [H]
       `Data\Art\Maps\<name>`; otherwise ask the random map picker 0x47bf40 (object 0x140b311a8) with
       (2 + space, terrain index from the type's `Terrain` +0x848 — TEMPERATE 0, ARCTIC 1, DESERT 2,
       FOREST 3, SWAMP 4, VOLCANIC 5, URBAN 6, SPACE 7 —, defender faction index — Rebel 0, Empire 1,
-      Pirates 2, Underworld 4, Hutts 5, other 0 —, base level, 2) and store its answer back into
-      planet data +0x1e0, so the planet keeps the same map for later battles;
+      Pirates 2, Underworld 4, Hutts 5, other 0 —, base level, 2, preferred = planet data +0x1e0) and store its
+      answer back into planet data +0x1e0 every time, an empty one included. The stored name only stops the
+      picker's scan after it, so the planet does not simply keep its map (corrected 2026-11-07,
+      CU8F_T03_T05_RE §1.3 / §1.4; the defender faction is −1 only when the defender id is −1);
    3. a story override (`SET_TACTICAL_MAP` / `STORY_LOAD_TACTICAL_MAP`: string at 0x140b30450 land,
       0x140b30430 space) as `Data\Art\Maps\<name>`; it is consumed (cleared) [M];
    4. the conflict record's explicit map (+0x30) as `Data\Art\Maps\<name>`;
@@ -514,7 +517,8 @@ vector), and three of them (UM01, UM11, Empire M02) are not sandbox at all.
    0x140b27d5e; reader of GMM+0x30 / +0x34 besides the save-load restore.
 2. 0x4bb1a0 / 0x27f370 in the resolutions (base cut and the per-type player call) — [M] only.
 3. GMM+0x1e3 reader 0x364b20 (one-shot check 10 s into the next tactical battle) and 0x140b30391 (no reader
-   found).
+   found). → 0x140b30391 (story manager +0x41) is read by the auto-resolve lock 0x4472a0 and set from the campaign's
+   `Is_Autoresolve_Allowed`: `MCX4_RE_ANSWERS_GALACTIC.md` Q7.6.
 4. Linked record arriving while a normal conflict's banner is up and the player picks auto-resolve
    (0x28c7e0 with param 1 → 0x29c020): when the record is then started was not traced.
 5. A link fired by STORY_ENTER / MOVE can coexist with a normal space conflict queued by the same fleet
@@ -675,7 +679,8 @@ declared; +0x24 countdown; +0x28 declared record (copy); +0x58 last frame seen; 
   the 210-frame end countdown.
 
 **Open items:** writer of 0x140b303c1; the +0x79 end-wait callbacks 0x140b30720 / 0x140b30718; the galactic-only
-gate (0x35f6b0 argument); whether a hero death (Tyber) is caught by the plot before any 0xb test of the
+gate (0x35f6b0 argument; 2026-11-09: 0x35f6b0 = multiplayer game type 1 / 2 / 4, so the gate only stops an AI player in
+multiplayer galactic; galactic triggers: STRATEGIC_GAPS §1.4 correction); whether a hero death (Tyber) is caught by the plot before any 0xb test of the
 Empire — with the hold up it is only queued, so the plot's VICTORY decides [M].
 
 ### 3.2 Planet write-back — 0x2bff60(winner) [H]
@@ -778,18 +783,25 @@ it sets the auto-resolve retreat instead) and AI task forces (0x5fdd50).
   +0x15b4, vanilla 30) × 30 frames from battle start (vf3). While it runs, requests get reason 2.
 - **Request check** (vf9): reason 1 if the player is not attacker/defender of the current conflict or
   the game type forbids it; 2 while not yet allowed; 5 if another player is already retreating;
-  otherwise for playable factions a story/ability check (0x282750: `Disallows_Hyperspace_Retreat`,
-  `RetreatPreventionAbility`) gives the reason; 0 = allowed.
+  otherwise for playable factions a story/ability check (0x282750: the interdict / `RetreatPreventionAbility` list, then
+  the TACTICAL_SUPER_WEAPON query; it reads no type field, so not `Disallows_Hyperspace_Retreat`: MCX4_RE_ANSWERS_TACTICAL
+  §4; no retail code reads the type +0x39 at all, §11) gives the reason; 0 = allowed.
 - **Countdown** (vf14): faction `Space_Retreat_Countdown_Seconds` (+0x20b0) / `Land_...` (+0x2190)
   × 30 frames; plays `Space_Retreat_Begin_SFXEvent` (own) or `..._Enemy_Begin_...`. The retreating
   units list is built by vf8 (`Adding %s to retreatable units list`). Cancel: vf15.
 - **States** (+0x18): 1 countdown (units that died or lost their locomotor drop out of the list), 2
   jump-out flight (`Space_Retreat_Flight_Move_Increment` +0x20bc, one unit every
-  `Space_Retreat_Unit_Increment_Wait_Frames` +0x20c0 toward `Space_Retreat_Off_Map_Dest_Pos`), 4
-  waiting for the retreat cinematic, 3 done.
+  `Space_Retreat_Unit_Increment_Wait_Frames` +0x20c0), 4 waiting for the retreat cinematic, 3 done.
+  Corrected 2026-11-15 (TRU1_C_RE.md §2): the flight runs only with the retreat cinematic (In_Game_Cinematics,
+  space), lines the units up at the `ATTACKER ENTRY POSITION` marker and flies them **opposite the marker's
+  facing**; `Space_Retreat_Off_Map_Dest_Pos` is copied into the coordinator and never read.
 - **Post-retreat** (vf11): retreated objects and objects inside a retreated flagship are preserved;
   every other object of the retreating player is destroyed; land preserves transports. The victory
   monitor then sees type 0xc (all capable enemy units retreated).
+  Corrected 2026-11-20 (TRL2_A_RE_ANSWERS.md Q3, land vf8 0x534d90 / vf11 0x535900 [H]): land keeps TRANSPORT objects
+  always, and keeps its listed units (a locomotor, or `Stay_In_Transport_During_Ground_Battle`) **only while the
+  retreating player or an ally holds an object with `Reinforcement_Enabling_Radius` > 0**; everything else of the
+  player dies with the normal death, the listed units too when no reinforcement point is held.
 - Damage taken while retreating is scaled by `Space/Land_Retreat_Units_Damaged_Mod_Factor`
   (TACTICAL_COMBAT.md); pursuers use `..._Pursue_Max_Speed_Mod_Factor` (MOVEMENT.md).
 - `Space/Land_Retreat_Attrition_Factor` (vanilla 0.0, "per unit probability of destruction during a
@@ -797,7 +809,14 @@ it sets the auto-resolve retreat instead) and AI task forces (0x5fdd50).
 
 ### 3.5 Credits, loot, heroes
 
-- No credit reward is paid by the battle code itself. A planet captured through the ownership change
+- **Corrected 2026-11-12 (`A2M_R2_RE_B.md` §2) [H]:** units killed by the auto-resolve pay a **bounty**.
+  - The path is the death handler 0x39bdb0 → 0x392600. The killer is the other side's first combatant.
+  - In galactic mode the killer is paid when two conditions hold: its faction has `Benefits_From_Corruption`, and the
+    dying object's planet is corrupted with Racketeering (type 3).
+  - Alternatively, when the victim is Underworld, the killer is paid if it owns NalHutta.
+  - The amount is the full type bounty, paid per object.
+  - Galactic starbases and the planet's structure lists pay nothing.
+  The sentence "No credit reward is paid by the battle code itself" is wrong for bounty. A planet captured through the ownership change
   pays the capture bonus of GALACTIC_ECONOMY §4.2 (step 6). [M]
 - Heroes are ordinary units for survival; auto-resolve picks hero-carrying combatants first (§4.4) and
   the result text adds `TEXT_AR_HERO_LOSS` per dead named hero. Overrun is blocked by a hero (§1.6).
@@ -953,7 +972,11 @@ progress; runs vf1/vf2 → vf8 0x609270 (gathers combatants from the current tac
 persistent lists, sets +0x3e = "from tactical") → vf4 → vf6(force)), and Lua/story triggers. Story can
 forbid it per planet (`DISABLE_AUTORESOLVE`, `RESTRICT_AUTORESOLVE`, `HIDE_AUTORESOLVE`,
 `Prevents_Story_Campaign_Autoresolve` on types, campaign `Is_Autoresolve_Allowed` /
-`Autoresolve_Exclusion_Locations`) [M for the field wiring].
+`Autoresolve_Exclusion_Locations`) [M for the field wiring]. The wiring is [H] in
+`MCX4_RE_ANSWERS_GALACTIC.md` Q7.4 / Q7.6 and `MCX4_T09_RE_ANSWERS.md` Q3 / Q5: the banner's one-button test also takes
+GameConstants `AlwaysBypassAutoResolve` (banner only), and `Prevents_Story_Campaign_Autoresolve` counts only in a story
+campaign, only for a space conflict, and only for the human's choice (sticky fleet flag +0x95). The fire bonus of §4.4
+step 1 is looked up by the **firing** unit's `CategoryMask` and is 1 in shipped data (`MCX4_T09_RE_ANSWERS.md` Q9).
 
 ### 4.6 Retreat from the pending dialog / Lua [H]
 

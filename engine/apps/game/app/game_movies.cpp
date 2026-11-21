@@ -1,5 +1,7 @@
 #include "game_movies.hpp"
 
+#include "alamo/game/hud_feeds.hpp"  // mcx4 t13: movie_frame_cue
+
 #include <cstdio>
 
 #ifdef ALAMO_GAME_HAVE_VIDEO
@@ -8,13 +10,15 @@
 #include <vector>
 
 #include "alamo/audio/audio_system.hpp"
+#include "alamo/core/ascii.hpp"
 #include "alamo/data/values.hpp"
 #include "alamo/data/xml.hpp"
 #include "alamo/video/movie_db.hpp"
 #include "alamo/video/video.hpp"
 #else
 namespace alamo::video {
-class MoviePlayer {};  // complete stand-in for the owned pointer (no engine/video in this build)
+class MoviePlayer {};  // complete stand-ins for the owned pointers (no engine/video in this build)
+class CaptionTrack {};
 }  // namespace alamo::video
 #endif
 
@@ -28,15 +32,6 @@ MovieSlot::~MovieSlot() = default;  // owners call stop() first (it needs the au
 bool movies_available(std::string* err) { return video::ffmpeg_available(err); }
 
 namespace {
-bool ieq(std::string_view a, std::string_view b) {
-    if (a.size() != b.size()) return false;
-    for (size_t i = 0; i < a.size(); ++i) {
-        const char x = a[i] >= 'A' && a[i] <= 'Z' ? static_cast<char>(a[i] - 'A' + 'a') : a[i];
-        const char y = b[i] >= 'A' && b[i] <= 'Z' ? static_cast<char>(b[i] - 'A' + 'a') : b[i];
-        if (x != y) return false;
-    }
-    return true;
-}
 // "Event, frame, Event2, frame2" (the SFXEvent_Frame list shape [port: MusicEvent_Frame has no sample in the data]).
 std::vector<std::pair<int64_t, std::string>> parse_frame_list(std::string_view text) {
     std::vector<std::string> tok;
@@ -66,8 +61,10 @@ bool MovieSlot::open(const GameData& data, GameAudioHost& audio, std::string_vie
     // [port].
     video::MovieEntry entry;
     bool have_entry = false;
-    bool credits_flag = false, halt_flag = false;
+    bool credits_flag = false, halt_flag = false, pause_flag = false;
     std::vector<Cue> cues;
+    std::vector<int64_t> sfx_frames, speech_frames;
+    std::vector<std::string> sfx_events, speech_events;
     {
         std::vector<uint8_t> xml;
         if (data.files->read("Data\\XML\\Movies.xml", xml)) {
@@ -78,11 +75,29 @@ bool MovieSlot::open(const GameData& data, GameAudioHost& audio, std::string_vie
                 have_entry = true;
                 // The music fields of the same record (the last <Movie> of that Name, like find_movie).
                 for (data::XmlNode n : doc.root().children("Movie")) {
-                    if (!ieq(n.attribute("Name"), entry.name)) continue;
+                    if (!ascii_iequals(n.attribute("Name"), entry.name)) continue;
                     credits_flag = data::parse_bool_or(n.child_text("Has_Credits"), false);
                     halt_flag = data::parse_bool_or(n.child_text("Halt_Game_Music"), false);
+                    // ledger: consumes Movie.Pause_Game_While_Playing
+                    pause_flag = data::parse_bool_or(n.child_text("Pause_Game_While_Playing"), false);
                     cues.clear();
                     for (auto& [frame, ev] : parse_frame_list(n.child_text("MusicEvent_Frame"))) cues.push_back({frame, std::move(ev)});
+                    sfx_frames.clear();
+                    sfx_events.clear();
+                    speech_frames.clear();
+                    speech_events.clear();
+                    // ledger: consumes Movie.SFXEvent_Frame
+                    for (data::XmlNode c : n.children("SFXEvent_Frame"))
+                        for (auto& [frame, ev] : parse_frame_list(c.text_trimmed())) {
+                            sfx_frames.push_back(frame);
+                            sfx_events.push_back(std::move(ev));
+                        }
+                    // ledger: consumes Movie.SpeechEvent_Frame
+                    for (data::XmlNode c : n.children("SpeechEvent_Frame"))
+                        for (auto& [frame, ev] : parse_frame_list(c.text_trimmed())) {
+                            speech_frames.push_back(frame);
+                            speech_events.push_back(std::move(ev));
+                        }
                 }
             }
         }
@@ -119,10 +134,21 @@ bool MovieSlot::open(const GameData& data, GameAudioHost& audio, std::string_vie
     has_frame_ = false;
     alpha_ = entry.alpha;
     cannot_skip_ = entry.cannot_skip;
+    pause_game_ = pause_flag;  // mcx4 t14
+    crawl_name_ = entry.text_crawl_name;  // storyb t13
+    crawl_start_ = entry.text_crawl_start_frame;
     has_credits_ = credits_flag;
     halt_music_ = halt_flag;
     cues_ = std::move(cues);
     next_cue_ = 0;
+    sfx_frames_ = std::move(sfx_frames);
+    sfx_events_ = std::move(sfx_events);
+    speech_frames_ = std::move(speech_frames);
+    speech_events_ = std::move(speech_events);
+    cue_frame_ = 0;
+    captions_ = std::make_unique<video::CaptionTrack>();  // ui5 t12: Caption_Frame / Caption_Duration
+    captions_->reset(entry.captions);
+    caption_frame_ = 0;  // the first step covers (0, 1], so a caption on frame 1 shows
     fps_ = info.fps_num > 0 && info.fps_den > 0 ? static_cast<double>(info.fps_num) / static_cast<double>(info.fps_den) : 30.0;
     audio_ = &audio;
     // STRATEGIC_GAPS §7.4: the movie-music flag starts mode 14 music, Halt_Game_Music stops the game's music; both are
@@ -146,11 +172,28 @@ void MovieSlot::stop(GameAudioHost& audio) {
     audio_ = nullptr;
     cues_.clear();
     next_cue_ = 0;
+    sfx_frames_.clear();
+    sfx_events_.clear();
+    speech_frames_.clear();
+    speech_events_.clear();
+    cue_frame_ = 0;
+    captions_.reset();
     has_credits_ = halt_music_ = false;
     has_frame_ = false;
     cannot_skip_ = false;
+    pause_game_ = false;
     name_.clear();
+    crawl_name_.clear();
+    crawl_start_ = 0;
 }
+
+int32_t MovieSlot::text_crawl_frame() const {
+    if (!player_ || crawl_name_.empty()) return -1;
+    const int64_t frame = static_cast<int64_t>(std::floor(player_->time_s() * fps_));
+    return frame >= crawl_start_ ? static_cast<int32_t>(frame - crawl_start_) : -1;
+}
+
+std::string_view MovieSlot::caption() const { return captions_ ? captions_->text_id() : std::string_view(); }
 
 bool MovieSlot::update(double dt, ui::HudRenderer& hud, uint16_t page) {
     if (!player_) return false;
@@ -159,6 +202,30 @@ bool MovieSlot::update(double dt, ui::HudRenderer& hud, uint16_t page) {
         const int64_t frame = static_cast<int64_t>(std::floor(player_->time_s() * fps_));
         if (next_cue_ > 0 && frame < cues_[next_cue_ - 1].frame) next_cue_ = 0;
         while (next_cue_ < cues_.size() && cues_[next_cue_].frame <= frame) audio_->movie_cue(cues_[next_cue_++].event);
+    }
+    if (audio_ && (!sfx_frames_.empty() || !speech_frames_.empty())) {  // mcx4 t13: Bink frame numbers count from 1
+        const int64_t frame = static_cast<int64_t>(std::floor(player_->time_s() * fps_)) + 1;
+        if (frame < cue_frame_) cue_frame_ = 0;  // a loop went back to the start
+        if (frame > cue_frame_) {
+            if (const int32_t i = movie_frame_cue(sfx_frames_, cue_frame_, frame); i >= 0)
+                audio_->ui(sfx_events_[static_cast<size_t>(i)]);  // 2D, not forced (0x5dbd60)
+            if (const int32_t i = movie_frame_cue(speech_frames_, cue_frame_, frame); i >= 0) {
+                if (audio::AudioSystem* sys = audio_->system()) sys->stop_all_speech();  // 0x5dbe70: the cue starts at once
+                audio_->speech(speech_events_[static_cast<size_t>(i)]);
+            }
+            cue_frame_ = frame;
+        }
+    }
+    if (captions_ && !captions_->empty()) {  // ui5 t12 (AUDIO.md §3.4): Bink frame numbers count from 1
+        const int64_t frame = static_cast<int64_t>(std::floor(player_->time_s() * fps_)) + 1;
+        if (frame < caption_frame_) {  // a loop went back to the start
+            captions_->restart();
+            caption_frame_ = 0;
+        }
+        if (frame > caption_frame_) {
+            captions_->step(caption_frame_, frame, [this](std::string_view id) { return !caption_shows_ || caption_shows_(id); });
+            caption_frame_ = frame;
+        }
     }
     const video::VideoFrame* vf = player_->current_frame();
     if (vf && player_->frame_serial() != serial_ && vf->plane_count > 0) {
@@ -193,6 +260,7 @@ void MovieSlot::stop(GameAudioHost&) {
     name_.clear();
 }
 bool MovieSlot::update(double, ui::HudRenderer&, uint16_t) { return false; }
+std::string_view MovieSlot::caption() const { return {}; }
 bool MovieSlot::playing() const { return false; }
 
 #endif

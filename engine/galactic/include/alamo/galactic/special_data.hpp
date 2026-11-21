@@ -39,6 +39,18 @@ enum class SpecialAbilityClass : uint8_t {
     IncomeGambling = 6, // Planet_Income_Gambling_Ability (P4 4.2)
     Slicer = 7,         // Slicer_Ability (REMAINING_GAPS 1.1: R2D2_Slicer)
     SystemSpy = 8,      // System_Spy_Ability (GRC 2.3 / 2.3.1: planet visibility modifiers)
+    ReducePrice = 9,    // Reduce_Production_Price_Ability (A2K_T01_BUILD_COST_RE 1.3)
+    ReduceTime = 10,    // Reduce_Production_Time_Ability (same class family, the time tables)
+    // galab (docs/re/GALAB_ABILITIES_RE.md)
+    RemoveCorruption = 11,     // Remove_Corruption_Ability (heroes; §1)
+    PlanetDestruction = 12,    // Planet_Destruction_Ability (Death Star / Death Star II; §2)
+    SiphonCredits = 13,        // Siphon_Credits_Ability (Han Solo, smugglers; §3)
+    GalaxyWideUpgrade = 14,    // Galaxy_Wide_Upgrade_Ability (planet bonuses, PLANETS.XML; §4)
+    ReduceTechPrice = 15,      // Reduce_Technology_Price_Ability (The Maw; §5)
+    PoliticalTransition = 16,  // Political_Transition_Bonus_Ability (Tarkin; §6)
+    NeutralizeHero = 17,       // Neutralize_Hero_Ability (bounty hunters; §7)
+    HeroProtection = 18,       // Hero_Protection_Ability (Neutralization_Cost_Multiplier; §7)
+    PoliticalProtection = 19,  // Political_Control_Protection_Ability (Tarkin; §6.1)
 };
 
 struct SpecialAbilityDef {
@@ -85,6 +97,48 @@ struct SpecialAbilityDef {
     // Ground_Activated <= 0 -> 30; any other style -> style None).
     uint32_t spy_mask = 0;                     // ability +0x18C
     float spy_duration = 0.0f;                 // Duration_In_Secs
+    // Reduce_Production_Price_Ability / Reduce_Production_Time_Ability (A2K_T01_BUILD_COST_RE 1.2-1.3): the fraction
+    // (Price_Reduction_Percentage +0x178 / Time_Reduction_Percentage; >= 1.0 is set to 1.0 with a diagnostic, negative
+    // values lengthen / raise), Stacking_Category +0x17c, Galaxy_Wide +0x180 and the applicable set (0x48d070:
+    // Applicable_Unit_Categories / _Types minus Excluded_Unit_Types; "All" = every type [port choice]).
+    float production_reduction = 0.0f;
+    int32_t stacking_category = 0;
+    bool galaxy_wide = false;
+    uint64_t applicable_categories = 0;      // GameObjectCategoryType mask; ~0 = All
+    std::vector<uint32_t> applicable_types;  // type indices
+    std::vector<uint32_t> excluded_types;    // type indices
+    // galab: Remove_Corruption_Ability (GALAB §1; ctor 0x5b1310, post-load 0x5b17f0): Corruption_Removal_Cost_Multiplier
+    // +0x17C (negative -> 1.0) and Corruption_Removal_Time_In_Secs +0x180 (float; <= 0 -> 10.0).
+    float removal_cost_multiplier = 1.0f;
+    float removal_seconds = 10.0f;
+    // Siphon_Credits_Ability (GALAB §3; post-load 0x70e9e0): Min / Max_Siphon_Percentage +0x178 / +0x17C (outside 0..1:
+    // clamped with an error), Siphon_Duration_In_Cycles +0x180 (< 1 -> 1); Ground_Activated only.
+    float siphon_min = 0.0f;
+    float siphon_max = 0.0f;
+    int32_t siphon_cycles = 0;
+    // Galaxy_Wide_Upgrade_Ability (GALAB §4): Space_Upgrade_Type +0x180 / Land_Upgrade_Type +0x190 (type indices,
+    // 0xFFFFFFFF = none). Galactic_Automatic only (post-load 0x6ffae0).
+    uint32_t space_upgrade = 0xFFFFFFFFu;
+    uint32_t land_upgrade = 0xFFFFFFFFu;
+    std::string space_upgrade_name, land_upgrade_name;  // as written (resolved by the loader)
+    // Reduce_Technology_Price_Ability (GALAB §5) and Political_Transition_Bonus_Ability (GALAB §6) keep their
+    // Price_ / Time_Reduction_Percentage in `production_reduction` and Stacking_Category in `stacking_category`.
+    // Neutralize_Hero_Ability (GALAB §7; ctor 0x615b70, post-load 0x617f70): the three cost curves (fewer than 2 points ->
+    // the defaults (0,1)-(5,1), (0,1)-(1000,1), (0,1)-(1000,1)), General_Minor / Major_Hero_Cost_Mod (<= 0 -> 1.0), the
+    // Owner_ / Target_Respawn_Time_In_Secs pairs (min, max; either <= 0 -> Default_Hero_Respawn_Time) and
+    // Can_Neutralize_Minor / Major_Heroes (default Yes). Ground_Activated by default (ctor style 6).
+    PiecewiseCurve cost_by_base_level;          // Cost_Mod_By_Base_Level (+0x178)
+    PiecewiseCurve cost_by_neutralizations;     // Cost_Mod_By_Previous_Neutralizations (+0x1A0)
+    PiecewiseCurve cost_by_corruption;          // Cost_Mod_By_Planetary_Corruption_Level (+0x1C8)
+    float minor_cost_mod = 1.0f;                // +0x1F0
+    float major_cost_mod = 1.0f;                // +0x1F4
+    float owner_respawn_min = 0.0f, owner_respawn_max = 0.0f;    // +0x1F8 / +0x1FC
+    float target_respawn_min = 0.0f, target_respawn_max = 0.0f;  // +0x200 / +0x204
+    bool can_neutralize_minor = true;           // +0x208
+    bool can_neutralize_major = true;           // +0x209
+    // Hero_Protection_Ability (GALAB §7.3; ctor 0x703090): Neutralization_Cost_Multiplier +0x178 (default 1.0) under
+    // `stacking_category`; Galactic_Automatic.
+    float protection_multiplier = 1.0f;
 };
 
 // BlackMarketItems.xml entry (P4 1.1), table order = file order.
@@ -103,18 +157,49 @@ struct BlackMarketItemDef {
     std::vector<std::string> used_by_units;                     // UI only [M]
 };
 
-// One corruption choice of a planet type (Corruption_N_*, P4 5.1 record 0x52c570), slot order 1, 2, 3.
+// One corruption choice of a planet type (Corruption_N_*, P4 5.1 record 0x52c570), slot order 1, 2, 3. Presentation
+// fields (speech events, briefing, Bink holograms) are not read.
+// Corruption mission [inferred until docs/re/L1_S4_REMAINING.md section C]: a choice whose Tactical_Game_Mode is Land /
+// Space and whose Tactical_Map_Name is set starts a tactical battle at the planet on that map (attacker = the corrupting
+// player, defender = the planet's owner) with Tactical_Script_Name as the tactical story (apps/sim
+// CampaignBattles::start_corruption); a choice without one corrupts the planet directly. Credits and the unit
+// requirement are charged / checked by GalacticSim::corruption_charge.
 struct CorruptionChoiceDef {
     uint32_t slot = 0;
     int8_t type = -1;                            // CorruptionTypeEnum 0..7
     float credit_cost = 0.0f;                    // Corruption_N_Credit_Cost (float)
+    // S4: the same field as an int (get_int, else the float rounded half up): start_corruption's credits pre-check and
+    // its corruption_charge fallback cost.
+    int32_t credit_cost_rounded = 0;
     std::vector<uint32_t> required_unit_types;   // Corruption_N_Required_Unit_Type (type indices, a union)
     int32_t required_unit_count = 0;
     int8_t required_mission = -1;                // Corruption_N_Required_Mission_Type
     int32_t required_mission_count = 0;
     std::vector<uint32_t> required_planets;      // Corruption_N_Required_Planets (planet type indices)
     uint32_t success_unlock = 0xFFFFFFFFu;       // Corruption_N_Success_Unlock_Unit_Type (REMAINING_GAPS 1.5 item 5)
+    float success_credit_bonus = 0.0f;           // Corruption_N_Success_Credit_Bonus (float; MCX4_T09_RE_ANSWERS Q1)
+    // Tactical mission (S4): Corruption_N_Tactical_Game_Mode (tSubGameModeType: Galactic 0, Land 1, Space 2),
+    // Tactical_Map_Name and Tactical_Script_Name (a Story_Plots file), both trimmed.
+    bool tactical = false;        // the mode is Land / Space and the map is set
+    bool tactical_space = false;  // mode Space (else Land)
+    std::string tactical_map;
+    std::string tactical_plots;
 };
+
+// a2m r2: Bounty_On_Faction_Ability. In tactical (A2M_R2_RE_B §2.4, not modelled) the holder's player gains
+// Bounty_Percentage_Amount x the bounty (bounty.hpp) of each destroyed object owned by a Target_Faction_Names faction (max
+// per Stacking_Category, summed over categories). The galactic bounty does not read it (§2.3, ConflictManager).
+// Vanilla FoC: Underworld_Racketeering_Salvage_Effect (1.0, on the Underworld's Racketeering corruption upgrade),
+// Underworld_Planetary_Corruption_Bounty (1.2, a tactical upgrade) and NalHutta_Bounty (0.15, Nal Hutta's planet bonus).
+struct BountyAbilityDef {
+    std::string name;                     // Name attribute
+    float percentage = 0.0f;              // Bounty_Percentage_Amount
+    int32_t stacking_category = 0;        // Stacking_Category
+    std::vector<uint32_t> target_factions;  // Target_Faction_Names (GalacticRules::factions indices; unknown names dropped)
+    bool apply_to_all_allies = false;     // Apply_To_All_Allies (parsed; allies are not modelled [port])
+};
+
+inline constexpr uint32_t kGalabRef = 0x80000000u;  // TypeSpecial::trigger_order: the entry is a `galab` index
 
 // Per object type (index = TypeIndex). Default-constructed for every type without these fields.
 struct TypeSpecial {
@@ -142,13 +227,59 @@ struct TypeSpecial {
     // all its cargo is).
     bool galactic_stealth = false;
     float detection_chance = -1.0f;  // DetectHeroAbility-style Detection_Chance (ability +0x17C), -1 = no detector
+    // mcx4 t06 (MCX4_T09_RE_ANSWERS Q11): the Galactic_Stealth_Ability's Evade_Detection_Chance (+0x178), clamped to
+    // [0, 1] as the activation stores it (0x3a86d0). A team without its own stealth entry takes its first member's
+    // [port, as for the abilities]. FoC: 0.0 everywhere.
+    float evade_detection_chance = 0.0f;
+    // mcx4 t09 (Q6): the Name of every <Abilities> entry, list order (a team without its own: its first member's), for
+    // the Activated_*_Ability_Names match of the galaxy-map ability button.
+    std::vector<std::string> ability_entry_names;
     // GRC 2.3: OR of the spy masks of this type's Initially_Enabled Galactic_Automatic System_Spy_Ability entries (the
     // always-on spies: smugglers, bounty hunters, OLRS, palaces, Bothawui). Derived at load from `abilities`.
     uint32_t auto_spy_mask = 0;
+    // SpecialRules::production indices of this type's Initially_Enabled Reduce_Production_Price / _Time abilities (list
+    // order; a team without its own uses its first member's). Kept out of `abilities` so those indices stay unchanged.
+    std::vector<uint32_t> production;
+    // a2m r2: SpecialRules::bounty indices of this type's Bounty_On_Faction_Ability entries (list order). Kept out of
+    // `abilities` so those indices stay unchanged.
+    std::vector<uint32_t> bounty;
+    // galab: SpecialRules::galab indices of this type's GALAB abilities (Remove_Corruption, Planet_Destruction,
+    // Siphon_Credits, Galaxy_Wide_Upgrade, Reduce_Technology_Price, Political_Transition_Bonus, Neutralize_Hero,
+    // Hero_Protection; list order; a team without its own uses its first member's). Kept out of `abilities` so those
+    // indices (and the CRC of sessions that never use these abilities) stay unchanged.
+    std::vector<uint32_t> galab;
+    // The Ground_Activated walk order of P4 6.1 over both tables, <Abilities> list order: an `abilities` index, or
+    // kGalabRef | a `galab` index. Equal to `abilities` for a type without GALAB entries.
+    std::vector<uint32_t> trigger_order;
+    // The walk list: trigger_order, or `abilities` when it is empty (tables built by hand, without GALAB entries).
+    const std::vector<uint32_t>& triggers() const { return trigger_order.empty() ? abilities : trigger_order; }
+    float corruption_removal_cost = 0.0f;  // planets: Planet_Corruption_Removal_Base_Cost (T +0x804, read as float)
+    // GALAB §7: Neutralization_Cost (T +0x1FBC, own or first member's) and Can_Be_Neutralized_By_Minor / Major_Heroes
+    // (T +0x7B / +0x7C, own or first member's; default No).
+    float neutralization_cost = 0.0f;
+    bool neutralizable_by_minor = false;
+    bool neutralizable_by_major = false;
+    bool prevents_minor_siphons = false;   // Prevents_Minor_Credit_Siphons (T +0x63; no FoC type sets it)
 };
+
+// mcx4 t09 (docs/re/MCX4_T09_RE_ANSWERS.md Q6): the galaxy-map ability button kind of a type. The kinds are tested in
+// the order 6, 1, 9, 2, 3, 4, 5, 7, 8, 10; the first whose Activated_*_Ability_Names list names one of the type's
+// <Abilities> entries (TypeSpecial::ability_entry_names, case-insensitive) wins: 1 Slice, 2 Sabotage, 3 System_Spy,
+// 4 Neutralize_Hero, 5 Siphon_Credits, 6 Destroy_Planet, 7 Corrupt_Planet, 8 Remove_Corruption, 9 Black_Market,
+// 10 Hack_Super_Weapon. kind -1 = no button; `label` = the text key ("" where it was not traced). Presentation only: no
+// rule or AI reads it. [port] "applies to the planet" (0x2e6fe0 -> 0x37c430) is the name match alone.
+struct ActivatedAbilitySlot {
+    int32_t kind = -1;
+    const char* label = "";
+};
+struct SpecialRules;
+ActivatedAbilitySlot activated_ability_slot_of(const SpecialRules& rules, uint32_t type);
 
 struct SpecialRules {
     std::vector<SpecialAbilityDef> abilities;  // every galactic-relevant <Abilities> entry, type order then list order
+    std::vector<SpecialAbilityDef> production; // Reduce_Production_Price / _Time entries (ReducePrice / ReduceTime)
+    std::vector<BountyAbilityDef> bounty;      // a2m r2: Bounty_On_Faction_Ability entries, type order then list order
+    std::vector<SpecialAbilityDef> galab;      // galab: GALAB ability entries (TypeSpecial::galab), type order then list order
     std::vector<BlackMarketItemDef> items;     // BlackMarketItems.xml, file order
     std::vector<TypeSpecial> types;            // index = TypeIndex (empty in hand-built rules: every lookup defaults)
     // GameConstants
@@ -158,10 +289,17 @@ struct SpecialRules {
     std::string hack_particle;                 // Hack_Super_Weapon_Particle_Effect (presentation)
     std::string sabotage_particle;             // Sabotage_Particle_Effect (presentation)
     std::vector<std::string> activated_black_market, activated_sabotage, activated_corrupt, activated_hack;
+    // mcx4 t09 (MCX4_T09_RE_ANSWERS Q6): the other six Activated_*_Ability_Names lists, read only by the galaxy-map
+    // ability button (GalacticSim::activated_ability_slot).
+    std::vector<std::string> activated_slice, activated_neutralize_hero, activated_siphon_credits, activated_system_spy,
+        activated_destroy_planet, activated_remove_corruption;
 
     const TypeSpecial& type(uint32_t t) const;  // a static default for unknown / missing types
     uint32_t find_item(uint32_t name_crc) const;  // table index (first match), 0xFFFFFFFF if absent (0x48f550)
     uint32_t find_item_by_name(std::string_view name) const;  // exact name (GIVE_BLACK_MARKET 0x7E: length + memcmp)
+    // 0x48d070 applicability of a ReducePrice / ReduceTime ability to type `t` with category mask `categories`:
+    // excluded types never; listed types; else the category mask ("All" = ~0 matches every type) [port choice].
+    static bool production_applies(const SpecialAbilityDef& a, uint32_t t, uint64_t categories);
 };
 
 }  // namespace alamo::galactic

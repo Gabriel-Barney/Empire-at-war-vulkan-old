@@ -1,4 +1,5 @@
 #include "alamo/tactical/garrison/garrison_types.hpp"
+#include "alamo/objects/game_object_types.hpp"
 
 #include "alamo/objects/behaviors.hpp"
 #include "alamo/objects/enums.hpp"
@@ -22,7 +23,7 @@ bool has(const objects::GameObjectTypes& types, objects::TypeIndex t, const char
 
 bool holder_desc_from_type(const objects::GameObjectTypes& types, objects::TypeIndex t, HolderDesc& out) {
     if (!valid(types, t)) return false;
-    const uint64_t props = types.get_mask(t, "Property_Flags");
+    const uint64_t props = types.get(t, objects::tags::Property_Flags);
     const bool contain = (props & property_bit(types, "CanContainGarrison", 0x1000u)) != 0;
     HolderDesc d;
     if (has(types, t, "GARRISON_VEHICLE")) d.kind = HolderKind::Vehicle;
@@ -30,11 +31,11 @@ bool holder_desc_from_type(const objects::GameObjectTypes& types, objects::TypeI
     else if (has(types, t, "GARRISON_HOVER")) d.kind = HolderKind::Hover;
     else if (contain) d.kind = HolderKind::Property;
     else return false;
-    d.accepts = types.get_mask(t, "Garrison_Category");
-    d.slots = types.get_int(t, "Num_Garrison_Slots");
-    d.enter_dist = types.get_float(t, "Garrison_Enter_Dist");
-    d.exit_dist = types.get_float(t, "Garrison_Exit_Dist");
-    d.radius = types.get_float(t, "Garrison_Radius");
+    d.accepts = types.get(t, objects::tags::Garrison_Category);
+    d.slots = types.get(t, objects::tags::Num_Garrison_Slots);
+    d.enter_dist = types.get(t, objects::tags::Garrison_Enter_Dist);
+    d.exit_dist = types.get(t, objects::tags::Garrison_Exit_Dist);
+    d.radius = types.get(t, objects::tags::Garrison_Radius);
     d.can_fire = (props & property_bit(types, "GarrisonCanFire", 0x2000u)) != 0;
     out = d;
     return true;
@@ -42,16 +43,17 @@ bool holder_desc_from_type(const objects::GameObjectTypes& types, objects::TypeI
 
 bool occupant_desc_from_type(const objects::GameObjectTypes& types, objects::TypeIndex t, OccupantDesc& out) {
     if (!valid(types, t) || !has(types, t, "GARRISON_UNIT")) return false;
-    out.category = types.get_mask(t, "Garrison_Category");
-    out.value = types.get_int(t, "Garrison_Value");
+    out.category = types.get(t, objects::tags::Garrison_Category);
+    // s78n t18 (FIGHTER_FLYING §7.4 item 2): the type constructor writes Garrison_Value := 1; an untagged type takes 1 slot
+    out.value = types.get_string(t, objects::tags::Garrison_Value).empty() ? 1 : types.get(t, objects::tags::Garrison_Value);
     return true;
 }
 
 bool capture_desc_from_type(const objects::GameObjectTypes& types, objects::TypeIndex t, CapturePointDesc& out) {
     if (!valid(types, t) || !has(types, t, "CAPTURE_POINT")) return false;
-    out.radius = types.get_float(t, "Capture_Point_Radius");
-    out.transition_seconds = types.get_float(t, "Capture_Point_Transition_Time_Seconds");
-    out.sticky = has(types, t, "REINFORCEMENT_POINT") || types.get_bool(t, "Ownership_Sticks");
+    out.radius = types.get(t, objects::tags::Capture_Point_Radius);
+    out.transition_seconds = types.get(t, objects::tags::Capture_Point_Transition_Time_Seconds);
+    out.sticky = has(types, t, "REINFORCEMENT_POINT") || types.get(t, objects::tags::Ownership_Sticks);
     return true;
 }
 
@@ -60,8 +62,8 @@ bool influences_capture(const objects::GameObjectTypes& types, objects::TypeInde
     // Rebel AI takes a neutral Mineral_Extractor_Pad by frame 600 with X-Wings only, and X-Wing sets no Influences_Capture_Point.
     // The shipped data sets it False on 150 types (pads, structures, vehicles) and True on 38.
     if (!valid(types, t)) return false;
-    if (types.get_string(t, "Influences_Capture_Point").empty()) return true;
-    return types.get_bool(t, "Influences_Capture_Point");
+    if (types.get_string(t, objects::tags::Influences_Capture_Point).empty()) return true;
+    return types.get(t, objects::tags::Influences_Capture_Point);
 }
 
 }  // namespace alamo::tactical::garrison

@@ -95,7 +95,7 @@ struct CombatEvent {
 
 struct BattleResult {
     bool won = false;
-    std::string enemy_faction;  // picks Music_Event_<Tactical/Strategic>_<Win/Lose>_Vs_Faction first
+    std::string enemy_faction;  // the other side's faction: picks Music_Event_<Tactical/Strategic>_<Win/Lose>_Vs_Faction first
     bool strategic = false;     // campaign won/lost (Music_Event_Strategic_*) instead of a battle
 };
 
@@ -142,8 +142,20 @@ public:
     void battle_load_screen(bool open);
     // Tactical mode started/resumed: listener mode land/space, ambient music (mode 6), weather/map ambience.
     void enter_tactical(const TacticalSetup& setup);
-    // Battle / campaign end music (mode 16, forced); combat notifications stop changing music afterwards.
+    // §2.3 (b0286): whether any player has its faction super weapon on the map; mode 6 / 7 music then picks the faction's
+    // Music_Event_<Land/Space>_<Ambient/Battle>_Super_Weapon. `restart_music`: the battle's first report (the host learns
+    // the start forces one tick after enter_tactical) - a change restarts the current mode's music with the new choice;
+    // otherwise the flag is read at the next mode switch, as retail reads it when it picks the event.
+    void set_super_weapon_present(bool present, bool restart_music = false);
+    bool super_weapon_present() const { return super_weapon_; }
+    // Campaign end music (strategic: mode 16, forced). A tactical result (strategic false) is tactical_result_music.
+    // battle_over_ only stops the super-weapon restart.
     void battle_end(const BattleResult& result);
+    // mcx4 t13 (MCX4_T13_RE_ANSWERS "Faction.Music_Event_Tactical_Win family", 0x28f250 [H]): the local faction's
+    // Music_Event_Tactical_Win (local player = winner, mode 9) or _Lose (mode 10), its _Vs_Faction row for
+    // `other_faction` (the loser on a win, the winner on a loss) first; not forced, no resume, and nothing when the music
+    // is already in that mode (the battle-end dialog's second call). Combat afterwards still switches to battle music.
+    void tactical_result_music(bool local_is_winner, std::string_view other_faction);
     // Battle-end summary dialog: Audio.xml Music_Event_Battle_End_Summary_Screen_<Win/Lose> (mode 16).
     void battle_summary_screen(bool won);
     // Mode push/pop, load, quit (§1.5, §3.1): stops every SFX instance, kills speech and conversations,
@@ -153,16 +165,16 @@ public:
 
     // ---------------- per frame
     void set_camera(const CameraState& camera);
-    // Current weather from the sim (tactical): CLEAR/RAIN/SNOW/SANDSTORM/ASH and 0..1 intensity. Also plays
-    // the faction's SFXEvent_Weather_Begin/End announcement when weather (type != CLEAR and intensity > 0)
-    // starts / stops [inferred].
-    void set_weather(std::string_view weather, float intensity);
+    // Current weather from the sim (tactical): CLEAR/RAIN/SNOW/SANDSTORM/ASH and 0..1 intensity. Also plays the local
+    // faction's SFXEvent_Weather_Begin / _End line for the current type when the intensity rises from 0 / falls to 0
+    // (AUDIO.md §9.3; not for CLEAR, not on a type change, not when `local_affected` is false = Weatherproof).
+    void set_weather(std::string_view weather, float intensity, bool local_affected = true);
     void sim_tick();                  // once per sim tick (music peace counter, announcement delays)
     void update(double wall_dt_seconds);
 
     // ---------------- battle events (sim -> audio, forwarded after the tick in a stable order)
-    // Weapon / hard point fire: attached to the shooter (3D-attached when the event Is_3D). Suppressed by
-    // Audio.xml Test_Disable_Weapon_Fire_SFX (§6.2). Returns the instance id (0 = refused).
+    // Weapon / hard point fire: 3D at `position` = the new projectile's position (§9.5; not attached, fog gate 9
+    // applies). Suppressed by Audio.xml Test_Disable_Weapon_Fire_SFX. Returns the instance id (0 = refused).
     uint32_t weapon_fire(uint64_t shooter, std::string_view event, const Vec3& position);
     // Projectile detonation / impact and explosions: 3D at a world position (fog gate 9 applies).
     uint32_t impact(std::string_view event, const Vec3& position);
@@ -255,9 +267,12 @@ public:
     // Local faction announcement by its Faction tag (e.g. "SFXEvent_Planet_Gained_Control",
     // "Reinforcements_Enroute_SFXEvent"): 2D; HUD VO rules apply (refused while speech plays, §1.2 test 5).
     uint32_t faction_sfx(std::string_view faction_tag);
-    // Enemy spotted (faction SFXEvent_Unit_Type_Spotted for the type, else SFXEvent_Enemy_Spotted); gated by
-    // Lua SFXManager.Allow_Enemy_Sighted_VO [inferred].
-    uint32_t enemy_spotted(std::string_view object_type_name);
+    // mcx4 t13 (MCX4_T13_RE_ANSWERS "GameObjectType.Play_SFXEvent_On_Sighting", 0x361470 / 0x3613a0): a sighted type
+    // with Play_SFXEvent_On_Sighting plays the local faction's SFXEvent_Unit_Type_Spotted entry for the type, else
+    // SFXEvent_Generic_Unit_Spotted; enemy_spotted plays SFXEvent_Enemy_Spotted. 2D. Both gated by Lua
+    // SFXManager.Allow_Enemy_Sighted_VO [inferred]; the once-per-type / once-per-battle limits are the host's.
+    uint32_t unit_type_spotted(std::string_view object_type_name);
+    uint32_t enemy_spotted();
     void allow_enemy_sighted_vo(bool on) { enemy_sighted_vo_ = on; }
 
     // ---------------- speech
@@ -298,8 +313,7 @@ private:
     std::string faction_;
     bool tactical_ = false, land_ = true, super_weapon_ = false, battle_over_ = false;
     std::string environment_;
-    bool weather_active_ = false;
-    std::string weather_type_ = "CLEAR";
+    float weather_intensity_ = 0.0f;  // the last set_weather intensity (§9.3 crossing test)
     uint64_t sim_ticks_ = 0, last_base_announcement_ = 0;
     bool base_announced_ = false;
     bool enemy_sighted_vo_ = true;

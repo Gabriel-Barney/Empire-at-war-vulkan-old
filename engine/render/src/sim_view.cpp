@@ -1,28 +1,17 @@
 #include "alamo/render/sim_view.hpp"
 
 #include <algorithm>
-#include <cctype>
 #include <cstring>
 #include <iterator>
 #include <string_view>
 #include <utility>
 
+#include "alamo/core/ascii.hpp"
 #include "alamo/render/lod.hpp"
 
 namespace alamo::render {
 
 namespace {
-
-// Case-insensitive substring test (R5 stealth mesh names: BASEMESH / STEALTH).
-bool icontains(std::string_view s, std::string_view needle) {
-    if (needle.size() > s.size()) return false;
-    for (size_t i = 0; i + needle.size() <= s.size(); ++i) {
-        size_t k = 0;
-        while (k < needle.size() && std::toupper(static_cast<unsigned char>(s[i + k])) == std::toupper(static_cast<unsigned char>(needle[k]))) ++k;
-        if (k == needle.size()) return true;
-    }
-    return false;
-}
 
 // R3 muzzle bone test: the named bone, else the bone index, else (own weapon) every bone named Muzzle*.
 bool muzzle_bone(const assets::Skeleton& sk, const SnapshotMuzzle& m, int32_t bone) {
@@ -30,22 +19,14 @@ bool muzzle_bone(const assets::Skeleton& sk, const SnapshotMuzzle& m, int32_t bo
     if (!m.bone.empty()) return sk.find(m.bone) == bone;
     if (m.bone_index >= 0) return m.bone_index == bone;
     const std::string& n = sk.names[static_cast<size_t>(bone)];
-    if (n.size() < 6) return false;
-    for (size_t i = 0; i < 6; ++i)
-        if (std::toupper(static_cast<unsigned char>(n[i])) != "MUZZLE"[i]) return false;
-    return true;
-}
-std::string upper(const std::string& s) {
-    std::string u(s);
-    for (char& c : u) c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
-    return u;
+    return ascii_istarts_with(n, "MUZZLE");
 }
 
 }  // namespace
 
 // --------------------------------------------------------------------------------- streamed models
 uint32_t StreamedSimModels::handle(const std::string& name) {
-    auto [it, inserted] = by_name_.try_emplace(upper(name), 0u);
+    auto [it, inserted] = by_name_.try_emplace(ascii_upper(name), 0u);
     if (inserted) {
         it->second = streamer_->request(name);
         handles_.push_back(it->second);
@@ -258,8 +239,21 @@ void SimInstanceBuilder::build(const InterpolatedFrame& frame, SimModelSource& m
                 ++st.stealth_tinted;
             }
         }
+        if (pulses_)  // mcx4 t15: a running light effect replaces the colour multiplier's RGB
+            if (const auto it = pulses_->find(static_cast<uint64_t>(o.id)); it != pulses_->end()) {
+                const float base[3] = {in.light_scale.x, in.light_scale.y, in.light_scale.z};
+                float rgb[3];
+                if (light_pulse_rgb(it->second, pulse_now_, base, rgb)) in.light_scale = {rgb[0], rgb[1], rgb[2], in.light_scale.w};
+            }
+        if (o.id == hover_ && hover_ != objects::kNoObjectId) {  // mcx4 t14: Mouse_Over_Highlight_Scale
+            const float k = hover_brighten(hover_scale_, 1.0f);
+            in.light_scale = {in.light_scale.x * k, in.light_scale.y * k, in.light_scale.z * k, in.light_scale.w};
+        }
         in.no_shadow = s.stealth.shadow_dropped();  // R5: the model's stencil-shadow bit is cleared while stealthed
         st.stealth_no_shadow += in.no_shadow ? 1u : 0u;
+        // vis1 t02: a blob-shadow type at this detail has its stencil shadow off (the terrain blob replaces it).
+        if (blob_detail_ > 0 && tinfo && blob_detail_ < tinfo->blob_below_detail) in.no_shadow = true;
+        in.no_distance_fade = tinfo && tinfo->no_distance_fade;  // mcx4 t15
         in.team_color_override = true;
         in.team_color = o.team_color;
         in.lod_bias = o.lod_bias;
@@ -278,7 +272,9 @@ void SimInstanceBuilder::build(const InterpolatedFrame& frame, SimModelSource& m
             bool own_muzzle = false;
             for (const SnapshotMuzzle& mzl : muzzles) own_muzzle = own_muzzle || mzl.hardpoint < 0;
             const bool stealth = (o.flags & kSnapStealthMeshes) != 0;  // R5: BASEMESH hidden, STEALTH shown (§3.7)
-            if (use_bv || own_muzzle || stealth) {
+            const std::span<const std::string> script_hidden =
+                hidden_meshes_ ? hidden_meshes_(o.id) : std::span<const std::string>();  // mcx6 t04
+            if (use_bv || own_muzzle || stealth || !script_hidden.empty()) {
                 const std::span<const uint8_t> base = s.vis.mask();
                 const size_t n = std::max(base.size(), ma.meshes.size());
                 s.combined.assign(n, 0);
@@ -327,10 +323,10 @@ void SimInstanceBuilder::build(const InterpolatedFrame& frame, SimModelSource& m
                     // [port: the swap is instant; the Stealth_Transition_Time fade spring is render-side and untraced].
                     for (size_t i = 0; i < ma.meshes.size(); ++i) {
                         const std::string& nm = ma.meshes[i].name;
-                        if (icontains(nm, "BASEMESH") && s.combined[i] == 0) {
+                        if (ascii_icontains(nm, "BASEMESH") && s.combined[i] == 0) {
                             s.combined[i] = 1;
                             ++hidden;
-                        } else if (icontains(nm, "STEALTH") && s.combined[i] != 0) {
+                        } else if (ascii_icontains(nm, "STEALTH") && s.combined[i] != 0) {
                             s.combined[i] = 0;
                             changed = true;
                         }
@@ -345,10 +341,86 @@ void SimInstanceBuilder::build(const InterpolatedFrame& frame, SimModelSource& m
                     }
                     ++st.stealthed;
                 }
+                // mcx6 t04: Hide_Sub_Object hides the named sub-mesh of this object, whatever the masks above say.
+                for (size_t i = 0; i < ma.meshes.size() && !script_hidden.empty(); ++i) {
+                    if (s.combined[i] != 0) continue;
+                    for (const std::string& name : script_hidden)
+                        if (ascii_iequals(ma.meshes[i].name, name)) {
+                            s.combined[i] = 1;
+                            ++hidden;
+                            ++st.script_hidden_meshes;
+                            break;
+                        }
+                }
                 if (hidden || changed) {
                     s.use_combined = true;
                     in.mesh_hidden = s.combined;
                     st.bone_hidden_meshes += hidden;
+                }
+            }
+        }
+        // mcx6 t05: Show_Emitter's particle groups (set_emitter_source), before the glow rule, which owns pe / pte of its units.
+        if (emitters_ && m->asset && s.vis.layout()) {
+            EmitterOverride eo = emitters_(o.id);
+            if ((o.engine_flags & kEngineGlowUnit) != 0) {
+                eo.show = static_cast<uint8_t>(eo.show & ~0x03u);
+                eo.hide = static_cast<uint8_t>(eo.hide & ~0x03u);
+            }
+            if ((eo.show | eo.hide) != 0) {
+                const assets::ModelAsset& ma = *m->asset;
+                const HardpointLayout& lay = *s.vis.layout();
+                if (!s.use_combined) {
+                    const std::span<const uint8_t> base = s.vis.mask();
+                    s.combined.assign(base.begin(), base.end());
+                }
+                bool changed = false;
+                for (size_t p = 0; p < ma.proxies.size() && p < lay.proxies; ++p) {
+                    const size_t sub = lay.proxy_index(static_cast<uint32_t>(p));
+                    if (sub >= s.combined.size()) continue;
+                    const uint8_t g = particle_emitter_groups(ma.proxies[p].name);
+                    const uint8_t want = (g & eo.hide) != 0 ? uint8_t{1} : (g & eo.show) != 0 ? uint8_t{0} : s.combined[sub];
+                    if (want != s.combined[sub]) {
+                        s.combined[sub] = want;
+                        changed = true;
+                    }
+                }
+                s.use_combined = true;
+                in.mesh_hidden = s.combined;
+                st.script_emitters += changed ? 1u : 0u;
+            }
+        }
+        // bkx1 t05 (b0019 / b0020, BKX1_RENDER_RE §1): the SimpleSpace engine glow - the engine particle proxies by name
+        // prefix (pe / pte / pi) hidden or shown on top of the mask above (engine_glow: TURBO picks pte over pe, engines
+        // off hide G, ion stun shows pi). Only pi is ever un-hidden here: pe / pte keep the mask above, so a destroyed engine
+        // hard point's Hide_Engine_Particles stays. [port] the glow brightness (EngineGlow::tint, SystemScalar::Color) is
+        // not applied.
+        if ((o.engine_flags & kEngineGlowUnit) != 0 && m->asset && s.vis.layout()) {
+            const EngineGlow glow = engine_glow(o.engine_flags, o.engine_timer_frames, o.engine_speed_ratio,
+                                                o.ability_active(9), (o.flags & kSnapDying) != 0);  // 9: TURBO
+            const assets::ModelAsset& ma = *m->asset;
+            const HardpointLayout& lay = *s.vis.layout();
+            if (glow.applies && (glow.hide | glow.show) != 0) {
+                if (!s.use_combined) {
+                    const std::span<const uint8_t> base = s.vis.mask();
+                    s.combined.assign(base.begin(), base.end());
+                }
+                bool changed = false;
+                for (size_t p = 0; p < ma.proxies.size() && p < lay.proxies; ++p) {
+                    const size_t sub = lay.proxy_index(static_cast<uint32_t>(p));
+                    if (sub >= s.combined.size()) continue;
+                    const uint8_t g = particle_glow_group(ma.proxies[p].name);
+                    const uint8_t want = (g & glow.hide) != 0                ? uint8_t{1}
+                                         : (g & glow.show & kGlowPi) != 0 ? uint8_t{0}
+                                                                           : s.combined[sub];
+                    if (want != s.combined[sub]) {
+                        s.combined[sub] = want;
+                        changed = true;
+                    }
+                }
+                if (changed || s.use_combined) {
+                    s.use_combined = true;
+                    in.mesh_hidden = s.combined;
+                    st.engine_glow_changed += changed ? 1u : 0u;
                 }
             }
         }
@@ -453,7 +525,7 @@ void SimInstanceBuilder::build(const InterpolatedFrame& frame, SimModelSource& m
         if (!m) continue;
         Instance in;
         in.model = m;
-        in.transform = projectile_transform(p, table_->valid(p.type) ? &(*table_)[p.type] : nullptr, m);
+        in.transform = projectile_transform(p, table_->valid(p.type) ? &(*table_)[p.type] : nullptr);
         in.motion_id = motion_key(2, p.serial);
         main.push_back(in);
         ++st.projectiles_drawn;
@@ -462,8 +534,7 @@ void SimInstanceBuilder::build(const InterpolatedFrame& frame, SimModelSource& m
     if (stats) *stats = st;
 }
 
-assets::Mat3x4 projectile_transform(const SnapshotProjectile& p, const SnapshotTypeInfo* type, const GpuModel* model) {
-    (void)model;
+assets::Mat3x4 projectile_transform(const SnapshotProjectile& p, const SnapshotTypeInfo* type) {
     return object_transform(p.position, p.direction, type ? type->scale : 1.0f);
 }
 

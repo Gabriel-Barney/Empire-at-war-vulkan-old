@@ -8,9 +8,8 @@
 //   IDD_STORY_SUMMARY_DIALOG        goals + recap lists, Active / Completed radios -> StorySummaryFilter (host refills),
 //                                   Close; Abandon is permanently disabled and has no handler (retail: switched off at
 //                                   creation, no callback case; docs/re/P4_SIM_SYSTEMS.md §9.1)
-//   (IDD_PLANET_INFO, GALACTIC_DIALOGS §9, is GameScreens::show_planet_info in gui_screens.hpp)
-//   IDD_PLANET_DIALOG               [dead in the original, GALACTIC_DIALOGS §9.1: show_planet is kept but unused] name, image, income, political / starbase / ground base level icons (0..4), companies /
-//                                   fleets counts, production item + progress; Organization / Production / Cancel
+//   (IDD_PLANET_INFO, GALACTIC_DIALOGS §9, is GameScreens::show_planet_info in gui_screens.hpp; IDD_PLANET_DIALOG is
+//   dead in the original and not ported)
 //   "holocron" pages (4 tab radios on every page: Droid log / Data chart / Tech tree / Summary; Close / Esc ->
 //   InfoClosed; a tab -> that page + InfoPageChanged):
 //     IDD_DROID_LOG                 log list, droid picture, legend rows IDC_PA_ICONn / IDC_PA_TEXTn, hints check
@@ -27,6 +26,7 @@
 // dots every 2 units along each segment, the y range 0..max(values) (min 0); summary trackbar v scrolls by
 // round(v / 100 * (rows - visible)); missing rows / icons are hidden.
 #pragma once
+#include <array>
 #include <cstdint>
 #include <functional>
 #include <span>
@@ -47,6 +47,7 @@ struct BuyUnitEntry {
     uint32_t owned = 0;
     std::string icon;
     bool can_buy = true;
+    uint32_t type_index = 0;  // mcx4 t04: the host's type index (buy limits, game::skirmish_buy_allowed)
 };
 struct BuyUnitsState {
     int64_t credits = 0;
@@ -88,27 +89,14 @@ struct StorySummaryInfo {
     std::vector<Rgba8> recap_colors;
     int32_t selected = -1;      // goal row preselected (-1 = the last row)
     bool has_completed = true;  // false: the Completed tab is disabled
-};
-
-struct PlanetDialogInfo {
-    uint32_t planet = 0;
-    std::u32string name;
-    std::string image;
-    int64_t credits = -1;
-    std::vector<std::string> political, starbase, ground_base;  // up to 5 icons each
-    // REMAINING_GAPS §6.3 display gates (host: GalacticSim::can_see_starbase_info / can_see_groundbase_info for the local
-    // player): false blanks the IDC_STARBASE_ICON_n / IDC_GROUND_BASE_ICON_n row whatever `starbase` / `ground_base` hold.
-    bool starbase_info = true, groundbase_info = true;
-    std::string companies_icon, fleets_icon;
-    int32_t companies = -1, fleets = -1;
-    std::u32string producing;   // "" = nothing in production
-    float progress = -1.0f;     // 0..1
+    bool show_completed_tab = true;  // mcx4 t14: false (Campaign Show_Completed_Tab False) hides IDC_RADIO_COMPLETED
 };
 
 enum class InfoPage : uint8_t { DroidLog, DataChart, TechTree, SummaryProduction, SummaryFleets, SummaryEconomy };
 
 struct DroidLogInfo {
     std::vector<std::u32string> entries;
+    std::vector<Rgba8> colors;  // mcx4 t14: per-entry text colour (alpha 0 or missing: the skin's font colours)
     std::string picture;
     std::vector<std::pair<std::string, std::u32string>> legend;  // (icon, text) for IDC_PA_ICONn / IDC_PA_TEXTn, n = 0..24
     bool hints = true;
@@ -128,13 +116,19 @@ struct TechTreeItem {
     std::string icon;
     TechState state = TechState::Locked;
 };
-enum class TechFaction : uint8_t { Rebel, Empire, BlackMarket };
 struct TechTreeInfo {
-    TechFaction faction = TechFaction::Empire;
+    // modc t20: the player faction's Tech_Tree_Dialog_Name (FoC IDD_TECH_TREE_REBEL / _EMPIRE / _BLACKMARKET); "" = the
+    // faction has no tech tree (the page does not open).
+    std::string dialog;
     bool space = false;
     // Object type name (the IDC_TECHTREE_<name> suffix) -> item; false hides the control.
     std::function<bool(std::string_view type, TechTreeItem& out)> item;
 };
+// ui4 t07 (HUD_GAPS §10.2, 0x10a250): summary sort keys - 1 planet name (IDC_BUTTON_PLANETARY), 2 base credit value, 3
+// trade-route income, 4 mining income, 5 total income, 6 pop cap, 7 producing, 8 upgrades, 9 land fleets, 10 space fleets.
+inline constexpr size_t kSummarySortKeys = 11;
+// The key of a summary button (IDC_BUTTON_PLANETARY, IDC_BUTTON_BASE_CREDIT_VALUE, ...), 0 for any other control.
+int32_t summary_button_key(std::string_view control);
 struct SummaryProductionRow {
     std::string icon;
     std::u32string name;
@@ -142,11 +136,15 @@ struct SummaryProductionRow {
     std::u32string space_text, ground_text;
     std::vector<std::string> heroes;  // up to 8
     std::u32string pop;
+    // ui4 t07 (HUD_GAPS §10.2): the row's sort values by sort key 1..10 (index 0 unused; key 1 sorts by `name`).
+    std::array<double, kSummarySortKeys> sort{};
 };
 struct SummaryFleetRow {
     std::string icon;
     std::u32string name;
     std::vector<std::string> fleets;  // up to 15
+    // ui4 t07 (HUD_GAPS §10.2): the row's sort values by sort key 1..10 (index 0 unused; key 1 sorts by `name`).
+    std::array<double, kSummarySortKeys> sort{};
 };
 struct SummaryEconomyRow {
     std::string icon;
@@ -154,6 +152,8 @@ struct SummaryEconomyRow {
     std::u32string total, base, trade, mining;
     std::string mining_icon;
     int32_t mining_count = 0;
+    // ui4 t07 (HUD_GAPS §10.2): the row's sort values by sort key 1..10 (index 0 unused; key 1 sorts by `name`).
+    std::array<double, kSummarySortKeys> sort{};
 };
 struct SummaryInfo {
     std::vector<SummaryProductionRow> production;
@@ -167,15 +167,15 @@ namespace dlg {
 inline constexpr const char* kBuyUnits = "IDD_SKIRMISH_BUY_UNITS_DIALOG";
 inline constexpr const char* kStory = "IDD_STORY_DIALOG";
 inline constexpr const char* kStorySummary = "IDD_STORY_SUMMARY_DIALOG";
-inline constexpr const char* kPlanetDialog = "IDD_PLANET_DIALOG";
+inline constexpr const char* kTutorial = "IDD_TUTORIAL_DIALOG";  // ui2 t02
 inline constexpr const char* kDroidLog = "IDD_DROID_LOG";
 inline constexpr const char* kDataChart = "IDD_DATA_CHART";
 inline constexpr const char* kSummaryProduction = "IDD_SUMMARY_SCREEN_PRODUCTION";
 inline constexpr const char* kSummaryFleets = "IDD_SUMMARY_SCREEN_FLEETS";
 inline constexpr const char* kSummaryEconomy = "IDD_SUMMARY_SCREEN_ECONOMY";
 }  // namespace dlg
-// IDD_TECH_TREE_<faction>[_SPACE].
-std::string tech_tree_dialog(TechFaction f, bool space);
+// `dialog` (TechTreeInfo::dialog, the faction's Tech_Tree_Dialog_Name) + "_SPACE" in space; "" when `dialog` is empty.
+std::string tech_tree_dialog(std::string_view dialog, bool space);
 
 class InfoScreens {
 public:
@@ -189,19 +189,31 @@ public:
     // True while lines or cues are still waiting.
     bool update_story(double now, std::vector<StoryDialogCue>* due = nullptr);
     size_t story_lines_shown() const { return story_shown_; }
-    bool story_waiting() const { return story_shown_ < story_.lines.size() || story_cue_ < story_.cues.size(); }
+    // ui2 t02 (TUTORIAL_DIALOG, STORY_PRESENTATION_REWARDS 4): IDD_TUTORIAL_DIALOG with the wrapped text in
+    // IDC_TUTORIAL_TEXT; IDC_CONTINUE only when `continue_button` (-> ScreenAction::TutorialContinue). A second call while it
+    // is open does nothing (retail: 'already up') and returns false.
+    bool show_tutorial(const std::vector<std::u32string>& lines, bool continue_button);
+    bool tutorial_open() const { return gui_ && gui_->find(dlg::kTutorial) != nullptr; }
     bool show_story_summary(const StorySummaryInfo& s);
-    bool show_planet(const PlanetDialogInfo& p);  // IDD_PLANET_DIALOG: never used by the original (GALACTIC_DIALOGS §9.1)
     // The holocron: data for every page, then open one (switching pages keeps the data).
     void set_droid_log(DroidLogInfo d) { droid_ = std::move(d); }
     void set_data_chart(DataChartInfo c) { chart_ = std::move(c); }
     void set_tech_tree(TechTreeInfo t) { tech_ = std::move(t); }
-    void set_summary(SummaryInfo s) { summary_ = std::move(s); }
+    void set_summary(SummaryInfo s) {
+        summary_ = std::move(s);
+        apply_summary_sort();
+    }
     bool show_info(InfoPage page);
     InfoPage info_page() const { return page_; }
     std::string info_dialog() const;  // the open holocron page's dialog, "" when closed
     int32_t chart_mode() const { return chart_mode_; }  // 0 economy, 1 military, 2 planets
     int32_t summary_offset() const { return summary_off_; }
+    // ui4 t07 (HUD_GAPS §10.2): the summary sort. A key sorts the numeric columns largest first and the name A to Z; the
+    // same key again reverses it, a third time restores it. All three summary screens share the key and direction, kept
+    // across opens; set_summary applies them; the scroll position is kept. [port] a stable sort (retail's may reorder ties).
+    void sort_summary(int32_t key);
+    int32_t summary_sort_key() const { return sort_key_; }
+    bool summary_sort_reversed() const { return sort_reversed_; }
     void close_all();
 
     // Data-chart lines over IDC_DATA_CHART_IMAGE (call after GuiManager::build, into the same list). Returns the dots.
@@ -211,11 +223,13 @@ public:
 
 private:
     GuiDialog* go_info(const std::string& name);
+    bool info_dialog(std::string_view n) const;
     void fill_buy(GuiDialog& d);
     void fill_droid(GuiDialog& d);
     void fill_chart(GuiDialog& d);
     void fill_tech(GuiDialog& d);
     void fill_summary(GuiDialog& d);
+    void apply_summary_sort();
     void fill_tabs(GuiDialog& d);
     std::u32string text(std::string_view key, std::u32string_view fallback) const;
     void on_click(const GuiEvent& e, std::vector<ScreenAction>& out);
@@ -228,7 +242,6 @@ private:
     double story_t0_ = -1.0;         // clock start (-1 = not started)
     size_t story_shown_ = 0, story_cue_ = 0;
     void fill_story_lines(GuiDialog& d);
-    uint32_t planet_ = 0;
     DroidLogInfo droid_;
     DataChartInfo chart_;
     TechTreeInfo tech_;
@@ -237,6 +250,8 @@ private:
     std::string info_open_;
     int32_t chart_mode_ = 0;
     int32_t summary_off_ = 0;
+    int32_t sort_key_ = 0;
+    bool sort_reversed_ = false;
 };
 
 }  // namespace alamo::ui

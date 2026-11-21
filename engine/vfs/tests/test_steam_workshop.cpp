@@ -1,7 +1,7 @@
 // alamo_vfs_steam_tests (modc t10): the STEAMMOD= resolver without the Steam API (steam_workshop.hpp) on a synthetic
 // Steam layout in its own temp folder: a client folder whose libraryfolders.vdf lists two more libraries, the FoC
 // install inside one library, workshop items spread over the libraries. No real Steam folder is read (the process-wide
-// lookup is installed with explicit roots).
+// lookup is installed with explicit roots). ums1 t01: InstallLocations (install_locations.hpp) on the same layout.
 #include <cstdio>
 #include <filesystem>
 #include <fstream>
@@ -10,27 +10,20 @@
 #include <vector>
 
 #include "alamo/core/file_provider.hpp"
+#include "alamo/core/host_fs.hpp"
+#include "alamo/vfs/install_locations.hpp"
 #include "alamo/vfs/steam_workshop.hpp"
 #include "alamo/vfs/vfs.hpp"
+#include "alamo/test/support.hpp"
 
 namespace fs = std::filesystem;
 namespace av = alamo::vfs;
 
-static int g_fail = 0;
-#define CHECK(c)                                                     \
-    do {                                                             \
-        if (!(c)) {                                                  \
-            std::printf("FAIL %s:%d: %s\n", __FILE__, __LINE__, #c); \
-            ++g_fail;                                                \
-        }                                                            \
-    } while (0)
+using ::alamo::test::g_fail;
 
 namespace {
 
-void write_file(const fs::path& p, const std::string& s) {
-    fs::create_directories(p.parent_path());
-    std::ofstream(p, std::ios::binary) << s;
-}
+using ::alamo::test::write_file;
 
 std::string u8(const fs::path& p) {
     std::string s = alamo::path_to_utf8(p);
@@ -149,6 +142,42 @@ void test_layout() {
             CHECK(warned(*v, "STEAMMOD=999: workshop item not found; nothing mounted"));
             CHECK(v->describe().find("STEAMMOD=222") != std::string::npos);
         }
+    }
+    // ums1 t01: InstallLocations. MegaFiles.xml makes it a FoC folder; a GameData folder beside it is the EaW install.
+    write_file(foc / "Data" / "MegaFiles.xml", "<Mega_Files/>");
+    write_file(foc.parent_path() / "GameData" / "Data" / "XML" / "x.xml", "EAW");
+    {
+        // A known game folder: the libraries are find_steam_libraries' (FoC's own first).
+        const av::InstallLocations at = av::install_at(u8(foc), roots);
+        CHECK(at.foc == u8(foc) && at.steam_libraries == libs);
+        CHECK(at.eaw == alamo::path_to_utf8(foc.parent_path() / "GameData"));
+        CHECK(at.mods_dir() == alamo::path_to_utf8(foc / "Mods"));
+        CHECK(av::is_foc_dir(u8(foc)) && !av::is_foc_dir(u8(foc.parent_path())) && !av::is_foc_dir(""));
+        CHECK(av::normalize_foc_dir("  \"" + u8(foc.parent_path()) + "\\\"  ") == alamo::path_to_utf8(foc.parent_path() / "corruption"));
+        CHECK(av::normalize_foc_dir(u8(T / "nothing")).empty());
+        // Search: the game is found through the client's libraries (lib1 is named by the client's .vdf).
+        av::InstallInputs in;
+        in.steam_roots = roots;
+        const av::InstallLocations found = av::find_install(in);
+        CHECK(found.foc == alamo::path_to_utf8(fs::path(u8(lib1)) / "steamapps" / "common" / "Star Wars Empire at War" / "corruption"));
+        CHECK(found.steam_libraries.size() == 3 && !found.eaw.empty());
+        // The user's folders come first; a stale one is skipped.
+        const fs::path mine = T / "My FoC" / "corruption";
+        write_file(mine / "StarWarsG.exe", "");
+        fs::create_directories(mine / "Data");
+        in.user_folders = {u8(T / "stale"), u8(mine.parent_path())};
+        const av::InstallLocations user = av::find_install(in);
+        CHECK(user.foc == alamo::path_to_utf8(mine.parent_path() / "corruption") && user.eaw.empty());
+        CHECK(user.steam_libraries.size() == 3);  // no steamapps ancestor: the client's libraries only
+        // Extra libraries (alamo_play's list) are searched after the roots' and kept once; fixed folders last.
+        av::InstallInputs only;
+        only.steam_libraries = {u8(T / "empty_lib"), u8(lib1)};
+        CHECK(av::find_install(only).foc == alamo::path_to_utf8(fs::path(u8(lib1)) / "steamapps" / "common" / "Star Wars Empire at War" / "corruption"));
+        CHECK(av::find_install(only).steam_libraries.size() == 2);
+        av::InstallInputs fixed;
+        fixed.fixed = {u8(T / "nope"), u8(mine)};
+        CHECK(av::find_install(fixed).foc == u8(mine));
+        CHECK(av::find_install(av::InstallInputs{}).foc.empty());
     }
     // The process-wide lookup: off by default (a bare Vfs warns "no workshop resolver"), on once installed, and the
     // caller's own resolver still wins.

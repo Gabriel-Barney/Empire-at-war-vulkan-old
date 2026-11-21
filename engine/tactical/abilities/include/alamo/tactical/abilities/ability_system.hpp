@@ -56,6 +56,11 @@ struct AbilityConfig {
     float nebula_ability_disable_time = 5.0f;   // GameConstants Nebula_Ability_Disable_Time
     float force_ability_disable_time = 0.0f;    // Force_Ability_Disable_Time
     float ion_storm_shield_disable_time = 5.0f; // Ion_Storm_Shield_Disable_Time
+    int32_t max_remote_bombs_per_player = 20;   // mcx4: Max_Remote_Bombs_Per_Player (GC +0x12138; FoC 20)
+    // trl2 t03 (TACTICAL_GAPS §2.3.4): the EARTHQUAKE_TARGET / TELEKINESIS_TARGET ramp-in time in seconds, GameConstants
+    // Earthquake_Transition_Time (+0x2d8, FoC 2.0) / Telekinesis_Transition_Time (+0x2c4, FoC 0.75); no damage before it.
+    float earthquake_transition_time = 2.0f;
+    float telekinesis_transition_time = 0.75f;
     float stealth_detection_time = 0.0f;        // GameConstants +0x12094 (not in vanilla XML) [L]
     float stealth_fire_fade = 0.3f;             // break on firing (0x3a06a0)
     uint64_t corvette_category = 0;             // CategoryMask bit of "Corvette" (tractor x2 rule)
@@ -70,9 +75,11 @@ enum class AbilityEventKind : uint8_t {
     Unhandled,       // type or special class without behaviour in this module (host / later work)
     TargetIssued,    // command 40/57 accepted for this user: attack order + pending ability
     PendingFired,    // the pending targeted ability applied (target in range)
-    Immobilised,     // Disable_Movement counter 0 -> 1 (host stops the unit)
+    // Disable_Movement counter 0 -> 1. cu8l t02: the host runs the first lock's split / adopt (0x3a8e50, MovementSystem::
+    // split_from_formation, else the adopt) when no other share of the counter (script, landing) holds the unit.
+    Immobilised,
     Released,        // ... 1 -> 0
-    InterdictOn,     // story event Interdict_Activated
+    InterdictOn,     // radar map event Interdict_Activated (TRU1_GRAVITY_FIELD 1.2; radar entry: rad1 t06)
     InterdictOff,
     StealthOn,
     StealthBroken,
@@ -92,7 +99,9 @@ enum class AbilityEventKind : uint8_t {
     SpawnObject,
     // ---- OI abilities: host actions, in event order after the tick (the sim state is already changed) ----
     MoveOrder,      // move `id` to `point` (0x2a7b80: HUNT, JET_PACK, CONFUSE, BERSERKER, distract) - not an order cancel
-    StopOrder,      // stop `id` (0x426d50 / 0x39bcb0: DEPLOY, mines, melee holds)
+    // stop `id` (0x426d50 / 0x39bcb0: DEPLOY, mines, melee holds); `value`: kStopPlain / kStopHold / kStopAdopt /
+    // kStopLeave. cu8l t02: `id` may be a TEAM container (kStopHold: the Hack / Repair release of a squad member's team).
+    StopOrder,
     OwnerChanged,   // `id` now belongs to player `value` (Hack, Tactical_Bribe, convert): store / trees / movement
     Deployed,       // DEPLOY on (`value` 1) / off (0): the host's DeployedBehavior / model state
     MineTriggered,  // mine `id` (bound object, may be kNoObject) triggered at `point`: dies and detonates [M]
@@ -112,6 +121,86 @@ enum class AbilityEventKind : uint8_t {
     // s78l t05 (TACTICAL_COMBAT §5.4.1): Tactical_Bribe apply refused for too few credits - the "cannot" event (ability
     // +0x1b8); `id` the user, `target` the target. No conversion, no recharge [M: whether the order is consumed].
     BribeRefused,
+    // cu8f t06 (CU8F_T04_T06_RE §3.1, LURE victim 0x62b270): `id` (a unit, or each live member of a lured team that is not
+    // movement-locked) accepted the lure's ordered attack on `target` (the lure owner; the combat order is already
+    // issued) and joins a new movement coordinator moving (type 3) toward it: the host runs an attack-move to `point` (the
+    // owner's position) with `target` as the goal object, keeping the attack order.
+    Lured,
+    // TRU1 t03 (docs/re/TRU1_GRAVITY_FIELD.md), presentation only: generator `id` came under base power (`value` 1: the
+    // local player's SFXEvent_HUD_Gravity_Control_Generator_On, radar map event Interdict_Activated) or lost it (`value` 0:
+    // ..._Off); unit `target` entered (`value` 1: attach the generator type's Gravity_Control_Field_Effect) or left (`value`
+    // 0: remove it) generator `id`'s field.
+    GravityFieldPower,
+    GravitySlow,
+    // r3g t02 (REMAINING_GAPS §5.2, DEPLOY_TROOPERS 0x591a90 state 5): trooper `id` of owner `target` is released from its
+    // Owner_Attachment_Bone (0x392160) and its LANDING behaviour starts (the rope slide down, Rope Land); the host drops
+    // the bone attachment. The trooper stays movement-locked until its landing ends (`value` = that frame).
+    TrooperReleased,
+    // mcx4 t13 (presentation; MCX4_T13_RE_ANSWERS "Tactical_Bribe_Ability.SFXEvent_Success family", 0x5b07c0): the bribe
+    // was paid for and the target `target` is converted; `id` the user.
+    BribeApplied,
+};
+
+// StopOrder `value` (cu8j t02, MOVEMENT §4.7.2 / §4.7.5): a plain stop; the stop-and-hold 0x3a9880 (leave every
+// coordinator, then the adopt 0x39bcb0: one FormationClass ctor draw; DEPLOY 0x3a1ce0 since skai t19); a stop followed
+// by the adopt only when no coordinator is left (no sender since skai t19).
+inline constexpr int32_t kStopPlain = 0;
+inline constexpr int32_t kStopHold = 1;
+inline constexpr int32_t kStopAdopt = 2;
+// cu8l t02 (A1_READINGS §28.9 "Stop"): the coordinator-system stop 0x4261f0 (INTERDICT / MISSILE_SHIELD with
+// Disable_Movement): stop and leave every coordinator, no adopt (so the first lock that follows adopts: one draw).
+inline constexpr int32_t kStopLeave = 3;
+
+// vis1 t06 (ABILITY_PARTICLES §2-§4): one target visual a special's class ran (the target half of the activation
+// presentation 0x48e4d0, or the stun apply's Stunned_Effect). Presentation only: never hashed, saved or read by the sim.
+enum class AbilityVisualKind : uint8_t {
+    TargetParticle,  // the special's Target_Particle_Effect on `target` (Force_Healing heal / harm, Force_Lightning, Hack, Repair)
+    StunnedEffect,   // Stun_Ability's Stunned_Effect on `target` (each victim the wave stunned)
+};
+struct AbilityVisualEvent {
+    AbilityVisualKind kind = AbilityVisualKind::TargetParticle;
+    uint32_t frame = 0;
+    ObjectId owner = kNoObject;
+    ObjectId target = kNoObject;
+    uint32_t special = 0;  // AbilityData::specials index
+    uint32_t serial = 0;   // 1, 2, ... in record order (the host's cursor; restarts with a new system)
+};
+// aud1 t10: an EffectOn event (the activation presentation 0x48e4d0) as kept for the host after clear_events
+// (AbilitySystem::activation_events). Presentation only.
+struct AbilityActivation {
+    uint32_t frame = 0;
+    uint8_t type = 0;  // AbilityEvent::type (unit-ability type)
+    ObjectId id = kNoObject;
+    ObjectId target = kNoObject;
+    uint32_t serial = 0;  // 1, 2, ... in event order (the host's cursor; restarts with a new system)
+    // mcx4 t15: the AbilityData::specials index of the user's special the unit ability forwarded to (its light
+    // effects); UINT32_MAX when none.
+    uint32_t special = 0xFFFFFFFFu;
+};
+// r3h t01 (ABILITIES_HARDPOINTS §4.15): a clip the ability system starts on an object's model (Play_Animation 0x3a92f0 /
+// ModelClass play 0x265560 calls of the special-ability classes), for the host's animation world. The variant is already
+// resolved (the ability system made any synced 0xFFFF draw), so the host plays it without drawing. Taken by the host in
+// the tick that made it (AbilitySystem::take_anim_plays); never hashed or saved.
+inline constexpr int32_t kAbilityPlayDefaultIdle = -2;  // AbilityAnimPlay::type: the default idle (0x395920), index 0
+struct AbilityAnimPlay {
+    ObjectId id = kNoObject;
+    int32_t type = -1;      // ModelAnimType id, or kAbilityPlayDefaultIdle (index 0, Loop_Idle_Anim_00, speed 1, blend 0)
+    uint32_t variant = 0;
+    uint8_t loop = 0;
+    uint8_t direct = 0;     // ModelClass play called directly (Super_Laser): no lock test, no Berserker redirect
+    // r3h t06: 1 = only when the primary clip is idle-like (0x27b5e0) or this same type, finished (Redirect_Blaster's
+    // Idle_Blockblaster, 0x709c90); the host tests its own world.
+    uint8_t only_from_idle = 0;
+    float blend = 0.0f;     // seconds (0 = hard cut)
+    float speed = 1.0f;
+    uint32_t frame = 0;     // the sim frame of the play
+};
+
+// vis1 t06: an applied special of an object (AbilitySystem::applied_specials).
+struct AppliedSpecialView {
+    uint32_t special = 0;  // AbilityData::specials index
+    ObjectId target = kNoObject;
+    std::span<const ObjectId> victims;  // vis1 t08: the cast's victim list (Drain_Life...); valid until the next tick
 };
 
 struct AbilityEvent {
@@ -131,7 +220,10 @@ enum class SpawnPurpose : uint8_t {
     Mine,           // Proximity_Mines Mine_Type: bind_spawn() makes it a mine (trigger radius, arm frame)
     Wingman,        // REPLENISH_WINGMEN member of `container`
     Troopers,       // DEPLOY_TROOPERS member i of Spawned_Object_Type at Owner_Attachment_Bone i (REMAINING_GAPS §5.2)
-    CaptureVariant, // Vehicle_Thief: the victim's capture variant, owner = the victim's owner (the thief boards it)
+    // Vehicle_Thief: the victim's capture variant, owner = the victim's owner. s78n t12 (HERO_CLASH §8.4.3): the host
+    // kills the victim after a successful spawn and boards the thief into the variant; without a variant type the
+    // thief boards the victim itself (no spawn, no kill).
+    CaptureVariant,
     Summon,         // Summon / Spawn / Buzz_Droids / Radioactive Object_Type after its delay
     BarrageTarget,  // BARRAGE Dummy_Barrage_Target owned by the shooter's first enemy (the host issues the attack)
     // Starbase_Upgrade_Ability service (0x70ec20 -> Do_Starbase_Upgrade 0x70f070, STATION_HANGARS_SOUND.md §1.2):
@@ -144,6 +236,15 @@ enum class SpawnPurpose : uint8_t {
     // -> 2D announcement (own / ally / enemy) -> remove the upgrade object silently. Hull, shields, cooldowns and
     // hangar counts are not carried over.
     StationUpgrade,
+    // cu8f t06 (CU8F_T04_T06_RE §3.1, LURE activate 0x62b190 -> 0x62af80): the LURE record's Particle_Effect at the owner
+    // (position, facing, owner's player), once per team: for an owner outside a team or the first member of its team.
+    // `object_type` -1 (the host resolves record(source, LURE)->particle_effect); bind_spawn() records the object, and
+    // the LURE deactivation (or the owner's death [port]) raises RemoveSilently for it.
+    LureEffect,
+    // mcx4 t06 (Spawn_Ability update 0x71e290, MCX4_RE_ANSWERS_TACTICAL §14): the bomber `object_type` for the owner at
+    // `position` (the user's Spawn_Bone_Name, or its position), facing the user's; the host calls bind_spawn, and the
+    // ability then orders it to move to and attack `target`, and detonates it when it stops.
+    Bomber,
 };
 struct SpawnRequest {
     uint32_t serial = 0;
@@ -159,7 +260,23 @@ struct SpawnRequest {
     // at `position` (the bone) with the owner's facing, runs locomotor vf +0x200, plays anim 0x5f (0 when missing),
     // attaches it at that bone of `source` (0x38d320), sets obj +0x3a2 |= 2, then calls bind_spawn (trooper list).
     int32_t bone = -1;
+    // Troopers (cu8f t06): the deploying unit's squad number (one squad per DEPLOY_TROOPERS spawn, CU8F_T04_T06_RE §3.2).
+    int32_t squad = -1;
+    // LureEffect (cu8g t05): the lure was deactivated before the host bound the effect. The original creates the effect
+    // inside the activation, so its deactivation always kills it; here the object exists only after this tick's host
+    // pass, so bind_spawn refuses a cancelled request and the host removes the new object silently (it keeps its id).
+    bool cancelled = false;
 };
+
+// s78n t02 (TACTICAL_COMBAT §5.4.4 item 1, 0x404450): one member of a land squad container for the joint box - its
+// formation slot offset (container frame: `along` its facing, `side` across; pack +0x114 / +0x118) and its footprint
+// half-extents (0x396850: Custom_Hard_X/YExtent x Scale_Factor, model-box fallback).
+struct SquadSlot {
+    float along = 0.0f, side = 0.0f, hx = 0.0f, hy = 0.0f;
+};
+// The joint box 0x404450: [min x, max x] x [min y, max y] starts at (0, 0, 0, 0) (the container's own point) and grows to
+// hold every slot +/- its half-extents; half-extent = half the span + `jiggle` (the container type's MaxJiggleDistance).
+void squad_joint_half_extents(std::span<const SquadSlot> slots, float jiggle, float& hx, float& hy);
 
 // OI abilities: host queries (all optional; unset ones use the documented fallbacks). Called from the serial tick
 // phases; they must not create or remove objects.
@@ -174,6 +291,9 @@ struct AbilityHost {
     // Battlefield_Modifier list +0x1f8 (TacticalBattle::fog_add_reveal_multiplier / fog_remove_reveal_modifier).
     std::function<void(int32_t player, int32_t category, uint64_t source, float multiplier)> fow_reveal_add;
     std::function<void(int32_t player, uint64_t source)> fow_reveal_remove;
+    // tru3 t05 (Garrison_Upgrade_Ability apply 0x6ffc60 / remove 0x6ffe30): append `types` (list order) to `player`'s
+    // skirmish garrison list (add), or erase the first occurrence of each (remove). Unset: no effect.
+    std::function<void(int32_t player, const std::vector<int32_t>& types, bool add)> garrison_types;
     // ---- REMAINING_GAPS §5 ----
     // §5.1: the first occupant of `vehicle`'s container list (obj +0xf8 -> list +0x20), kNoObject when empty. Unset:
     // no occupant (EJECT_VEHICLE_THIEF does nothing).
@@ -200,9 +320,6 @@ struct AbilityHost {
     // (a unit or its team container) starts circling the cable target between Activation_Min_Range and
     // Activation_Max_Range of the ability record (the host: MovementSystem::start_circling). Unset: no circling.
     std::function<void(ObjectId user, ObjectId target, float r_min, float r_max)> cable_attack;
-    // OI t02 (ABILITIES_HARDPOINTS §4.12 [port]): the map has a water plane above the terrain under `p` (XY). Unset: no
-    // water anywhere (Destroy_When_Stunned_Over_Water never fires).
-    std::function<bool(Vec3 p)> over_water;
     // OI t03 (ABILITIES_HARDPOINTS §4.13 [port]): frame count and fps of animation `anim_type` (a ModelAnimType id; < 0:
     // the XML name `anim_name`, e.g. an Attack_Animation / Toss_Anim value) of `id`'s sim model, variant `variant`.
     // Static model data only, never a playing clock. False when the object has no model or the model lacks the clip.
@@ -210,6 +327,10 @@ struct AbilityHost {
     std::function<bool(ObjectId id, int32_t anim_type, std::string_view anim_name, uint32_t variant, uint32_t& frame_count,
                        float& fps)>
         anim_clip;
+    // r3h t03 (ABILITIES_HARDPOINTS §4.15): the number of variants of animation `anim_type` on `id`'s sim model (the same
+    // static model data as anim_clip; 0 = no clip). A 0xFFFF play draws one synced Get_Int(0, n - 1) when n >= 2. Unset:
+    // [port] one variant when anim_clip finds variant 0 (no draw).
+    std::function<uint32_t(ObjectId id, int32_t anim_type)> anim_variants;
     // OI follow-up t01 (§4.14): the ModelAnimType id of an XML animation name (-1 unknown). Unset: names never resolve
     // (the melee / grenade animations leave no record).
     std::function<int32_t(std::string_view anim_name)> anim_type;
@@ -231,15 +352,56 @@ struct AbilityHost {
     // deploy state and reports every change with set_deploy_state() (DEPLOY Is_Active = Walk state 0x19); unset: [port] the
     // deploy is instant (Is_Active follows the request).
     std::function<bool(ObjectId id, bool on, uint32_t frame)> deploy;
+    // mdu1 t01 (SKAI_T19_MDU_DEPLOY_BLOCK Q1 steps 2-3): DEPLOY's stop-and-hold applied at once, inside the activation call
+    // and before `deploy` - `id` leaves every coordinator (its formation and land attack block stay behind) and is adopted.
+    // True when the host did it. Unset or false: the StopOrder event (kStopHold) carries it to the host after the pass.
+    std::function<bool(ObjectId id, uint32_t frame)> stop_hold_now;
     // S8 t10 (LOB_SOLVER §3.5 "Facing at apply"): 0x3a8710 - snap `id`'s yaw to `yaw_deg` at once (no turn rate; roll and
     // pitch 0). Unset: [port] the facing is not changed.
     std::function<void(ObjectId id, float yaw_deg)> snap_yaw;
+    // mcx4 t23 (MCX4_T10_RE_ANSWERS §12a): Redirect_Blaster's Turn_To_Face_Unblockable_Shots - a facing order to the
+    // victim's locomotor (behaviour 1, vf +0x218) toward the level unit vector `dir`. Unset: the order is not given.
+    std::function<void(ObjectId id, Vec3 dir)> face_direction;
+    // mcx4 t23: `id`'s current primary clip type (0x3956a0) in the host's animation world, -1 none / unknown. Unset: -1.
+    std::function<int32_t(ObjectId id)> primary_clip;
+    // mcx4 (MCX4_T10_RE_ANSWERS §15, 0x3a8f90): put `id` at `pos` at once (a buzz-droid cloud's chase step). The ability
+    // system also moves the combat position. Unset: only the combat position moves.
+    std::function<void(ObjectId id, Vec3 pos)> place;
     // s78l t05 (TACTICAL_COMBAT §5.4.1, Tactical_Bribe 0x5b0ec0 / 0x5b07c0): the current battle's planet is corrupted
     // (0x28a890 -> +0xb8 -> +0x2f4 != -1 [M]). Unset: uncorrupted (Bribe_Modifier_On_Uncorrupted_Planets).
     std::function<bool()> battle_planet_corrupted;
     // The bribe payment: false when `player`'s credits (player +0x70) are below `cost` (nothing changes), else deducts
     // `cost` and returns true. Unset: [port] bribes are free.
     std::function<bool(int32_t player, float cost)> pay_credits;
+    // s78m t08 (TACTICAL_COMBAT §5.4.2 step 5 and "Where P_T is"): `container` is a land squad team container (TEAM with
+    // a LAND_TEAM_CONTAINER locomotor: vf +0x230 true, moving or not): writes its position (the one movement uses) and
+    // returns true. Unset / false: [port] Tactical_Bribe's container test (R + 10) is skipped and the member alone counts.
+    std::function<bool(ObjectId container, Vec3& pos)> land_squad_container;
+    // s78m t05 (TACTICAL_COMBAT §5.4.3 item 4, AI_TACTICAL §7.5.1): 0x39a230 - player `b` is allied with player `a`
+    // (relation a -> b == 0: own player included, a neutral relation 2 is not). Read by the Combat_Bonus accept. Unset:
+    // [port] not enemies in the combat relation table (`allied`).
+    std::function<bool(int32_t a, int32_t b)> allied_players;
+    // s78n t05 (HERO_CLASH §7, TACTICAL_COMBAT §5.4.3 item 1; 0x395c10 step 6): `id` is a build pad whose
+    // under-construction or finished content is set and alive. Read by the Tactical_Bribe accept (step 6, on T). Unset:
+    // no build pads.
+    std::function<bool(ObjectId id)> occupied_build_pad;
+    // s78n t02 (TACTICAL_COMBAT §5.4.4 item 1, 0x404450): a land squad container's joint box for the too-close test
+    // (slot 46): every member's formation slot offset in the container's frame with its footprint half-extents, the
+    // container type's MaxJiggleDistance and the container's facing (yaw as a vector). Unset / false: [port] E_T = 0 (the
+    // port's movement keeps no per-squad slot layout).
+    std::function<bool(ObjectId container, std::vector<SquadSlot>& slots, float& jiggle, Vec3& facing)> land_squad_slots;
+    // s78n t04 (TACTICAL_COMBAT §5.4.4 item 3a): Combat_Bonus Specific_Faction - a faction name's index in the host's
+    // faction registry (-1 unknown) and a player's faction index (-1 unknown). Unset `faction_index`: every name is
+    // unknown (the ability behaves as without the tag, and nothing is logged).
+    std::function<int32_t(std::string_view name)> faction_index;
+    std::function<int32_t(int32_t player)> player_faction;
+    // s78n t04 (§5.4.4 item 3c, apply 0x6fa920 step 1): the player an Enhance_Defense source's owner stands for - the owner,
+    // or the battle's defender (0x28a910) when the owner is the neutral player (0x294aa0); -1 = no entry. Unset: [port]
+    // the owner.
+    std::function<int32_t(int32_t owner)> defense_player;
+    // TRU1 t03 (docs/re/TRU1_GRAVITY_FIELD.md §1.3): player `p`'s faction is Is_Neutral (faction +0x108); the gravity
+    // control field skips such a player in both branches. Unset: no neutral players.
+    std::function<bool(int32_t p)> neutral_player;
 };
 
 // OI abilities: the per-player tactical lists Battlefield_Modifier writes (§2.3.11) besides the reveal range.
@@ -248,6 +410,15 @@ enum class PlayerList : uint8_t {
     StealthDuration = 1,      // +0x268: m - 1 (stealth apply, max-then-sum)
     CaptureTime = 2,          // +0x188 -> +0x288: m - 1
     ReinforcementDeploy = 3,  // +0x18c -> +0x2a8: m - 1
+};
+
+// cu8f t06 (CU8F_T04_T06_RE §3.3 [H]): the per-player tactical bool lists the Battlefield_Modifier Enable_* fields write
+// (each gate is the AND of its list's values; the caller decides what an empty list means: allowed in a campaign battle,
+// disallowed in a skirmish). Values are the stored list numbers (after PlayerList's 0..3).
+enum class PlayerGate : uint8_t {
+    BombingRuns = 4,     // +0x1c8: Enable_Bombing_Runs; Lua PlayerWrapper.Disable_Bombing_Run (0x527550)
+    SpecialWeapons = 5,  // +0x1e0: Enable_Special_Weapons (0x527620)
+    Bombardment = 6,     // +0x250: Enable_Planetary_Bombardment; Lua Disable_Orbital_Bombardment (0x5275a0)
 };
 
 class AbilitySystem final : public combat::CombatHooks {
@@ -259,6 +430,7 @@ public:
 
     const AbilityConfig& config() const { return cfg_; }
     combat::CombatSystem& combat() { return *combat_; }
+    const combat::CombatSystem& combat() const { return *combat_; }
     void reserve(uint32_t objects, uint32_t events = 512);
 
     // ---- objects (host) ----
@@ -301,7 +473,18 @@ public:
     std::span<const ObjectId> members_of(ObjectId container) const;
     bool has_ability(ObjectId id, uint8_t type) const;
     bool is_active(ObjectId id, uint8_t type) const;  // Is_Unit_Ability_Active (0x39b950)
+    // cu8k t01: the object's Saber_Throw data - the Saber_Name projectile (-1 none) and Catch_Dist; false without one.
+    bool saber_params(ObjectId id, int32_t& projectile, float& catch_dist) const;
     bool can_activate(ObjectId id, uint8_t type, bool check_recharge, bool check_nebula, uint32_t frame) const;
+    // sp3 (the AI lane's capture, docs/SIM_PARALLEL_DESIGN.md 11.6): the objects in ascending id order, and per object the
+    // ability types it answers has_ability or is_autofire for (ascending), each with the kLane* bits of its answers at
+    // `frame`: has_ability, is_ready, can_activate(t, true, true), is_active, is_autofire, and two dry runs that act on
+    // nothing - set_unit_ability_mode(on / off) would count the object (its gates 1-3), targeted_ability would count it as a
+    // user (every check but the target's own).
+    static constexpr uint8_t kLaneHas = 1, kLaneReady = 2, kLaneCan = 4, kLaneActive = 8, kLaneAutofire = 16, kLaneModeOn = 32,
+                             kLaneModeOff = 64, kLaneTargeted = 128;
+    void object_ids(std::vector<ObjectId>& out) const;
+    void lane_types(ObjectId id, uint32_t frame, std::vector<std::pair<uint8_t, uint8_t>>& out) const;
     bool is_ready(ObjectId id, uint8_t type, uint32_t frame) const;  // Lua Is_Ability_Ready
     bool is_autofire(ObjectId id, uint8_t type) const;
     const UnitAbilityRecord* record(ObjectId id, uint8_t type) const;  // Get_Unit_Ability_Record (0x397d90)
@@ -310,9 +493,17 @@ public:
     uint8_t countdown_phase(ObjectId id, uint8_t type) const;
     int32_t pending_type(ObjectId id) const;  // -1 none
     ObjectId pending_target(ObjectId id) const;
+    // bkt1 t01 (b0068, BKT1_ATTACK_RE §1.1 [H]): the pending targeted ability's Activation_Min_Range / Activation_Max_Range
+    // (the special named by the pending CRC in the unit's ability list); false when nothing is pending or it is unknown.
+    bool pending_ranges(ObjectId id, float& min_range, float& max_range) const;
     bool is_stealthed(ObjectId id, uint32_t frame) const;  // Is_Stealthed (0x39b140)
     bool tractored(ObjectId id) const;                     // CD +0x132
     bool interdicting(ObjectId id) const;
+    // TRU1 t03 (docs/re/TRU1_GRAVITY_FIELD.md): `id` is slowed by a gravity control field (obj +0x3a1 bit 0x40; also
+    // refuses DEPLOY on); the generator's powered state and the units it slows (add order).
+    bool in_gravity_field(ObjectId id) const;
+    bool gravity_field_on(ObjectId generator) const;
+    std::span<const ObjectId> gravity_field_units(ObjectId generator) const;
     bool interdicted(int32_t player) const;  // some enemy interdict entry targets this player [L]
     int32_t immobilize_count(ObjectId id) const;
     // OI follow-up t01 (§4.14 [port]): the owner's primary-slot animation type as the sim records it after the advance of
@@ -323,16 +514,53 @@ public:
     // R5 jamming visual (presentation only): the applied Sensor_Jamming_Ability of `id` (null when none / dead) and the radius
     // its update jams with (unit ability 63 Effective_Radius, else the type's Passive_Missile_Shield_Radius).
     const SpecialAbilityDesc* jamming_special(ObjectId id, float& radius) const;
+    // vis1 t06 (ABILITY_PARTICLES §10, presentation only): the specials of `id` that are applied now (list order) with
+    // their targets; the description of a specials index; the target visuals of the last kVisualKeepFrames frames
+    // (record order; a host takes the entries whose serial is above the last one it saw).
+    void applied_specials(ObjectId id, std::vector<AppliedSpecialView>& out) const;
+    const SpecialAbilityDesc* special_desc(uint32_t index) const {
+        return index < data_->specials.size() ? &data_->specials[index] : nullptr;
+    }
+    static constexpr uint32_t kVisualKeepFrames = 64;
+    std::span<const AbilityVisualEvent> visual_events() const { return visuals_; }
+    // aud1 t10 (presentation only, like visual_events): the EffectOn events of the last kVisualKeepFrames frames. The
+    // battle clears events() inside its tick (consume_events), so a host reading between ticks takes these, by serial.
+    std::span<const AbilityActivation> activation_events() const { return activations_; }
+    // r3h t01: the clips started since the last take (play order), moved into `out` (cleared first). The battle takes
+    // them right after its combat tick and plays them on its animation world (presentation of the ability record).
+    void take_anim_plays(std::vector<AbilityAnimPlay>& out) {
+        out.clear();
+        out.swap(anim_plays_);
+    }
+    // r3h t04: a clip the host started on `id` outside the ability system (Lua / cinematic Play_Animation, a flinch, a
+    // death): Generic / Arc_Sweep / Eat see their Attack_Animation replaced and abort at their next update (§4.14 "What else
+    // ends them"); the others ignore it. The record ends (type none).
+    void external_play(ObjectId id, uint32_t frame);
+    // r3h t04: the host's animation world shows `type` as `id`'s primary clip after the advance of frame - 1 (the state an
+    // apply of `frame` reads). When the record's view of that frame shows another clip, a play outside the ability system
+    // replaced it (or the world refused the ability's play): external_play. Weapon-shot records and finished views are
+    // not compared.
+    void observe_clip(ObjectId id, int32_t type, uint32_t frame);
+    // r3h t01 (§4.14 "Hold"): an ability clip of the record runs on `id` as of the advance of frame - 1 (not finished, not a
+    // weapon shot): the hold suspends the IDLE behaviour and stops the locomotor, so the host plays no locomotor / idle clip.
+    bool ability_clip_running(ObjectId id, uint32_t frame) const;
     float get_hull(ObjectId id) const { return combat_->script_hull(id); }      // Lua Get_Hull
     float get_shield(ObjectId id) const { return combat_->shield_fraction(id); }  // Lua Get_Shield
 
     // ---- Lua helpers (5) ----
     bool force_recharge(ObjectId id, uint8_t type, float seconds = -1.0f);  // Force_Ability_Recharge
-    bool reset_counter(ObjectId id, uint8_t type);                          // Reset_Ability_Counter [M]
+    // Reset_Ability_Counter (docs/re/MCX8_BINDINGS_OBJECTS.md §Reset_Ability_Counter [H]): a counter that is NOT zero
+    // becomes counter = maximum = 1 frame (true); a zero counter is left alone (false). reset_counters: every ability id.
+    bool reset_counter(ObjectId id, uint8_t type);
+    void reset_counters(ObjectId id);
 
     // ---- host-fed state ----
     void set_nebula(ObjectId id, uint32_t frame);         // CD +0x104: last frame inside a nebula
-    void set_force_disabled(ObjectId id, uint32_t frame); // CD +0x110
+    // CD +0x110, the Force-disable stamp (gate 3, TACTICAL_GAPS §2.3.1a). cu8 t02: the battle stamps it every frame for
+    // objects with has_force_ability() in range of a Disable_Force_Abilities_Range emitter (its only writer).
+    void set_force_disabled(ObjectId id, uint32_t frame);
+    // Some unit ability of the object has the F (Force power) column set (0x3986b0 x 0x43fa30 over the types).
+    bool has_force_ability(ObjectId id) const;
     void set_ion_storm(ObjectId id, uint32_t frame);      // CD +0x100
     // ---- L1 systems: space fields (L1_S4_REMAINING.md §3.3) ----
     void clear_nebula(ObjectId id);     // stamp CD +0x104 := -1 (left the nebula)
@@ -346,12 +574,20 @@ public:
     // CombatHooks: shields neither absorb nor count as up during the ion-storm lockout (0x549ac0).
     bool ion_storm_shields_down(ObjectId victim, uint32_t frame) const override;
     void set_locomotor_busy(ObjectId id, bool busy);      // also the combat flag (no ion stun)
-    void set_abilities_disabled(ObjectId id, bool off);   // SAP +0x28
+    // SAP +0x28, "special abilities disabled" (CU8F_T01_T02_T07_RE.md §1). Its only writer is the Cancel_Special_Ability
+    // class (apply: disable the target, remove: enable it); public for tests / hosts. While set, every manager entry point
+    // returns early (SAP update, activate-by-name, autofire driver / style-9 fallback, Take_Damage listeners, automatic
+    // applies) and gate 5 refuses every unit ability. Set (0x37b9e0, no-op when already set): each enabled, mode-allowed
+    // special of an automatic style (1..5, 12) is cancelled on its live target (remembered for the restore). Clear
+    // (0x37d7f0, no-op when clear): byte first, then per enabled, mode-allowed special in list order: interval > 0 -> one
+    // synced Get_Int(now, now + interval) due frame (the bound RNG; none bound: due = now), then a cancelled effect is
+    // re-applied to its target when that is still live.
+    void set_abilities_disabled(ObjectId id, bool off, uint32_t frame = 0);
+    bool abilities_disabled(ObjectId id) const;
     void set_corrupted(ObjectId id, bool on);             // CORRUPT_SYSTEMS behaviour on the victim
     void set_weapons_disabled(ObjectId id, bool off);     // obj +0x3a0 bit 0x10
     void set_garrison_count(ObjectId id, int32_t n);
     void set_special_enabled(int32_t player, uint32_t ability_name_crc, bool enabled);  // player override
-    void set_player_stealth_bonus(int32_t player, float s);  // player list +0x268 (Stealth_Duration_Multiplier)
     // P4 tactical: campaign Black Market gate (ABILITIES_HARDPOINTS 2.4, 0x39bbd0 / 0x39b0b0; P4_SIM_SYSTEMS 1.5).
     // `name_crcs` = the ability names (name_crc: UnitAbilityRecord::gui_name_crc / SpecialAbilityDesc::name_crc) that
     // are blocked for `player`: the host lists a name when its record has Must_Be_Bought_On_Black_Market, some
@@ -372,7 +608,9 @@ public:
     void set_fog_reveal_all(std::function<void(int32_t player, bool on)> fn) { fog_reveal_all_ = std::move(fn); }
 
     // ---- OI abilities (TACTICAL_GAPS.md §1, §2, §7) ----
-    void set_host(AbilityHost h) { host_ = std::move(h); }
+    // s78n t04: also resolves every Combat_Bonus Specific_Faction through the host's faction_index (the validate
+    // 0x6f4ff0: an unknown name logs "Unrecognized faction given for Specific_Faction value." and is treated as unset).
+    void set_host(AbilityHost h);
     // Objects to create after this tick (cleared by clear_events()); bind_spawn tells which object a request became.
     std::span<const SpawnRequest> spawn_requests() const { return spawns_; }
     bool bind_spawn(uint32_t serial, ObjectId id);
@@ -392,6 +630,9 @@ public:
     // BARRAGE, LUCKY_SHOT, ION_CANNON_SHOT (on the team container) and HUNT when active. Not called for the moves
     // abilities issue themselves (MoveOrder events).
     void order_cancel(ObjectId id, uint32_t frame);
+    // mcx4 (MCX4_T10_RE_ANSWERS §13): `id` got a new move order (0x4f6b60, player or AI; not the moves abilities issue
+    // themselves): the effects of its specials with Terminate_Effect_On_Move_Command end at once.
+    void move_ordered(ObjectId id, uint32_t frame);
     // Autofire setter 0x3a78b0 (command 58 / Lua Set_Single_Ability_Autofire, §1.3): writes the slot byte AND the
     // per-object map entry (keyed by the ability name CRC); refused (false) for records without Supports_Autofire
     // unless the owner is an AI player.
@@ -399,8 +640,12 @@ public:
     // 0x48d5e0: the map entry when set, else true for AI-controlled (non-human) owners.
     bool autofire_on(ObjectId id, uint8_t type) const;
     // Retreat permission (0x282750 / 0x2825e0, §1.5): true while some interdict / Retreat_Prevention entry targets the
-    // player (the original returns the entry's reason code +0x38 [M]).
+    // player (the original returns the entry's reason code +0x38 [M]). cu8 t01: TacticalBattle refuses the player's
+    // retreat (and the auto-resolve stop) while it holds.
     bool retreat_blocked(int32_t player) const;
+    // mcx4 t13 (presentation read; MCX4_PRES_RE_ANSWERS_2 Q4): the kind of the first list entry that blocks `player`'s
+    // retreat: 0 interdict (refusal code 3), 1 Retreat_Prevention (code 4), -1 none.
+    int32_t retreat_block_kind(int32_t player) const;
     // Command 45 RepairHardpointEvent (§1.12): adds `player` as a repairer of the hardpoint (CombatSystem).
     bool repair_hardpoint(ObjectId id, uint32_t hp, int32_t player);
     // Lua Set_Targeting_Priorities(name) on a unit or container (members follow their head): the named
@@ -408,8 +653,24 @@ public:
     bool set_targeting_priorities(ObjectId id, std::string_view set_name);
     // Battlefield_Modifier player lists (max-then-sum over stacking categories, ascending; 0 when empty).
     float player_list(int32_t player, PlayerList l) const;
-    // Weatherproof (§7.4): weather-affected = no entry for the player (every Weatherproof entry is false).
-    bool weather_affected(int32_t player) const;
+    // cu8f t06: the entries of `player`'s list `g` - returns their count (0 = empty) and their AND in `all` (true when
+    // empty). Entries: Battlefield_Modifier Enable_* sources (true, keyed by object + ability) and the Lua entry below.
+    uint32_t player_gate(int32_t player, PlayerGate g, bool& all) const;
+    // Lua PlayerWrapper.Disable_Bombing_Run / Disable_Orbital_Bombardment: one entry per (player, list, key), replaced by
+    // every call, value `allowed` (the Lua bool negated [M high]). No object source.
+    void set_player_gate_entry(int32_t player, PlayerGate g, uint32_t key, bool allowed);
+    // cu8f t06 (CU8F_T04_T06_RE §3.2): live DEPLOY_TROOPERS squads of `id` (deploy pack +0x58: the squads list count; a
+    // squad leaves it once none of its troopers is left in the battle [port: still a combat unit, or still requested]).
+    int32_t trooper_squads(ObjectId id) const;
+    // cu8f t06 (CU8F_T04_T06_RE §3.1): the LURE behaviour of `id` - running (not suspended), pulses made, next pulse frame,
+    // the bound Particle_Effect object (kNoObject: none).
+    bool lure_running(ObjectId id) const;
+    int32_t lure_pulses(ObjectId id) const;
+    uint32_t lure_next(ObjectId id) const;
+    ObjectId lure_effect(ObjectId id) const;
+    // Weatherproof (§7.4): weather-affected = no entry for the player (every Weatherproof entry is false). cu8 t01: the
+    // battle gates the land weather sight and accuracy factors on it (CombatHooks::weather_affected).
+    bool weather_affected(int32_t player) const override;
     bool hunting(ObjectId id) const;     // HUNT behaviour enabled
     bool deployed(ObjectId id) const;    // DEPLOY state (DEPLOY 2 Is_Active)
     // S8 t11: the host's Walk deploy state of `id` (MovementSystem::deploy_state: 0 none, 0x18 Deploying, 0x19 Deployed,
@@ -453,6 +714,7 @@ public:
 
     void tick(uint32_t frame, const TreeSet& trees, SimRng& rng, const ParallelFor& pf = serial_for) {
         combat_->tick(frame, trees, rng, pf);
+        anim_follow_ups(frame, rng);  // r3h t01: the clips that follow a finished one-shot (hold loop / idle)
     }
 
     // ---- CombatHooks ----
@@ -466,9 +728,9 @@ public:
     bool fire_gate(ObjectId shooter, const combat::HardpointDesc* hardpoint, int32_t& projectile, float& damage_scale) override;
     void fire_done(ObjectId shooter, const combat::HardpointDesc* hardpoint, uint32_t frame) override;
     float lucky_shot(ObjectId source, ObjectId victim, int32_t& hardpoint, Vec3 impact, bool has_impact) override;
-    bool damage_listener(ObjectId victim, ObjectId source, int32_t projectile_desc, uint32_t frame, SimRng* rng) override;
-    void hardpoint_destroyed(ObjectId owner, uint32_t index, combat::HardpointKind kind, bool last_of_kind,
-                             uint32_t frame) override;  // = hardpoint_offline(..., destroyed = true, ...)
+    bool damage_listener(ObjectId victim, ObjectId source, const combat::ListenerShot& shot, uint32_t frame, SimRng* rng) override;
+    // mcx4 (§15): the Inaccuracy_Radius of the Corrupt_Systems ability corrupting `shooter` (lowest user id first).
+    bool corrupt_inaccuracy(ObjectId shooter, float& radius) const override;
     // Set_System_Online (0x384d00) ability side, HARDPOINT_DISABLED.md §9: offline (destroyed or disabled) / online.
     void hardpoint_offline(ObjectId owner, uint32_t index, combat::HardpointKind kind, bool last_of_kind, bool destroyed,
                            uint32_t frame) override;
@@ -507,7 +769,10 @@ private:
         float radius = 0.0f;  // wave radius / sweep angle
         float value = 0.0f;   // stored damage D
         Vec3 point;           // target point
-        std::vector<ObjectId> victims;  // per-cast id list (waves, lightning, drain)
+        std::vector<ObjectId> victims;  // per-cast id list (waves, lightning, drain; Cancel_Special: the disabled targets)
+        // cu8f t01: the target an abilities-disabled cancel removed this effect from (Restore re-applies it there on
+        // enable); kNoObject = nothing to restore. Hashed and saved only when set.
+        ObjectId restore = kNoObject;
     };
     struct Obj {
         ObjectId id = kNoObject;
@@ -551,6 +816,13 @@ private:
         // ---- REMAINING_GAPS §5 ----
         int32_t troopers_deployed = 0;  // §5.2 DEPLOY_TROOPERS behaviour data +0x40
         std::vector<ObjectId> troopers; // §5.2 trooper list +0x10 (bound ids)
+        // ---- cu8f t06 ----
+        std::vector<int32_t> trooper_squads;  // squad number of each trooper (parallel to `troopers`, CU8F §3.2)
+        int32_t squads_formed = 0;            // squad numbers handed out (one per DEPLOY_TROOPERS spawn)
+        uint8_t lure_on = 0;                  // LURE behaviour running (suspend counter 0; CU8F §3.1)
+        int32_t lure_pulses = 0;              // LureDataPack +8: pulses made
+        uint32_t lure_next = 0;               // LureDataPack +0xc: next pulse frame
+        ObjectId lure_effect = kNoObject;     // LureDataPack +0x18: the Particle_Effect object
         // ---- OI follow-up t01 (§4.14 [port]): the clip the ability system last started in the owner's primary slot, on
         // sim frames (no playing clock is read). anim_type -1 = none (no play yet, or none with clip data).
         int32_t anim_type = -1;
@@ -560,12 +832,36 @@ private:
         uint8_t anim_loop = 0;
         uint8_t anim_then = 0;    // after a one-shot finishes: kAnimStay / kAnimIdle / kAnimHoldLoop
         uint8_t lock_flags = 0;   // OI follow-up t04: which 0x3a8e50 pairs hold a lock (kLock*)
+        // ---- TRU1 t03: GRAVITY_CONTROL_FIELD (docs/re/TRU1_GRAVITY_FIELD.md) ----
+        uint32_t gravity_due = 0;            // generator: next service frame (interval 60)
+        uint8_t gravity_on = 0;              // generator: powered state of the last service (pack +0x48)
+        uint8_t in_gravity_field = 0;        // victim: obj +0x3a1 bit 0x40 (slowed by some generator)
+        std::vector<ObjectId> gravity_list;  // generator: the units it slows, in the order they were added (pack +0x30)
+        // ---- r3g t02: the timed DEPLOY_TROOPERS machine (owner) and the trooper's rope landing ----
+        uint8_t troop_state = 0;   // owner: 0 idle, 1 wait stopped, 2 wait deployed, 3 Drop Rope, 4 spawn, 5 Deploy
+                                   // Troopers, 8 Lift Rope (0x591a90 states; 6 / 7 folded into 5 -> 8 [port])
+        uint8_t troop_deploy = 0;  // owner: this deploy asked the locomotor to deploy (undeployed at the end)
+        uint32_t troop_end = 0;    // owner: the frame the playing clip reports finished
+        uint8_t rope_state = 0;    // trooper: 0 none, 1 hanging on the bone, 2 sliding down / Rope Land, 3 hanging, lock
+                                   // not taken yet (spawned this tick)
+        uint32_t rope_end = 0;     // trooper: the frame its LANDING ends (unlocked, joins the coordinator)
+        float rope_z = 0.0f;       // trooper: the bone height it was created at
+        ObjectId rope_owner = kNoObject;
+        uint8_t cable_holds = 0;   // r3g t04: cables holding this walker paralyzed (kLockCable while > 0; 0x3a8e50 counts)
     };
     static constexpr uint8_t kAnimStay = 0;      // parks at its end (Super_Laser)
     static constexpr uint8_t kAnimIdle = 1;      // the owner returns to idle: the record ends
     static constexpr uint8_t kAnimHoldLoop = 2;  // begin -> hold: animation type + 1 loops (FB / FTK / Force_Revel)
+    // r3h t01: what the host plays when the one-shot finishes (anim_view treats them as kAnimIdle: the record ends).
+    static constexpr uint8_t kAnimIdleLoop0 = 3;     // Idle (type 0) loop, 0xFFFF, blend 0.2 (FB / FTK release end)
+    static constexpr uint8_t kAnimIdleService = 4;   // nothing: the IDLE behaviour replaces it (Force_Revel_End, Hack)
+    static constexpr uint8_t kAnimWeaponShot = 5;    // a weapon shot's Attack (the host played it): never mirrored
+    static constexpr uint32_t kDrawVariant = 0xFFFF;  // play_anim: index 0xFFFF (one synced draw when >= 2 variants)
     static constexpr uint8_t kLockGrenade = 1, kLockDeploy = 2, kLockSelfDestruct = 4, kLockConfuse = 8;
     static constexpr uint8_t kLockRemoteBomb = 16;  // S8 t06: the Remote_Bomb toss (LOB_SOLVER §3.5)
+    static constexpr uint8_t kLockCable = 32;       // r3g t04: a cable-paralyzed walker (0x6f3800 -> 0x3a8e50(target, 1))
+    static constexpr uint8_t kLockTroops = 64;      // r3g t02: DEPLOY_TROOPERS activate 0x58f6a0 .. release 0x58f600
+    static constexpr uint8_t kLockRope = 128;       // r3g t02: a trooper on its rope until its LANDING ends
     // The owner's primary slot as of the advance of `frame` (type -1 = none: every gate passes).
     struct AnimView {
         int32_t type = -1;
@@ -584,6 +880,19 @@ private:
         float detect = 0.0f;    // its own detection range (0x3979d0) [port: Trigger_Radius x 2]
         uint32_t arm = 0;
         uint8_t detected = 0, dead = 0;
+    };
+    // mcx4 (MCX4_T10_RE_ANSWERS §15): BuzzDroidsBehavior (vf6 0x6379a0) on a spawned Buzz_Droids Object_Type: its pack
+    // (+0x228), filled by the apply 0x71c430.
+    struct BuzzCloud {
+        uint32_t serial = 0;     // spawn request
+        ObjectId id = kNoObject;
+        uint32_t made = 0;       // frame of the request (unbound past it: dropped)
+        uint32_t end = 0;        // pack +8: active from this frame on
+        float chase = 0.0f;      // +0xc Chase_Radius
+        float radius = 0.0f;     // +0x10 Damage_Radius
+        float own = 0.0f;        // +0x28 Own_Damage_Per_Second
+        float enemy = 0.0f;      // +0x2c Enemy_Damage_Per_Second
+        Vec3 point;              // +0x30 the target position
     };
     struct PlayerEntry {  // Battlefield_Modifier player-list entry (append insert 0x38c850, permanent)
         int32_t player;
@@ -627,12 +936,19 @@ private:
     void start_recharge(Obj& o, uint32_t t);
     void deactivate_early(Obj& o, uint32_t t, uint32_t frame);
     void update_countdown(Obj& o, uint32_t frame);
+    // TRU1 t03 (gravity_field.cpp): GRAVITY_CONTROL_FIELD service (vf6 0x61c700), apply (0x61bec0), release.
+    void gravity_service(Obj& g, uint32_t frame);
+    void gravity_apply(Obj& g, uint32_t frame);
+    void gravity_release(Obj& g, Obj& victim, uint32_t frame);
+    void gravity_release_all(Obj& g, uint32_t frame);
+    void gravity_unit_dying(Obj& o, uint32_t frame);
     void expire(Obj& o, uint32_t t, uint32_t frame);
     Vec3 position(const Obj& o) const;
     bool alive_unit(ObjectId id) const;
 
     // special abilities
     SpecialState* special_by_crc(Obj& o, uint32_t crc);
+    const SpecialState* special_by_crc(const Obj& o, uint32_t crc) const;
     bool allowed(const SpecialAbilityDesc& s) const;
     bool enabled(int32_t player, const SpecialAbilityDesc& s) const;
     bool enabled(const Obj& o, const SpecialAbilityDesc& s) const;  // + the (player, type) override (§9.6)
@@ -644,7 +960,9 @@ private:
     // s78l t05: Tactical_Bribe accept (0x5b0f70) and cost (0x5b0ec0; -1 = no cost data, [port] free).
     bool bribe_accepts(const Obj& o, ObjectId target) const;
     float bribe_cost(const Obj& o, ObjectId target) const;
-    bool in_range(const Obj& o, const SpecialAbilityDesc& s, ObjectId target) const;
+    // s78m t08 (TACTICAL_COMBAT §5.4.2): Target_In_Range and not Must_Close_Range; `container` = the target's team
+    // container for Tactical_Bribe's container-or-member rule (kNoObject: the target alone).
+    bool in_range(const Obj& o, const SpecialAbilityDesc& s, ObjectId target, ObjectId container = kNoObject) const;
     bool apply(Obj& o, SpecialState& sp, ObjectId target, int32_t hp, uint32_t frame);
     void update_special(Obj& o, SpecialState& sp, uint32_t frame);
     void remove_special(Obj& o, SpecialState& sp, uint32_t frame);
@@ -670,9 +988,12 @@ private:
     int32_t draw_int(int32_t lo, int32_t hi);
     bool allied(int32_t a, int32_t b) const { return a == b || (a >= 0 && b >= 0 && !combat_->is_enemy(a, b)); }
     bool enemy(int32_t a, int32_t b) const { return combat_->is_enemy(a, b); }
+    // s78n t07: the retail ally test (0x39a230 / 0x39a2c0 / 0x6f1130: relation == 0, own player included, a neutral
+    // relation-2 player is not allied) through the host's `allied_players` hook; unset: [port] `allied` (not enemies).
+    bool friendly(int32_t a, int32_t b) const { return host_.allied_players ? host_.allied_players(a, b) : allied(a, b); }
     bool moving(const Obj& o) const;
     void move_order(ObjectId id, Vec3 p, uint32_t frame, uint8_t type = 0);  // type: the ability issuing it (event)
-    void stop_order(ObjectId id, uint32_t frame);
+    void stop_order(ObjectId id, uint32_t frame, int32_t hold = kStopPlain);
     void change_owner(Obj& o, int32_t owner, uint32_t frame);
     uint32_t request_spawn(SpawnRequest r);
     float max_health_and_shield(ObjectId id) const;
@@ -682,7 +1003,9 @@ private:
     void aura_on(Obj& src, SpecialState& sp, uint32_t frame);
     void aura_off(Obj& src, SpecialState& sp, uint32_t frame);
     void aura_give(const Obj& src, const SpecialAbilityDesc& s, ObjectId target);
-    bool aura_target(const Obj& src, const SpecialAbilityDesc& s, const Obj& t) const;
+    bool aura_target(const Obj& src, uint32_t di, const Obj& t) const;  // di: AbilityData::specials index
+    // s78n t04 (§5.4.4 item 3c): Enhance_Defense's apply 0x6fa920 - permanent list-0 entries in the players' sets.
+    void enhance_defense_apply(Obj& src, SpecialState& sp, uint32_t frame);
     float player_reduce(int32_t player, uint8_t list) const;
     // unit-ability handler bodies (§2.1) and behaviours (§2.2)
     bool team_gates(Obj& o, uint32_t t, uint32_t frame);
@@ -694,10 +1017,32 @@ private:
     void h_instant(Obj& o, uint32_t t, ObjectId target, uint32_t frame);
     void h_eject_thief(Obj& o, uint32_t frame);                                // REMAINING_GAPS §5.1
     void deploy_troopers(Obj& o, const UnitAbilityRecord& r, uint32_t frame);  // §5.2 (state 4 -> 0x590730)
+    void troopers_service(Obj& o, uint32_t frame);   // r3g t02: the timed DEPLOY_TROOPERS states
+    void rope_service(Obj& t, uint32_t frame);       // r3g t02: a trooper's rope landing
+    uint32_t clip_finish(ObjectId id, int32_t anim_type) const;  // r3g t02: sim frames until a one-shot finishes (0 none)
+    void release_troopers(Obj& o, uint32_t frame);  // r3g t02: state 5's end (0x392160 + LANDING resume)
+    void troopers_abort(Obj& o, uint32_t frame);    // r3g t02: the machine's end / abort (unlock, undeploy)
+    void rope_release(Obj& t, uint32_t frame, uint32_t rope_end);  // r3g t02: off the bone, TrooperReleased
     SpecialState* blast_state(Obj& o);                                         // §5.5: the applied Blast, if any
     void h_behavior(Obj& o, uint32_t t, bool on, uint32_t frame);
     void behaviors_service(Obj& o, uint32_t frame);  // HUNT, SELF_DESTRUCT, CONFUSE expiry
     void hunt_decide(Obj& o, uint32_t frame);
+    // cu8f t06 (CU8F_T04_T06_RE §3.1 / §3.2): LURE activate / deactivate / service / pulse / victim, the live squad count.
+    void lure_activate(Obj& o, uint32_t frame);
+    void lure_deactivate(Obj& o, uint32_t frame);
+    void lure_service(Obj& o, uint32_t frame);
+    void lure_pulse(Obj& o, const UnitAbilityRecord& r, uint32_t frame);
+    void lure_victim(Obj& o, ObjectId v, uint32_t frame);
+    int32_t live_squads(const Obj& o) const;
+    // cu8f t06 (§3.3): the Enable_* entries of a Battlefield_Modifier source (push = apply, else delete by source).
+    void gate_entries(const Obj& src, const SpecialAbilityDesc& s, bool push);
+    // cu8g t05 (§3.3): every entry of a Battlefield_Modifier source (reveal list, float lists, Enable_* lists): push =
+    // apply, else delete by source; Reverse_Application_Logic swaps which of apply / remove pushes (the caller's choice).
+    void modifier_entries(const Obj& src, uint32_t desc, const SpecialAbilityDesc& s, bool push);
+    // cu8f t06 (§3.4): one Turn_Toward yaw step of the owner toward `target` (rate <= 0: the type's turn rate) and the
+    // Firing_Cone test.
+    void super_laser_turn(Obj& o, const SpecialAbilityDesc& s, ObjectId target);
+    bool super_laser_in_cone(const Obj& o, const SpecialAbilityDesc& s, ObjectId target) const;
     void confuse(Obj& v, float secs, uint32_t frame);
     void mines_update(uint32_t frame);
     // special-ability class bodies (ability_classes.cpp)
@@ -705,12 +1050,15 @@ private:
     bool class_apply(Obj& o, SpecialState& sp, ObjectId target, int32_t hp, uint32_t frame);
     void class_update(Obj& o, SpecialState& sp, uint32_t frame);
     void class_remove(Obj& o, SpecialState& sp, uint32_t frame);
+    // mcx4 t06 (Spawn_Ability, §14): the detonation 0x71dff0 (also the remove) and the object-removed notice 0x71de50.
+    void spawn_detonate(Obj& o, SpecialState& sp, uint32_t frame);
+    void spawn_object_removed(ObjectId id);
     // S8 t06 (LOB_SOLVER §3.5): Remote_Bomb range object (the target's garrison host when garrisoned), the toss 0x71a200
     // (true = a bomb spawned) and its launch point (garrison gun bones within 60°, Spawn_Bone, else position + z adjust).
     ObjectId remote_bomb_range_target(ObjectId target) const;
     bool remote_bomb_toss(Obj& o, const SpecialAbilityDesc& s, ObjectId target, uint32_t frame);
     Vec3 remote_bomb_launch(Obj& o, const SpecialAbilityDesc& s, ObjectId target);
-    bool range_ok(const Obj& o, const SpecialAbilityDesc& s, ObjectId target) const;
+    bool range_ok(const Obj& o, const SpecialAbilityDesc& s, ObjectId target, bool with_container = false) const;
     void heal_pass(Obj& o, const SpecialAbilityDesc& s, uint32_t frame);
     uint32_t wave_victims(Obj& o, SpecialState& sp, float radius, std::vector<ObjectId>& out);
     // OI t03: an animation's timing on sim frames (§4.13). rate = clip frames per sim frame at speed 1 (clip fps / 30,
@@ -723,26 +1071,49 @@ private:
     };
     ClipTiming clip_timing(ObjectId id, int32_t anim_type, std::string_view anim_name, uint32_t variant = 0) const;
     // OI follow-up t01 (§4.14 [port]): start a clip in the owner's record (type < 0: resolve `anim_name`). Without clip
-    // data nothing changes (as the original play returns 0 for a missing clip). No synced draw: variant 0 unless given.
-    void play_anim(Obj& o, int32_t type, std::string_view anim_name, uint32_t variant, bool loop, float speed, uint8_t then,
-                   uint32_t frame);
+    // data nothing changes (as the original play returns 0 for a missing clip). r3h t03: variant kDrawVariant = one synced
+    // draw when the clip has >= 2 variants; r3h t01: the play is also queued for the host (AbilityAnimPlay) unless `then`
+    // is kAnimWeaponShot. `direct`: ModelClass play called directly (no lock, no Berserker redirect).
+    uint32_t play_anim(Obj& o, int32_t type, std::string_view anim_name, uint32_t variant, bool loop, float speed, uint8_t then,
+                   uint32_t frame, float blend = 0.0f, bool direct = false);
+    // r3h t01: a play without a record (victims: FW_Attack, Eat's grab; Contaminate / Heal / Hack users ...): queued for the
+    // host when `id`'s model has the clip, variant kDrawVariant drawn as play_anim does. True when queued.
+    bool queue_play(ObjectId id, int32_t type, uint32_t variant, bool loop, float blend, float speed, uint32_t frame,
+                    bool only_from_idle = false);
+    uint32_t resolve_variant(ObjectId id, int32_t type, uint32_t variant);  // kDrawVariant -> the draw; else as given
+    uint32_t variant_count(ObjectId id, int32_t type) const;
+    void anim_follow_ups(uint32_t frame, SimRng& rng);  // r3h t01: plays that follow a one-shot finishing at `frame`
+    std::vector<AbilityAnimPlay> anim_plays_;          // r3h t01: plays waiting for the host (saved, not hashed)
     AnimView anim_view(const Obj& o, uint32_t frame) const;
     // Apply gates read the previous frame's advance (Object Service advances the model before the SAP update).
     AnimView anim_before(const Obj& o, uint32_t frame) const { return anim_view(o, frame > 0 ? frame - 1 : 0); }
     int32_t anim_type_of(std::string_view anim_name) const;
     bool anim_busy(const Obj& o, uint32_t frame) const;  // 0x39a350
     bool class_state(const Obj& o, SpecialClass cls) const;  // a special of that class is applied on the owner
+    // trl2 t03 (TACTICAL_GAPS §2.3.4): `target`'s EARTHQUAKE_TARGET / TELEKINESIS_TARGET state is 1 or 2 - an applied
+    // effect of that class from any user other than `except` holds it (Earthquake's accepts: kNoObject; Telekinesis's
+    // apply: the user, whose own effect was removed just before).
+    bool target_affected(ObjectId target, SpecialClass cls, ObjectId except) const;
     bool class_has(const Obj& o, SpecialClass cls) const;    // the owner lists a special of that class
     bool locked(const Obj& o) const;  // 0x39ad40: this system's share or the host's (script lock, forced move)
+    // mcx4 (§15): the member that acts for Hack / Repair (Team_Member_With_Ability), else `o` itself.
+    ObjectId acting_member(const Obj& o, const SpecialAbilityDesc& s) const;
+    // mcx4 t23 (0x4cca10): Redirect_Blaster's new shot - at `target` (a redirect), or kNoObject: sent back with `angle`.
+    bool redirect_shot(ObjectId victim, ObjectId target, const combat::ListenerShot& shot, float angle, uint32_t frame,
+                       SimRng& rng);
     void snap_face(Obj& o, ObjectId target);  // S8 t10: 0x20acd0 + 0x3a8710 at a thrown ability's apply (LOB_SOLVER §3.5)
     void lock_pair(Obj& o, uint8_t flag, bool lock, uint32_t frame);  // a 0x3a8e50 lock / unlock pair of one caller
     void lightning_targets(Obj& o, const SpecialAbilityDesc& s, ObjectId primary, std::vector<ObjectId>& out);
 
     AbilityHost host_;
+    // s78n t04: Specific_Faction per special (AbilityData::specials index) resolved by set_host; -1 = unset / unknown.
+    std::vector<int32_t> specific_faction_;
     SimRng* rng_ = nullptr;  // synced RNG for draws outside a tick (bind_rng) and inside (the hooks' rng)
     std::vector<SpawnRequest> spawns_;
     uint32_t spawn_serial_ = 1;
     std::vector<Mine> mines_;
+    std::vector<BuzzCloud> buzz_;  // mcx4: live buzz-droid clouds, request order
+    void buzz_update(uint32_t frame);
     std::vector<PlayerEntry> player_entries_;
     std::vector<SourceEntry> source_entries_;
     std::vector<RemoteBomb> remote_bombs_;
@@ -761,6 +1132,11 @@ private:
     AbilityConfig cfg_;
     std::vector<Obj> objs_;  // sorted by id
     std::vector<AbilityEvent> events_;
+    std::vector<AbilityVisualEvent> visuals_;  // vis1 t06: presentation only (not hashed / saved; visual_events())
+    uint32_t visual_serial_ = 0;               // vis1 t06: the last AbilityVisualEvent::serial
+    void visual(AbilityVisualKind k, uint32_t frame, ObjectId owner, ObjectId target, uint32_t special);
+    std::vector<AbilityActivation> activations_;  // aud1 t10: presentation only (not hashed / saved)
+    uint32_t activation_serial_ = 0;
     std::vector<PlayerOverride> overrides_;
     struct TypeOverride {
         int32_t player;
@@ -769,7 +1145,6 @@ private:
         uint8_t enabled;
     };
     std::vector<TypeOverride> type_overrides_;  // insertion order; hashed only when non-empty
-    std::vector<float> stealth_bonus_;  // per player
     std::vector<std::vector<uint32_t>> bm_blocked_;  // P4 tactical: per player, sorted unique name CRCs
     std::function<void(int32_t, bool)> fog_reveal_all_;  // fog follow-up (Force Sight)
 };

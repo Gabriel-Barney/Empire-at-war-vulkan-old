@@ -224,7 +224,7 @@ bool Gltf::load(const std::string& path, std::string* err) {
         const Json* type = a.get("type");
         const std::string t = type ? type->str : "";
         comps = t == "SCALAR" ? 1 : t == "VEC2" ? 2 : t == "VEC3" ? 3 : t == "VEC4" ? 4 : t == "MAT4" ? 16 : 0;
-        const size_t csize = ct == 5126 ? 4 : ct == 5123 ? 2 : ct == 5125 ? 4 : ct == 5121 ? 1 : 0;
+        const size_t csize = static_cast<size_t>(ct == 5126 ? 4 : ct == 5123 ? 2 : ct == 5125 ? 4 : ct == 5121 ? 1 : 0);
         const size_t nc = static_cast<size_t>(comps);
         if (!nc || !csize || off + count * nc * csize > bin.size()) return false;
         out.resize(count * nc);
@@ -380,7 +380,7 @@ std::vector<std::vector<double>> Gltf::posed_positions(int frame, bool skip_root
         std::vector<double> v(p.positions.size());
         for (size_t i = 0; i * 3 < p.positions.size(); ++i) {
             const double in[3] = {p.positions[i * 3], p.positions[i * 3 + 1], p.positions[i * 3 + 2]};
-            const Dmat4& m = p.skinned ? jm[p.joints[i] < jm.size() ? p.joints[i] : 0] : g[static_cast<size_t>(p.node)];
+            const Dmat4& m = p.skinned ? jm[p.joints[i] < jm.size() ? static_cast<size_t>(p.joints[i]) : size_t{0}] : g[static_cast<size_t>(p.node)];
             m.apply(in, &v[i * 3]);
         }
         out.push_back(std::move(v));

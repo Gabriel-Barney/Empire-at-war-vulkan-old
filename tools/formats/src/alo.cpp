@@ -26,6 +26,11 @@ Mat34 read_mat34(ByteReader& r) {
 
 struct Ctx {
     Model& model;
+    const ParseOptions* opt = nullptr;  // salvage mode (D5, mcx2 t03) when opt && opt->salvage
+    bool salvage() const { return opt && opt->salvage; }
+    void note(const char* rule, const std::string& detail) const {
+        if (opt) opt->note(rule, detail);
+    }
     void unknown(const std::string& parent, const Chunk& c) {
         model.unknown.push_back({parent.empty() ? hex_id(c.id) : parent + "/" + hex_id(c.id), c.offset, c.data.size()});
     }
@@ -272,12 +277,29 @@ SubMesh parse_submesh_data(const Chunk& c, Material&& mat, Ctx& ctx) {
             const float ws[4] = {w.x, w.y, w.z, w.w};
             for (int k = 0; k < std::max(1, sm.format.bone_influences); ++k) {
                 if (k > 0 && ws[k] == 0.f) continue;
-                if (bi[static_cast<std::size_t>(k)] >= sm.bone_map.size())
-                    throw FormatError("skin bone index out of range of bone map", c.offset);
+                if (bi[static_cast<std::size_t>(k)] >= sm.bone_map.size()) {
+                    if (!ctx.salvage()) throw FormatError("skin bone index out of range of bone map", c.offset);
+                    // Retail draws such a model like the intact one (compat_assets run 3, docs/re/MCX2_T02 3); the
+                    // influence goes to bone-map entry 0 [port: retail's out-of-range read is not reproduced].
+                    sm.vertices.bone_index[v][static_cast<std::size_t>(k)] = 0;
+                    ctx.note("alo_skin_index_clamped", "vertex " + std::to_string(v));
+                }
             }
         }
     }
-    if (collision) sm.collision = parse_collision(*collision, sm.declared_primitives);
+    if (collision) {
+        if (!ctx.salvage()) {
+            sm.collision = parse_collision(*collision, sm.declared_primitives);
+        } else {
+            // A broken collision tree: retail draws the model like the intact one (compat_assets run 3); the port
+            // drops the tree, so hit tests use the submesh without it [port].
+            try {
+                sm.collision = parse_collision(*collision, sm.declared_primitives);
+            } catch (const FormatError& e) {
+                ctx.note("alo_collision_dropped", e.what());
+            }
+        }
+    }
     return sm;
 }
 
@@ -528,7 +550,7 @@ std::uint32_t Model::mesh_bone(std::uint32_t mesh_index) const {
     return 0;
 }
 
-AloFile parse(Bytes data) {
+AloFile parse(Bytes data, const ParseOptions& opt) {
     AloFile f;
     auto top = top_level_chunks(data);
     auto first = top.next();
@@ -541,9 +563,20 @@ AloFile parse(Bytes data) {
         return f;
     }
     f.kind = AloFile::Kind::Model;
-    Ctx ctx{f.model};
+    Ctx ctx{f.model, &opt};
     bool skeleton = false, connections = false;
-    for (std::optional<Chunk> c = first; c; c = top.next()) {
+    // Salvage (Defiler shape): once the skeleton and the connections are read, a top-level chunk that overruns the
+    // file ends the model; retail draws such a model like the intact one (compat_assets run 3).
+    auto next = [&]() -> std::optional<Chunk> {
+        if (!(ctx.salvage() && skeleton && connections)) return top.next();
+        try {
+            return top.next();
+        } catch (const FormatError& e) {
+            ctx.note("alo_trailing_junk", e.what());
+            return std::nullopt;
+        }
+    };
+    for (std::optional<Chunk> c = first; c; c = next()) {
         switch (c->id) {
             case 0x200:
                 if (skeleton) throw FormatError("duplicate skeleton", c->offset);

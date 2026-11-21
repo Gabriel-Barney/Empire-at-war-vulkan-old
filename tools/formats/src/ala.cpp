@@ -84,9 +84,71 @@ BoneTrack parse_bone(const Chunk& c, Animation& a) {
     return b;
 }
 
+// Salvage (see ala.hpp): replays retail's read of one block channel (k elements per track) into a block that fits.
+template <class T>
+void replay_channel(Animation& a, std::vector<T>& data, std::uint32_t& block, std::uint16_t BoneTrack::*index,
+                    std::uint32_t k, const char* channel, const ParseOptions& opt) {
+    const std::uint64_t nf = a.num_frames;
+    std::size_t tracks = 0;
+    bool fits = data.size() == nf * block;
+    for (const auto& b : a.bones) {
+        if (b.*index == 0xFFFF) continue;
+        ++tracks;
+        fits = fits && nf > 0 && std::uint64_t(b.*index) + k <= block;
+    }
+    if (fits) return;
+    const std::uint64_t new_block = std::uint64_t(tracks) * k;
+    // A garbage frame count must not size the replay: past the stored data every frame only repeats the last value, so
+    // more than a few million values means the header is not an animation's (shipped clips stay far below).
+    constexpr std::uint64_t kMaxReplayValues = std::uint64_t(1) << 24;
+    if (nf * new_block > kMaxReplayValues)
+        throw FormatError(std::string(channel) + ": " + std::to_string(nf) + " frames x " + std::to_string(tracks) +
+                              " tracks is too large to replay",
+                          0);
+    std::vector<T> out(static_cast<std::size_t>(nf * new_block));
+    std::size_t slot = 0, repeated = 0, dropped = 0;
+    for (auto& b : a.bones) {
+        if (b.*index == 0xFFFF) continue;
+        const std::uint64_t old = b.*index;
+        bool have = false;
+        for (std::uint64_t f = 0; f < nf; ++f) {
+            const std::uint64_t at = f * block + old;
+            T* dst = out.data() + static_cast<std::size_t>(f * new_block + slot * k);
+            if (at + k <= data.size()) {
+                std::memcpy(dst, data.data() + at, k * sizeof(T));
+                have = true;
+            } else if (have) {
+                std::memcpy(dst, dst - new_block, k * sizeof(T));
+                ++repeated;
+            } else {
+                break;
+            }
+        }
+        if (!have) {
+            b.*index = 0xFFFF;  // no value inside the data: the bone keeps its default
+            ++dropped;
+            continue;
+        }
+        b.*index = static_cast<std::uint16_t>(slot * k);
+        ++slot;
+    }
+    // Drop the slots of the tracks that had no data (they were allocated in bone order).
+    const std::uint64_t kept_block = std::uint64_t(slot) * k;
+    std::vector<T> packed(static_cast<std::size_t>(nf * kept_block));
+    for (std::uint64_t f = 0; f < nf && kept_block; ++f)
+        std::memcpy(packed.data() + f * kept_block, out.data() + f * new_block, static_cast<std::size_t>(kept_block) * sizeof(T));
+    opt.note("ala_block_stride", std::string(channel) + ": block " + std::to_string(block) + " declared x " +
+                                     std::to_string(nf) + " frames, " + std::to_string(data.size()) + " values stored; " +
+                                     std::to_string(tracks) + " tracks replayed as retail reads them, " +
+                                     std::to_string(repeated) + " frame reads past the data repeat the last value, " +
+                                     std::to_string(dropped) + " tracks without data left at their default");
+    data = std::move(packed);
+    block = static_cast<std::uint32_t>(kept_block);
+}
+
 }  // namespace
 
-Animation parse(Bytes data) {
+Animation parse(Bytes data, const ParseOptions& opt) {
     Animation a;
     auto top = top_level_chunks(data);
     auto root = top.next();
@@ -128,6 +190,11 @@ Animation parse(Bytes data) {
         throw FormatError("animation bone count mismatch: header " + std::to_string(a.num_bones) + ", found " +
                               std::to_string(a.bones.size()), root->offset);
     const std::size_t nf = a.num_frames;
+    if (a.layout == Layout::Block && opt.salvage) {
+        replay_channel(a, a.rotation_data, a.rotation_block, &BoneTrack::rotation_index, 4, "rotation", opt);
+        replay_channel(a, a.translation_data, a.translation_block, &BoneTrack::translation_index, 3, "translation", opt);
+        replay_channel(a, a.scale_data, a.scale_block, &BoneTrack::scale_index, 3, "scale", opt);
+    }
     if (a.layout == Layout::Block) {
         if (a.rotation_data.size() != nf * a.rotation_block)
             throw FormatError("rotation block data size mismatch", root->offset);

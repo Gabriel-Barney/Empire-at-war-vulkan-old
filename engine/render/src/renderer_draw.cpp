@@ -17,11 +17,13 @@
 #include "alamo/materials/constants.hpp"
 #include "alamo/materials/params.hpp"
 #include "alamo/render/convert.hpp"
+#include "alamo/render/frustum.hpp"
 #include "alamo/render/ssao.hpp"
 #include "alamo/render/world.hpp"
 #include "render_internal.hpp"
 #include "fx2_reader.hpp"
 #include "gamma.hpp"  // [port] output gamma
+#include "smaa.hpp"  // [port] SMAA
 #include "taa.hpp"  // [port] TAA
 #include "renderer_shared.hpp"
 
@@ -30,17 +32,19 @@ using namespace detail;
 
 // ------------------------------------------------------------------------------ frame constants
 
-const SceneLightConstants& Renderer::scene_lights() {
+const SceneLightConstants& RendererCore::scene_lights() {
     SlcCache& c = slc_cache_;
     const Lighting& l = lighting_;
     const bool same = c.valid && std::memcmp(&c.sun, &l.sun, sizeof c.sun) == 0 &&
                       std::memcmp(&c.fill[0], &l.fill[0], sizeof c.fill[0]) == 0 &&
                       std::memcmp(&c.fill[1], &l.fill[1], sizeof c.fill[1]) == 0 &&
+                      std::memcmp(&c.flash, &l.flash, sizeof c.flash) == 0 &&
                       std::memcmp(&c.ambient, &l.ambient, sizeof c.ambient) == 0;
     if (!same) {
         c.sun = l.sun;
         c.fill[0] = l.fill[0];
         c.fill[1] = l.fill[1];
+        c.flash = l.flash;
         c.ambient = l.ambient;
         c.slc = scene_light_constants(l);
         c.valid = true;
@@ -48,7 +52,7 @@ const SceneLightConstants& Renderer::scene_lights() {
     return c.slc;
 }
 
-void Renderer::frame_constants(const ViewMatrices& v, uint32_t extras, materials::FrameCB& cb) {
+void RendererCore::frame_constants(const ViewMatrices& v, uint32_t extras, materials::FrameCB& cb) {
     fill_frame_cb(v, time_, cb);
     fill_frame_lights(lighting_, cb);
     const SceneLightConstants& slc = scene_lights();
@@ -57,7 +61,7 @@ void Renderer::frame_constants(const ViewMatrices& v, uint32_t extras, materials
     if (extras & kFcbFog) apply_scene_fog(lighting_, cb);
     if (extras & kFcbFade) {
         distance_fade_vals(fade_begin_, fade_end_, cb.fog_vals_fade_vals.z, cb.fog_vals_fade_vals.w);
-        cb.shadow_params.x = kShadowExtrusion;
+        cb.shadow_params.x = kShadowExtrusionDistance;  // SHADOW_EXTRUSION_DISTANCE, FrameCB.shadow_params.x
     }
     if (extras & kFcbWorld) {
         cb.cloud_tex_u = cloud_u_;
@@ -80,11 +84,11 @@ bool sh_contract_ok(const materials::FrameCB& cb, const SceneLightConstants& slc
 }
 }  // namespace
 
-bool Renderer::frame_cb_sh_ok(const materials::FrameCB& cb, const Lighting& lighting) {
+bool RendererCore::frame_cb_sh_ok(const materials::FrameCB& cb, const Lighting& lighting) {
     return sh_contract_ok(cb, scene_light_constants(lighting));
 }
 
-bool Renderer::upload_frame_cb(rhi::Frame& frame, const materials::FrameCB& cb, rhi::BufferRange& out) {
+bool RendererCore::upload_frame_cb(rhi::Frame& frame, const materials::FrameCB& cb, rhi::BufferRange& out) {
     if (!sh_contract_ok(cb, scene_lights()) && fcb_violations_.fetch_add(1) == 0)
         log::errorf("render", "FrameCB uploaded with zero SH under a lit scene (SH lighting contract)");
     const rhi::UniformAlloc a = frame.alloc_uniform(sizeof cb);
@@ -108,23 +112,6 @@ bool beyond_depth(const Mat4& view, const assets::Aabb& b, float depth) {
         if (-(view * p).z <= depth) return false;
     }
     return true;
-}
-
-bool outside_frustum(const Mat4& vp, const assets::Aabb& b) {
-    int out[6] = {0, 0, 0, 0, 0, 0};
-    for (int i = 0; i < 8; ++i) {
-        const Float4 p{(i & 1) ? b.max.x : b.min.x, (i & 2) ? b.max.y : b.min.y, (i & 4) ? b.max.z : b.min.z, 1.0f};
-        const Float4 c = vp * p;
-        out[0] += c.x < -c.w;
-        out[1] += c.x > c.w;
-        out[2] += c.y < -c.w;
-        out[3] += c.y > c.w;
-        out[4] += c.z < 0.0f;
-        out[5] += c.z > c.w;
-    }
-    for (int k = 0; k < 6; ++k)
-        if (out[k] == 8) return true;
-    return false;
 }
 
 materials::CullMode mirrored_cull(materials::CullMode c) {
@@ -169,13 +156,13 @@ void for_range(jobs::JobSystem* js, bool parallel, uint32_t count, uint32_t grai
 
 }  // namespace detail
 
-Renderer::Built& Renderer::built(BuiltSlot slot) {
+RendererCore::Built& RendererCore::built(BuiltSlot slot) {
     std::unique_ptr<Built>& b = built_[slot];
     if (!b) b = std::make_unique<Built>();
     return *b;
 }
 
-bool Renderer::xt_prepare(XTemplate& t, rhi::Frame& frame, uint32_t thread, const EngineFrame& f, const float (&pixel_offset)[4],
+bool RendererCore::xt_prepare(XTemplate& t, rhi::Frame& frame, uint32_t thread, const EngineFrame& f, const float (&pixel_offset)[4],
                           bool fog) {
     t.ok = false;
     t.set0 = t.set1 = VK_NULL_HANDLE;
@@ -275,7 +262,7 @@ namespace {
 // Items i and j (j = i + 1) form one instanced draw: everything but their DrawData (and, translated, their per-draw
 // register images) equal, not in a back-to-front bucket (SPACE_AND_OPEN.md D.1: only the sorted buckets keep strict
 // per-object order by depth; merging there is not done even though the order would be kept).
-bool same_draw(const Renderer::Built::Item& a, const Renderer::Built::Item& b, const std::vector<Renderer::Built::Group>& groups) {
+bool same_draw(const RendererCore::Built::Item& a, const RendererCore::Built::Item& b, const std::vector<RendererCore::Built::Group>& groups) {
     if (a.pipeline != b.pipeline || a.bucket != b.bucket || a.pass != b.pass || a.fading != b.fading) return false;
     if (a.bucket == PhaseBucket::Transparent || a.bucket == PhaseBucket::Heat) return false;
     // Q3: translated items of the instanced form share one call when they use the same program and register-image
@@ -288,7 +275,7 @@ bool same_draw(const Renderer::Built::Item& a, const Renderer::Built::Item& b, c
 }
 }  // namespace
 
-bool Renderer::build(rhi::Frame& frame, const ViewMatrices& view, std::span<const Instance> instances, DrawMode mode,
+bool RendererCore::build(rhi::Frame& frame, const ViewMatrices& view, std::span<const Instance> instances, DrawMode mode,
                      const RecordOptions& opts, Built& out, DrawStats& st, bool main_list) {
     using Group = Built::Group;
     using Item = Built::Item;
@@ -316,7 +303,7 @@ bool Renderer::build(rhi::Frame& frame, const ViewMatrices& view, std::span<cons
     // ---- Per-model memo (persistent, serial, first-appearance order). Instances share models, so PipelineManager
     // (mutex) and the translation table are touched only while a model still waits for a pipeline / program.
     const int cfg = (mode == DrawMode::Lit ? 1 : 0) | (external_ ? 2 : 0) | (opts.mirrored ? 4 : 0) | (sky_build_ ? 8 : 0) |
-                    (opts.coverage_alpha ? 16 : 0);
+                    (opts.coverage_alpha ? 16 : 0) | (!external_ && render_pass_ != rp_scene_ ? 32 : 0);  // [port] MSAA class
     BuildCache::MemoSet& ms = bc.sets[cfg];
     if (ms.render_pass != render_pass_) {  // colour format changed: every key differs
         ms.index.clear();
@@ -528,6 +515,7 @@ bool Renderer::build(rhi::Frame& frame, const ViewMatrices& view, std::span<cons
         return g.effect && (g.bucket == PhaseBucket::Heat || g.bucket == PhaseBucket::Shadow);
     };
     const std::vector<uint32_t>& inst_model = bc.inst_model;
+    const Frustum view_frustum = frustum_of(view.view_proj);
     for_range(desc_.js, par, n_inst, 32, [&](uint32_t b, uint32_t e) {
         for (uint32_t ii = b; ii < e; ++ii) {
             if (inst_model[ii] == UINT32_MAX) continue;
@@ -536,12 +524,13 @@ bool Renderer::build(rhi::Frame& frame, const ViewMatrices& view, std::span<cons
             ++o.st.instances;
             const GpuModel& gm = *in.model;
             const assets::Aabb box = gm.bounds.valid() ? assets::transform_aabb(in.transform, gm.bounds) : assets::Aabb{};
-            if (opts.frustum_cull && box.valid() && outside_frustum(view.view_proj, box)) {
+            if (opts.frustum_cull && box.valid() && !aabb_visible(view_frustum, box)) {
                 ++o.st.culled;
                 continue;
             }
             // Culling frustum far plane = Object_Fade_End (RENDER.md 3.4 / camera +0x3c).
-            if (opts.frustum_cull && fade_end_ > 0.0f && box.valid() && beyond_depth(view.view, box, fade_end_)) {
+            // mcx4 t15: an Exclude_From_Distance_Fade type is never faded / culled by distance.
+            if (opts.frustum_cull && fade_end_ > 0.0f && !in.no_distance_fade && box.valid() && beyond_depth(view.view, box, fade_end_)) {
                 ++o.st.culled;
                 continue;
             }
@@ -644,7 +633,7 @@ bool Renderer::build(rhi::Frame& frame, const ViewMatrices& view, std::span<cons
                     }
                 } else {
                     const BlendMode bm = g.unlit_blend;
-                    out.items[it++] = {gi, -1, (external_ ? unlit_ : unlit_int_)[g.skinned ? 1 : 0][static_cast<int>(bm)],
+                    out.items[it++] = {gi, -1, (external_ ? unlit_ : render_pass_ != rp_scene_ ? unlit_ms_ : unlit_int_)[g.skinned ? 1 : 0][static_cast<int>(bm)],
                                        bm == BlendMode::Opaque ? PhaseBucket::Opaque : PhaseBucket::Transparent, false,
                                        static_cast<uint64_t>((g.skinned ? 3 : 0) + static_cast<int>(bm)), nullptr, nullptr};
                 }
@@ -1111,7 +1100,7 @@ bool Renderer::build(rhi::Frame& frame, const ViewMatrices& view, std::span<cons
     return true;
 }
 
-void Renderer::record_range(VkCommandBuffer cmd, const Built& b, size_t begin, size_t end, uint32_t width, uint32_t height,
+void RendererCore::record_range(VkCommandBuffer cmd, const Built& b, size_t begin, size_t end, uint32_t width, uint32_t height,
                             bool set_viewport) const {
     const rhi::DeviceFns& fn = ctx_->vkd();
     if (set_viewport) {
@@ -1203,9 +1192,9 @@ void Renderer::record_range(VkCommandBuffer cmd, const Built& b, size_t begin, s
 }
 
 namespace detail {
-void count_items(const Renderer::Built& bl, size_t b, size_t e, DrawStats& st) {
+void count_items(const RendererCore::Built& bl, size_t b, size_t e, DrawStats& st) {
     for (size_t i = b; i < e; ++i) {
-        const Renderer::Built::Item& it = bl.items[i];
+        const RendererCore::Built::Item& it = bl.items[i];
         const GpuSubmesh& g = *bl.groups[it.group].g;
         ++st.draws;
         st.triangles += g.index_count / 3;
@@ -1227,19 +1216,19 @@ void count_items(const Renderer::Built& bl, size_t b, size_t e, DrawStats& st) {
     }
 }
 // First item index whose bucket is >= b (items are sorted by bucket).
-size_t bucket_begin(const std::vector<Renderer::Built::Item>& items, PhaseBucket b) {
+size_t bucket_begin(const std::vector<RendererCore::Built::Item>& items, PhaseBucket b) {
     size_t i = 0;
     while (i < items.size() && items[i].bucket < b) ++i;
     return i;
 }
 }  // namespace detail
 
-bool Renderer::draw(rhi::Frame& frame, VkCommandBuffer cmd, const ViewMatrices& view, std::span<const Instance> instances,
+bool RendererCore::draw(rhi::Frame& frame, VkCommandBuffer cmd, const ViewMatrices& view, std::span<const Instance> instances,
                     DrawMode mode, DrawStats* stats) {
     return draw(frame, cmd, view, instances, mode, RecordOptions{}, stats);
 }
 
-bool Renderer::draw(rhi::Frame& frame, VkCommandBuffer cmd, const ViewMatrices& view, std::span<const Instance> instances,
+bool RendererCore::draw(rhi::Frame& frame, VkCommandBuffer cmd, const ViewMatrices& view, std::span<const Instance> instances,
                     DrawMode mode, const RecordOptions& opts, DrawStats* stats) {
     // Inline single pass into the caller's attachments: no stencil, no heat target, so the Shadow and
     // Heat buckets are skipped (render() draws them).
@@ -1254,7 +1243,7 @@ bool Renderer::draw(rhi::Frame& frame, VkCommandBuffer cmd, const ViewMatrices& 
     render_pass_ = rp_external_;
     const bool ok = build(frame, view, instances, mode, opts, b, st);
     external_ = false;
-    render_pass_ = rp_scene_;
+    render_pass_ = rp_main_;
     if (!ok) return false;
     const size_t s0 = bucket_begin(b.items, PhaseBucket::Shadow), s1 = bucket_begin(b.items, PhaseBucket::Water);
     const size_t h0 = bucket_begin(b.items, PhaseBucket::Heat);

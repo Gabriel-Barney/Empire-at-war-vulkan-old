@@ -37,8 +37,12 @@
 //     or dead target) is dropped from the move, and when no unit is left the order is rejected (InvalidTarget). An
 //     object's own Lua Attack_Move (arg 0) has path B only.
 //     refixf t06 - space TF.Reinforce (AI_TACTICAL §7.4): the drop point is searched in rings around the target, one
-//     attempt per Lua poll of the block status (BlockOnCommand -> status IsFinished), one unit per poll; the host answers
-//     space_drop_frame / space_prevention_hit / space_drop_ok (below) and executes the Reinforce event at the point found.
+//     attempt per Lua poll of the block status (BlockOnCommand -> status IsFinished), one unit per poll; the host's facts
+//     answer space_drop_frame / space_prevention_hit / space_drop_ok (battle_facts.hpp) and the host executes the Reinforce
+//     event at the point found.
+//   * ref5 t07: everything else the AI reads from the battle comes from TacticalAiHost::facts() (battle_facts.hpp): live
+//     reads ask the host's rule at the moment of the read (the AI's own orders change the battle inside a frame); with the
+//     AI lane on, think() reads what the host captured at publish.
 //   * Everything runs on the sim thread; the only RNG is the session's synced stream (§10 order).
 //
 // TARGET IDENTITY [port]: each AI player's target list is kept as append-only SLOTS with tombstones; the live
@@ -73,6 +77,7 @@
 #include "alamo/ai/ai_definitions.hpp"
 #include "alamo/ai/ai_plans.hpp"
 #include "alamo/ai/tactical/applies.hpp"
+#include "alamo/ai/tactical/battle_facts.hpp"  // ref5 t07
 #include "alamo/ai/tactical/damage_tracking.hpp"
 #include "alamo/ai/tactical/free_store.hpp"
 #include "alamo/ai/tactical/perception_world.hpp"
@@ -103,6 +108,7 @@ class ContrastTable;
 namespace alamo::lua {
 class ObjectBridge;
 class GlobalValueStore;  // Int-final
+struct AiGlobalValue;     // ai_bridge.hpp (sp3: TacticalAiWorld::GlobalWrite)
 enum class PreventAiResult : uint8_t;  // object_bridge.hpp
 }  // namespace alamo::lua
 
@@ -127,111 +133,53 @@ struct TacticalAiObject {
     // Collidable_By_Projectile_Living and Is_Valid_Target; not garrisoned / hidden (+0x3a7), not dead, not carried in a
     // transport, not in a hero clash (+0x3b4, `hero_clash`), and no SPECIAL_WEAPON unless it is a DUMMY_STAR_BASE.
     bool valid_target = true;
-    bool hero_clash = false;  // obj +0x3b4 [port: no hero clashes yet, always false; kept so it can be wired]
+    bool hero_clash = false;  // obj +0x3b4 (s78n t06: the combat flag kUnitHeroClash; skipped by free store Setup A)
+    // b0416: has TACTICAL_BUILD_OBJECTS and its pad holds a finished (0x42e3b0) or UC (0x42e3d0) object; skipped by free
+    // store Setup A (0x7287a0 test 11).
+    bool pad_occupied = false;
     // UnitAI data-pack re-projection stamp (+0x20, A1_READINGS §14): UnitAiStamps::reprojection_check drawn by the host
-    // when the UNIT_AI object was created (draw_unit_ai_stamps). kNoReprojectionStamp: the host does not carry it, the
-    // grid uses its [port] legacy registration + 300.
-    static constexpr int32_t kNoReprojectionStamp = INT32_MIN;
-    int32_t reprojection_stamp = kNoReprojectionStamp;
+    // when the UNIT_AI object was created (draw_unit_ai_stamps). Every host draws it; the default 0 (a stamp at or
+    // before the first service) makes the first check run at the object's first service, as a drawn stamp does.
+    int32_t reprojection_stamp = 0;
+    // mcx6 t06 (docs/re/LUA_API.md "Task force: Enable_Attack_Positioning and Release_Reinforcements"): the UnitAI data pack's
+    // attack-positioning stamp (+0x34, UnitAiStamps::second as the host drew it at creation; the world takes its own copy
+    // when a task force first sets the object's flag), and the unit formation's attack target (0x41a2e0): object id (-1
+    // none; a TEAM container: its first member's, ascending id), the aimed point (the target's position, or the named hard
+    // point's world position) and the target's 2-D extent (0x3982b0). Not saved: every fill() sets them again before the
+    // attack-positioning step reads them.
+    int32_t attack_position_stamp = 0;
+    int32_t formation_target = -1;
+    Vec3f formation_target_point;
+    float formation_target_extent = 0.0f;
 };
-
-// One entry of a player's reinforcement pool (campaign: units in orbit = the battle's reserves; skirmish: the
-// tactical reinforcement pool).
-struct TacticalReinforcement {
-    int32_t key = -1;          // pool key (the Reinforce event's "unit" field)
-    int32_t type = -1;         // PerceptionWorld type index
-    float population = 0.0f;   // population cost (0x373500)
-    uint32_t units = 1;        // objects it spawns (team members)
-    // --- A2 tactical: the Reinforcement marshaller's entry facts (AI_GALACTIC_3 §1.3) ---
-    int32_t member_type = -1;          // first Company_Units member type (-1: the type has no Company_Units)
-    bool member_create_team = false;   // that member type has Create_Team
-    int32_t count = 1;                 // count(E): selections the entry serves
-    // --- end A2 tactical ---
-};
-
-enum class PadCheck : uint8_t { Ok = 0, NotFriendlyOrVisible = 1, Blocked = 2, RebuildCooldown = 3 };
 
 // refixf t06: payload arg bit of a task-force AttackMove LuaOrder: issue Order_Attack per unit (HOST CONTRACT above).
 inline constexpr uint32_t kTfAttackMoveIssueAttack = 1u;
-
-// refixf t06 (AI_TACTICAL §7.4 space): what the space reinforcement ring search needs from the mode.
-struct SpaceDropFrame {
-    float entry_facing_deg = 0.0f;  // the player's reinforcement entry facing (mode +0x288 record, field +8), degrees
-    bool has_box = false;           // the playable box (mode vf 0x208): ring points are clamped into it
-    float min_x = 0.0f, min_y = 0.0f, max_x = 0.0f, max_y = 0.0f;
-};
-
-// A hard point acquired an opportunity target (STRATEGIC_GAPS §5.3: signal 0x21 OpportunityTargetAcquiredDataClass, sent
-// to the hard point's owner, or to the team object for a team member). Object ids; hardpoint_type = HardPointType value.
-struct OpportunityTargetEvent {
-    int32_t owner = -1;           // the hard point's owner object
-    int32_t target = -1;          // the acquired target object
-    int32_t hardpoint_type = -1;  // HardPointType of the hard point (5..10 for weapons)
-};
-
-// s78f t08 - signal 0x1E (TACTICAL_COMBAT §3.1.1 "s78f t08 answers" 4): a unit's targeting state entered 4 (attacking)
-// for the first time. `unit` = the object the signal is raised on (a team member's: its container), `target` = its
-// formation attack target, else its current target. Object ids.
-struct AttackStateSignal {
-    int32_t unit = -1;
-    int32_t target = -1;
-};
-
-// a1j t01 - signal 0x19 "reinforcements unloaded" (ReinforcementsUnloadedDataClass, A1_READINGS §32.1 / §36): a land
-// landing object finished its unload (0x6438a0) or was removed while unloading (detach vf15 0x6442d0). `key` = the
-// Reinforce event's unit field (the pool entry); `units` = the unloaded object ids in spawn order.
-struct ReinforcementsUnloaded {
-    int32_t player = -1;
-    int32_t key = -1;
-    std::vector<int32_t> units;
-};
-
-// --- A2 tactical: a build pad the player can build on (the TacticalBuild marshaller's pool, AI_TACTICAL §5.1
-// side table 0x4d29a0): visible, empty, friendly or neutral [M], and the UC_ types its pad type lists for the
-// player's faction (Tactical_Buildable_Objects_Multiplayer in skirmish, _Campaign otherwise). ---
-struct TacticalPad {
-    int32_t id = -1;
-    Vec3f position;
-    std::vector<int32_t> accepts;  // PerceptionWorld type indices
-};
-// --- end A2 tactical ---
 
 class TacticalAiHost {
 public:
     virtual ~TacticalAiHost() = default;
     // The snapshot of this AI frame (objects in GOM order) + the per-object facts (same order).
     virtual void fill(PerceptionWorld& world, std::vector<TacticalAiObject>& objects) = 0;
-    // Direct execution of one AI order (the AI pipeline's handler).
+    // The signals the battle raised since the last AI frame (FrameEvents), for the lists in `kinds` (FrameEvents::Kind
+    // bits; the others are left as they are). Each list is taken once per AI frame: the lane-off world takes each one right
+    // before it handles it (a task-force event handler may give orders in between), the AI lane all of them at publish().
+    // Default: none.
+    virtual void frame_events(uint32_t kinds, FrameEvents& out) {
+        if (kinds & FrameEvents::kOpportunity) out.opportunity.clear();
+        if (kinds & FrameEvents::kAttackStates) out.attack_states.clear();
+        if (kinds & FrameEvents::kDamaged) out.damaged.clear();
+        if (kinds & FrameEvents::kAbilityFinished) out.ability_finished.clear();
+        if (kinds & FrameEvents::kUnloaded) out.unloaded.clear();
+        if (kinds & FrameEvents::kProduced) out.produced.clear();
+    }
+    // Direct execution of one AI order (the AI pipeline's handler). The host sets facts().order_refused for it.
     virtual commands::RejectReason execute(uint8_t player, const commands::EventData& ev) = 0;
-    virtual std::vector<TacticalReinforcement> reinforcement_pool(int32_t player) = 0;
-    virtual bool can_reinforce(int32_t player) = 0;   // 0x2b03e0
-    virtual float population_cap(int32_t player) = 0;  // < 0: no cap
-    virtual float population_used(int32_t player) = 0;
-    virtual const DamageTrackingStore* damage_tracking() = 0;
-    virtual const galactic::ContrastTable* contrast() = 0;
-    // Build (§7.5): the three refusal checks for (pad, type) of `player`; type = PerceptionWorld type index.
-    virtual PadCheck build_pad_check(int32_t /*player*/, int32_t /*pad*/, int32_t /*type*/) { return PadCheck::NotFriendlyOrVisible; }
-    // A2 tactical: the pads `player` can build on now (ascending id) with their buildable types (TacticalBuild
-    // marshaller). Default: none (battles without build pads).
-    virtual std::vector<TacticalPad> build_pads(int32_t /*player*/) { return {}; }
-    // A2 tactical: TacticalBuild for types without TACTICAL_UNDER_CONSTRUCTION - a builder of the player can build
-    // `type` now (0x288b80 + 0x497140). Default false (no tactical production in the host: campaign battles never buy
-    // units through the AI, AI_GALACTIC_3 §1.11).
-    virtual bool can_build_now(int32_t /*player*/, int32_t /*type*/) { return false; }
-    // A2 tactical: the free store's builder list (free store +0x120, AI_GALACTIC_3 §1.8 / §1.11 [M]) for `type`: ids of
-    // the live objects of `player` whose type lists `type` (PerceptionWorld index) for the owner's faction
-    // (Tactical_Buildable_Objects_Multiplayer). Order = the order Produce_Force tries them [port: ascending object id].
-    // A skirmish build plan's Produce_Force issues Production {type_index, location = builder} to each in turn until the
-    // host accepts one. Default: none (no tactical production in the host).
-    virtual std::vector<int32_t> tactical_builders(int32_t /*player*/, int32_t /*type*/) { return {}; }
-    // Opportunity-fire acquisitions since the last AI frame, in the order they happened (STRATEGIC_GAPS §5.3). A task
-    // force holding the owner (or its team container) raises plan event 17 Hardpoint_Opportunity_Target_Acquired
-    // (unit, target) when it subscribed that HardPointType. Default: none (the combat side does not report them).
-    virtual std::vector<OpportunityTargetEvent> opportunity_targets() { return {}; }
-    // s78f t08: the signal 0x1E raises since the last AI frame, in the order they happened. A task force holding the unit
-    // (TaskForceClass::Add_Force 0x5f9a90 subscribes every unit it takes; handler 0x5fe5d0 case 0x1E) raises plan event 12
-    // Target_In_Range (unit, target) when the target is live. Default: none.
-    virtual std::vector<AttackStateSignal> attack_state_signals() { return {}; }
+    // ref5 t07: everything else the AI reads from the battle (battle_facts.hpp: one rule per fact family, read live, or
+    // from the capture while the AI lane thinks). Owned by the host; outlives the world.
+    virtual BattleFacts& facts() = 0;
+
+    // ---- the AI's writes beyond orders ----
     // MagicPlan HIJACK_UNIT, tactical with a parent galactic mode (AI_GALACTIC_3 §4.3 steps 1-5): spawn `type`
     // (PerceptionWorld type index) for `player` at the battle planet in the galactic store (steal = MagicPlanStealing or a
     // named hero: the player's first galactic object of the type elsewhere is killed silently; pending respawns of the
@@ -260,60 +208,12 @@ public:
     // (SetClassPriorities) lasts only while the unit is a member. Unconditional (no movement-lock test). Called during
     // the AI update, before unit_released. Default: nothing.
     virtual void unit_left_task_force(int32_t /*object_id*/) {}
-    // refixf t06 - space TF.Reinforce ring search (AI_TACTICAL §7.4). space_drop_frame: the player's entry facing and the
-    // playable box (false: facing 0, no box). space_prevention_hit (0x4d8d10): `p` lies inside the
-    // Reinforcement_Prevention_Radius (2-D, strict) of a live object whose owner is not allied with `player`.
-    // space_drop_ok (SpaceMode vf80 0x4d6fd0, force 0): `p` is inside the playable box, not fogged for `player` (force 1),
-    // outside every non-allied prevention radius, and the occupancy sweep of pool entry `key`'s type from
-    // p - sweep x (cos, sin)(facing) to p over frames [now, now + 115] on its Space_Layer (default 4) and layer 8 is
-    // clear. Defaults: no frame, no prevention, every point valid (hosts without the hooks drop at the target).
-    virtual bool space_drop_frame(int32_t /*player*/, SpaceDropFrame& /*out*/) { return false; }
-    virtual bool space_prevention_hit(int32_t /*player*/, const Vec3f& /*p*/) { return false; }
-    virtual bool space_drop_ok(int32_t /*player*/, int32_t /*key*/, const Vec3f& /*p*/, float /*facing_deg*/, float /*sweep*/) {
-        return true;
-    }
-    // S7 t15 A1 - "unit ability finished" (object signal 0x29: every ability end, ABILITIES_HARDPOINTS §2.6, and the
-    // jetpack's swap back to the primary locomotor, MOVEMENT §3.1.1 step 6): the object ids that raised it since the last
-    // AI frame, in the order they happened (an id may repeat). The AI feeds its scripts' object bridge (blocking
-    // GameObjectWrapper.Activate_Ability), finishes the task-force AbilityBlockStatus counts and raises plan event 19
-    // <TF>_Unit_Ability_Finished(tf, unit) for task-force members that are not dying. Default: none.
-    virtual std::vector<int32_t> ability_finished() { return {}; }
-    // S7 t21 - the unit's movement lock (0x39ad40: ability share, script lock, suspended locomotor; A1_READINGS §28.9):
-    // a locked member does not join a SpaceAmbushBlockStatus (AI_TACTICAL §7.3.1). Default: never locked.
-    virtual bool movement_locked(int32_t /*object_id*/) { return false; }
-    // S7 t27 - the land sight factor 0x3722a0 of land Prepare_Ambush (AI_TACTICAL §7.3.3 item 5): the weather
-    // Sight_Range_Modifier for the Weather_Category of `type` (the target's company type), for the object `object_id`
-    // (its owner decides the weather exemption); 1.0 without strong weather / no entry. Default: 1.0 (no weather).
-    virtual float sight_weather_factor(int32_t /*type*/, int32_t /*object_id*/) { return 1.0f; }
-    // a1g t04 follow-up - land TF.Reinforce drop validity (LandMode vf80 0x3b5f60 -> 0x3b6170, TACTICAL_GAPS
-    // §4.2.1, A1_READINGS §30.7): can pool entry `key` of `player` land at spot `p` (the company layout's centre)? The host
-    // refuses unless every formation slot is passable for its member, not fogged for `player`, clear of blocking footprints
-    // and inside the reinforcement radii (enabling / prevention). A refused spot sends the unit to the next ring spot. Default:
-    // every spot valid (hosts without the hook).
-    virtual bool land_drop_ok(int32_t /*player*/, int32_t /*key*/, const Vec3f& /*p*/) { return true; }
-    // a1j t01 - land TF.Reinforce with a timed landing (ReinforceBlockStatus, A1_READINGS §36). reinforce_in_flight: the
-    // Reinforce of pool entry `key` just executed for `player` put the company in a landing object that has not finished
-    // its unload (the units come later, by reinforcements_unloaded). reinforcements_unloaded: the signal 0x19 records of
-    // the tick just run, in the order they were sent. Defaults: never in flight, none (the units exist at the order).
-    virtual bool reinforce_in_flight(int32_t /*player*/, int32_t /*key*/) { return false; }
-    virtual std::vector<ReinforcementsUnloaded> reinforcements_unloaded() { return {}; }
-    // q6 t19 (A1_READINGS §33.2.2): the object ids the order just executed dropped from its move because their attack
-    // order (path A, kTfAttackMoveIssueAttack) was refused, in the order tried. Such a unit stays in the block's
-    // all-units list but is neither moved nor pending. Default: none (every unit moved).
-    virtual std::vector<int32_t> attack_order_refused() { return {}; }
-    // q6 t19 (SKIRMISH_SETUP §3 / §3.1, AI_GALACTIC_3 §1.11): land tactical builds completed in the tick just run, in
-    // completion order (signal 0x22): the type went to the player's reinforcement pool (no object appears), so the build
-    // task of the first task force (id order) producing that type ends its entry. Default: none (hosts whose builds
-    // spawn objects; those are claimed when they appear).
-    struct ProductionCompleted {
-        int32_t player = -1;
-        int32_t type = -1;  // PerceptionWorld type index
-    };
-    virtual std::vector<ProductionCompleted> production_completed() { return {}; }
+    using ProductionCompleted = ::alamo::ai::tactical::ProductionCompleted;
 };
 
 // OPT2 t10: frames from a proposal slice to the apply of its PotentialPlan solves (TacticalAiConfig::pp_latency).
 inline constexpr uint32_t kDefaultPpLatency = 1;
+inline constexpr uint32_t kDefaultAiLaneLatency = 2;  // sp3: k_ai (SIM_PARALLEL_DESIGN 5.1 "Why k_ai = 2")
 
 struct TacticalAiPlayerConfig {
     int32_t player = -1;
@@ -335,6 +235,11 @@ struct TacticalAiConfig {
     std::vector<TacticalAiPlayerConfig> players;
     std::vector<TacticalAiDifficulty> difficulties;
     std::vector<lua::LuaPlayerSetup> lua_players;   // players of the Lua player world (PlayerObject, ...)
+    // skai t12 (AI_GALACTIC §1.3 [H]): N of the goal quota's cap (int)(20 / max(1, N - H) + 0.5) is the whole PlayerList
+    // (session players, then one player per faction that has none), not the battle's players. Retail land skirmish:
+    // 7 players, one human -> cap 3, a proposal pass of about 430 frames on Utapau (SKAI_T06_LAND_RUNS §7).
+    // 0 = the perception world's players [port: hosts without a faction table].
+    int32_t player_list_size = 0;
     int32_t attacker = -1, defender = -1;           // conflict record (opponent preference, §1.2)
     bool campaign = false;                          // galactic parent (campaign battle)
     TacticalAiConstants constants;
@@ -354,8 +259,17 @@ struct TacticalAiConfig {
     // original timing).
     uint32_t path_latency = galactic::kDefaultAllPairsLatency;
     BackgroundStart background;
-    // OPT2 t01: per-player planning phases (AiContext::set_stagger); false = the original timing.
-    bool stagger = true;
+    // OPT2 t01: per-player planning phases (AiContext::set_stagger); false = the original timing. bkx1 t01 (b0123, Gabriel
+    // 2026-11-12): off by default, as galactic (AI_GALACTIC 1.3); alamo_headless --ai-stagger keeps it as a benchmark knob.
+    bool stagger = false;
+    // bkx1 t01 (b0123, BKX1_CADENCE_RE §2 [H]): N - H of the goal quota's cap, N = the global PlayerList (the session
+    // players plus one per faction no player has; a campaign battle: the campaign's list), H = the active humans. The
+    // host computes it (BattleAi); -1 = count the perception players.
+    int32_t quota_players = -1;
+    // bkx1 t01 (BKX1_CADENCE_RE §1 / §3 [H]): the battle goal systems run the galactic cadence (GoalSystemConfig::
+    // retail_cadence: seeded first quota, slice ends at the quota). false = the earlier [port] cadence (no host or
+    // tactical test sets it since tst2 t05; GoalSystemConfig's own tests cover both).
+    bool retail_cadence = true;
     // OPT2 t03: fan-out for the goal candidates' perception values (ai_goals.hpp batched values); any value gives
     // identical results.
     ParallelFor pf = serial_for;
@@ -365,7 +279,31 @@ struct TacticalAiConfig {
     // pp_latency frames after the slice. false = the original synced draws in proposal order (pp_latency unused).
     bool pp_streams = true;
     uint32_t pp_latency = kDefaultPpLatency;
+    // sp3 (docs/SIM_PARALLEL_DESIGN.md 5.1, 11.3): the AI lane. On, the world's own draws (goals, plan picks, FindTarget,
+    // Script_ evaluators, Guard / "Random" hard point, Most_Defended, the AI Lua VMs' GameRandom) come from an AI-owned
+    // GameRandom seeded from game_seed (ai_lane_seeds) and saved with the world, not from the session's streams; k_ai is the
+    // number of ticks between an AI update and the apply of its command batch (saved per world, a load keeps the saved
+    // value). Off = today's behaviour; a world saved with the lane on loads only into a world with it on, and vice versa.
+    bool ai_lane = false;
+    uint32_t k_ai = kDefaultAiLaneLatency;
+    // skai t15 (SKAI_T15_PLAN_RETEST): the running-plan contrast re-test 0x6c47c0 step 2 at every commit (plan_invalid) and
+    // on Resolve_Category's old-candidate path. Retail runs it (the hook runs of 2026-11-16 saw it end 11 of 73 land
+    // Destroy_Structure plans). On by default since skai t18 (Gabriel, 2026-11-16, DECISIONS.md); off = the pre-t18 port.
+    bool plan_retest = true;
+    // skai t22 (SKAI_T22_SPACE_AI_RE Part 5 [H]): per mode, whether a Produce_Force hand-over keeps the unit on the free
+    // store as an entry reserved by its PotentialPlan (retail's tactical stores, +0x48 = 0: land and space alike). On, a
+    // task-force member's reservation is suspended at each Commit start and re-asserted when its goal is kept, so a goal
+    // accepted earlier in the Commit can take it and the member's plan fails the stolen test 0x6c45e0. Off = the port
+    // before skai t22 (the unit leaves the store, its reservation is released). On in both modes (land since skai t15,
+    // 2026-11-16, with its land goldens).
+    bool keep_members_on_free_store_space = true;
+    bool keep_members_on_free_store_land = true;
+    bool keep_members_on_free_store(TacticalMode m) const {
+        return m == TacticalMode::Land ? keep_members_on_free_store_land : keep_members_on_free_store_space;
+    }
 };
+// sp3: the AI-owned stream's (synced, free) seeds of an AI-lane world (splitmix64 of the session seed and a lane salt).
+std::pair<uint32_t, uint32_t> ai_lane_seeds(uint32_t game_seed);
 
 struct TacticalAiDecision {
     int64_t frame = 0;
@@ -398,10 +336,26 @@ public:
     // The ObjectBridge attached to every AI VM (pipeline = the AI pipeline). The host fills its hooks
     // (abilities, objects_in_range, is_enemy, ...) before start().
     lua::ObjectBridge& object_bridge();
+    const lua::ObjectBridge& object_bridge() const;
     lua::LuaPlayerWorld& player_world();
+    // aitac t01 (SIM_PARALLEL_DESIGN 11.5; AI_GALACTIC 1.2 / 1.5, MCX8_BINDINGS_PLAYERS_STORY GiveDesireBonus): the story
+    // session's LuaPlayerWorld (StorySession::player_world()). Each AI frame its Suspend_AI switch pauses this AI too (the
+    // one TheAI master byte), and its GiveDesireBonus / Purge_Goals requests for a player with a tactical AI go to that
+    // player's tactical context (the context of the current mode); requests for other players are dropped, as retail
+    // finds no context for them. The galactic AI leaves the story world alone while a battle is on top
+    // (GalacticAiWorld::update_player). [port] Not attached with the AI lane on (the story VMs write the world on the
+    // critical lane). Null detaches; the world must outlive this object or be detached first.
+    void attach_story_world(lua::LuaPlayerWorld* world);
     // Int-final: the session-wide GlobalValue table (L1_S4_REMAINING §1.5) for GlobalValue.Get / Set of every AI VM;
     // null (default) = the world's own map (hashed in its CRC section). Hosted battles attach SimHost::global_values().
     void set_global_values(lua::GlobalValueStore* store);
+    // sp3 slice 4e (part 3): with the lane on, the AI's GlobalValue.Get / Set use a private copy of the session table,
+    // rebuilt at each publish() (and at start()) as the table plus `overlay` - the AI's own writes not applied yet, in
+    // issue order (the host passes them before publish). A Set changes the copy and is handed out by
+    // take_lane_global_writes() (in issue order) for the host to apply to the session table at the due tick.
+    using GlobalWrite = std::pair<std::string, lua::AiGlobalValue>;
+    void set_lane_global_overlay(std::vector<GlobalWrite> overlay);
+    std::vector<GlobalWrite> take_lane_global_writes();
 
     // Loads the plan scripts (cfg.plan_files). False when none loaded.
     bool load_plans(std::vector<std::string>* diagnostics = nullptr);
@@ -409,6 +363,14 @@ public:
     bool start(std::vector<std::string>* diagnostics = nullptr);
     // One AI frame (see the header comment). `now` = global frame (service clocks), `mode_frame` = F.
     void update(int64_t now, uint32_t mode_frame);
+    // sp3 t02 (AI lane, docs/SIM_PARALLEL_DESIGN.md 5.1): update() split at the lane boundary, used with ai_lane on (there
+    // update() = publish() + think()). publish() runs on the critical lane at the end of tick N: the host's fill
+    // (PerceptionWorld + facts), this tick's host event lists (opportunity targets, attack states, ability ends, landings,
+    // production) and the snapshot store - a copy of the battle store taken now, which the world and its Lua VMs read
+    // (and, until t05 turns them into commands, the Lua bindings that create objects write) with the lane on. think() runs
+    // the rest of update() from those inputs. Lane off: unused, update() is unchanged.
+    void publish(int64_t now, uint32_t mode_frame);
+    void think();
     // Battle end (slot 7 / context teardown): every running plan ends (released by the goal system).
     void end_battle();
     // OPT3 t11: closes every Lua VM of this world (running plans, free stores, evaluators, plan pools) instead of one by
@@ -417,7 +379,6 @@ public:
     // the job's wait function (empty when nothing is left running): call it before the job system goes away. Call
     // after end_battle(), right before destroying the world: no script may run afterwards. Owner thread of the VMs.
     std::function<void()> release_scripts();
-    void set_suspended(bool suspended);
     // S7 t26 (AI_TACTICAL §7.3.3 item 2) - object signal 0xb "a new order replaces this unit's order", raised by the host
     // when it executes an order on `object_id` (A1_READINGS §33.3: task-force movement collectors, unit Move_To /
     // Attack_Move, MoveToObject, attack orders, ...): the Activate_Ability blocks waiting on the unit (or its team
@@ -437,8 +398,19 @@ public:
     // neutral player); NotInitialised: its AI has not had its first service.
     lua::PreventAiResult prevent_ai_usage(int32_t id, int32_t owner, bool on);
 
+    // skm2 t01 (SKIRMISH_SETUP 1.1: Set_Difficulty 0x4b0dc0 from the Gameplay options Accept): the AI player keeps its state
+    // and takes `difficulty`'s (0 Easy, 1 Normal, 2 Hard) Land_ / Space_ contrast multiplier, goal-cycle sleep and build
+    // time multiplier (this battle's mode) from now on. False without an AI for the player or when it already has that
+    // difficulty. Serial, between updates.
+    bool set_difficulty(int32_t player, int32_t difficulty);
+
     // ---- inspection ----
     bool is_ai_player(int32_t player) const;
+    // skm1 t04 (SKIRMISH_SETUP 0x496f00, AI_TACTICAL §4.5): the AI player's Land_ / Space_Build_Time_Multiplier of its
+    // difficulty adjustment (this battle's mode); 1.0 for a player without a tactical AI.
+    float build_time_multiplier(int32_t player) const;
+    // skm2 t03: the AI player's difficulty 0 Easy / 1 Normal / 2 Hard (AIPlayer +0x58); -1 without a tactical AI here.
+    int32_t difficulty(int32_t player) const;
     int32_t opponent(int32_t player) const;
     const AiContext* context(int32_t player) const;
     size_t free_store_size(int32_t player) const;
@@ -449,6 +421,13 @@ public:
     const std::vector<TacticalAiDecision>& decision_log() const;
     std::vector<std::string> lua_errors() const;
     uint64_t orders_issued() const;
+    bool ai_lane() const;    // sp3: TacticalAiConfig::ai_lane
+    // sp3 t02: the store the world reads - the snapshot store with the lane on (as of the last publish()), else the battle's.
+    const objects::ObjectStore& view_store() const;
+    uint32_t k_ai() const;   // sp3: TacticalAiConfig::k_ai (a load keeps the saved value)
+    // ref5 t06: the space TF.Reinforce occupancy sweep (TacticalAiConstants::space_reinforcement_collision_check_distance),
+    // which a host's lane Reinforce apply passes to space_drop_ok.
+    float space_reinforcement_sweep() const;
     uint64_t orders_rejected() const;
     // Results left on the AI pipeline's event bus: 0 after every update().
     size_t pending_order_results() const;
@@ -458,6 +437,9 @@ public:
     // Threat-grid point danger for `player` at (x, y) (0x653ff0; REMAINING_GAPS §4.2 movement threat mode). Const;
     // safe between AI ticks (the battle's movement planning).
     float point_danger(int32_t player, float x, float y) const;
+    // mcx6 t06: the UnitAI attack-positioning flag (data pack +0x38) of object `object_id`, set by a land task force's
+    // Enable_Attack_Positioning (LUA_API.md). The formation re-path veto 0x4f5780 reads it (BattleAi::follow_service).
+    bool attack_positioning(int32_t object_id) const;
     // q6 land end (diagnostics only, never hashed): the value of perception equation `equation` for AI player `player`
     // with Variable_Target = that player's live unit target of object `target_object` (-1: no target), on the last
     // update's PerceptionWorld. The leaf cache is read, never written (LeafCacheReadOnly); no RNG (an equation that

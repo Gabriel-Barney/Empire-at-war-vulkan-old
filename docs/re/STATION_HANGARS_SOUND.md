@@ -202,9 +202,15 @@ type CRC (4), live (5), max (6), remaining (7).
 
 ### 2.4 Can-spawn (0x593350), all must hold [H unless tagged]
 1. Not suppressed by the in-game cinematic camera (0x140b27a10 active and global 0x140b27d90 = 0) unless the
-   type has `Spawn_Garrison_On_Load`. [M names]
-2. Campaign battle on a planet with corruption type 5 (`Corruption_Bribery`): only owners whose faction has
-   `Benefits_From_Corruption` (+0x10B) spawn.
+   type has `Spawn_Garrison_On_Load`. [M names] **trl2 t06 (2026-11-20) [H read, M consequence]: dead in retail** -
+   0x140b27d90 is the controller's int +0x380; its only writers are the static initialiser (−1) and
+   `End_Cinematic_Mode` 0x2cbb80 (reset to −1); no other direct reference in `.text`, so "= 0" never holds and the
+   gate never suppresses. The port leaves it unset.
+2. Campaign battle on a planet with corruption type 5 (`Corruption_Bribery`): nothing spawns unless the faction of
+   **the battle planet's owner** (the planet object's +0x58, through the player list) has `Benefits_From_Corruption`
+   (+0x10B) — trl2 t06 re-read of 0x593350 [H]: the faction read is the planet owner's, not the spawner owner's, so
+   the gate holds every spawner of the battle alike. A planet without an owning player would read through a null
+   faction (not reachable in practice) [port: no block].
 3. The spawner's locomotor does not report the hyperspace byte (locomotor pack +0x260; hyperspace arrival /
    departure) [M meaning].
 4. Unit ability **DEFEND (1) is not active** (power to shields stops launches).
@@ -221,6 +227,7 @@ type CRC (4), live (5), max (6), remaining (7).
    +0x60 := i, true. [H read; L: what fills that list — skirmish-bought space units waiting to launch]
 
 ### 2.5 Launch one (space: service state 0) [H unless tagged]
+> r3g t03 (2026-11-16): the land states (Structure Open / Hold / Close, signal 10 = the leaving unit's move finished, Spawn_Garrison_On_Load bulk via vf13) are in R3G_ANIM_TIMED_RE.md §3.
 - If the spawner has the DEPLOY_SQUAD (75) unit ability and its owner is **not** an AI player (0x2814d0
   false, or player +0x62 ≠ 0): state := 4 and nothing spawns. Launches then happen only through the
   DEPLOY_SQUAD activation (ABILITIES_HARDPOINTS §2.5: reset, next-ready frame, recharge). Vanilla: Executor.
@@ -235,7 +242,8 @@ type CRC (4), live (5), max (6), remaining (7).
 **Spawn position (space)** (0x594dc0):
 - bay = synced `Get_Int(0, bays − 1)` (no draw with one bay); P0 = bay bone world position (hardpoint bone
   +0x2C, else +0x38; zero if the bone is missing); D = bay bone X axis × `Fighter_Bay_Flyout_Distance`;
-  P1 = P0 + D.
+  P1 = P0 + D. [port] trl2 t06: the attachment bone's bind-pose position and X axis from the model (HardpointDesc
+  attach frame) turned by the carrier's yaw; without a model frame the carrier's forward axis.
 - **Squadron type** (has `Squadron_Units`): each member created at **P0**, owned by player +0x60, facing
   along P0 → P1, with initial velocity = normalize(P1 − P0) × member max speed (locomotor velocity);
   then the squadron container is built (team helper 0x2a5a60, REMAINING_GAPS); flag +0x3A2 |= 2 (spawned);
@@ -359,9 +367,10 @@ retreat, fog, camera, pause.
 - 0x392410(obj, fade): stops moving, idle and cinematic-focus loops with `fade` (or each event's own
   fade-out when fade < 0), clears +0x3B5/+0x3B6, sets **+0x3B9 := 1**. While set, §3.2 does nothing.
 - Cleared by 0x393970 and 0x3989a0; copied by 0x472560 (object state copy).
-- Callers are in the 0x635xxx land behaviour block next to the garrison/vehicle host code (0x635180,
-  0x635310, 0x635450, 0x6355c0, 0x635750 set; 0x635950 clears) [L: crew leaving / holstering / garrison
-  vehicle]. Not used in space. After the clear, nothing restarts the loops until the next locomotor service
+- Callers (0x635180, 0x635310, 0x635450, 0x6355c0, 0x635750 set; 0x635950 clears) are all in
+  `HolsterWeaponBehaviorClass` (HOLSTER_WEAPON 0x4E, lightsaber heroes) plus two of its entry points called by
+  `Saber_Throw` (corrected 2026-11-07: the "garrison / crew" guess was wrong; full rule in CU8F_T01_T02_T07_RE.md
+  §2). Not used in space. After the clear, nothing restarts the loops until the next locomotor service
   or mode enter turns a flag 0 → 1.
 
 ### 3.5 The resulting rule for a space ship [H for the code, M for the composition]

@@ -1,20 +1,14 @@
 #include "alamo/render/hardpoints.hpp"
 
 #include <algorithm>
-#include <cctype>
 
+#include "alamo/core/ascii.hpp"
 #include "alamo/data/xml.hpp"
 #include "alamo/render/lod.hpp"
 
 namespace alamo::render {
 
 namespace {
-bool iequal(std::string_view a, std::string_view b) {
-    if (a.size() != b.size()) return false;
-    for (size_t i = 0; i < a.size(); ++i)
-        if (std::toupper(static_cast<unsigned char>(a[i])) != std::toupper(static_cast<unsigned char>(b[i]))) return false;
-    return true;
-}
 void sort_unique(std::vector<uint32_t>& v) {
     std::sort(v.begin(), v.end());
     v.erase(std::unique(v.begin(), v.end()), v.end());
@@ -22,7 +16,7 @@ void sort_unique(std::vector<uint32_t>& v) {
 // XML bool: yes / true / 1 (case-insensitive first letter), no / false / 0; `fallback` when empty / other.
 bool parse_bool(std::string_view s, bool fallback) {
     if (s.empty()) return fallback;
-    const char c = static_cast<char>(std::toupper(static_cast<unsigned char>(s[0])));
+    const char c = ascii_to_upper(s[0]);
     if (c == 'Y' || c == 'T' || c == '1') return true;
     if (c == 'N' || c == 'F' || c == '0') return false;
     return fallback;
@@ -31,24 +25,24 @@ bool parse_bool(std::string_view s, bool fallback) {
 int32_t find_bone(const assets::Skeleton& sk, std::string_view name) {
     if (name.empty()) return -1;
     for (size_t b = 0; b < sk.names.size(); ++b)
-        if (iequal(sk.names[b], name)) return static_cast<int32_t>(b);
+        if (ascii_iequals(sk.names[b], name)) return static_cast<int32_t>(b);
     return -1;
 }
 }  // namespace
 
 std::string_view HardpointDef::tag(std::string_view tag_name) const {
     for (const auto& [k, v] : tags)
-        if (iequal(k, tag_name)) return v;
+        if (ascii_iequals(k, tag_name)) return v;
     return {};
 }
 
 bool HardpointDef::has_tag(std::string_view tag_name) const {
     for (const auto& kv : tags)
-        if (iequal(kv.first, tag_name)) return true;
+        if (ascii_iequals(kv.first, tag_name)) return true;
     return false;
 }
 
-bool HardpointDef::dummy_art() const { return iequal(type, "HARD_POINT_DUMMY_ART"); }
+bool HardpointDef::dummy_art() const { return ascii_iequals(type, "HARD_POINT_DUMMY_ART"); }
 
 HardpointDef parse_hardpoint(const data::XmlNode& hp) {
     HardpointDef d;
@@ -104,7 +98,7 @@ std::vector<uint32_t> meshes_named(const assets::ModelAsset& model, std::string_
     std::vector<uint32_t> out;
     if (name.empty()) return out;
     for (uint32_t i = 0; i < model.meshes.size(); ++i)
-        if (iequal(model.meshes[i].name, name)) out.push_back(i);
+        if (ascii_iequals(model.meshes[i].name, name)) out.push_back(i);
     return out;
 }
 
@@ -123,10 +117,16 @@ std::vector<int32_t> sub_object_bones(const assets::ModelAsset& model, const Har
 int64_t first_named(const assets::ModelAsset& model, std::string_view name) {
     if (name.empty()) return -1;
     for (size_t i = 0; i < model.meshes.size(); ++i)
-        if (iequal(model.meshes[i].name, name)) return static_cast<int64_t>(i);
+        if (ascii_iequals(model.meshes[i].name, name)) return static_cast<int64_t>(i);
     for (size_t p = 0; p < model.proxies.size(); ++p)
-        if (iequal(model.proxies[p].name, name)) return static_cast<int64_t>(model.meshes.size() + p);
+        if (ascii_iequals(model.proxies[p].name, name)) return static_cast<int64_t>(model.meshes.size() + p);
     return -1;
+}
+// B.10 answer 4 (0x3a5700): the lookup name of a Model_To_Attach - upper-cased, cut at the first ".ALO".
+std::string attach_key(std::string_view model) {
+    std::string k = ascii_upper(model);
+    if (const size_t dot = k.find(".ALO"); dot != std::string::npos) k.resize(dot);
+    return k;
 }
 std::vector<uint32_t> subtree(const MeshBoneMap& bm, const std::vector<int32_t>& bones, int32_t root) {
     std::vector<uint32_t> out;
@@ -169,6 +169,21 @@ HardpointLayout build_hardpoint_layout(const assets::ModelAsset& model, std::spa
         sort_unique(e.show);
         sort_unique(e.hide);
     }
+    // Step (f): what each destruction may erase - every sub-object named like the Model_To_Attach stem, in lookup
+    // order (meshes, proxies, attachment slots). The slots' names are their models' stems [M].
+    l.removes.resize(hardpoints.size());
+    for (size_t h = 0; h < hardpoints.size(); ++h) {
+        const HardpointDef& d = hardpoints[h];
+        if (d.dummy_art() || !d.destroyable || d.model_to_attach.empty()) continue;
+        const std::string key = attach_key(d.model_to_attach);
+        std::vector<uint32_t>& r = l.removes[h];
+        for (uint32_t i = 0; i < l.meshes; ++i)
+            if (ascii_iequals(model.meshes[i].name, key)) r.push_back(i);
+        for (uint32_t p = 0; p < l.proxies; ++p)
+            if (ascii_iequals(model.proxies[p].name, key)) r.push_back(l.proxy_index(p));
+        for (uint32_t a = 0; a < l.hardpoints; ++a)
+            if (!l.attach_model[a].empty() && attach_key(l.attach_model[a]) == key) r.push_back(l.attachment_index(a));
+    }
     return l;
 }
 
@@ -183,6 +198,7 @@ HardpointLayout fallback_hardpoint_layout(const assets::ModelAsset& model, std::
     l.effects.resize(hardpoints);
     l.attach_bone.assign(hardpoints, -1);
     l.attach_model.assign(hardpoints, std::string());
+    l.removes.resize(hardpoints);
     return l;
 }
 
@@ -215,6 +231,7 @@ void HardpointVisibility::init(HardpointLayoutPtr layout) {
     const size_t n = layout_ ? layout_->base.size() : 0;
     overrides_.assign(n, 0);
     mask_.assign(n, 0);
+    erased_.assign(n, 0);
     recompute();
 }
 
@@ -250,7 +267,14 @@ void HardpointVisibility::recompute() {
     if (!layout_) return;
     // In place: mask_ keeps its size (and storage) from init().
     std::copy(layout_->base.begin(), layout_->base.end(), mask_.begin());
+    std::fill(erased_.begin(), erased_.end(), uint8_t{0});
     for (uint32_t h : order_) {
+        if (h < layout_->removes.size())  // step (f) before (g): the first sub-object of that name still present
+            for (uint32_t s : layout_->removes[h])
+                if (s < erased_.size() && !erased_[s]) {
+                    erased_[s] = 1;
+                    break;
+                }
         if (h >= layout_->effects.size()) continue;
         const HardpointEffect& e = layout_->effects[h];
         for (uint32_t s : e.show)
@@ -258,10 +282,72 @@ void HardpointVisibility::recompute() {
         for (uint32_t s : e.hide)
             if (s < mask_.size()) mask_[s] = 1;
     }
+    for (size_t i = 0; i < mask_.size(); ++i)
+        if (erased_[i]) mask_[i] = 1;  // gone from the model: no later show reaches it
     for (size_t i = 0; i < mask_.size(); ++i) {
         if (overrides_[i] == static_cast<uint8_t>(MeshOverride::Show)) mask_[i] = 0;
         else if (overrides_[i] == static_cast<uint8_t>(MeshOverride::Hide)) mask_[i] = 1;
     }
+}
+
+// ---- bkx1 t05: engine glow groups (BKX1_RENDER_RE §1) ----------------------------------------------------------------
+
+uint8_t particle_glow_group(std::string_view n) {
+    const auto starts = [&](std::string_view p) {
+        if (n.size() < p.size()) return false;
+        for (size_t i = 0; i < p.size(); ++i)
+            if (ascii_to_upper(n[i]) != ascii_to_upper(p[i])) return false;
+        return true;
+    };
+    uint8_t g = 0;
+    if (starts("pe")) g |= kGlowPe;
+    if (starts("pte")) g |= kGlowPte;
+    if (starts("pi")) g |= kGlowPi;
+    return g;
+}
+
+uint8_t particle_emitter_groups(std::string_view n) {
+    static constexpr std::string_view kPrefix[8] = {"pe", "pte", "pi", "pgw", "pas", "pptw", "pem", "prs"};
+    uint8_t g = 0;
+    for (uint32_t i = 0; i < 8; ++i)
+        if (ascii_istarts_with(n, kPrefix[i])) g = static_cast<uint8_t>(g | (1u << i));
+    return g;
+}
+
+float engine_glow_flicker(uint32_t timer_frames) {
+    // n = a fixed value in [-1, 1] per lattice point x = 2 x frames left (murmur-style integer hash) [port]
+    uint32_t x = timer_frames * 2u;
+    x ^= x >> 16;
+    x *= 0x7feb352du;
+    x ^= x >> 15;
+    x *= 0x846ca68bu;
+    x ^= x >> 16;
+    const float n = static_cast<float>(x & 0xFFFFu) / 32767.5f - 1.0f;
+    return (n * 0.5f + 0.5f) * 0.2f;
+}
+
+EngineGlow engine_glow(uint8_t flags, uint32_t timer_frames, float speed_ratio, bool turbo, bool dying) {
+    EngineGlow e;
+    if ((flags & kEngineGlowUnit) == 0) return e;
+    e.applies = true;
+    const uint8_t g = turbo ? kGlowPte : kGlowPe, other = turbo ? kGlowPe : kGlowPte;
+    e.hide = other;
+    e.tint_group = g;
+    if (dying) {
+        e.hide = kGlowPe | kGlowPte;
+    } else if ((flags & kEngineGlowOff) != 0 && timer_frames == 0) {
+        e.hide |= g;
+    } else if ((flags & kEngineGlowOff) != 0) {
+        e.show = g;
+        e.tint = timer_frames == 1 ? 1.0f : engine_glow_flicker(timer_frames);
+        e.tint_seconds = timer_frames == 1 ? 0.1f : 0.0f;
+    } else {
+        e.show = g;
+        e.tint = std::clamp(0.8f * speed_ratio + 0.2f, 0.0f, 1.0f);
+    }
+    if ((flags & kEngineGlowIonStun) != 0) e.show |= kGlowPi;
+    else e.hide |= kGlowPi;
+    return e;
 }
 
 }  // namespace alamo::render

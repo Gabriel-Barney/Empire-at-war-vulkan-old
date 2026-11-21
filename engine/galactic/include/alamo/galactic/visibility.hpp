@@ -34,6 +34,7 @@ enum VisibilityBit : uint32_t {
 inline constexpr uint32_t kVisEvilDefault = 0x0;
 inline constexpr uint32_t kVisGoodDefault = 0x11;
 inline constexpr uint32_t kVisPlanetOwner = 0x9FFF;
+// limit: retail GALACTIC_REVEAL_CORRUPTION §2.2 (0x510120)
 inline constexpr uint32_t kVisMaximum = 0xFFFFFFFFu;
 // Presence entry values (GRC 2.3, 0x3fd080): an own object in orbit / on the ground.
 inline constexpr uint32_t kVisPresenceOrbit = 0x71;

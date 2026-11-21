@@ -10,10 +10,16 @@
 //         active / autofire / behaviour bytes, the countdown (77 x counter, maximum, phase + last update), pending
 //         ability, host-fed stamps, state bytes, the ion / lucky shot slots, special-ability states (with their victim
 //         lists), OI behaviour state, the autofire map and the trooper list;
-//         version 2 adds the animation record (i32 type, u32 start, f32 rate, f32 end, u8 loop / then) and the u8 lock pairs
-//   u32 + spawn requests, mines, Battlefield_Modifier player entries, interdict / retreat / weatherproof entries,
-//   remote bombs, events, player overrides, type overrides; u32 + stealth bonus per player; u32 + per-player
-//   black-market lists (not hashed, but read by the gates)
+//         then the animation record (i32 type, u32 start, f32 rate, f32 end, u8 loop / then) and the u8 lock pairs;
+//         v4 (cu8f t06): u32 + trooper squad numbers, i32 squads formed, u8 LURE running, i32 pulses, u32 next pulse,
+//         i32 effect object
+//   (only kAbilitySaveVersion is read, cu6)
+//   u32 + spawn requests (v4: + i32 trooper squad), mines, Battlefield_Modifier player entries (cu8f t06: the Enable_*
+//   gate lists use list numbers 4..6, same layout), interdict / retreat / weatherproof entries,
+//   remote bombs, v8 (mcx4): u32 + buzz-droid clouds (u32 serial, i32 id, u32 made / end, f32 chase / radius / own /
+//   enemy, vec3 point), events, v7 (r3h): queued animation plays (i32 id, i32 type, u32 variant, u8 loop / direct /
+//   only-from-idle, f32 blend, f32 speed, u32 frame), player overrides, type overrides; u32 + per-player black-market lists (not hashed, but read
+//   by the gates)
 // Rebuilt / not saved: the query scratch lists, the host query table (AbilityHost), the bound RNG, the fog callback.
 //
 // SpecialWeaponSystem layout (version kSpecialWeaponSaveVersion): u32 + descriptors (every field), u32 + packs, u32 +
@@ -29,29 +35,23 @@
 #include "alamo/tactical/abilities/ability_system.hpp"
 #include "alamo/tactical/abilities/space_fields.hpp"
 #include "alamo/tactical/abilities/special_weapons.hpp"
+#include "alamo/tactical/save_io.hpp"
 
 namespace alamo::tactical::abilities {
 
+using save_io::get_vec3;
+using save_io::put_vec3;
+
 namespace {
 
-constexpr uint32_t kAbilitySaveVersion = 2;  // 2: OI follow-up animation record + lock pairs (1 still reads)
+// 2: OI follow-up animation record + lock pairs; 3: cu8 t02 stealth bonus gone; 4: cu8f t01 special restore target,
+// cu8f t06 trooper squads, LURE pack, spawn-request squad; 5: TRU1 t03 gravity control field state; 6: r3g t02 the timed
+// DEPLOY_TROOPERS machine and the rope landing, r3g t04 the cable hold count; 7: r3h the queued animation plays (a
+// play queued after the host drained the queue - AI / Lua activations, damage listeners, deaths - waits for the next
+// tick). Only the current version is read (cu6).
+constexpr uint32_t kAbilitySaveVersion = 8;  // mcx4: + buzz-droid clouds
 constexpr uint32_t kSpecialWeaponSaveVersion = 1;
 constexpr uint32_t kSpaceFieldSaveVersion = 1;
-
-bool get_count(ByteReader& r, uint32_t& n, size_t min_bytes) {
-    n = r.u32();
-    return r.ok() && static_cast<uint64_t>(n) * static_cast<uint64_t>(min_bytes) <= static_cast<uint64_t>(r.remaining());
-}
-
-void put_vec3(ByteWriter& w, const Vec3& v) { w.f32(v.x).f32(v.y).f32(v.z); }
-
-Vec3 get_vec3(ByteReader& r) {
-    Vec3 v;
-    v.x = r.f32();
-    v.y = r.f32();
-    v.z = r.f32();
-    return v;
-}
 
 void put_ids(ByteWriter& w, const std::vector<ObjectId>& v) {
     w.u32(static_cast<uint32_t>(v.size()));
@@ -60,7 +60,7 @@ void put_ids(ByteWriter& w, const std::vector<ObjectId>& v) {
 
 bool get_ids(ByteReader& r, std::vector<ObjectId>& v) {
     uint32_t n = 0;
-    if (!get_count(r, n, 4)) return false;
+    if (!r.count(n, 4)) return false;
     v.assign(n, kNoObject);
     for (ObjectId& id : v) id = r.i32();
     return r.ok();
@@ -103,6 +103,7 @@ void AbilitySystem::write(ByteWriter& w) const {
             w.u8(sp.aura).f32(sp.radius).f32(sp.value);
             put_vec3(w, sp.point);
             put_ids(w, sp.victims);
+            w.i32(sp.restore);
         }
         w.u32(o.heal_due);
         w.u32(static_cast<uint32_t>(o.autofire_map.size()));
@@ -112,6 +113,13 @@ void AbilitySystem::write(ByteWriter& w) const {
         w.u32(o.confuse_end).i32(o.barrage_dummy).u8(o.pending_direct).i32(o.troopers_deployed);
         put_ids(w, o.troopers);
         w.i32(o.anim_type).u32(o.anim_start).f32(o.anim_rate).f32(o.anim_end).u8(o.anim_loop).u8(o.anim_then).u8(o.lock_flags);
+        w.u32(static_cast<uint32_t>(o.trooper_squads.size()));  // v4 (cu8f t06)
+        for (const int32_t q : o.trooper_squads) w.i32(q);
+        w.i32(o.squads_formed).u8(o.lure_on).i32(o.lure_pulses).u32(o.lure_next).i32(o.lure_effect);
+        w.u32(o.gravity_due).u8(o.gravity_on).u8(o.in_gravity_field);  // v5 (TRU1 t03)
+        put_ids(w, o.gravity_list);
+        w.u8(o.troop_state).u8(o.troop_deploy).u32(o.troop_end).u8(o.rope_state).u32(o.rope_end).f32(o.rope_z).i32(o.rope_owner);  // v6
+        w.u8(o.cable_holds);  // v6
     }
 
     w.u32(static_cast<uint32_t>(spawns_.size()));
@@ -119,7 +127,7 @@ void AbilitySystem::write(ByteWriter& w) const {
         w.u32(s.serial).u8(static_cast<uint8_t>(s.purpose)).i32(s.object_type);
         put_vec3(w, s.position);
         put_vec3(w, s.facing);
-        w.i32(s.owner).i32(s.source).i32(s.target).u8(s.ability_type).f32(s.fuse_seconds).i32(s.bone);
+        w.i32(s.owner).i32(s.source).i32(s.target).u8(s.ability_type).f32(s.fuse_seconds).i32(s.bone).i32(s.squad);
     }
     w.u32(static_cast<uint32_t>(mines_.size()));
     for (const Mine& m : mines_) {
@@ -133,18 +141,24 @@ void AbilitySystem::write(ByteWriter& w) const {
     for (const SourceEntry& e : source_entries_) w.i32(e.player).i32(e.source).u32(e.crc).u8(e.kind);
     w.u32(static_cast<uint32_t>(remote_bombs_.size()));
     for (const RemoteBomb& b : remote_bombs_) w.i32(b.player).u32(b.serial);
+    w.u32(static_cast<uint32_t>(buzz_.size()));  // mcx4 (version 8)
+    for (const BuzzCloud& c : buzz_) {
+        w.u32(c.serial).i32(c.id).u32(c.made).u32(c.end).f32(c.chase).f32(c.radius).f32(c.own).f32(c.enemy);
+        put_vec3(w, c.point);
+    }
     w.u32(static_cast<uint32_t>(events_.size()));
     for (const AbilityEvent& e : events_) {
         w.u8(static_cast<uint8_t>(e.kind)).u8(e.type).i32(e.id).i32(e.target).u32(e.frame);
         put_vec3(w, e.point);
         w.i32(e.value);
     }
+    w.u32(static_cast<uint32_t>(anim_plays_.size()));  // r3h: plays still waiting for the host
+    for (const AbilityAnimPlay& p : anim_plays_)
+        w.i32(p.id).i32(p.type).u32(p.variant).u8(p.loop).u8(p.direct).u8(p.only_from_idle).f32(p.blend).f32(p.speed).u32(p.frame);
     w.u32(static_cast<uint32_t>(overrides_.size()));
     for (const PlayerOverride& p : overrides_) w.i32(p.player).u32(p.crc).u8(p.enabled);
     w.u32(static_cast<uint32_t>(type_overrides_.size()));
     for (const TypeOverride& t : type_overrides_) w.i32(t.player).u32(t.desc).u32(t.crc).u8(t.enabled);
-    w.u32(static_cast<uint32_t>(stealth_bonus_.size()));
-    for (const float s : stealth_bonus_) w.f32(s);
     w.u32(static_cast<uint32_t>(bm_blocked_.size()));
     for (const std::vector<uint32_t>& list : bm_blocked_) {
         w.u32(static_cast<uint32_t>(list.size()));
@@ -154,7 +168,7 @@ void AbilitySystem::write(ByteWriter& w) const {
 
 bool AbilitySystem::read(ByteReader& r) {
     const uint32_t version = r.u32();
-    if (!r.ok() || version < 1 || version > kAbilitySaveVersion) return false;
+    if (version != kAbilitySaveVersion || !r.ok()) return false;
     const uint32_t c_objects = r.u32(), c_specials = r.u32(), c_players = r.u32();
     if (!r.ok() || c_objects != data_->objects.size() || c_specials != data_->specials.size() ||
         c_players != combat_->player_count())
@@ -164,7 +178,7 @@ bool AbilitySystem::read(ByteReader& r) {
     if (!r.ok()) return false;
 
     uint32_t n = 0;
-    if (!get_count(r, n, 1000)) return false;
+    if (!r.count(n, 1000)) return false;
     std::vector<Obj> objs(n);
     bool first = true;
     ObjectId prev = 0;
@@ -219,7 +233,7 @@ bool AbilitySystem::read(ByteReader& r) {
         o.lucky_fired = r.u8();
         if (!r.ok() || o.pending_type < -1 || o.pending_type >= static_cast<int32_t>(kAbilitySlots)) return false;
         uint32_t ns = 0;
-        if (!get_count(r, ns, 64)) return false;
+        if (!r.count(ns, 64)) return false;
         o.specials.resize(ns);
         for (SpecialState& sp : o.specials) {
             sp.desc = r.u32();
@@ -239,12 +253,13 @@ bool AbilitySystem::read(ByteReader& r) {
             sp.aura = r.u8();
             sp.radius = r.f32();
             sp.value = r.f32();
-            sp.point = get_vec3(r);
+            sp.point = get_vec3<Vec3>(r);
             if (!r.ok() || sp.desc >= c_specials || !get_ids(r, sp.victims)) return false;
+            sp.restore = r.i32();
         }
         o.heal_due = r.u32();
         uint32_t na = 0;
-        if (!get_count(r, na, 5)) return false;
+        if (!r.count(na, 5)) return false;
         o.autofire_map.resize(na);
         for (auto& [crc, on] : o.autofire_map) {
             crc = r.u32();
@@ -262,48 +277,71 @@ bool AbilitySystem::read(ByteReader& r) {
         o.pending_direct = r.u8();
         o.troopers_deployed = r.i32();
         if (!r.ok() || !get_ids(r, o.troopers)) return false;
-        if (version >= 2) {
-            o.anim_type = r.i32();
-            o.anim_start = r.u32();
-            o.anim_rate = r.f32();
-            o.anim_end = r.f32();
-            o.anim_loop = r.u8();
-            o.anim_then = r.u8();
-            o.lock_flags = r.u8();
-        }
+        o.anim_type = r.i32();
+        o.anim_start = r.u32();
+        o.anim_rate = r.f32();
+        o.anim_end = r.f32();
+        o.anim_loop = r.u8();
+        o.anim_then = r.u8();
+        o.lock_flags = r.u8();
+        // cu8f t06
+        uint32_t nq = 0;
+        if (!r.count(nq, 4)) return false;
+        o.trooper_squads.resize(nq);
+        for (int32_t& q : o.trooper_squads) q = r.i32();
+        o.squads_formed = r.i32();
+        o.lure_on = r.u8();
+        o.lure_pulses = r.i32();
+        o.lure_next = r.u32();
+        o.lure_effect = r.i32();
+        if (!r.ok() || o.trooper_squads.size() != o.troopers.size()) return false;
+        o.gravity_due = r.u32();  // TRU1 t03
+        o.gravity_on = r.u8();
+        o.in_gravity_field = r.u8();
+        if (!r.ok() || !get_ids(r, o.gravity_list)) return false;
+        o.troop_state = r.u8();  // v6 (r3g t02)
+        o.troop_deploy = r.u8();
+        o.troop_end = r.u32();
+        o.rope_state = r.u8();
+        o.rope_end = r.u32();
+        o.rope_z = r.f32();
+        o.rope_owner = r.i32();
+        o.cable_holds = r.u8();  // r3g t04
+        if (!r.ok() || o.rope_state > 3) return false;
     }
 
-    if (!get_count(r, n, 51)) return false;
+    if (!r.count(n, 55u)) return false;
     std::vector<SpawnRequest> spawns(n);
     for (SpawnRequest& s : spawns) {
         s.serial = r.u32();
         const uint8_t purpose = r.u8();
         s.object_type = r.i32();
-        s.position = get_vec3(r);
-        s.facing = get_vec3(r);
+        s.position = get_vec3<Vec3>(r);
+        s.facing = get_vec3<Vec3>(r);
         s.owner = r.i32();
         s.source = r.i32();
         s.target = r.i32();
         s.ability_type = r.u8();
         s.fuse_seconds = r.f32();
         s.bone = r.i32();
-        if (!r.ok() || purpose > static_cast<uint8_t>(SpawnPurpose::StationUpgrade)) return false;
+        s.squad = r.i32();
+        if (!r.ok() || purpose > static_cast<uint8_t>(SpawnPurpose::Bomber)) return false;  // mcx4 t06: + Bomber (older saves hold none)
         s.purpose = static_cast<SpawnPurpose>(purpose);
     }
-    if (!get_count(r, n, 38)) return false;
+    if (!r.count(n, 38)) return false;
     std::vector<Mine> mines(n);
     for (Mine& m : mines) {
         m.serial = r.u32();
         m.id = r.i32();
         m.owner = r.i32();
-        m.pos = get_vec3(r);
+        m.pos = get_vec3<Vec3>(r);
         m.trigger = r.f32();
         m.detect = r.f32();
         m.arm = r.u32();
         m.detected = r.u8();
         m.dead = r.u8();
     }
-    if (!get_count(r, n, 21)) return false;
+    if (!r.count(n, 21)) return false;
     std::vector<PlayerEntry> player_entries(n);
     for (PlayerEntry& e : player_entries) {
         e.player = r.i32();
@@ -313,7 +351,7 @@ bool AbilitySystem::read(ByteReader& r) {
         e.source = r.i32();
         e.crc = r.u32();
     }
-    if (!get_count(r, n, 13)) return false;
+    if (!r.count(n, 13)) return false;
     std::vector<SourceEntry> source_entries(n);
     for (SourceEntry& e : source_entries) {
         e.player = r.i32();
@@ -321,13 +359,26 @@ bool AbilitySystem::read(ByteReader& r) {
         e.crc = r.u32();
         e.kind = r.u8();
     }
-    if (!get_count(r, n, 8)) return false;
+    if (!r.count(n, 8)) return false;
     std::vector<RemoteBomb> remote_bombs(n);
     for (RemoteBomb& b : remote_bombs) {
         b.player = r.i32();
         b.serial = r.u32();
     }
-    if (!get_count(r, n, 30)) return false;
+    if (!r.count(n, 44)) return false;  // mcx4 (version 8)
+    std::vector<BuzzCloud> buzz(n);
+    for (BuzzCloud& c : buzz) {
+        c.serial = r.u32();
+        c.id = r.i32();
+        c.made = r.u32();
+        c.end = r.u32();
+        c.chase = r.f32();
+        c.radius = r.f32();
+        c.own = r.f32();
+        c.enemy = r.f32();
+        c.point = get_vec3<Vec3>(r);
+    }
+    if (!r.count(n, 30)) return false;
     std::vector<AbilityEvent> events(n);
     for (AbilityEvent& e : events) {
         const uint8_t kind = r.u8();
@@ -335,19 +386,33 @@ bool AbilitySystem::read(ByteReader& r) {
         e.id = r.i32();
         e.target = r.i32();
         e.frame = r.u32();
-        e.point = get_vec3(r);
+        e.point = get_vec3<Vec3>(r);
         e.value = r.i32();
-        if (!r.ok() || kind > static_cast<uint8_t>(AbilityEventKind::BribeRefused)) return false;
+        if (!r.ok() || kind > static_cast<uint8_t>(AbilityEventKind::TrooperReleased)) return false;
         e.kind = static_cast<AbilityEventKind>(kind);
     }
-    if (!get_count(r, n, 9)) return false;
+    if (!r.count(n, 31)) return false;
+    std::vector<AbilityAnimPlay> anim_plays(n);
+    for (AbilityAnimPlay& p : anim_plays) {
+        p.id = r.i32();
+        p.type = r.i32();
+        p.variant = r.u32();
+        p.loop = r.u8();
+        p.direct = r.u8();
+        p.only_from_idle = r.u8();
+        p.blend = r.f32();
+        p.speed = r.f32();
+        p.frame = r.u32();
+    }
+    if (!r.ok()) return false;
+    if (!r.count(n, 9)) return false;
     std::vector<PlayerOverride> overrides(n);
     for (PlayerOverride& p : overrides) {
         p.player = r.i32();
         p.crc = r.u32();
         p.enabled = r.u8();
     }
-    if (!get_count(r, n, 13)) return false;
+    if (!r.count(n, 13)) return false;
     std::vector<TypeOverride> type_overrides(n);
     for (TypeOverride& t : type_overrides) {
         t.player = r.i32();
@@ -355,14 +420,11 @@ bool AbilitySystem::read(ByteReader& r) {
         t.crc = r.u32();
         t.enabled = r.u8();
     }
-    if (!get_count(r, n, 4)) return false;
-    std::vector<float> stealth_bonus(n);
-    for (float& s : stealth_bonus) s = r.f32();
-    if (!get_count(r, n, 4)) return false;
+    if (!r.count(n, 4)) return false;
     std::vector<std::vector<uint32_t>> bm_blocked(n);
     for (std::vector<uint32_t>& list : bm_blocked) {
         uint32_t nl = 0;
-        if (!get_count(r, nl, 4)) return false;
+        if (!r.count(nl, 4)) return false;
         list.resize(nl);
         for (uint32_t& crc : list) crc = r.u32();
     }
@@ -376,10 +438,13 @@ bool AbilitySystem::read(ByteReader& r) {
     player_entries_ = std::move(player_entries);
     source_entries_ = std::move(source_entries);
     remote_bombs_ = std::move(remote_bombs);
+    buzz_ = std::move(buzz);
     events_ = std::move(events);
+    anim_plays_ = std::move(anim_plays);  // r3h
+    visuals_.clear();  // vis1 t06: presentation only, not saved (the serial keeps counting)
+    activations_.clear();  // aud1 t10: likewise
     overrides_ = std::move(overrides);
     type_overrides_ = std::move(type_overrides);
-    stealth_bonus_ = std::move(stealth_bonus);
     bm_blocked_ = std::move(bm_blocked);
     scratch_.clear();
     member_scratch_.clear();
@@ -423,7 +488,7 @@ void SpecialWeaponSystem::write(ByteWriter& w) const {
 bool SpecialWeaponSystem::read(ByteReader& r) {
     if (r.u32() != kSpecialWeaponSaveVersion || !r.ok()) return false;
     uint32_t n = 0;
-    if (!get_count(r, n, 63)) return false;
+    if (!r.count(n, 63)) return false;
     std::vector<SpecialWeaponDesc> descs(n);
     for (SpecialWeaponDesc& d : descs) {
         d.kinds = r.u8();
@@ -446,7 +511,7 @@ bool SpecialWeaponSystem::read(ByteReader& r) {
         if (!r.ok()) return false;
     }
     const auto nd = static_cast<uint32_t>(descs.size());
-    if (!get_count(r, n, 85)) return false;
+    if (!r.count(n, 85)) return false;
     std::vector<Pack> packs(n);
     bool first = true;
     ObjectId prev = 0;
@@ -462,12 +527,12 @@ bool SpecialWeaponSystem::read(ByteReader& r) {
         p.pulse_index = r.u32();
         p.next_pulse = r.u32();
         p.shot_target = r.i32();
-        p.shot_point = get_vec3(r);
+        p.shot_point = get_vec3<Vec3>(r);
         p.at_point = r.u8();
         p.tsw = r.i32();
         p.tsw_init = r.u8();
         p.tsw_target = r.i32();
-        p.tsw_target_pos = get_vec3(r);
+        p.tsw_target_pos = get_vec3<Vec3>(r);
         p.countdown = r.i32();
         p.debris_pick = r.i32();
         p.debris_frame = r.u32();
@@ -478,18 +543,18 @@ bool SpecialWeaponSystem::read(ByteReader& r) {
         first = false;
         prev = p.id;
     }
-    if (!get_count(r, n, 33)) return false;
+    if (!r.count(n, 33)) return false;
     std::vector<SpecialWeaponShot> shots(n);
     for (SpecialWeaponShot& s : shots) {
         s.weapon = r.i32();
         s.owner = r.i32();
         s.projectile = r.i32();
         s.target = r.i32();
-        s.point = get_vec3(r);
+        s.point = get_vec3<Vec3>(r);
         s.at_point = r.boolean();
         s.pulse = r.u32();
     }
-    if (!get_count(r, n, 29)) return false;
+    if (!r.count(n, 29)) return false;
     std::vector<SpecialWeaponEvent> events(n);
     for (SpecialWeaponEvent& e : events) {
         const uint8_t kind = r.u8();
@@ -497,7 +562,7 @@ bool SpecialWeaponSystem::read(ByteReader& r) {
         e.target = r.i32();
         e.value = r.i32();
         e.frame = r.u32();
-        e.point = get_vec3(r);
+        e.point = get_vec3<Vec3>(r);
         if (!r.ok() || kind > static_cast<uint8_t>(SwEventKind::TswDone)) return false;
         e.kind = static_cast<SwEventKind>(kind);
     }
@@ -520,7 +585,7 @@ void SpaceFieldIndex::write(ByteWriter& w) const {
 bool SpaceFieldIndex::read(ByteReader& r) {
     if (r.u32() != kSpaceFieldSaveVersion || !r.ok()) return false;
     uint32_t n = 0;
-    if (!get_count(r, n, 20)) return false;
+    if (!r.count(n, 20)) return false;
     std::vector<SpaceField> fields(n);
     for (SpaceField& f : fields) {
         f.id = r.i32();

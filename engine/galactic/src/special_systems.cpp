@@ -11,6 +11,9 @@
 #include <climits>
 
 #include "alamo/commands/event_types.hpp"
+#include "alamo/core/frames.hpp"
+#include "alamo/core/sim_crc.hpp"
+#include "alamo/core/bytes.hpp"
 #include "alamo/core/hash.hpp"
 #include "alamo/galactic/campaign.hpp"
 
@@ -18,17 +21,11 @@ namespace alamo::galactic {
 
 namespace {
 
-void put32(std::vector<uint8_t>& b, uint32_t v) {
-    for (int i = 0; i < 4; ++i) b.push_back(static_cast<uint8_t>(v >> (8 * i)));
-}
-uint32_t get32(std::span<const uint8_t> b, size_t at) {
-    uint32_t v = 0;
-    for (size_t i = 0; i < 4; ++i) v |= static_cast<uint32_t>(b[at + i]) << (8 * i);
-    return v;
-}
-commands::EventData special_event(uint32_t kind, const std::vector<uint8_t>& bytes) {
+// Special-ability payloads (COMMANDS.md, kind + "data" bytes): little-endian u32 fields, then a u8 flag where the kind
+// has one; the exact size per kind is checked on read.
+commands::EventData special_event(uint32_t kind, const ByteWriter& w) {
     commands::EventData e(commands::EventType::SpecialAbility);
-    e.set("kind", kind).set_bytes("data", std::span<const uint8_t>(bytes.data(), bytes.size()));
+    e.set("kind", kind).set_bytes("data", std::span<const uint8_t>(w.bytes()));
     return e;
 }
 
@@ -48,54 +45,67 @@ constexpr int8_t kCorruptionBlackMarket = 6;  // Corruption_Black_Market (P4 1.2
 uint32_t economy_mining_tag() { return special_name_crc("TEXT_ECONOMY_MINING_FACILITIES"); }
 
 commands::EventData special_activate_event(uint32_t planet_id, uint32_t unit_id) {
-    std::vector<uint8_t> b;
-    put32(b, planet_id);
-    put32(b, unit_id);
+    ByteWriter b;
+    b.u32(planet_id);
+    b.u32(unit_id);
     return special_event(kSpecialActivate, b);
 }
 
 commands::EventData black_market_purchase_event(uint32_t planet_id, uint32_t hero_id, uint32_t item_crc, float price,
                                                 float respawn_seconds, bool only_one) {
-    std::vector<uint8_t> b;
-    put32(b, planet_id);
-    put32(b, hero_id);
-    put32(b, item_crc);
-    put32(b, commands::quantize(kQuantAmount, price));
-    put32(b, commands::quantize(kQuantDuration, respawn_seconds));
-    b.push_back(static_cast<uint8_t>(only_one ? 1 : 0));
+    ByteWriter b;
+    b.u32(planet_id);
+    b.u32(hero_id);
+    b.u32(item_crc);
+    b.u32(commands::quantize(kQuantAmount, price));
+    b.u32(commands::quantize(kQuantDuration, respawn_seconds));
+    b.boolean(only_one);
     return special_event(kSpecialBlackMarket, b);
 }
 
 commands::EventData sabotage_structure_event(uint32_t planet_id, uint32_t saboteur_id, uint32_t structure_id, float cost,
                                              float respawn_seconds) {
-    std::vector<uint8_t> b;
-    put32(b, planet_id);
-    put32(b, saboteur_id);
-    put32(b, structure_id);
-    put32(b, commands::quantize(kQuantAmount, cost));
-    put32(b, commands::quantize(kQuantDuration, respawn_seconds));
+    ByteWriter b;
+    b.u32(planet_id);
+    b.u32(saboteur_id);
+    b.u32(structure_id);
+    b.u32(commands::quantize(kQuantAmount, cost));
+    b.u32(commands::quantize(kQuantDuration, respawn_seconds));
     return special_event(kSpecialSabotage, b);
 }
 
 commands::EventData slice_event(uint32_t planet_id, uint32_t slicer_id, uint32_t type, float price, float chance,
                                 float respawn_seconds, bool only_one) {
-    std::vector<uint8_t> b;
-    put32(b, planet_id);
-    put32(b, slicer_id);
-    put32(b, type);
-    put32(b, commands::quantize(kQuantAmount, price));
-    put32(b, commands::quantize(kQuantDuration, chance * 1000.0f));
-    put32(b, commands::quantize(kQuantDuration, respawn_seconds));
-    b.push_back(static_cast<uint8_t>(only_one ? 1 : 0));
+    ByteWriter b;
+    b.u32(planet_id);
+    b.u32(slicer_id);
+    b.u32(type);
+    b.u32(commands::quantize(kQuantAmount, price));
+    b.u32(commands::quantize(kQuantDuration, chance * 1000.0f));
+    b.u32(commands::quantize(kQuantDuration, respawn_seconds));
+    b.boolean(only_one);
     return special_event(kSpecialSlice, b);
 }
 
 commands::EventData hack_super_weapon_event(uint32_t planet_id, uint32_t hacker_id, float cost) {
-    std::vector<uint8_t> b;
-    put32(b, planet_id);
-    put32(b, hacker_id);
-    put32(b, commands::quantize(kQuantAmount, cost));
+    ByteWriter b;
+    b.u32(planet_id);
+    b.u32(hacker_id);
+    b.u32(commands::quantize(kQuantAmount, cost));
     return special_event(kSpecialHack, b);
+}
+
+commands::EventData neutralize_hero_event(uint32_t planet_id, uint32_t neutralizer_id, const NeutralizeCandidate& c) {
+    ByteWriter b;
+    b.u32(planet_id);
+    b.u32(neutralizer_id);
+    b.u32(static_cast<uint32_t>(c.object));
+    b.u32(c.type);
+    b.u32(commands::quantize(kQuantAmount, c.price()));
+    b.u32(commands::quantize(kQuantDuration, c.owner_respawn));
+    b.u32(commands::quantize(kQuantDuration, c.target_respawn));
+    b.u8(static_cast<uint8_t>((c.space ? 1u : 0u) | (c.eligible ? 2u : 0u) | (c.siphon ? 4u : 0u)));
+    return special_event(kSpecialNeutralize, b);
 }
 
 bool read_special_payload(const commands::EventData& ev, SpecialPayload& out) {
@@ -103,40 +113,55 @@ bool read_special_payload(const commands::EventData& ev, SpecialPayload& out) {
     out = SpecialPayload{};
     out.kind = ev.u("kind");
     const std::span<const uint8_t> b = ev.bytes_view("data");
+    size_t size = 0;  // exact payload size per kind
     switch (out.kind) {
-    case kSpecialActivate:
-        if (b.size() != 8) return false;
-        break;
-    case kSpecialSlice:
-        if (b.size() != 25) return false;
-        out.type = get32(b, 8);
-        out.amount = commands::dequantize(kQuantAmount, get32(b, 12));
-        out.chance = commands::dequantize(kQuantDuration, get32(b, 16)) / 1000.0f;  // unpack 0x4b4470 divides by 1000
-        out.seconds = commands::dequantize(kQuantDuration, get32(b, 20));
-        out.only_one = b[24] != 0;
-        break;
-    case kSpecialBlackMarket:
-        if (b.size() != 21) return false;
-        out.item_crc = get32(b, 8);
-        out.amount = commands::dequantize(kQuantAmount, get32(b, 12));
-        out.seconds = commands::dequantize(kQuantDuration, get32(b, 16));
-        out.only_one = b[20] != 0;
-        break;
-    case kSpecialSabotage:
-        if (b.size() != 20) return false;
-        out.structure = get32(b, 8);
-        out.amount = commands::dequantize(kQuantAmount, get32(b, 12));
-        out.seconds = commands::dequantize(kQuantDuration, get32(b, 16));
-        break;
-    case kSpecialHack:
-        if (b.size() != 12) return false;
-        out.amount = commands::dequantize(kQuantAmount, get32(b, 8));
-        break;
+    case kSpecialActivate: size = 8; break;
+    case kSpecialSlice: size = 25; break;
+    case kSpecialNeutralize: size = 29; break;
+    case kSpecialBlackMarket: size = 21; break;
+    case kSpecialSabotage: size = 20; break;
+    case kSpecialHack: size = 12; break;
     default: return false;
     }
-    out.planet = get32(b, 0);
-    out.unit = get32(b, 4);
-    return true;
+    if (b.size() != size) return false;
+    ByteReader r(b);
+    out.planet = r.u32();
+    out.unit = r.u32();
+    switch (out.kind) {
+    case kSpecialSlice:
+        out.type = r.u32();
+        out.amount = commands::dequantize(kQuantAmount, r.u32());
+        out.chance = commands::dequantize(kQuantDuration, r.u32()) / 1000.0f;  // unpack 0x4b4470 divides by 1000
+        out.seconds = commands::dequantize(kQuantDuration, r.u32());
+        out.only_one = r.u8() != 0;  // any non-zero byte, as before (not ByteReader::boolean)
+        break;
+    case kSpecialBlackMarket:
+        out.item_crc = r.u32();
+        out.amount = commands::dequantize(kQuantAmount, r.u32());
+        out.seconds = commands::dequantize(kQuantDuration, r.u32());
+        out.only_one = r.u8() != 0;
+        break;
+    case kSpecialSabotage:
+        out.structure = r.u32();
+        out.amount = commands::dequantize(kQuantAmount, r.u32());
+        out.seconds = commands::dequantize(kQuantDuration, r.u32());
+        break;
+    case kSpecialHack: out.amount = commands::dequantize(kQuantAmount, r.u32()); break;
+    case kSpecialNeutralize: {
+        out.structure = r.u32();
+        out.type = r.u32();
+        out.amount = commands::dequantize(kQuantAmount, r.u32());
+        out.seconds = commands::dequantize(kQuantDuration, r.u32());
+        out.target_seconds = commands::dequantize(kQuantDuration, r.u32());
+        const uint8_t fl = r.u8();
+        out.space = (fl & 1u) != 0;
+        out.eligible = (fl & 2u) != 0;
+        out.siphon = (fl & 4u) != 0;
+        break;
+    }
+    default: break;  // kSpecialActivate: planet and unit only
+    }
+    return r.ok() && r.done();  // always true after the size check
 }
 
 // ---- helpers ----------------------------------------------------------------------------------------------------------
@@ -157,9 +182,11 @@ bool GalacticSim::faction_pairing(int32_t player, int32_t owner) const {
     const std::string& a = faction_of(player).name;
     const std::string& b = faction_of(owner).name;
     auto is = [](const std::string& n, const char* f) { return iequals(n, f); };
+    // [name-ok-begin: retail by-name pairing in 0x48d900, docs/re/P4_SIM_SYSTEMS.md §1.2 step 1]
     if (is(a, "Rebel")) return is(b, "Empire") || is(b, "Underworld");
     if (is(a, "Empire")) return is(b, "Rebel") || is(b, "Underworld");
     if (is(a, "Underworld")) return is(b, "Rebel") || is(b, "Empire");
+    // [name-ok-end]
     return false;
 }
 
@@ -213,12 +240,24 @@ bool GalacticSim::special_accepts(const SpecialAbilityDef& a, ObjectHandle unit,
         return slice_accepts(owner, planet);
     case SpecialAbilityClass::SystemSpy:  // GRC 2.3: no accept rule recovered [L]: any planet, a non-empty mask
         return a.spy_mask != 0;
+    case SpecialAbilityClass::RemoveCorruption:  // galab §1: vf5 0x5b1770
+        return remove_corruption_accepts(owner, planet);
+    case SpecialAbilityClass::PlanetDestruction:  // galab §2: vf5 0x7079c0
+        return planet_destruction_accepts(owner, planet);
+    case SpecialAbilityClass::SiphonCredits:  // galab §3: vf5 0x70e8c0
+        return siphon_accepts(owner, planet);
+    case SpecialAbilityClass::NeutralizeHero:  // galab §7: vf5 0x6166d0
+        return neutralize_accepts(planet);
     default: return false;  // income abilities are Galactic_Automatic (service_income_abilities)
     }
 }
 
+const SpecialAbilityDef& GalacticSim::special_def(uint32_t ref) const {
+    return (ref & kGalabRef) != 0 ? special().galab[ref & ~kGalabRef] : special().abilities[ref];
+}
+
 bool GalacticSim::special_apply(uint32_t ability, ObjectHandle unit, int32_t owner, PlanetIndex planet) {
-    const SpecialAbilityDef& a = special().abilities[ability];
+    const SpecialAbilityDef& a = special_def(ability);
     bool applied = false;
     switch (a.cls) {
     case SpecialAbilityClass::BlackMarket: applied = apply_black_market(a, unit, owner, planet); break;
@@ -227,10 +266,16 @@ bool GalacticSim::special_apply(uint32_t ability, ObjectHandle unit, int32_t own
     case SpecialAbilityClass::Corruption: applied = apply_corruption(unit, owner, planet); break;
     case SpecialAbilityClass::Slicer: applied = apply_slicer(a, unit, owner, planet); break;
     case SpecialAbilityClass::SystemSpy: applied = apply_system_spy(a, unit, owner, planet); break;  // GRC 2.3
+    case SpecialAbilityClass::RemoveCorruption: applied = apply_remove_corruption(a, unit, owner, planet); break;  // galab
+    case SpecialAbilityClass::PlanetDestruction: applied = apply_planet_destruction(unit, owner, planet); break;
+    case SpecialAbilityClass::SiphonCredits: applied = apply_siphon(a, unit, owner, planet); break;
+    case SpecialAbilityClass::NeutralizeHero: applied = apply_neutralize(a, unit, owner, planet); break;
     default: break;
     }
-    // Story LAND_ON (2) + DEPLOY (0xC) for every successful apply (0x3284c0) [H]; type = the unit's type.
-    if (applied)
+    // Story LAND_ON (2) + DEPLOY (0xC) for every successful apply (0x3284c0) [H]; type = the unit's type. galab: the
+    // planet destruction ability does not call it (0x707670); Neutralize_Hero calls it inside its executor (0x616740),
+    // before the neutralizer leaves.
+    if (applied && a.cls != SpecialAbilityClass::PlanetDestruction && a.cls != SpecialAbilityClass::NeutralizeHero)
         emit_special(GalacticEventKind::SpecialApplied, owner, planet, unit, static_cast<uint32_t>(store_->exists(unit) ? store_->type(unit) : kNoIndex),
                      static_cast<int32_t>(ability), -1);
     return applied;
@@ -242,12 +287,13 @@ bool GalacticSim::ground_activated_trigger(ObjectHandle unit, PlanetIndex planet
     const int32_t owner = store_->owner(unit);
     if (!valid_player(owner)) return false;
     const uint32_t type = static_cast<uint32_t>(store_->type(unit));
-    const std::vector<uint32_t> list = special().type(type).abilities;  // copy: the unit may leave during the walk
+    // galab: both tables in <Abilities> list order (TypeSpecial::trigger_order).
+    const std::vector<uint32_t> list = special().type(type).triggers();  // copy: the unit may leave during the walk
     bool any = false;
     for (const uint32_t ai : list) {
         if (!store_->alive(unit)) break;  // [inferred] a departed hero tries nothing more
-        const SpecialAbilityDef& a = special().abilities[ai];
-        if (a.style != ActivationStyle::GroundActivated || !a.initially_enabled) continue;  // style + "ready" (0x37be10)
+        const SpecialAbilityDef& a = special_def(ai);
+        if (a.style != ActivationStyle::GroundActivated || !ability_ready(a, owner, type)) continue;  // style + "ready" (0x37be10)
         if (!special_accepts(a, unit, owner, planet)) continue;
         if (!bm_allows_special_ability(owner, a.name_crc, a.must_be_bought)) continue;  // 0x39b0b0
         if (accepted) *accepted = true;
@@ -271,6 +317,22 @@ bool GalacticSim::schedule_hero_respawn(ObjectHandle hero, PlanetIndex planet, f
     const uint32_t type = static_cast<uint32_t>(store_->type(hero));
     const int32_t owner = store_->owner(hero);
     if (type >= rules_->types.size() || !valid_player(owner)) return false;  // 0x396380: the type must resolve
+    // mcx4 t05 (MCX4_T10_RE_ANSWERS §8, 0x48eb10 step 1) [H reader; M counts]: a structure-tied unit respawns only while
+    // its owner has more live objects of the structure type than of its own type, the dying one not counted [M: the
+    // spec's "one per structure"]; a company takes the tag of its first member that has one (retail tests the member).
+    uint32_t tied = rules_->types[type].respawn_tied_to_structure;
+    for (const uint32_t m : rules_->types[type].company_units)
+        if (tied == kNoIndex && m < rules_->types.size()) tied = rules_->types[m].respawn_tied_to_structure;
+    if (tied != kNoIndex) {
+        uint32_t structures = 0, units = 0;
+        for (const ObjectHandle h : store_->all_objects()) {
+            if (h == hero || !store_->alive(h) || store_->owner(h) != owner) continue;
+            const auto ht = static_cast<uint32_t>(store_->type(h));
+            structures += ht == tied ? 1u : 0u;
+            units += ht == type ? 1u : 0u;
+        }
+        if (structures <= units) return false;
+    }
     float t = seconds;
     if (t <= 0.0f) t = special().default_hero_respawn_time;
     // [H quirk, kept on purpose] 0x3fe0a0 tests 0 <= time: a negative time queues nothing, the caller still reports
@@ -281,12 +343,69 @@ bool GalacticSim::schedule_hero_respawn(ObjectHandle hero, PlanetIndex planet, f
             for (const RespawnEntry& e : p.respawns)
                 if (e.type == type) return true;
     RespawnEntry e;
-    e.due = frame_ + static_cast<int32_t>(30.0f * t + 0.5f);
+    e.due = frame_ + frames_trunc(30.0f * t + 0.5f);
     e.type = type;
     e.owner = owner;
     planets_[planet].respawns.push_back(e);
     emit_special(GalacticEventKind::HeroRespawnScheduled, owner, planet, hero, type, e.due, -1);
     return true;
+}
+
+ActivatedAbilitySlot GalacticSim::activated_ability_slot(ObjectHandle unit, PlanetIndex planet) const {
+    ActivatedAbilitySlot out;
+    if (!store_->alive(unit) || !valid_planet(planet)) return out;
+    if (planet < story_gates_.planet.size() && (story_gates_.planet[planet] & StoryGates::kNoAbilities) != 0) return out;
+    // 0x2e6fe0 recurses into a fleet of exactly one unit; a larger fleet never matches.
+    if (const uint32_t f = fleet_of(unit); f != kNoFleet) {
+        if (fleets_[f].contents.size() != 1) return out;
+        unit = fleets_[f].contents[0];
+        if (!store_->alive(unit)) return out;
+    }
+    return activated_ability_slot_of(special(), static_cast<uint32_t>(store_->type(unit)));
+}
+
+ActivatedAbilitySlot activated_ability_slot_of(const SpecialRules& sp, uint32_t type) {
+    ActivatedAbilitySlot out;
+    const TypeSpecial& ts = sp.type(type);
+    auto has = [&](const std::vector<std::string>& names) {
+        auto listed = [&](const std::string& n) {
+            for (const std::string& want : names)
+                if (iequals(want, n)) return true;
+            return false;
+        };
+        for (const std::string& n : ts.ability_entry_names)
+            if (listed(n)) return true;
+        return false;
+    };
+    struct Kind {
+        int32_t kind;
+        const std::vector<std::string>* names;
+        const char* label;
+    };
+    const Kind order[] = {
+        {6, &sp.activated_destroy_planet, "TEXT_TOOLTIP_ABILITY_DESTROY_PLANET_NAME"},
+        {1, &sp.activated_slice, "TEXT_ABILITY_SLOT_SLICE"},
+        {9, &sp.activated_black_market, ""},
+        {2, &sp.activated_sabotage, ""},
+        {3, &sp.activated_system_spy, "TEXT_ABILITY_SLOT_SPY"},
+        {4, &sp.activated_neutralize_hero, "TEXT_ABILITY_SLOT_NEUTRALIZE_HERO"},
+        {5, &sp.activated_siphon_credits, "TEXT_ABILITY_SLOT_SIPHON_CREDITS"},
+        {7, &sp.activated_corrupt, ""},
+        {8, &sp.activated_remove_corruption, "TEXT_ABILITY_SLOT_REMOVE_CORRUPTION"},
+        {10, &sp.activated_hack, ""},
+    };
+    for (const Kind& k : order)
+        if (has(*k.names)) {
+            out.kind = k.kind;
+            out.label = k.label;
+            return out;
+        }
+    return out;
+}
+
+bool GalacticSim::hero_defeated(ObjectHandle hero, PlanetIndex planet) {
+    if (!store_->alive(hero) || !is_hero_type(static_cast<uint32_t>(store_->type(hero)))) return false;
+    return schedule_hero_respawn(hero, planet, 0.0f);  // 0 -> Default_Hero_Respawn_Time
 }
 
 bool GalacticSim::hero_depart(ObjectHandle hero, PlanetIndex planet, float seconds) {
@@ -418,7 +537,7 @@ bool GalacticSim::bm_allows_special_ability(int32_t player, uint32_t ability_nam
 bool GalacticSim::bm_purchase(int32_t player, PlanetIndex planet, ObjectHandle hero, uint32_t item, float price, float seconds) {
     // 0x61ab60 [H]: price > credits -> nothing; else charge, add (append if absent), SFX (UI), hero departure.
     if (price > players_[static_cast<size_t>(player)].account.credits) return false;
-    add_credits(player, -price, true);
+    add_credits(player, -price, false);  // notify off (A2K_T10_CREDIT_NOTIFY_RE Q3)
     std::vector<uint32_t>& v = players_[static_cast<size_t>(player)].bm_purchased;
     if (std::find(v.begin(), v.end(), item) == v.end()) v.push_back(item);
     emit_special(GalacticEventKind::BlackMarketPurchase, player, planet, hero, kNoIndex, static_cast<int32_t>(item),
@@ -502,6 +621,7 @@ void GalacticSim::set_sabotage_tutorial(int32_t player, bool on) {
 std::vector<uint8_t> GalacticSim::sabotage_options_of(const SpecialAbilityDef& a, PlanetIndex planet, int32_t player) const {
     std::vector<uint8_t> out;
     if (!valid_planet(planet)) return out;
+    if (story_gates_.has(planet, StoryGates::kNoSabotage)) return out;  // RESTRICT_SABOTAGE (STY1)
     const PlanetState& p = planets_[planet];
     bool has_structure = false;
     for (ObjectHandle s : p.structures) has_structure = has_structure || store_->alive(s);
@@ -582,6 +702,9 @@ bool GalacticSim::apply_sabotage(const SpecialAbilityDef& a, ObjectHandle sabote
     // vf30 0x5b1920 [H].
     const PlayerState& ps = players_[static_cast<size_t>(player)];
     if (!ps.human && !ps.ai) return false;  // 1. (a human is the local player in the port's SP model)
+    // mcx6 ENABLE_SABOTAGE off (STORY_REWARDS_GALACTIC §1.21, 0x2e6770): the human's sabotage slot is never offered, so
+    // a human sabotage does not start [port: the slot test sits in the GUI; the sim refuses the use]. The AI ignores it.
+    if (ps.human && !story_gates_.sabotage_enabled) return false;
     const std::vector<uint8_t> opts = sabotage_options_of(a, planet, player);
     if (opts.empty()) {  // 2.
         emit_special(GalacticEventKind::SpecialError, player, planet, saboteur, kNoIndex, 0, -1);
@@ -654,7 +777,7 @@ bool GalacticSim::apply_sabotage(const SpecialAbilityDef& a, ObjectHandle sabote
         break;
     }
     case kSabotageHalt: {  // 0x5b2450: halt-list entry, expiry now + int(FPS * duration + 0.5), -1 = permanent [H]
-        const int32_t until = a.halt_duration == -1.0f ? INT32_MAX : frame_ + static_cast<int32_t>(30.0f * a.halt_duration + 0.5f);
+        const int32_t until = a.halt_duration == -1.0f ? INT32_MAX : frame_ + frames_trunc(30.0f * a.halt_duration + 0.5f);
         set_credit_halt(planet, until);  // [port] the keyed halt list folds into PlanetState::halt_until
         ok = true;
         break;
@@ -669,6 +792,9 @@ RejectReason GalacticSim::sabotage_execute_structure(int32_t player, PlanetIndex
     // 0x5b21a0(structure, cost, R, saboteur, planet, story = 0) [H].
     if (!valid_player(player)) return RejectReason::InvalidPlayer;
     if (!valid_planet(planet)) return RejectReason::InvalidTarget;
+    if (story_gates_.has(planet, StoryGates::kNoSabotage)) return RejectReason::NotAllowed;  // RESTRICT_SABOTAGE (STY1)
+    // mcx6 ENABLE_SABOTAGE off: the dialog confirm 0x3cf2e0 queues no command for the human (§1.21).
+    if (players_[static_cast<size_t>(player)].human && !story_gates_.sabotage_enabled) return RejectReason::NotAllowed;
     if (!store_->alive(saboteur) || store_->owner(saboteur) != player) return RejectReason::InvalidUnit;
     const float c = commands::requantize(kQuantAmount, cost);
     const float r = commands::requantize(kQuantDuration, respawn_seconds);
@@ -677,7 +803,7 @@ RejectReason GalacticSim::sabotage_execute_structure(int32_t player, PlanetIndex
     if (!store_->alive(structure) || std::find(p.structures.begin(), p.structures.end(), structure) == p.structures.end())
         return RejectReason::InvalidTarget;
     destroy_structure_sabotage(planet, structure, player, true);  // story GALACTIC_SABOTAGE with the structure type
-    add_credits(player, -c, true);
+    add_credits(player, -c, false);  // notify off (A2K_T10_CREDIT_NOTIFY_RE Q3)
     if (r >= 0.0f) schedule_hero_respawn(saboteur, planet, r);  // R = 0 -> Default_Hero_Respawn_Time
     if (store_->alive(saboteur)) despawn(saboteur);
     ++p.sabotage_count;  // (Sabotage_Particle_Effect, SFXEvent_Sabotage_Success: presentation)
@@ -795,6 +921,27 @@ uint32_t GalacticSim::corruption_unlock(PlanetIndex planet, int8_t type) const {
     return kNoIndex;
 }
 
+float GalacticSim::corruption_credit_bonus(PlanetIndex planet, int8_t type) const {
+    if (!valid_planet(planet) || type == kCorruptionNone) return 0.0f;
+    const uint32_t pt = planets_[planet].type;
+    if (pt >= special().types.size()) return 0.0f;
+    for (const CorruptionChoiceDef& c : special().types[pt].corruption)
+        if (c.type == type) return c.success_credit_bonus;  // slot 1, 2, 3: the first match (a repeated type pays slot 1)
+    return 0.0f;
+}
+
+void GalacticSim::pay_corruption_bonus(PlanetIndex planet, int8_t type, int32_t player) {
+    if (!valid_player(player)) return;
+    const float bonus = corruption_credit_bonus(planet, type);
+    if (bonus > 0.0f) add_credits(player, bonus, false);
+}
+
+int32_t GalacticSim::first_corruption_player() const {
+    for (size_t i = 0; i < players_.size(); ++i)
+        if (benefits(static_cast<int32_t>(i))) return static_cast<int32_t>(i);
+    return kNoPlayer;
+}
+
 void GalacticSim::corruption_unlocks(PlanetIndex planet, int8_t old_type, int32_t old_player) {
     if (!valid_planet(planet)) return;
     const uint32_t old_unlock = corruption_unlock(planet, old_type);
@@ -846,8 +993,7 @@ bool GalacticSim::build_locked(int32_t player, uint32_t type) const {
     if (!valid_player(player)) return false;
     const PlayerState& ps = players_[static_cast<size_t>(player)];
     if (!ps.locked_types.empty() && type_locked(player, type)) return true;
-    return initial_build_locks_ && type < rules_->types.size() && rules_->types[type].build_initially_locked &&
-           !type_unlocked(player, type);
+    return type < rules_->types.size() && rules_->types[type].build_initially_locked && !type_unlocked(player, type);
 }
 
 void GalacticSim::hack_effect(int32_t player, PlanetIndex planet, ObjectHandle hacker, ObjectHandle weapon) {
@@ -883,7 +1029,7 @@ RejectReason GalacticSim::hack_execute(int32_t player, PlanetIndex planet, Objec
         emit_special(GalacticEventKind::SpecialError, player, planet, hacker, kNoIndex, 0, -1);
         return store_->alive(w) ? RejectReason::CannotAfford : RejectReason::InvalidTarget;
     }
-    add_credits(player, -c, true);
+    add_credits(player, -c, false);  // notify off (A2K_T10_CREDIT_NOTIFY_RE Q3)
     hack_effect(player, planet, hacker, w);  // + SFXEvent_Hack_Success, hack particle effect (presentation)
     return RejectReason::None;
 }
@@ -900,6 +1046,15 @@ bool GalacticSim::planet_destroy_impl(PlanetIndex planet, int32_t destroyer, int
         PlanetState& p = planets_[planet];
         p.siphon_player = kNoPlayer;  // siphon fields cleared
         p.siphon_amount = 0.0f;
+        p.siphon_type = kNoIndex;
+        p.siphon_source = 0;
+        // galab §4 / §5 [M]: a destroyed planet gives no Galaxy_Wide_Upgrade / Reduce_Technology_Price bonus (both apply
+        // paths test it); its holder loses them now.
+        if (p.bonus_holder != kNoPlayer) {
+            const int32_t holder = p.bonus_holder;
+            p.bonus_holder = kNoPlayer;
+            refresh_tech_cost(holder);
+        }
     }
     auto remove = [this, planet](ObjectHandle h) {
         if (!store_->alive(h)) return;
@@ -1081,6 +1236,7 @@ float GalacticSim::economy_income_for_tag(int32_t player, uint32_t tag) const {
 
 std::span<const CorruptionChoiceDef> GalacticSim::corruption_choices(PlanetIndex planet) const {
     if (!valid_planet(planet)) return {};
+    if (story_gates_.has(planet, StoryGates::kNoCorruption)) return {};  // RESTRICT_CORRUPTION (STY1)
     return special().type(planets_[planet].type).corruption;
 }
 
@@ -1214,7 +1370,7 @@ CorruptionCharge GalacticSim::corruption_charge(int32_t player, PlanetIndex plan
     const CorruptionChoiceDef* c = corruption_choice(planet, type);
     const float cost = c ? c->credit_cost : fallback_cost;
     if (!(cost <= 0.0f || cost <= credits(player))) return CorruptionCharge::NoCredits;
-    if (cost > 0.0f) add_credits(player, -cost, true);  // charged BEFORE the unit check [H as read]
+    if (cost > 0.0f) add_credits(player, -cost, false);  // notify off (A2K_T10 Q3); charged BEFORE the unit check [H as read]
     if (c) {
         if (!corruption_requirements(player, planet, *c).units) return CorruptionCharge::UnitsUnmet;  // no refund [H]
         consume_prerequisites(player, planet, *c);
@@ -1277,9 +1433,9 @@ RejectReason GalacticSim::special_command(int32_t player, const commands::EventD
             if (fleets_[f].planet != planet || fleets_[f].moving) return RejectReason::InvalidTarget;
             for (ObjectHandle m : fleets_[f].contents) {
                 if (!store_->alive(m)) continue;
-                for (uint32_t ai : special_type(m).abilities) {
-                    const SpecialAbilityDef& a = special().abilities[ai];
-                    if (a.style == ActivationStyle::GroundActivated && a.initially_enabled && special_accepts(a, m, player, planet)) {
+                for (uint32_t ai : special_type(m).triggers()) {
+                    const SpecialAbilityDef& a = special_def(ai);
+                    if (a.style == ActivationStyle::GroundActivated && ability_ready(a, player, static_cast<uint32_t>(store_->type(m))) && special_accepts(a, m, player, planet)) {
                         users.push_back(m);
                         break;
                     }
@@ -1305,6 +1461,20 @@ RejectReason GalacticSim::special_command(int32_t player, const commands::EventD
         return sabotage_execute_structure(player, planet, unit, s, pl.amount, pl.seconds);
     }
     case kSpecialHack: return hack_execute(player, planet, unit, pl.amount);
+    case kSpecialNeutralize: {
+        // 0x4b4d70 case 3: the candidate's cost list becomes one entry (the q8 price), the respawn times are re-read from
+        // q5, then 0x616740 runs for a neutralizer that is at a planet.
+        NeutralizeCandidate c;
+        c.object = static_cast<int32_t>(pl.structure);
+        c.type = pl.type;
+        c.space = pl.space;
+        c.eligible = pl.eligible;
+        c.siphon = pl.siphon;
+        c.owner_respawn = pl.seconds;
+        c.target_respawn = pl.target_seconds;
+        c.terms.emplace_back(NeutralizeTerm::Base, pl.amount);
+        return neutralize_execute(player, planet, unit, c);
+    }
     case kSpecialSlice: {
         // Execute 0x4b4d70 case 2: price q8, chance q5 (without the x1000) and R q5 re-quantized locally (COMMANDS 3.2).
         if (!valid_player(player)) return RejectReason::InvalidPlayer;
@@ -1416,14 +1586,14 @@ bool GalacticSim::slice_execute(int32_t player, PlanetIndex planet, ObjectHandle
     float r = respawn_seconds;
     const bool success = s < e.chance;
     if (success) {  // 5.
-        add_credits(player, -e.price, true);
+        add_credits(player, -e.price, false);  // notify off (A2K_T10_CREDIT_NOTIFY_RE Q3)
         unlock_type(player, e.type, 2);
         if (only_one) raise_tech_level(player);
         emit_special(GalacticEventKind::Slice, player, planet, slicer, e.type, 0, owner);
     } else {  // 6. k: 1 captured (R x 2), 2 lost effort, 3 cheated (charged)
         const int32_t k = rng_->range_int(1, 3);
         if (k == 1) r *= 2.0f;
-        if (k == 3) add_credits(player, -e.price, true);
+        if (k == 3) add_credits(player, -e.price, false);  // notify off (A2K_T10_CREDIT_NOTIFY_RE Q3)
         emit_special(GalacticEventKind::Slice, player, planet, slicer, e.type, k, owner);
     }
     hero_depart(slicer, planet, r);  // 7.

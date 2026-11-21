@@ -3,13 +3,16 @@
 // "battle host (BT pass)" blocks). Serial code; synced draws: retreat attrition (one inline draw per eligible unit) and the
 // hard-point draws of AbilitySystem::add_unit for pad objects.
 #include <algorithm>
-#include <cctype>
 #include <cmath>
+#include <cstdio>
 #include <cstdlib>
 #include <string>
 #include <string_view>
+#include <vector>
 
 #include "alamo/core/dmath.hpp"
+#include "alamo/core/sim_crc.hpp"
+#include "alamo/core/ascii.hpp"
 #include "alamo/core/hash.hpp"
 #include "alamo/terrain/chunk.hpp"
 #include "alamo/galactic/campaign.hpp"
@@ -26,26 +29,11 @@ namespace alamo::sim {
 namespace tc = alamo::tactical::combat;
 namespace mv = alamo::tactical::movement;
 namespace cmd = alamo::commands;
+namespace ta = alamo::tactical::abilities;
 
 namespace {
 
-std::string_view trim(std::string_view s) {
-    while (!s.empty() && (s.front() == ' ' || s.front() == '\t' || s.front() == '\r' || s.front() == '\n')) s.remove_prefix(1);
-    while (!s.empty() && (s.back() == ' ' || s.back() == '\t' || s.back() == '\r' || s.back() == '\n')) s.remove_suffix(1);
-    return s;
-}
-
-bool iequal_trim(std::string_view a, std::string_view b) {
-    a = trim(a);
-    b = trim(b);
-    if (a.size() != b.size()) return false;
-    for (size_t i = 0; i < a.size(); ++i) {
-        const char x = (a[i] >= 'a' && a[i] <= 'z') ? static_cast<char>(a[i] - 'a' + 'A') : a[i];
-        const char y = (b[i] >= 'a' && b[i] <= 'z') ? static_cast<char>(b[i] - 'a' + 'A') : b[i];
-        if (x != y) return false;
-    }
-    return true;
-}
+bool iequal_trim(std::string_view a, std::string_view b) { return ascii_iequals(ascii_trim(a), ascii_trim(b)); }
 
 objects::BehaviorTypeId pad_behavior() {
     static const objects::BehaviorTypeId id = objects::behavior_type_id("TACTICAL_BUILD_OBJECTS");
@@ -135,6 +123,43 @@ void TacticalBattle::bt_force_split() {
 
 // ---- pad types (setup) -------------------------------------------------------------------------------------------
 
+void TacticalBattle::prepare_models(const BattleCatalog& catalog, const galactic::GalacticSim& galaxy, const galactic::ConflictRules& rules,
+                                    const galactic::BattleRequest& request, const terrain::MapData& map, const ParallelFor& pf) {
+    const objects::GameObjectTypes& types = catalog.types();
+    const bool space = request.info.kind == galactic::ConflictKind::Space;
+    std::vector<uint32_t> list;
+    auto use = [&](uint32_t t) {
+        if (t < types.size() && std::find(list.begin(), list.end(), t) == list.end()) list.push_back(t);
+    };
+    const objects::ObjectStore& gs = galaxy.store();
+    for (const galactic::BattleForces& f : request.forces)
+        for (const std::vector<objects::ObjectHandle>* hs : {&f.start, &f.reserve})
+            for (const objects::ObjectHandle h : *hs) {
+                if (!gs.alive(h)) continue;
+                const auto t = static_cast<uint32_t>(gs.type(h));
+                const galactic::ConflictTypeInfo& ti = rules.type(t);
+                use(t);
+                for (const auto& [mt, n] : ti.members) use(mt);
+            }
+    const TypeCrcIndex index(types);
+    for (const terrain::ObjectPlacement& pl : map.objects) {
+        const objects::TypeIndex t = index.find(pl.type_crc);
+        if (t == objects::kNone || t >= types.size()) continue;
+        use(static_cast<uint32_t>(t));
+        if (pad_behavior() == objects::kNoBehavior || !types.has_behavior(t, objects::BehaviorSet::Union, pad_behavior())) continue;
+        for (const objects::ListTag* tag : {&objects::tags::Tactical_Buildable_Objects_Multiplayer, &objects::tags::Tactical_Buildable_Objects_Campaign})
+            for (const std::string_view tok : types.get(t, *tag)) {
+                const objects::TypeIndex uc = types.raw().find(tok);
+                if (uc == objects::kNone || uc >= types.size()) continue;
+                use(static_cast<uint32_t>(uc));
+                const objects::TypeIndex ft = types.resolve_name(types.get(uc, objects::tags::Tactical_Buildable_Constructed));
+                if (ft != objects::kNone) use(static_cast<uint32_t>(ft));
+            }
+    }
+    catalog.preload(list, space,
+                    BattleCatalog::kPreloadBones | BattleCatalog::kPreloadAvoid | (space ? 0u : BattleCatalog::kPreloadExtents), pf);
+}
+
 void TacticalBattle::bt_add_pad_types(const terrain::MapData& map) {
     if (pad_behavior() == objects::kNoBehavior) return;
     const objects::GameObjectTypes& types = catalog_->types();
@@ -150,11 +175,11 @@ void TacticalBattle::bt_add_pad_types(const terrain::MapData& map) {
         if (std::find(types_used_.begin(), types_used_.end(), t) == types_used_.end()) types_used_.push_back(t);
     };
     for (const uint32_t pt : pads)
-        for (const std::string_view tok : types.get_list(pt, pad_list_tag())) {
+        for (const std::string_view tok : types.get(pt, pad_list_tag())) {
             const objects::TypeIndex uc = types.raw().find(tok);
             if (uc == objects::kNone || uc >= types.size()) continue;  // a faction name (row header)
             use(uc);
-            const objects::TypeIndex ft = types.resolve_name(types.get_string(uc, "Tactical_Buildable_Constructed"));
+            const objects::TypeIndex ft = types.resolve_name(types.get(uc, objects::tags::Tactical_Buildable_Constructed));
             if (ft != objects::kNone && ft < types.size()) use(ft);
         }
     if (pad_records_ && pad_restore_ && !cfg_.skirmish && !pads.empty())  // §9.4: the finished types bt_pad_restore may create
@@ -175,11 +200,11 @@ uint32_t TacticalBattle::bt_adopt_built(TacticalMode& mode, objects::ObjectHandl
     p.galactic_id = objects::kNoObjectId;
     p.owner = owner;
     p.type = t;
-    p.side = owner == req_.info.defender ? 0 : 1;
+    p.side = owner_side(owner);
     p.deployed = true;
     p.built = true;
     p.map = map;
-    p.third = map && owner != req_.info.defender && owner != req_.info.attacker;
+    p.third = map && owner != req_.info.defender && owner != req_.info.attacker && owner_side(owner) < 2;  // skm2 t02: slots 2.. count
     p.pop = 0.0f;
     const auto& gt = galaxy_->rules().types;
     p.power = t < gt.size() ? gt[t].ai_combat_power : 0.0f;
@@ -210,6 +235,7 @@ uint32_t TacticalBattle::bt_adopt_built(TacticalMode& mode, objects::ObjectHandl
         md.z = pos.z;
         md.yaw_deg = dmath::atan2(f.y, f.x) * (180.0f / dmath::kPiF);
         md.owner = owner;
+        mv_type_extents(md, t);  // s78n t20
         movement_->add_unit(md);
     }
     tc::UnitSpawn cs;
@@ -249,15 +275,22 @@ void TacticalBattle::bt_pad_health() {
     bt_ramps_.resize(w);
 }
 
-float TacticalBattle::build_cost(objects::TypeIndex uc_type) const {
+float TacticalBattle::build_cost(objects::TypeIndex uc_type, int32_t player) const {
     const objects::GameObjectTypes& types = catalog_->types();
     if (uc_type >= types.size()) return 0.0f;
     // Both are int fields (the float view of an int field is 0).
     // t50 0x3744e0: a skirmish pad is priced from Tactical_Build_Cost_Multiplayer alone (no campaign fallback).
-    if (skirmish_land()) return static_cast<float>(std::max(0, types.get_int(uc_type, "Tactical_Build_Cost_Multiplayer")));
-    int32_t c = types.get_int(uc_type, "Tactical_Build_Cost_Campaign");
-    if (c <= 0) c = types.get_int(uc_type, "Tactical_Build_Cost_Multiplayer");
-    return static_cast<float>(std::max(0, c));
+    // skai t17: any skirmish, land or space (0x28afb0).
+    if (cfg_.skirmish) return static_cast<float>(std::max(0, types.get(uc_type, objects::tags::Tactical_Build_Cost_Multiplayer)));
+    int32_t c = types.get(uc_type, objects::tags::Tactical_Build_Cost_Campaign);
+    if (c <= 0) c = types.get(uc_type, objects::tags::Tactical_Build_Cost_Multiplayer);
+    c = std::max(0, c);
+    if (player >= 0 && galaxy_) {  // mcx4 t07 (Q7.2): the corrupted battle planet's pad price factor, truncated
+        const float m = galaxy_->tactical_corruption_multiplier(req_.info.planet, player,
+                                                                galactic::GalacticSim::TacticalCorruption::PadPrice);
+        if (m != 1.0f) c = static_cast<int32_t>(static_cast<float>(c) * m);
+    }
+    return static_cast<float>(c);
 }
 
 cmd::RejectReason TacticalBattle::tactical_build(TacticalMode& mode, uint8_t player, objects::ObjectId pad, objects::TypeIndex type,
@@ -271,22 +304,28 @@ cmd::RejectReason TacticalBattle::tactical_build(TacticalMode& mode, uint8_t pla
     if (!st.alive(ph) || pad_behavior() == objects::kNoBehavior || !st.has_behavior(ph, pad_behavior()) || type >= types.size())
         return R::InvalidTarget;
     if (pad_contents(pad) != objects::kNoObjectId) return R::NotAllowed;  // UC present / built present
-#ifdef ALAMO_SIM_HAVE_FOG
     if (fog() && fog_object_hidden(static_cast<int32_t>(player), pad, true)) return R::NotAllowed;  // pad fogged (0x35f470)
-#endif
     const int32_t owner = st.owner(ph);
     // q6 t19 (AI_TACTICAL §7.5.1): 0x39a230(pad, player) = relation(player -> pad owner) == 0. A Neutral-owned (relation 2)
     // pad is not allied, for humans and AI alike; the structure belongs to the builder, the pad keeps its owner.
     if (owner < 0 || !bt_allied(static_cast<int32_t>(player), owner)) return R::NotAllowed;  // "not owned by an ally"
     if (const PadState* s = pad_state(pad); s && s->cooldown_end > frame_) return R::NotAllowed;
     if (uc_behavior() == objects::kNoBehavior || !types.has_behavior(type, objects::BehaviorSet::Union, uc_behavior())) return R::InvalidUnit;
-    if (!ai) {
-        const float cost = build_cost(type);
+    // skai t09 (SKAI_T06_LAND_RUNS 2 "Credits" [H, trace]): the AI pays a pad build in full when its under-construction object
+    // appears, like a human (retail Utapau: Mineral Processor -800, Ground Mining Facility -1300, AV turret + Mineral Processor
+    // -1650 in one frame). SKIRMISH_SETUP 3's "the AI is never charged" reading of 0x289050 does not hold for pad builds there.
+    // [port] Campaign land battles keep the free AI pad builds (L1_S4 3.6): no retail trace of an AI pad build there yet.
+    // skai t17: a space skirmish AI pays too (retail Geonosis: the Rebel balance drops by the extractors it starts).
+    if (!ai || cfg_.skirmish) {
+        const float cost = build_cost(type, static_cast<int32_t>(player));
         const float have = credits_get_ ? credits_get_(static_cast<int32_t>(player)) : 0.0f;
         if (cost > have) return R::CannotAfford;
         if (cost > 0.0f && credits_add_) credits_add_(static_cast<int32_t>(player), -cost);  // execute 0x5d78a0: charge 1
     }
-    return pad_build(mode, pad, type, false, static_cast<int32_t>(player)) == 1 ? R::None : R::NotAllowed;
+    pad_build_sfx_ = true;  // mcx4 t13: a command start plays the builder's line (presentation feed only)
+    const int32_t started = pad_build(mode, pad, type, false, static_cast<int32_t>(player));
+    pad_build_sfx_ = false;
+    return started == 1 ? R::None : R::NotAllowed;
 }
 
 cmd::RejectReason TacticalBattle::tactical_sell(TacticalMode& mode, uint8_t player, objects::ObjectId object) {
@@ -306,15 +345,15 @@ cmd::RejectReason TacticalBattle::tactical_sell(TacticalMode& mode, uint8_t play
     float cost = 0.0f;
     const objects::ObjectHandle ph = st.find(s->pad);
     if (st.alive(ph))
-        for (const std::string_view tok : types.get_list(st.type(ph), pad_list_tag())) {
+        for (const std::string_view tok : types.get(st.type(ph), pad_list_tag())) {
             const objects::TypeIndex uc = types.raw().find(tok);
             if (uc == objects::kNone || uc >= types.size()) continue;
-            if (types.resolve_name(types.get_string(uc, "Tactical_Buildable_Constructed")) == bt) {
+            if (types.resolve_name(types.get(uc, objects::tags::Tactical_Buildable_Constructed)) == bt) {
                 cost = build_cost(uc);
                 break;
             }
         }
-    const float refund = std::floor(cost * (bt < types.size() ? types.get_float(bt, "Tactical_Sell_Percentage") : 0.0f));
+    const float refund = std::floor(cost * (bt < types.size() ? types.get(bt, objects::tags::Tactical_Sell_Percentage) : 0.0f));
     if (refund > 0.0f && credits_add_) credits_add_(static_cast<int32_t>(player), refund);
     // Release 0x42ecd0: no cooldown; then the object is killed [port: removed from the battle at once].
     s->built = objects::kNoObjectId;
@@ -323,6 +362,8 @@ cmd::RejectReason TacticalBattle::tactical_sell(TacticalMode& mode, uint8_t play
     // q6 t19 (AI_TACTICAL §7.5.1 item 4): a sale clears the slot and the persistence record but resets no ownership and
     // starts no cooldown: the pad keeps its owner until someone captures it (the capture rules of an empty pad).
     if (st.alive(ph)) pad_persist(st, ph, bt, st.position(h), false);  // §9.4: the sale removes the persistent record (the object's x, y)
+    if (st.alive(ph)) play_battle_clip(s->pad, 0x75, false, 1.0f, 0.0f);  // r3h t05: release 0x42ecd0 plays Pad_Sell (L1_S4 §3.6)
+    pad_events_.push_back({PadEvent::Kind::Sold, false, object, objects::kNoObjectId, bt, static_cast<int32_t>(player), st.position(h)});
     if (Unit* u = unit_by_id(object); u && u->alive) {
         u->alive = false;
         --parts_[u->participant].alive;
@@ -355,7 +396,7 @@ bool TacticalBattle::add_reserve(objects::ObjectHandle galactic, int32_t owner) 
         if (!p.built && p.galactic_id == gid) return false;
     if (!can_add_reserve(static_cast<uint32_t>(gs.type(galactic)))) return false;
     const size_t n = parts_.size();
-    add_participant(galactic, owner, owner == req_.info.defender ? 0 : 1, true, false, false);
+    add_participant(galactic, owner, owner_side(owner), true, false, false);
     if (parts_.size() == n) return false;
     bt_used_ = true;
     return true;
@@ -369,11 +410,11 @@ bool TacticalBattle::add_built_reserve(int32_t owner, uint32_t type, objects::Ob
     p.galactic_id = kBuiltReserveKeyBase + static_cast<objects::ObjectId>(parts_.size());
     p.owner = owner;
     p.type = type;
-    p.side = owner == req_.info.defender ? 0 : 1;
+    p.side = owner_side(owner);
     p.reserve = true;
     p.built = true;  // no galactic counterpart: not in the battle result
     const galactic::ConflictTypeInfo& ti = rules_->type(type);
-    p.pop = static_cast<float>(ti.space_population_override >= 0 ? ti.space_population_override : ti.population);
+    p.pop = participant_pop(ti);  // trl2 t02: pop(T, mode) 0x373500, land / space override
     const auto& types = galaxy_->rules().types;
     p.power = type < types.size() ? types[type].ai_combat_power : 0.0f;
     for (const auto& [mt, n] : ti.members)
@@ -408,7 +449,7 @@ void TacticalBattle::bt_retreat_attrition(uint8_t side, SimRng& rng) {
         }
         if (blockade)
             for (const Unit& u : units_)
-                if (u.side == side && u.alive && !u.retreated && catalog_->types().get_bool(u.type, "Prevents_Blockade_Run_Attrition"))
+                if (u.side == side && u.alive && !u.retreated && catalog_->types().get(u.type, objects::tags::Prevents_Blockade_Run_Attrition))
                     blockade = false;
         if (blockade) p = std::min(1.0f, p + k.blockade_run_attrition);
     }
@@ -462,10 +503,24 @@ void TacticalBattle::bt_battle_end() {
 
 // ---- battle host follow-up: TEAM containers (REMAINING_GAPS §3.4), landing reinforcement points (§3.3) --------------
 
+std::string_view TacticalBattle::map_hint(objects::ObjectId id) const {
+    const auto it = std::lower_bound(map_hints_.begin(), map_hints_.end(), id,
+                                     [](const std::pair<objects::ObjectId, std::string>& e, objects::ObjectId v) { return e.first < v; });
+    return it != map_hints_.end() && it->first == id ? std::string_view(it->second) : std::string_view();
+}
+
 objects::TypeIndex TacticalBattle::representative_type(objects::ObjectId id) const {
     if (id == objects::kNoObjectId) return objects::kNone;
     for (const Container& ct : containers_)  // container order; ids are unique
         if (ct.id == id) return ct.team && ct.type != 0xFFFFFFFFu ? static_cast<objects::TypeIndex>(ct.type) : objects::kNone;
+    return objects::kNone;
+}
+
+objects::TypeIndex TacticalBattle::team_company_type(objects::ObjectId id) const {
+    if (id == objects::kNoObjectId) return objects::kNone;
+    for (const Container& ct : containers_)  // container order; ids are unique
+        if (ct.id == id)
+            return ct.team && ct.squad_type != 0xFFFFFFFFu ? static_cast<objects::TypeIndex>(ct.squad_type) : objects::kNone;
     return objects::kNone;
 }
 
@@ -476,15 +531,15 @@ bool TacticalBattle::bt_team(uint32_t company_type, uint32_t first_member, uint3
     squad = 0;
     if (company_type >= types.size()) return false;
     // 0x2a00b0: the helper runs when the first spawned member's type has Create_Team (+0x67), or always in space.
-    if (!space_ && !(first_member < types.size() && types.get_bool(first_member, "Create_Team"))) return false;
+    if (!space_ && !(first_member < types.size() && types.get(first_member, objects::tags::Create_Team))) return false;
     // Create_Team_Type (+0x1e50 / +0x1e58), else the type named "Team"; neither resolves -> nothing is created.
-    const std::string_view name = types.get_string(company_type, "Create_Team_Type");
+    const std::string_view name = types.get(company_type, objects::tags::Create_Team_Type);
     objects::TypeIndex tt = objects::kNone;
-    if (!trim(name).empty()) tt = types.resolve_name(trim(name));
+    if (!ascii_trim(name).empty()) tt = types.resolve_name(ascii_trim(name));
     const bool named = tt != objects::kNone && tt < types.size();
     if (!named) tt = types.resolve_name("Team");
     if (tt == objects::kNone || tt >= types.size()) return false;
-    const int32_t k = types.get_int(company_type, "Max_Squad_Size");  // company type +0x1e44, default 10
+    const int32_t k = types.get(company_type, objects::tags::Max_Squad_Size);  // company type +0x1e44, default 10
     squad = k > 0 ? static_cast<uint32_t>(k) : 10u;
     object_type = static_cast<uint32_t>(tt);
     behavior_type = named ? object_type : company_type;  // TEAM behaviour type: the company type without Create_Team_Type
@@ -493,10 +548,14 @@ bool TacticalBattle::bt_team(uint32_t company_type, uint32_t first_member, uint3
 
 void TacticalBattle::bt_team_positions(TacticalMode& mode) {
     // A1_READINGS §29.4: each TEAM service (0x405b10) moves the container to the centre of its members' joint bounding box
-    // [H]; [M] the members' boxes are taken as equal, so the centre of their positions' box is used.
+    // [H]; [M] the members' boxes are taken as equal, so the centre of their positions' box is used. s78n t03 (TACTICAL_
+    // COMBAT §5.4.4 item 2): only when the container has no locomotor or its vf +0x230 is false - space squadrons (the
+    // FIGHTER_FLYING §4.10 B centre). A land squad container (LandTeamContainer) is never re-centred: its own mover places
+    // it (MovementSystem, mv_squad_add). [port] A land squad whose members cannot steer (no mover) keeps this stand-in.
     objects::ObjectStore& st = mode.primary();
     for (const Container& c : containers_) {
         if (!c.team || c.removed || !st.alive(c.h)) continue;
+        if (!space_ && movement_ && movement_->has_unit(c.id)) continue;
         bool any = false;
         Vec3 lo{0.0f, 0.0f, 0.0f}, hi{0.0f, 0.0f, 0.0f};
         for (const Unit& u : units_)
@@ -512,6 +571,119 @@ void TacticalBattle::bt_team_positions(TacticalMode& mode) {
             }
         if (any) st.set_position(c.h, Vec3{(lo.x + hi.x) * 0.5f, (lo.y + hi.y) * 0.5f, (lo.z + hi.z) * 0.5f});
     }
+}
+
+void TacticalBattle::combat_team_positions(const objects::ObjectStore& store) {
+    // s78n t03 (TACTICAL_COMBAT §5.4.4 item 2.1): TeamTargeting 0x62eeb0 scans and range-tests from the land container's
+    // position - the same store position the fog test, the AI threat entry and Bribe's T read.
+    combat_->clear_team_positions();
+    if (space_) return;
+    for (const Container& c : containers_) {
+        if (!c.team || c.removed || !store.alive(c.h)) continue;
+        const Vec3 p = store.position(c.h);
+        combat_->set_team_position(static_cast<uint32_t>(c.id), tactical::Vec3{p.x, p.y, p.z});
+    }
+}
+
+void TacticalBattle::type_half_extents(uint32_t type, float& hx, float& hy) const {
+    // s78n t09 (TACTICAL_COMBAT §5.4.6 item 1, 0x371be0): both Custom_Hard extents > 0 -> Scale_Factor x (X, Y), no model
+    // read; else the mode's model (no fallback to another mode's): none -> (0, 0); else per axis the custom value when > 0,
+    // else the collision-bound half x / y (ModelClass vf +0x58: avoid_model's bound_h) x Scale_Factor. [port] A named model
+    // whose file does not load (no art data) takes per axis the custom value, else 0 (s78n t10: as drop_half_extents).
+    hx = hy = 0.0f;
+    const objects::GameObjectTypes& types = catalog_->types();
+    if (type >= types.size()) return;
+    const float sc = types.scale_factor(type);
+    const float cx = types.get(type, objects::tags::Custom_Hard_XExtent), cy = types.get(type, objects::tags::Custom_Hard_YExtent);
+    if (cx > 0.0f && cy > 0.0f) {
+        hx = sc * cx;
+        hy = sc * cy;
+        return;
+    }
+    if (ascii_trim(types.get(type, space_ ? objects::tags::Space_Model_Name : objects::tags::Land_Model_Name)).empty()) return;
+    const tactical::movement::AvoidModel* am = catalog_->avoid_model(type, space_);
+    if (!am) {
+        hx = cx > 0.0f ? sc * cx : 0.0f;
+        hy = cy > 0.0f ? sc * cy : 0.0f;
+        return;
+    }
+    hx = cx > 0.0f ? sc * cx : sc * std::fabs(am->bound_h.x);
+    hy = cy > 0.0f ? sc * cy : sc * std::fabs(am->bound_h.y);
+}
+
+void TacticalBattle::mv_type_extents(tactical::movement::UnitDesc& d, uint32_t type) const {
+    float hx = 0.0f, hy = 0.0f;
+    type_half_extents(type, hx, hy);
+    d.type_hx = hx;
+    d.type_hy = hy;
+    // s78n t26.1 (MOVEMENT §3.2.1 item 3, 0x3986b0(obj, 2)): the type has a DEPLOY unit ability (the droid has none, so it
+    // deploys at every stop)
+    d.deploy_ability = false;
+    for (const ta::AbilityObjectDesc& o : tables_->abilities.objects) {
+        if (o.object_type != static_cast<int32_t>(type)) continue;
+        for (const ta::UnitAbilityRecord& r : o.unit_abilities) d.deploy_ability = d.deploy_ability || r.type == ta::kDeploy;
+        break;
+    }
+}
+
+void TacticalBattle::unit_half_extents(const Unit& u, float& hx, float& hy) const {
+    // s78n t09 (TACTICAL_COMBAT §5.4.6 items 2 / 4, 0x396850 on a non-container): a Deploys walker in Walk state 0x18 / 0x19
+    // takes 0x371d20 - the deployed pair when both deployed extents > 0, else 0x371be0 with the x / y replaced only when
+    // Custom_Hard_XExtent_Deployed > 0 (the y test reads the x field) - and every other object 0x371be0.
+    type_half_extents(u.type, hx, hy);
+    deployed_half_extents(u.type, u.id, hx, hy);
+}
+
+void TacticalBattle::deployed_half_extents(uint32_t type, objects::ObjectId id, float& hx, float& hy) const {
+    const objects::GameObjectTypes& types = catalog_->types();
+    if (type >= types.size() || !types.get(type, objects::tags::Deploys) || !movement_ || !movement_->has_unit(id)) return;
+    const mv::LocoState ds = movement_->deploy_state(id);
+    if (ds != mv::LocoState::WalkDeploying && ds != mv::LocoState::WalkDeployed) return;
+    const float sc = types.scale_factor(type);
+    const float dx = types.get(type, objects::tags::Custom_Hard_XExtent_Deployed);
+    const float dy = types.get(type, objects::tags::Custom_Hard_YExtent_Deployed);
+    if (dx > 0.0f) {
+        hx = sc * dx;
+        hy = sc * dy;  // with dy <= 0: 0 (the deployed y is used only together with the deployed x)
+    }
+}
+
+bool TacticalBattle::squad_joint_slots(const objects::ObjectStore& st, objects::ObjectId container,
+                                       std::vector<tactical::abilities::SquadSlot>& slots, float& jiggle, Vec3& facing) const {
+    // s78n t09 (TACTICAL_COMBAT §5.4.4 item 1, 0x404450): the container's member array (live members, team index order;
+    // null / gone entries skipped), each member's slot (along +0x114, side +0x118) and its 0x396850 half-extents (hx with
+    // the along offset, hy with the side offset), the container type's MaxJiggleDistance (+0x16ac) and its facing.
+    // s78n review: index lookups only (this runs per fog query, in the parallel candidate filter too) - the movement
+    // system's team container test and its (container, team index) member index, the store's id lookup and the units'
+    // ascending-id binary search. Only mv_squad_add makes team container movers (removed with the container: unit_gone).
+    slots.clear();
+    jiggle = 0.0f;
+    if (space_ || !movement_ || !movement_->is_land_team_container(container)) return false;
+    const objects::ObjectHandle ch = st.find(container);
+    if (!st.alive(ch)) return false;
+    for (const mv::MovementSystem::LandTeamSlot& e : movement_->land_team(container)) {
+        const auto it = std::lower_bound(units_.begin(), units_.end(), e.member, [](const Unit& u, objects::ObjectId v) { return u.id < v; });
+        if (it == units_.end() || it->id != e.member || !it->alive || it->retreated) continue;
+        tactical::abilities::SquadSlot s;
+        s.along = e.slot.x;
+        s.side = e.slot.y;
+        unit_half_extents(*it, s.hx, s.hy);
+        slots.push_back(s);
+    }
+    const objects::TypeIndex t = st.type(ch);
+    if (!slots.empty() && t < catalog_->types().size()) jiggle = catalog_->types().get(t, objects::tags::MaxJiggleDistance);
+    facing = st.facing(ch);
+    return true;
+}
+
+bool TacticalBattle::squad_joint_box(const objects::ObjectStore& st, objects::ObjectId id, float& hx, float& hy) const {
+    hx = hy = 0.0f;
+    std::vector<tactical::abilities::SquadSlot> slots;
+    float jiggle = 0.0f;
+    Vec3 facing{1.0f, 0.0f, 0.0f};
+    if (!squad_joint_slots(st, id, slots, jiggle, facing)) return false;
+    tactical::abilities::squad_joint_half_extents(slots, jiggle, hx, hy);
+    return true;
 }
 
 void TacticalBattle::bt_landing_points(TacticalMode& mode) {
@@ -585,15 +757,18 @@ int32_t placement_base_level(const terrain::ObjectPlacement& pl) {
     return (m && !m->data.empty()) ? static_cast<int32_t>(m->data[0]) : 0;
 }
 
+// bkg3 b0028: mini 0x29 of the placement, the garrison / hangar spawn byte (obj +0x3CB, map load 0x39ce40); -1 when absent.
+int32_t placement_garrison_spawn(const terrain::ObjectPlacement& pl) {
+    const terrain::RawMini* m = terrain::find_mini(pl.placement_raw, 0x29);
+    return (m && !m->data.empty()) ? static_cast<int32_t>(m->data[0]) : -1;
+}
+
 // t50: the slot of a skirmish team marker "Team_NN_<what>" (MultiplayerStructureMarker / Marker types of the MP maps): NN as a
 // number, -1 when the name has another shape. [M] team NN = skirmish slot NN.
 int32_t team_marker_slot(std::string_view name) {
     if (name.size() < 9) return -1;
     static constexpr std::string_view kTeam = "TEAM_";
-    for (size_t i = 0; i < kTeam.size(); ++i) {
-        const char c = (name[i] >= 'a' && name[i] <= 'z') ? static_cast<char>(name[i] - 'a' + 'A') : name[i];
-        if (c != kTeam[i]) return -1;
-    }
+    if (!ascii_istarts_with(name, kTeam)) return -1;
     if (name[5] < '0' || name[5] > '9' || name[6] < '0' || name[6] > '9' || name[7] != '_') return -1;
     return (name[5] - '0') * 10 + (name[6] - '0');
 }
@@ -610,11 +785,11 @@ Vec3 yaw_facing(float yaw_deg) {
 // names are skipped [M].
 std::vector<std::pair<objects::TypeIndex, float>> spawn_table(const objects::GameObjectTypes& types, objects::TypeIndex t) {
     std::vector<std::pair<objects::TypeIndex, float>> out;
-    const std::span<const std::string_view> list = types.get_list(t, "Map_Load_Spawn_Table");
+    const std::span<const std::string_view> list = types.get(t, objects::tags::Map_Load_Spawn_Table);
     float cum = 0.0f;
     for (size_t i = 0; i + 1 < list.size(); i += 2) {
-        const objects::TypeIndex x = types.resolve_name(trim(list[i]));
-        const float w = std::strtof(std::string(trim(list[i + 1])).c_str(), nullptr);
+        const objects::TypeIndex x = types.resolve_name(ascii_trim(list[i]));
+        const float w = std::strtof(std::string(ascii_trim(list[i + 1])).c_str(), nullptr);
         if (x == objects::kNone || x >= types.size()) continue;
         cum = cum + w;
         out.emplace_back(x, cum);
@@ -629,6 +804,81 @@ std::vector<std::pair<bool, Vec3>> TacticalBattle::bt_start_markers() const {
     for (const MapMarker& m : bt_markers_)
         if (m.kind == kMkDefend || m.kind == kMkAttack) out.emplace_back(m.kind == kMkDefend, m.pos);
     return out;
+}
+
+uint32_t TacticalBattle::bt_ground_special_weapons(TacticalMode& mode) {
+    // Retail creates every qualifying structure's weapon and the registration 0x35c520 silently removes a second one of the
+    // same (player, Special_Weapon_Index), adding 1 to the first one's record counter (+0x20, effect not read [L]). [port]
+    // The duplicate is not created (no object id used) and no counter is kept. The weapon has no galactic link, no
+    // population share and no battle participant (not victory relevant, never a valid target); [port] it is not killed
+    // at its owner's space retreat end (retail vf11 0x5335f0 kills it; the battle ends then anyway).
+    if (!space_ || cfg_.skirmish || !galaxy_ || !catalog_) return 0;
+    const uint32_t pi = req_.info.planet;
+    if (pi >= galaxy_->planets().size()) return 0;
+    const int32_t owner = galaxy_->planets()[pi].owner;
+    if (owner < 0) return 0;
+    const objects::ObjectStore& gs = galaxy_->store();
+    const objects::GameObjectTypes& types = catalog_->types();
+    static const objects::BehaviorTypeId kOrbital = objects::behavior_type_id("DUMMY_ORBITAL_STRUCTURE");
+    static const objects::BehaviorTypeId kSource = objects::behavior_type_id("DUMMY_SPECIAL_WEAPON_SOURCE");
+    // Position: the first DUMMY_SPECIAL_WEAPON_SOURCE object of the mode (store order), else the origin.
+    Vec3 pos{0.0f, 0.0f, 0.0f}, face{1.0f, 0.0f, 0.0f};
+    {
+        const objects::ObjectStore& st = mode.primary();
+        for (const objects::ObjectHandle h : st.all_objects())
+            if (st.alive(h) && kSource != objects::kNoBehavior && st.has_behavior(h, kSource)) {
+                pos = st.position(h);
+                face = st.facing(h);
+                break;
+            }
+    }
+    std::vector<int32_t> indexes;  // Special_Weapon_Index values already placed for the owner
+    uint32_t n = 0;
+    for (const objects::ObjectHandle g : galaxy_->planets()[pi].structures) {
+        if (!gs.alive(g)) continue;
+        const objects::TypeIndex t = gs.type(g);
+        if (t >= types.size() || !types.get(t, objects::tags::Is_Special_Weapon_In_Space)) continue;
+        if (kOrbital != objects::kNoBehavior && types.has_behavior(t, objects::BehaviorSet::Union, kOrbital)) continue;
+        const int32_t idx = types.get(t, objects::tags::Special_Weapon_Index);
+        // limit: retail TRL2_A_RE_ANSWERS Q1.2 (0x35c520, three special-weapon slots per player [H])
+        constexpr int32_t kWeaponSlots = 3;
+        if (idx >= 0 && idx < kWeaponSlots) {
+            if (std::find(indexes.begin(), indexes.end(), idx) != indexes.end()) continue;
+            indexes.push_back(idx);
+        }
+        objects::SpawnParams sp;
+        sp.type = t;
+        sp.owner = owner;
+        sp.position = pos;
+        sp.facing = face;
+        if (script_spawn_effect(mode, sp)) {
+            ++n;
+            bt_used_ = true;
+        }
+    }
+    return n;
+}
+
+bool TacticalBattle::bt_attacker_entry(Vec3& pos, Vec3& facing) const {
+    for (const MapMarker& m : bt_markers_)
+        if (m.kind == kMkAttack) {
+            pos = m.pos;
+            facing = m.facing;
+            return true;
+        }
+    return false;
+}
+
+bool TacticalBattle::bt_retreat_marker_facing(Vec3& facing) const {
+    // 0x533220 (TRL2_A_RE_ANSWERS Q4.1 [H]): the first ATTACKER ENTRY POSITION marker, else the last marker the query examined.
+    if (bt_markers_.empty()) return false;
+    facing = bt_markers_.back().facing;
+    for (const MapMarker& m : bt_markers_)
+        if (m.kind == kMkAttack) {
+            facing = m.facing;
+            break;
+        }
+    return true;
 }
 
 bool TacticalBattle::bt_owner_valid(int32_t owner) const {
@@ -652,6 +902,12 @@ int32_t TacticalBattle::bt_relation(int32_t p, int32_t q) const {
         if (np) return 2;  // its own entry too
         if (p == q) return 0;
         if (nq) return 2;
+        // skm2 t02 (TACTICAL_COMBAT §2.10, 0x295cf0 -> 0x297470 [M]): in a team game (BattleConfig::skirmish_team_game) allies
+        // are the same team id (-1 = no team); the faction is not used. Players without a slot (Hostile, Pirates, ...) have no team.
+        if (!cfg_.skirmish_slots.empty() && cfg_.skirmish_team_game) {
+            const int32_t tp = skirmish_team(p), tq = skirmish_team(q);
+            return tp >= 0 && tp == tq ? 0 : 1;
+        }
         return fp == fq ? 0 : 1;
     }
     // Campaign (Create_Default_Players 0x294360). [port] once a script wrote the galactic table (Make_Ally / Make_Enemy),
@@ -665,21 +921,15 @@ int32_t TacticalBattle::bt_relation(int32_t p, int32_t q) const {
     if (np || nq) return 2;
     if (fp == fq) return 0;
     if (fp >= fs.size() || fq >= fs.size()) return 1;
-    const auto same = [](std::string_view a, std::string_view b) {
-        if (a.size() != b.size()) return false;
-        for (size_t i = 0; i < a.size(); ++i)
-            if (std::tolower(static_cast<unsigned char>(a[i])) != std::tolower(static_cast<unsigned char>(b[i]))) return false;
-        return true;
-    };
     // [port] a faction with neither list stays an enemy of every other non-neutral faction (the old default): only the
     // synthetic test data has such factions; every shipped non-neutral faction lists its Enemies.
     if (fs[fp].allies.empty() && fs[fp].enemies.empty()) return 1;
     const std::string& gname = fs[fq].name;
     int32_t v = 2;  // the constructor's value ("undefined feelings")
     for (const std::string& n : fs[fp].allies)
-        if (same(n, gname)) v = 0;
+        if (ascii_iequals(n, gname)) v = 0;
     for (const std::string& n : fs[fp].enemies)  // Enemies wins over Allies
-        if (same(n, gname)) v = 1;
+        if (ascii_iequals(n, gname)) v = 1;
     return v;
 }
 
@@ -687,14 +937,16 @@ int32_t TacticalBattle::bt_map_owner(uint32_t raw) const {
     // [probe 2026-10-29] (tools/probe_mod/s10_map_owners): a .ted owner (mini 02) is a faction index (FactionFiles order)
     // resolved to that faction's player; a native faction without a player belongs to the Hostile player (Hutts props
     // -> Hostile in skirmish). [inferred] "native" = a faction neither Is_Playable nor Is_Neutral; the Hostile player =
-    // the first player whose faction is named Hostile. Anything else without a player: -1 (dropped as an unknown id).
+    // the first player of GalacticRules::native_owner_faction (modc t03: by data; FoC: Hostile). Anything else without a
+    // player: -1 (dropped as an unknown id).
     const auto& ps = galaxy_->players();
     const auto& fs = galaxy_->rules().factions;
     for (size_t p = 0; p < ps.size(); ++p)
         if (ps[p].faction == raw) return static_cast<int32_t>(p);
     if (raw >= fs.size() || fs[raw].is_playable || fs[raw].is_neutral) return -1;
-    for (size_t p = 0; p < ps.size(); ++p)
-        if (ps[p].faction < fs.size() && iequal_trim(fs[ps[p].faction].name, "Hostile")) return static_cast<int32_t>(p);
+    const uint32_t native = galaxy_->rules().native_owner_faction();
+    for (size_t p = 0; native != galactic::kNoIndex && p < ps.size(); ++p)
+        if (ps[p].faction == native) return static_cast<int32_t>(p);
     return -1;
 }
 
@@ -714,8 +966,12 @@ void TacticalBattle::bt_map_prepass() {
         const uint32_t f = galaxy_->players()[static_cast<size_t>(o)].faction;
         return f < galaxy_->rules().factions.size() && galaxy_->rules().factions[f].can_control_planets;
     };
+    map_stats_ = {};
+    map_stats_.placements = static_cast<uint32_t>(map_.objects.size());
     std::vector<terrain::ObjectPlacement> kept;
     kept.reserve(map_.objects.size());
+    std::vector<uint8_t> swapped;  // bkg3 b0028: parallel to kept, 1 = made by the team-marker swap
+    swapped.reserve(map_.objects.size());
     const size_t before = types_used_.size();
     auto use = [this](uint32_t t) {
         if (std::find(types_used_.begin(), types_used_.end(), t) == types_used_.end()) types_used_.push_back(t);
@@ -725,22 +981,43 @@ void TacticalBattle::bt_map_prepass() {
                 types.has_behavior(t, objects::BehaviorSet::Union, objects::beh::Selectable)) &&
                rules_->type(static_cast<uint32_t>(t)).members.empty();
     };
+    // map1 t03: a company placed on the map (or picked by its spawn table) is expanded by bt_map_load: its members, the company
+    // type and its TEAM types join the tables.
+    std::vector<uint32_t> company_types;
+    auto use_type = [&](objects::TypeIndex t) {
+        if (t == objects::kNone || t >= types.size()) return;
+        if (static_cast<uint32_t>(t) < rules_->types.size() && !rules_->type(static_cast<uint32_t>(t)).members.empty()) {
+            company_types.clear();
+            bt_company_types(static_cast<uint32_t>(t), company_types);
+            for (const uint32_t x : company_types) use(x);
+        } else if (combat_candidate(t)) {
+            use(static_cast<uint32_t>(t));
+        }
+    };
     // t50: land skirmish team markers ("Team_NN_Command Center", "_Barracks", "_BuildPads_Position", "_Reinforcement_Point_Plus2_Cap",
     // ...): the marker stands for the pad (or point) of slot NN's faction, i.e. the Marker_For_Specific_Object_Type entry whose
     // Affiliation names that faction. [M] the retail skirmish setup creates these at game start; the rule is read from the
     // marker data (MULTIPLAYER_STRUCTURE_MARKERS.XML), the slot -> player map is skirmish_slot_player. The pad takes the marker's place.
     const auto& type_crcs = types.raw().types().name_crc;
     auto team_pad = [&](const terrain::ObjectPlacement& marker, objects::TypeIndex mt, terrain::ObjectPlacement& out) -> bool {
-        const int32_t slot = team_marker_slot(types.raw().types().name[mt]);
-        const int32_t player = slot >= 0 ? skirmish_slot_player(slot) : -1;
+        const int32_t slot = team_marker_slot(types.name(mt));
+        // skm2 t02 (BKG3_RE_ANSWERS Q3.1, 0x295cf0): with slot teams, the marker's number is a team: the first slot player of
+        // that team takes it (a team's other slots get none).
+        int32_t player = -1;
+        if (slot >= 0 && !cfg_.skirmish_slots.empty()) {
+            for (int32_t s = 0; s < skirmish_slot_count() && player < 0; ++s)
+                if (const int32_t ps = skirmish_slot_player(s); ps >= 0 && skirmish_team(ps) == slot) player = ps;
+        } else if (slot >= 0) {
+            player = skirmish_slot_player(slot);
+        }
         if (player < 0 || static_cast<size_t>(player) >= galaxy_->players().size()) return false;
         const uint32_t f = galaxy_->players()[static_cast<size_t>(player)].faction;
         if (f >= galaxy_->rules().factions.size()) return false;
         const std::string& faction = galaxy_->rules().factions[f].name;
-        for (const std::string_view tok : types.get_list(mt, "Marker_For_Specific_Object_Type")) {
-            const objects::TypeIndex x = types.resolve_name(trim(tok));
+        for (const std::string_view tok : types.get(mt, objects::tags::Marker_For_Specific_Object_Type)) {
+            const objects::TypeIndex x = types.resolve_name(ascii_trim(tok));
             if (x == objects::kNone || x >= types.size() || x >= type_crcs.size()) continue;
-            for (const std::string_view a : types.get_list(x, "Affiliation"))
+            for (const std::string_view a : types.get(x, objects::tags::Affiliation))
                 if (iequal_trim(a, faction)) {
                     out = marker;
                     out.type_crc = type_crcs[x];
@@ -751,38 +1028,59 @@ void TacticalBattle::bt_map_prepass() {
         return false;
     };
     for (terrain::ObjectPlacement& pl : map_.objects) {
-        if (placement_base_level(pl) > base) continue;
+        if (placement_base_level(pl) > base) {
+            ++map_stats_.base_level_drops;
+            continue;
+        }
         if (skirmish_land() || skirmish_map()) {  // t50: the team marker is replaced by its pad (the marker is not kept: it would block the pad)
             const objects::TypeIndex mt = index.find(pl.type_crc);
             terrain::ObjectPlacement pad;
             if (mt != objects::kNone && mt < types.size() && team_pad(pl, mt, pad)) {
                 const objects::TypeIndex et = index.find(pad.type_crc);
                 if (et != objects::kNone && et < types.size()) {
-                    if (combat_candidate(et)) use(static_cast<uint32_t>(et));
-                    for (const auto& [x, w] : spawn_table(types, et))
-                        if (combat_candidate(x)) use(static_cast<uint32_t>(x));
+                    use_type(et);
+                    for (const auto& [x, w] : spawn_table(types, et)) use_type(x);
                 }
                 kept.push_back(std::move(pad));
+                swapped.push_back(1);
                 continue;
             }
         }
         const int32_t o = bt_map_owner(pl.owner);  // [probe 2026-10-29] faction index -> player
-        if (!bt_owner_valid(o)) continue;
+        if (!bt_owner_valid(o)) {
+            ++map_stats_.owner_drops;
+            continue;
+        }
         pl.owner = static_cast<uint32_t>(o);  // map_ owners are player ids from here on (bt_map_load, markers)
         const objects::TypeIndex t = index.find(pl.type_crc);
         if (t != objects::kNone && t < types.size()) {
-            if (def >= 0 && !cfg_.map_battle && types.get_bool(t, "Is_Branched_Map_Discardable")) {
-                const bool keep = o == def || ((req_.linked || types.get_bool(t, "Loads_When_Faction_Present")) && o == att) ||
-                                  !can_control(o) || types.get_bool(t, "Is_Marker");
-                if (!keep) continue;
+            if (def >= 0 && !cfg_.map_battle && types.get(t, objects::tags::Is_Branched_Map_Discardable)) {
+                const bool keep = o == def || ((req_.linked || types.get(t, objects::tags::Loads_When_Faction_Present)) && o == att) ||
+                                  !can_control(o) || types.get(t, objects::tags::Is_Marker);
+                if (!keep) {
+                    ++map_stats_.discards;
+                    continue;
+                }
             }
-            if (combat_candidate(t)) use(static_cast<uint32_t>(t));
-            for (const auto& [x, w] : spawn_table(types, t))
-                if (combat_candidate(x)) use(static_cast<uint32_t>(x));
+            use_type(t);
+            for (const auto& [x, w] : spawn_table(types, t)) use_type(x);
         }
         kept.push_back(std::move(pl));
+        swapped.push_back(0);
     }
     map_.objects = std::move(kept);
+    bt_team_swap_ = std::move(swapped);
+    // map1 t07 (REMAINING_GAPS §3.2 steps 1 / 6 / 7): the picked starbase type and the start units' Space_Escort_Unit_Types.
+    bt_pick_starbase();
+    if (space_)
+        for (const Participant& p : parts_) {
+            if (p.reserve || p.starbase || p.structure || p.built || p.type >= types.size()) continue;
+            for (const objects::TypeIndex x : types.get_type_refs(static_cast<objects::TypeIndex>(p.type), objects::tags::Space_Escort_Unit_Types)) {
+                company_types.clear();
+                if (x != objects::kNone && x < types.size()) bt_company_types(static_cast<uint32_t>(x), company_types);
+                for (const uint32_t y : company_types) use(y);
+            }
+        }
     if (types_used_.size() != before) tables_extend();
 }
 
@@ -795,8 +1093,11 @@ void TacticalBattle::bt_map_load(TacticalMode& mode, SimRng& rng) {
     //     ones are also third-party battle combat units of that owner (any owner, Is_Neutral included);
     //   * selectable / mobile objects (map units, turrets, base layouts) of a non-Is_Neutral owner: battle combat units
     //     (map participants; a third party when owned by neither side) [port: Is_Neutral-owned ones stay inert store
-    //     objects (every player is an enemy of every other in CombatSystem); company types placed on the map are not
-    //     expanded and are skipped];
+    //     objects (every player is an enemy of every other in CombatSystem)];
+    //   * map1 t03 (company expansion 0x2ab060, after the record loop [H]): a company / squadron type (Company_Units /
+    //     Squadron_Units) is not an object of its own: each one, in map order, becomes its members through the company
+    //     spawn 0x29e960 (every member created at the placement's position and facing for its owner, then the TEAM helper of
+    //     REMAINING_GAPS §3.4) and the company object is removed; with a hint (0x482) every member gets HINT and the hint;
     //   * everything else (props, markers): inert store objects.
     // MARKER objects with an owner are remembered for §3.2 (bt_markers_); the start markers are also recognised by name
     // when the type is missing from the data [port: synthetic maps].
@@ -836,8 +1137,63 @@ void TacticalBattle::bt_map_load(TacticalMode& mode, SimRng& rng) {
                                          [](const std::pair<objects::ObjectId, int32_t>& e, objects::ObjectId v) { return e.first < v; });
         if (it == pad_levels_.end() || it->first != id) pad_levels_.insert(it, {id, level});
     };
+    // q6 t28 (TERRAIN_WATER_POST 1.6): the placement's 0x482 hint name goes on the object created for it (the GOM loader
+    // loads it into the object's hint holder). [port] A Map_Load_Spawn_Table pick does not inherit it (the placeholder that
+    // held it is removed; whether the original copies it over is not read).
+    map_hints_.clear();
+    map_marker_names_.clear();
+    auto note_hint = [&](const terrain::ObjectPlacement& p, objects::ObjectHandle h) {
+        bt_note_record(mode, p, h);  // map1 t04: 0x4B7 behaviours, 0x46E marker name
+        if (p.hint.empty() || !mode.primary().exists(h)) return;
+        // q6 t32 (Q6_T30 §3 [H]): the reader skips chunk 0x482 when the object has no hint pack, that is no HINT from its
+        // type or the record's 0x4B7 list: such an object gets no hint (FoC _SPACE_PLANET_AETENII_PIRACY has two).
+        static const objects::BehaviorTypeId kHintBeh = objects::behavior_type_id("HINT");
+        if (!mode.primary().has_behavior(h, kHintBeh)) {
+            ++map_stats_.hints_skipped;
+            return;
+        }
+        const objects::ObjectId id = mode.primary().id(h);
+        const auto it = std::lower_bound(map_hints_.begin(), map_hints_.end(), id,
+                                         [](const std::pair<objects::ObjectId, std::string>& e, objects::ObjectId v) { return e.first < v; });
+        if (it == map_hints_.end() || it->first != id) map_hints_.insert(it, {id, p.hint});
+    };
+    const bool skirmish = skirmish_land() || skirmish_map();
+    // skai t22 (SKAI_T22_SPACE_AI_RE Q1.1, Part 3 [H]): in a space skirmish the team-marker swap (0x295cf0) creates the
+    // start station before the skirmish start (0xeed80) deletes and rebuilds the threat grid, so it never joins the new
+    // grid's owner lists (its cells and threat come back at the first re-projection): the same store flag as skai t15's
+    // pre-built land structures (objects::kFlagNoAiOwnerList, set there in bt_skirmish_base).
+    auto note_stale = [&](const terrain::ObjectPlacement& p, objects::ObjectHandle h) {
+        const size_t pi = static_cast<size_t>(&p - map_.objects.data());
+        if (!space_ || !skirmish_map() || pi >= bt_team_swap_.size() || bt_team_swap_[pi] == 0 || !mode.primary().alive(h))
+            return;
+        mode.primary().set_flag(h, objects::kFlagNoAiOwnerList);
+    };
+    // storyb t16 (STORY_T04 §7.1 [H]): an Is_Decoration map object goes to retail's secondary store (objects::kFlagMapDecoration).
+    auto note_decoration = [&](objects::TypeIndex t, objects::ObjectHandle h) {
+        if (mode.primary().alive(h) && t < types.size() && types.get(t, objects::tags::Is_Decoration)) {
+            mode.primary().set_flag(h, objects::kFlagMapDecoration);
+            ++map_stats_.decorations;
+        }
+    };
+    struct CompanyPlacement {
+        const terrain::ObjectPlacement* pl;
+        objects::TypeIndex type;
+        int32_t owner;
+        bool record;  // false: a Map_Load_Spawn_Table pick (the placeholder's record data is not carried over)
+    };
+    std::vector<CompanyPlacement> companies;  // map1 t03: expanded after the record loop, map order
     for (const terrain::ObjectPlacement& pl : map_.objects) {
+        // bkg3 b0028 / map1 t05 (BKG3_RE_ANSWERS Q3.2 [H]): the object reader 0x39ce40 sets +0x3CB from mini 0x29 for every
+        // map placement (campaign, story and skirmish maps alike), so a placement with byte 0 spawns nothing from its hangar
+        // lists; a skirmish's team-marker structures get 0 from the swap. Absent mini: the creation value (on).
+        const size_t pi_map = static_cast<size_t>(&pl - map_.objects.data());
+        const bool byte_off = placement_garrison_spawn(pl) == 0;
+        hg_spawn_off_ = byte_off || (skirmish && pi_map < bt_team_swap_.size() && bt_team_swap_[pi_map] != 0);
         objects::TypeIndex t = index.find(pl.type_crc);
+        static const objects::BehaviorTypeId kSpawnSquadron = objects::behavior_type_id("SPAWN_SQUADRON");
+        if (byte_off && t != objects::kNone && t < types.size() && kSpawnSquadron != objects::kNoBehavior &&
+            types.has_behavior(t, objects::BehaviorSet::Union, kSpawnSquadron))
+            ++map_stats_.hangar_off;
         int32_t owner = static_cast<int32_t>(pl.owner);
         const Vec3 pos{pl.position[0], pl.position[1], pl.position[2]};
         const Vec3 face = yaw_facing(pl.rotation_deg[2]);
@@ -852,11 +1208,16 @@ void TacticalBattle::bt_map_load(TacticalMode& mode, SimRng& rng) {
                 m.owner = owner;
                 m.pos = pos;
                 m.facing = face;
+                m.map_id = static_cast<int32_t>(pl.object_id);
                 bt_markers_.push_back(m);
+            } else {
+                ++map_stats_.unknown_types;
             }
             continue;
         }
+        bool picked = false;  // q6 t28: a Map_Load_Spawn_Table pick (no hint)
         if (const auto table = spawn_table(types, t); !table.empty()) {
+            ++map_stats_.spawn_tables;
             const float w = table.back().second;
             const float r1 = rng.range_float(0.0f, 1.0f);
             if (!(r1 >= 1.0f - w)) {  // no spawn: the placeholder goes
@@ -871,9 +1232,12 @@ void TacticalBattle::bt_map_load(TacticalMode& mode, SimRng& rng) {
                     break;
                 }
             t = pick;
+            picked = true;
+            hg_spawn_off_ = false;  // map1 (Q6_T30 1): the pick is a new object from the generic create, +0x3CB its creation value
+            ++map_stats_.spawn_table_picks;
             bt_used_ = true;
             int32_t aff = -1;
-            const std::span<const std::string_view> af = types.get_list(t, "Affiliation");
+            const std::span<const std::string_view> af = types.get(t, objects::tags::Affiliation);
             for (size_t p = 0; p < galaxy_->players().size() && aff < 0; ++p) {
                 const uint32_t f = galaxy_->players()[p].faction;
                 if (f >= galaxy_->rules().factions.size()) continue;
@@ -895,12 +1259,20 @@ void TacticalBattle::bt_map_load(TacticalMode& mode, SimRng& rng) {
             bt_ds_pos_ = {pos.x, pos.y, space_ ? 0.0f : pos.z};
             bt_have_ds_ = true;
         }
+        if (static_cast<uint32_t>(t) < rules_->types.size() && !rules_->type(static_cast<uint32_t>(t)).members.empty()) {
+            own_obstacles(pl, objects::kNone, objects::ObjectHandle{});  // map1 t03: the company object goes; its members stamp
+            companies.push_back({&pl, t, owner, !picked});
+            continue;
+        }
         const bool mobile = types.has_behavior(t, objects::BehaviorSet::Union, objects::beh::Locomotor);
         const bool selectable = types.has_behavior(t, objects::BehaviorSet::Union, objects::beh::Selectable);
         objects::ObjectHandle placed{};
         if (!mobile && s4_placement(mode, t, sp, pl.health_fraction, &placed)) {  // S4: capture points / garrison structures
             own_obstacles(pl, t, placed);
             note_pad(pl, placed);
+            if (!picked) note_hint(pl, placed);
+            note_stale(pl, placed);
+            note_decoration(t, placed);
             // a1f t07: a SELECTABLE one (Secondary_Abandoned_Sensor: Tactical_Health 700, Structure, Neutral at start) is a
             // combat object too, so Destroy_Structure / attack orders can kill it; whatever its map owner (the Is_Neutral
             // player's objects are skipped by the target scan, TACTICAL_COMBAT §2.2). [port] a third party: never decides
@@ -912,19 +1284,21 @@ void TacticalBattle::bt_map_load(TacticalMode& mode, SimRng& rng) {
             continue;
         }
         if (mobile || selectable) {
-            if (!rules_->type(static_cast<uint32_t>(t)).members.empty()) {  // [port] map-placed companies
-                own_obstacles(pl, objects::kNone, objects::ObjectHandle{});
-                continue;
-            }
             const objects::ObjectHandle h = mode.spawn(sp, pl.health_fraction);
             own_obstacles(pl, t, h);
             note_pad(pl, h);
+            if (!picked) note_hint(pl, h);
+            note_stale(pl, h);
+            note_decoration(t, h);
             if (!bt_owner_neutral(owner)) bt_adopt_built(mode, h, owner, pl.health_fraction, &rng, true);
             continue;
         }
         const objects::ObjectHandle h = mode.spawn(sp, pl.health_fraction);
         own_obstacles(pl, t, h);
         note_pad(pl, h);
+        if (!picked) note_hint(pl, h);
+        note_stale(pl, h);
+        note_decoration(t, h);
         if (kMarker != objects::kNoBehavior && types.has_behavior(t, objects::BehaviorSet::Union, kMarker) && owner >= 0) {
             MapMarker m;
             m.id = mode.primary().exists(h) ? mode.primary().id(h) : objects::kNoObjectId;
@@ -933,8 +1307,9 @@ void TacticalBattle::bt_map_load(TacticalMode& mode, SimRng& rng) {
             m.owner = owner;
             m.pos = pos;
             m.facing = face;
-            for (const std::string_view s : types.get_list(t, "Marker_For_Specific_Object_Type")) {
-                const objects::TypeIndex x = types.resolve_name(trim(s));
+            m.map_id = static_cast<int32_t>(pl.object_id);
+            for (const std::string_view s : types.get(t, objects::tags::Marker_For_Specific_Object_Type)) {
+                const objects::TypeIndex x = types.resolve_name(ascii_trim(s));
                 if (x != objects::kNone && x < types.size()) m.specific.push_back(x);
             }
             bt_markers_.push_back(std::move(m));
@@ -945,14 +1320,274 @@ void TacticalBattle::bt_map_load(TacticalMode& mode, SimRng& rng) {
             m.owner = owner;
             m.pos = pos;
             m.facing = face;
+            m.map_id = static_cast<int32_t>(pl.object_id);
             bt_markers_.push_back(std::move(m));
+        }
+    }
+    hg_spawn_off_ = false;
+    // map1 t03: company expansion (0x2ab060), after every record, in map order.
+    for (const CompanyPlacement& c : companies) bt_expand_company(mode, *c.pl, c.type, c.owner, c.record);
+}
+
+// ---- map1: map record data, company expansion, starbase pick, escorts ---------------------------------------------------
+
+std::string_view TacticalBattle::map_marker_name(objects::ObjectId id) const {
+    const auto it = std::lower_bound(map_marker_names_.begin(), map_marker_names_.end(), id,
+                                     [](const std::pair<objects::ObjectId, std::string>& e, objects::ObjectId v) { return e.first < v; });
+    return it != map_marker_names_.end() && it->first == id ? std::string_view(it->second) : std::string_view();
+}
+
+bool TacticalBattle::start_camera_focus(int32_t player, Vec3& out) const {
+    if (!have_focus_ || player < 0 || player != focus_player_) return false;
+    out = focus_;
+    return true;
+}
+
+void TacticalBattle::bt_note_record(TacticalMode& mode, const terrain::ObjectPlacement& pl, objects::ObjectHandle h) {
+    // map1 t04 (Q6_T30 3 [H]): the base record reader 0x39c3a0 -> 0x39cca0 reads chunk 0x4B7 and attaches each listed
+    // behaviour to the object (every shipped entry is HINT: how types without HINT in XML carry one); chunk 0x46E goes into
+    // the object's marker data pack. A behaviour the object already has is not attached twice [port: ObjectStore::add_behavior].
+    objects::ObjectStore& st = mode.primary();
+    if (!st.exists(h)) return;
+    for (const terrain::ObjectPlacement::ExtraBehavior& e : pl.extra_behaviors) {
+        const objects::BehaviorTypeId b = objects::behavior_type_id_from_crc(e.name_crc);
+        if (b != objects::kNoBehavior && st.add_behavior(h, b)) ++map_stats_.extra_behaviors;
+    }
+    if (pl.marker_name.empty()) return;
+    ++map_stats_.marker_names;
+    const objects::ObjectId id = st.id(h);
+    const auto it = std::lower_bound(map_marker_names_.begin(), map_marker_names_.end(), id,
+                                     [](const std::pair<objects::ObjectId, std::string>& e, objects::ObjectId v) { return e.first < v; });
+    if (it == map_marker_names_.end() || it->first != id) map_marker_names_.insert(it, {id, pl.marker_name});
+}
+
+void TacticalBattle::bt_company_types(uint32_t company, std::vector<uint32_t>& out) const {
+    // The types a spawned company needs in the battle tables (as script_spawn_company): its members, itself and its TEAM
+    // object / behaviour types; a plain type: itself.
+    auto add = [&out](uint32_t t) {
+        if (std::find(out.begin(), out.end(), t) == out.end()) out.push_back(t);
+    };
+    if (company >= catalog_->types().size()) return;
+    if (company >= rules_->types.size() || rules_->type(company).members.empty()) {
+        add(company);
+        return;
+    }
+    Participant P;
+    P.type = company;
+    const std::vector<uint32_t> members = spawn_types(P);
+    for (const uint32_t m : members) add(m);
+    add(company);
+    uint32_t ot = 0xFFFFFFFFu, bt = 0xFFFFFFFFu, squad = 0;
+    if (!members.empty() && bt_team(company, members.front(), ot, bt, squad)) {
+        add(ot);
+        add(bt);
+    }
+}
+
+void TacticalBattle::bt_sky_domes(TacticalMode& mode) {
+    // storyb t16 (docs/re/STORYB_T16_SKY_DOME.md [H]; land 0x3bc1c0, space 0x4d98c0, from the post-load start): one object
+    // per non-empty sky dome name (TEE minis 0x19 / 0x1A) of the picked environment that names a type, made with the plain
+    // create in the PRIMARY store (Is_Decoration only matters to the map object reader), owner = the first Is_Neutral
+    // faction's player, facing (roll A, pitch 0, yaw B) from the dome's two angles. Land position: half the terrain box
+    // per axis (x = width x spacing / 2, y = height x spacing / 2, z = (max(0, top) - min(0, bottom)) / 2); space: the
+    // origin. [port] the roll is not kept (the store facing is a direction); not saved separately (a store object).
+    if (env_index_ >= map_.environments.environments.size()) return;
+    const terrain::Environment& env = map_.environments.environments[env_index_];
+    const objects::GameObjectTypes& types = catalog_->types();
+    const int32_t owner = galaxy_->neutral_player();
+    Vec3 pos{0.0f, 0.0f, 0.0f};
+    if (!space_ && map_.terrain.present) {
+        float lo = 0.0f, hi = 0.0f;
+        for (const int16_t h : map_.terrain.heights) {
+            const float z = static_cast<float>(h) * terrain::kHeightScale;
+            lo = std::min(lo, z);
+            hi = std::max(hi, z);
+        }
+        pos = Vec3{std::fabs(static_cast<float>(map_.terrain.width) * terrain::kVertexSpacing) / 2.0f,
+                   std::fabs(static_cast<float>(map_.terrain.height) * terrain::kVertexSpacing) / 2.0f, std::fabs(hi - lo) / 2.0f};
+    }
+    for (int k = 0; k < 2; ++k) {
+        const std::string_view name = ascii_trim(env.skydome[k]);
+        if (name.empty()) continue;
+        const objects::TypeIndex t = types.resolve_name(name);
+        if (t == objects::kNone || t >= types.size()) continue;
+        objects::SpawnParams sp;
+        sp.type = t;
+        sp.owner = owner;
+        sp.position = pos;
+        sp.facing = yaw_facing(env.skydome_angle_deg[k][1]);
+        (void)mode.primary().create(sp);
+        ++map_stats_.sky_domes;
+    }
+}
+
+void TacticalBattle::bt_expand_company(TacticalMode& mode, const terrain::ObjectPlacement& pl, objects::TypeIndex t, int32_t owner,
+                                       bool record) {
+    // map1 t03 (company expansion 0x2ab060 [H]): the company spawn 0x29e960 creates every member (Company_Units / Squadron_Units
+    // order) at the company's position and facing for its owner, runs the TEAM helper (REMAINING_GAPS §3.4), and the company
+    // object is removed. Members of a company with HINT and a hint get HINT (when they lack it) and a copy of the hint; the
+    // company object is not findable. [M] 0x29e960 adopts nothing (as Lua Spawn_Unit's company path, deploy_script_): the
+    // load's post-load pass gives each member its coordinator. [port] A company of an Is_Neutral owner becomes inert store
+    // objects (as the Is_Neutral map units); [M] obj +0x3C8 (mini 0x28) copied to the members is not modelled.
+    const auto ct = static_cast<uint32_t>(t);
+    if (ct >= catalog_->types().size() || ct >= rules_->types.size() || rules_->type(ct).members.empty()) return;
+    ++map_stats_.companies;
+    objects::ObjectStore& st = mode.primary();
+    const Vec3 pos{pl.position[0], pl.position[1], pl.position[2]};
+    const Vec3 face = yaw_facing(pl.rotation_deg[2]);
+    static const objects::BehaviorTypeId kHint = objects::behavior_type_id("HINT");
+    // q6 t31 (Q6_T30 §1 / §3 [H]): only a company object with HINT (its type, or the record's 0x4B7 list) has a hint pack
+    // for chunk 0x482, so only then do its members inherit.
+    bool company_hint = kHint != objects::kNoBehavior &&
+                        catalog_->types().has_behavior(t, objects::BehaviorSet::Union, kHint);
+    for (const terrain::ObjectPlacement::ExtraBehavior& e : pl.extra_behaviors)
+        company_hint = company_hint || (kHint != objects::kNoBehavior && objects::behavior_type_id_from_crc(e.name_crc) == kHint);
+    const bool hinted = record && !pl.hint.empty() && company_hint;
+    if (record && !pl.hint.empty() && !company_hint) ++map_stats_.hints_skipped;
+    // storyb t17 (Q6_T30 §1 [H]: "every object created for it"): the TEAM containers the company spawn makes get the hint too
+    // (UM01 Find_Hint("URBAN_HUMAN_CIV_TEAM", "first1")).
+    auto give_hint = [&](objects::ObjectHandle h) {
+        if (!hinted || !st.exists(h)) return;
+        if (kHint != objects::kNoBehavior) (void)st.add_behavior(h, kHint);
+        const objects::ObjectId id = st.id(h);
+        const auto it = std::lower_bound(map_hints_.begin(), map_hints_.end(), id,
+                                         [](const std::pair<objects::ObjectId, std::string>& e, objects::ObjectId v) { return e.first < v; });
+        if (it == map_hints_.end() || it->first != id) map_hints_.insert(it, {id, pl.hint});
+    };
+    auto inherit = [&](objects::ObjectHandle h) {
+        ++map_stats_.company_members;
+        give_hint(h);
+    };
+    Participant P;
+    P.galactic_id = objects::kNoObjectId;
+    P.owner = owner;
+    P.type = ct;
+    if (bt_owner_neutral(owner) || !combat_ || !bt_rng_) {
+        std::vector<objects::ObjectHandle> made;
+        for (const uint32_t m : spawn_types(P)) {
+            objects::SpawnParams sp;
+            sp.type = static_cast<objects::TypeIndex>(m);
+            sp.owner = owner;
+            sp.position = pos;
+            sp.facing = face;
+            made.push_back(mode.spawn(sp, 1.0f));
+            inherit(made.back());
+        }
+        // storyb t16 (STORY_T04 §7.1: retail UM01 has 14 URBAN_HUMAN_CIV_TEAM + 2 WOOKIE_TEAM for its Neutral prisoner
+        // companies): the company spawn runs the TEAM helper (REMAINING_GAPS §3.4) for an inert company too - one store
+        // object of the team type per Max_Squad_Size chunk, at the chunk's centroid, owner / facing of its first member,
+        // after every member. [port] The containers are inert like the members (no Container record, no movement unit).
+        uint32_t team_obj = 0xFFFFFFFFu, team_beh = 0xFFFFFFFFu, squad = 0;
+        if (!made.empty() && st.exists(made.front()) &&
+            bt_team(ct, static_cast<uint32_t>(st.type(made.front())), team_obj, team_beh, squad) && squad > 0) {
+            for (size_t s0 = 0; s0 < made.size(); s0 += squad) {
+                const size_t end = std::min(made.size(), s0 + squad);
+                Vec3 c{0.0f, 0.0f, 0.0f};
+                for (size_t i = s0; i < end; ++i) {
+                    const Vec3 p = st.position(made[i]);
+                    c.x = c.x + p.x;
+                    c.y = c.y + p.y;
+                    c.z = c.z + p.z;
+                }
+                const float inv = static_cast<float>(end - s0);
+                objects::SpawnParams sp;
+                sp.type = static_cast<objects::TypeIndex>(team_obj);
+                sp.owner = st.owner(made[s0]);
+                sp.position = Vec3{c.x / inv, c.y / inv, c.z / inv};
+                sp.facing = st.facing(made[s0]);
+                give_hint(st.create(sp));
+                ++map_stats_.neutral_teams;
+            }
+        }
+        return;
+    }
+    P.side = owner_side(owner);
+    P.built = true;
+    P.map = true;
+    P.third = owner != req_.info.defender && owner != req_.info.attacker && owner_side(owner) < 2;  // skm2 t02: slots 2.. count
+    P.pop = 0.0f;
+    const auto& gt = galaxy_->rules().types;
+    P.power = ct < gt.size() ? gt[ct].ai_combat_power : 0.0f;
+    const size_t n = spawn_types(P).size();
+    for (size_t k = 0; k < n; ++k) P.spots.emplace_back(pos, face);
+    const auto pi = static_cast<uint32_t>(parts_.size());
+    parts_.push_back(std::move(P));
+    const size_t u0 = units_.size(), c0 = containers_.size();
+    deploy_script_ = true;
+    deploy(mode, pi, *bt_rng_);
+    deploy_script_ = false;
+    for (size_t k = u0; k < units_.size(); ++k) inherit(units_[k].h);
+    for (size_t k = c0; k < containers_.size(); ++k) give_hint(containers_[k].h);  // storyb t17: its TEAM containers
+    bt_used_ = true;
+}
+
+void TacticalBattle::bt_pick_starbase() {
+    // map1 t07 (REMAINING_GAPS §3.2 step 1, 0x407b60 [H]): the space starbase is the first DUMMY_STAR_BASE type (type order
+    // [M: the list's order]) whose Base_Level equals the battle's starbase level (D +0x148) and that is affiliated with the
+    // record defender's faction (0x3751a0); it is spawned for the defender. Any behaviour list counts (retail STARBASES.XML
+    // names DUMMY_STAR_BASE under <Behavior>, not <SpaceBehavior>). No such type: the galactic starbase's own type
+    // [port].
+    if (!space_) return;
+    static const objects::BehaviorTypeId kStarBase = objects::behavior_type_id("DUMMY_STAR_BASE");
+    const int32_t def = req_.info.defender;
+    if (kStarBase == objects::kNoBehavior || def < 0 || static_cast<size_t>(def) >= galaxy_->players().size()) return;
+    const uint32_t f = galaxy_->players()[static_cast<size_t>(def)].faction;
+    if (f >= galaxy_->rules().factions.size()) return;
+    const std::string& faction = galaxy_->rules().factions[f].name;
+    const objects::GameObjectTypes& types = catalog_->types();
+    for (Participant& p : parts_) {
+        if (!p.starbase || p.reserve) continue;
+        for (uint32_t t = 0; t < types.size(); ++t) {
+            const auto ti = static_cast<objects::TypeIndex>(t);
+            if (!types.has_behavior(ti, objects::BehaviorSet::Union, kStarBase) || types.get(ti, objects::tags::Base_Level) != req_.base_level) continue;
+            bool aff = false;
+            for (const std::string_view a : types.get(ti, objects::tags::Affiliation)) aff = aff || iequal_trim(a, faction);
+            if (!aff) continue;
+            if (p.type != t) {
+                p.type = t;
+                const auto& gt = galaxy_->rules().types;
+                p.power = t < gt.size() ? gt[t].ai_combat_power : 0.0f;  // side power from the spawned type
+                if (std::find(types_used_.begin(), types_used_.end(), t) == types_used_.end()) types_used_.push_back(t);
+            }
+            map_stats_.starbase_picked = true;
+            break;
+        }
+        break;
+    }
+}
+
+void TacticalBattle::bt_space_escorts(uint8_t side) {
+    // map1 t07 (REMAINING_GAPS §3.2 steps 6 / 7 [H]): in space, every start unit's Space_Escort_Unit_Types (list order, a
+    // name listed twice spawns twice) is spawned for the unit's owner and appended to the side's start list (flag +0x3a6 = 1),
+    // so the formation placement places the escorts after the listed units. [port] One built participant per escort entry.
+    if (!space_) return;
+    const objects::GameObjectTypes& types = catalog_->types();
+    const size_t n0 = parts_.size();
+    for (size_t i = 0; i < n0; ++i) {
+        const Participant& u = parts_[i];
+        if (u.reserve || u.starbase || u.structure || u.built || u.side != side || u.type >= types.size()) continue;
+        const std::vector<objects::TypeIndex> esc = types.get_type_refs(static_cast<objects::TypeIndex>(u.type), objects::tags::Space_Escort_Unit_Types);
+        for (const objects::TypeIndex x : esc) {
+            if (x == objects::kNone || x >= types.size() || static_cast<uint32_t>(x) >= rules_->types.size()) continue;
+            Participant e;
+            e.galactic_id = objects::kNoObjectId;
+            e.owner = parts_[i].owner;
+            e.type = static_cast<uint32_t>(x);
+            e.side = side;
+            e.built = true;
+            e.escort = true;
+            const auto& gt = galaxy_->rules().types;
+            e.power = e.type < gt.size() ? gt[e.type].ai_combat_power : 0.0f;
+            parts_.push_back(std::move(e));
+            ++map_stats_.escorts;
+            bt_used_ = true;
         }
     }
 }
 
 // ---- post-load placement of the galactic forces (REMAINING_GAPS §3.2, 0x2a1eb0) -------------------------------------
 
-void TacticalBattle::bt_place_forces(TacticalMode& mode, SimRng& rng) {
+void TacticalBattle::bt_place_forces(TacticalMode& mode, SimRng& rng, const ParallelFor& pf) {
     const objects::GameObjectTypes& types = catalog_->types();
     const int32_t def = req_.info.defender, att = req_.info.attacker;
     auto flat = [this](Vec3 p) { return space_ ? Vec3{p.x, p.y, 0.0f} : p; };
@@ -966,14 +1601,25 @@ void TacticalBattle::bt_place_forces(TacticalMode& mode, SimRng& rng) {
         bt_markers_[i].used = true;
         p.spots.emplace_back(flat(bt_markers_[i].pos), bt_markers_[i].facing);
     };
-    // 1. Starbase (space): one of the Space Station markers, synced int(0, n - 1) when n >= 2 [port: the galactic starbase
-    //    participant is placed there; DUMMY_STAR_BASE / Base_Level and the super-weapon registration are not modelled].
+    // 1. Starbase (space): one of the Space Station markers, synced int(0, n - 1) when n >= 2. map1 t07: the participant's
+    //    type is the defender faction's DUMMY_STAR_BASE of the battle's starbase level (bt_pick_starbase, 0x407b60), spawned
+    //    for the record defender; the local camera focus is that marker when the defender is local (start_camera_focus). The
+    //    space-station super-weapon registration (0x35c520, Is_Special_Weapon_In_Space) is the deploy's l1_register [port:
+    //    no shipped starbase has the flag].
+    have_focus_ = false;
     for (Participant& p : parts_) {
         if (!p.starbase || p.reserve) continue;
         const std::vector<size_t> st = of_kind(kMkStation);
         if (!st.empty()) {
             const size_t k = st.size() >= 2 ? static_cast<size_t>(rng.range_int(0, static_cast<int32_t>(st.size()) - 1)) : 0u;
             take(st[k], p);
+            if (def >= 0) {  // spawned for the record defender, on the defender's side
+                p.owner = def;
+                p.side = 0;
+            }
+            have_focus_ = true;
+            focus_ = flat(bt_markers_[st[k]].pos);
+            focus_player_ = def;
             bt_used_ = true;
         }
         break;
@@ -987,7 +1633,7 @@ void TacticalBattle::bt_place_forces(TacticalMode& mode, SimRng& rng) {
     const size_t n0 = parts_.size();
     for (size_t i = 0; i < n0; ++i) {
         if (!parts_[i].structure || parts_[i].built) continue;
-        const objects::TypeIndex x = types.resolve_name(trim(types.get_string(parts_[i].type, "Tactical_Additional_Structure_Type")));
+        const objects::TypeIndex x = types.resolve_name(ascii_trim(types.get(parts_[i].type, objects::tags::Tactical_Additional_Structure_Type)));
         if (x == objects::kNone || x >= types.size()) continue;
         bool have = false;
         for (const Participant& q : parts_) have = have || (q.structure && q.type == static_cast<uint32_t>(x));
@@ -1006,7 +1652,7 @@ void TacticalBattle::bt_place_forces(TacticalMode& mode, SimRng& rng) {
     //    structure behaviour slot filter is not modelled].
     for (Participant& p : parts_) {
         if (!p.structure) continue;
-        const objects::TypeIndex o = types.resolve_name(trim(types.get_string(p.type, "Place_Other_Type_At_Every_Specific_Marker_Position")));
+        const objects::TypeIndex o = types.resolve_name(ascii_trim(types.get(p.type, objects::tags::Place_Other_Type_At_Every_Specific_Marker_Position)));
         if (o == objects::kNone || o >= types.size()) continue;
         p.other_type = static_cast<int32_t>(o);
         for (size_t i = 0; i < bt_markers_.size(); ++i) {
@@ -1016,13 +1662,44 @@ void TacticalBattle::bt_place_forces(TacticalMode& mode, SimRng& rng) {
         p.unplaced = p.spots.empty();
         bt_used_ = true;
     }
-    // 4. Other structures, pass 0 [port: pass 1 (the remembered marker +0x3b0 of the planet's structures) has no galactic
-    //    storage; the marker / slot written back is not kept]: a specific marker listing the type, else the Base_Position
-    //    group (Orbital / In_Base / Out_Base; In_Base falls over to out-base and vice versa), else any free in-base then
-    //    out-base marker; none left -> not spawned. Spawned for the record defender. [M] the space special-weapon rule.
+    // 4. Other structures, two passes. map1 t06: pass 1 places each structure that remembers a marker (+0x3b0, the
+    //    galactic memory GalacticSim::structure_slot of its galactic object) on that marker when it is still free; pass 0
+    //    places the rest: a specific marker listing the type, else the Base_Position group (Orbital / In_Base / Out_Base;
+    //    In_Base falls over to out-base and vice versa), else any free in-base then out-base marker; none left -> not
+    //    spawned. Spawned for the record defender. On placement the structure remembers the slot (+0x3ac: [M] the marker's
+    //    index among the markers of its kind) and the marker (+0x3b0: [M] the marker's .ted object id, which the loader keeps
+    //    as the object's id) in the galactic memory. [M] the space special-weapon rule.
+    auto slot_of = [this](size_t mi) {
+        int32_t n = 0;
+        for (size_t i = 0; i < mi; ++i) n += bt_markers_[i].kind == bt_markers_[mi].kind ? 1 : 0;
+        return n;
+    };
+    auto remember = [&](const Participant& p, size_t mi) {
+        if (!slot_memory_ || !slot_memory_write_ || p.built || p.galactic_id == objects::kNoObjectId) return;
+        slot_memory_->set_structure_slot(p.galactic_id, slot_of(mi), bt_markers_[mi].map_id);
+    };
+    std::vector<uint8_t> pass1(parts_.size(), 0);
+    if (structure_markers && slot_memory_)
+        for (size_t pi = 0; pi < parts_.size(); ++pi) {
+            Participant& p = parts_[pi];
+            if (!p.structure || p.starbase || p.other_type >= 0 || p.built || p.galactic_id == objects::kNoObjectId) continue;
+            const galactic::GalacticSim::StructureSlot* mem = slot_memory_->structure_slot(p.galactic_id);
+            if (!mem || mem->marker < 0) continue;
+            for (size_t i = 0; i < bt_markers_.size(); ++i) {
+                if (bt_markers_[i].used || bt_markers_[i].map_id != mem->marker) continue;
+                take(i, p);
+                p.owner = def >= 0 ? def : p.owner;
+                remember(p, i);
+                pass1[pi] = 1;
+                ++map_stats_.remembered_markers;
+                bt_used_ = true;
+                break;
+            }
+        }
     if (structure_markers)
-        for (Participant& p : parts_) {
-            if (!p.structure || p.starbase || p.other_type >= 0) continue;
+        for (size_t pi = 0; pi < parts_.size(); ++pi) {
+            Participant& p = parts_[pi];
+            if (!p.structure || p.starbase || p.other_type >= 0 || (pi < pass1.size() && pass1[pi] != 0)) continue;
             auto first_free = [&](uint8_t k) -> int64_t {
                 for (size_t i = 0; i < bt_markers_.size(); ++i)
                     if (!bt_markers_[i].used && bt_markers_[i].kind == k) return static_cast<int64_t>(i);
@@ -1035,7 +1712,7 @@ void TacticalBattle::bt_place_forces(TacticalMode& mode, SimRng& rng) {
                     pick = static_cast<int64_t>(i);
             }
             if (pick < 0) {
-                const std::string_view bp = trim(types.get_string(p.type, "Base_Position"));
+                const std::string_view bp = ascii_trim(types.get(p.type, objects::tags::Base_Position));
                 if (iequal_trim(bp, "Orbital")) pick = first_free(kMkOrbital);
                 else if (iequal_trim(bp, "In_Base")) pick = first_free(kMkInBase) >= 0 ? first_free(kMkInBase) : first_free(kMkOutBase);
                 else if (iequal_trim(bp, "Out_Base")) pick = first_free(kMkOutBase) >= 0 ? first_free(kMkOutBase) : first_free(kMkInBase);
@@ -1047,6 +1724,7 @@ void TacticalBattle::bt_place_forces(TacticalMode& mode, SimRng& rng) {
             }
             take(static_cast<size_t>(pick), p);
             p.owner = def >= 0 ? def : p.owner;
+            remember(p, static_cast<size_t>(pick));
             bt_used_ = true;
         }
     // Deploy: the starbase, then the structures (participant order), then the start forces.
@@ -1057,23 +1735,28 @@ void TacticalBattle::bt_place_forces(TacticalMode& mode, SimRng& rng) {
             if (parts_[i].unplaced) parts_[i].deployed = true;  // not spawned: never deployed later either
             else deploy(mode, i, rng);
         }
-    land_obstacles_sync(mode);  // S8 t02: the starbase / structures stamp on attach, before the start forces are placed
+    bt_ground_special_weapons(mode);  // trl2 t01: step 4 pass 0's space special-weapon branch
+    land_obstacles_sync(mode, pf);  // S8 t02: the starbase / structures stamp on attach, before the start forces are placed
     // 6 / 7. Facing slots and anchors: the first Defending Forces marker (position, facing); the attacker's entry marker =
     //    the farthest from the first non-attacker DUMMY_GROUND_STRUCTURE with a non-zero Reinforcement_Prevention_Radius
     //    [M: the 0x2a9ff0 filter], else the nearest to the first Defending Forces marker. Space: the attacker looks at the
     //    last Defending Forces marker. [port] Formation placement 0x2a00b0 = rows of 6 behind the anchor along the facing;
     //    Space_Escort_Unit_Types and the planet-specific upgrades (step 5) are not spawned.
     const bool skirmish_records = skirmish_land() || skirmish_map();
-    if (skirmish_records) bt_skirmish_anchors();  // t50; skai: space skirmish map battles too
+    // s78n t20 (SKIRMISH_SETUP §2.2 [H]): a land skirmish places its start forces at the spawn-point markers only. Before, a map
+    // that also carries campaign markers (_MP_LAND_UTAPAU has a Defending Forces Position at (1671, 4620), next to the
+    // Rebel spawn) moved side 0's anchor onto it: the Empire's start infantry stood beside the Rebel base, partly snapped
+    // into a pocket between a structure footprint and a cliff that no path leaves.
+    const uint8_t spawn_marked = skirmish_records ? bt_skirmish_anchors() : uint8_t{0};  // t50; skai: space skirmish map battles too
     const std::vector<size_t> dm = of_kind(kMkDefend), am = of_kind(kMkAttack);
-    if (!dm.empty()) {
+    if (!dm.empty() && !(spawn_marked & 1u)) {
         anchor_[0] = flat(bt_markers_[dm.front()].pos);
         facing_[0] = bt_markers_[dm.front()].facing;
         // a1h t06: mode +0x288 record of the defender (TACTICAL_GAPS §4.2.2 item 1). s78i t02: a skirmish writes its
         // records from the spawn-point markers instead (bt_skirmish_anchors; TACTICAL_COMBAT §3.1.1 "other spawns").
         if (!skirmish_records) drop_facing_[0] = facing_[0];
     }
-    if (!am.empty()) {
+    if (!am.empty() && !(spawn_marked & 2u)) {
         static const objects::BehaviorTypeId kDummy = objects::behavior_type_id("DUMMY_GROUND_STRUCTURE");
         const objects::ObjectStore& st = mode.primary();
         bool have_block = false;
@@ -1081,7 +1764,7 @@ void TacticalBattle::bt_place_forces(TacticalMode& mode, SimRng& rng) {
         if (kDummy != objects::kNoBehavior)
             for (const objects::ObjectHandle h : st.all_objects()) {
                 if (!st.active(h) || !st.has_behavior(h, kDummy) || st.owner(h) == att) continue;
-                if (types.get_float(st.type(h), "Reinforcement_Prevention_Radius") == 0.0f) continue;
+                if (types.get(st.type(h), objects::tags::Reinforcement_Prevention_Radius) == 0.0f) continue;
                 block = st.position(h);
                 have_block = true;
                 break;
@@ -1112,14 +1795,354 @@ void TacticalBattle::bt_place_forces(TacticalMode& mode, SimRng& rng) {
     // [port] a side without its marker faces the other side's anchor.
     for (int s = 0; s < 2; ++s) {
         if (s == 0 ? !dm.empty() : !am.empty()) continue;
+        if (spawn_marked & (1u << s)) continue;  // s78n t20: the marker's own facing
         const Vec3 d{anchor_[1 - s].x - anchor_[s].x, anchor_[1 - s].y - anchor_[s].y, 0.0f};
         const float len = dmath::sqrt(d.x * d.x + d.y * d.y);
         facing_[s] = len > 0.0f ? Vec3{d.x / len, d.y / len, 0.0f} : Vec3{s == 0 ? -1.0f : 1.0f, 0.0f, 0.0f};
     }
-    for (uint8_t side = 0; side < 2; ++side)
+    const std::vector<size_t> no_marks;
+    for (uint8_t side = 0; side < side_count(); ++side) {  // skm2 t02: a skirmish map's slots 2.. are sides 2..
+        // cu8l t03 (CU8K_T03_T08_T09_RE §1.1, §4 item 1; replaces cu8j's count-only second adopt): the campaign spawn
+        // 0x2a00b0 (one call per side: the defender, then the attacker) registers, per galactic unit that spawned
+        // something (group k, k := k + 1 wrapping at the side's marker count), each unit it creates whose own Ship_Class
+        // is 0..6 (the unit made from the galactic object itself: not in the Super category) as itself (before the team
+        // helper: placement skips it as a team member), then the first chunk's TEAM container when its first member's
+        // Ship_Class is 0..6 (later chunks are neither registered nor placed). In space the fleet placement 0x4fbb10
+        // runs at the end: the defender on the DEFENDING FORCES markers, the attacker on the ATTACKER ENTRY markers
+        // (map order [M]).
+        const bool placement = space_ && !cfg_.skirmish;
+        const std::vector<size_t>& marks = side == 0 ? dm : side == 1 ? am : no_marks;
+        std::vector<FleetEntry> reg;
+        uint32_t group = 0;
+        bt_space_escorts(side);  // map1 t07: the start units' escorts join the side's start list (appended)
         for (uint32_t i = 0; i < parts_.size(); ++i)
-            if (!parts_[i].reserve && !parts_[i].starbase && !parts_[i].structure && !parts_[i].built && parts_[i].side == side)
+            if (!parts_[i].reserve && !parts_[i].starbase && !parts_[i].structure && (!parts_[i].built || parts_[i].escort) &&
+                parts_[i].side == side) {
+                const size_t u0 = units_.size(), c0 = containers_.size();
+                // skai t21 (retail Geonosis trace, frame 1 [H, trace]): a space skirmish places its start squadrons the same
+                // way - both Empire TIE squadrons in rings around their spawn marker (one at the marker, 6 at r ~40, the rest
+                // at r ~80), the Rebel X-Wings likewise (r ~71 / ~143) - not in the campaign rows of 6 behind the anchor.
+                // [port] the space side keys on the marker being found (stats_.skirmish_marked): bt_skirmish_anchors reports
+                // land sides only, since its bit also picks the marker facing and the deploy-record fallback.
+                const bool marker_rings = skirmish_land() ? (spawn_marked & (1u << side)) != 0
+                                                          : space_ && skirmish_map() && stats_.skirmish_marked[side];
+                if (marker_rings && parts_[i].spots.empty()) {
+                    // skai t07 (SKAI_T06_LAND_RUNS 2 [H, trace]): every start company stands on its slot's spawn marker (retail
+                    // Utapau frame 0: the four STORMTROOPER_TEAMs within 12 of marker 93302, all 36 squads within 41), not in rows
+                    // behind it. [port] The members take the free placement ring search around the marker that a script company
+                    // spawn uses (script_member_spots: each member avoids every live object, the earlier companies included),
+                    // facing the marker's way.
+                    const Vec3 at{anchor_[side].x, anchor_[side].y, map_.terrain.present ? map_.terrain.sample_height(anchor_[side].x, anchor_[side].y) : 0.0f};
+                    std::vector<Vec3> spots;
+                    script_member_spots(mode, spawn_types(parts_[i]), at, dmath::atan2(facing_[side].y, facing_[side].x) * (180.0f / dmath::kPiF), spots);
+                    for (const Vec3& sp : spots) parts_[i].spots.emplace_back(sp, facing_[side]);
+                }
                 deploy(mode, i, rng);
+                if (!placement || units_.size() <= u0) continue;
+                const uint32_t g = group;
+                group = marks.empty() || group + 1 < marks.size() ? group + 1 : 0u;
+                const bool team = !rules_->type(parts_[i].type).members.empty();
+                for (size_t k = u0; k < units_.size(); ++k) {
+                    const uint32_t t = units_[k].type;
+                    if (t >= types.size()) continue;
+                    const int32_t sc = types.get(t, objects::tags::Ship_Class);
+                    if (sc < 0 || sc > 6) continue;
+                    if (!team && (types.get(t, objects::tags::CategoryMask) & 0x40u) != 0) continue;  // CategoryMask Super [M]
+                    FleetEntry e;
+                    e.unit = static_cast<uint32_t>(k);
+                    e.group = g;
+                    reg.push_back(e);
+                }
+                if (containers_.size() > c0 && units_[u0].container == c0 && units_[u0].type < types.size()) {
+                    const int32_t sc = types.get(units_[u0].type, objects::tags::Ship_Class);  // the head of the member list
+                    if (sc >= 0 && sc <= 6) {
+                        FleetEntry e;
+                        e.container = static_cast<uint32_t>(c0);
+                        e.group = g;
+                        reg.push_back(e);
+                    }
+                }
+            }
+        if (!placement) continue;
+        bt_fleet_placement(mode, rng, reg, marks);
+        // §1.9: the attacker's call (arrival flag 1 in space), with In_Game_Cinematics and 0x140b27d5e: the vf82 pass.
+        // [port] 0x140b27d5e (the story link's arrival option, P9 != 0) is taken as on in every battle: the Kashyyyk run
+        // (no linked battle) held it, so its start value is 1 [M], and the one link that clears it (P9 = 0: the
+        // _EXEC_DEMO campaign) cannot be told from that start value by the port's LinkedPresentation.
+        if (side == 1 && l1_k_.in_game_cinematics) bt_fleet_arrival(mode, rng, reg);
+    }
+}
+
+// cu8l t03 (CU8K_T03_T08_T09_RE §1.3): the cull-box half extents. [M] The type's model bounds (Space_Model_Name, else the
+// other models) x Scale_Factor in the object's frame - hx along the facing (the model's -Y nose), hy across it; [port]
+// without model data the movement radius both ways.
+mv::fleet::HalfBox TacticalBattle::fleet_box(uint32_t type) const {
+    mv::fleet::HalfBox b;
+    const objects::GameObjectTypes& types = catalog_->types();
+    if (type >= types.size()) return b;
+    float sf = types.columns().scale_factor[type];
+    if (!(sf > 0.0f)) sf = 1.0f;
+    if (const BattleCatalog::ModelInfo* mi = catalog_->model_info(type, true, true); mi && mi->has_bounds) {
+        b.hx = 0.5f * (mi->max[1] - mi->min[1]) * sf;
+        b.hy = 0.5f * (mi->max[0] - mi->min[0]) * sf;
+        return b;
+    }
+    const mv::UnitDesc d = mv::unit_desc_from_type(types, type);
+    b.hx = b.hy = d.radius;
+    return b;
+}
+
+// Squadron_Offsets (type +0x998: one "x, y, z" per line, list order), as (x, y).
+std::vector<mv::V2> TacticalBattle::fleet_offsets(uint32_t type) const {
+    std::vector<mv::V2> out;
+    const objects::GameObjectTypes& types = catalog_->types();
+    if (type >= types.size()) return out;
+    const std::span<const std::string_view> toks = types.get(type, objects::tags::Squadron_Offsets);
+    for (size_t i = 0; i + 1 < toks.size(); i += 3) {
+        const std::string xs(ascii_trim(toks[i])), ys(ascii_trim(toks[i + 1]));
+        out.push_back(mv::V2{static_cast<float>(std::strtod(xs.c_str(), nullptr)), static_cast<float>(std::strtod(ys.c_str(), nullptr))});
+    }
+    return out;
+}
+
+// cu8l t03 (CU8K_T03_T08_T09_RE §1.2 - §1.8, §4 items 2 / 3): per anchor (the side's markers in order) its group's
+// registered objects in registration order - team members skipped, a container classed by its first member - laid out by
+// mv::fleet::place_group; then per placed object in placement order: orientation := the marker's, teleport to the new
+// position (own z), leave its coordinator and adopt (one int(1, FPS) when the predicate admits it: mv_adopt with leave),
+// and a TEAM container's members to container + Rot(yaw) . offset with the marker's orientation (no draw).
+void TacticalBattle::bt_fleet_placement(TacticalMode& mode, SimRng& rng, const std::vector<FleetEntry>& reg,
+                                        const std::vector<size_t>& markers) {
+    objects::ObjectStore& st = mode.primary();
+    const objects::GameObjectTypes& types = catalog_->types();
+    for (size_t a = 0; a < markers.size(); ++a) {
+        const MapMarker& mk = bt_markers_[markers[a]];
+        std::vector<mv::fleet::FleetObject> objs;
+        std::vector<FleetEntry> refs;
+        std::vector<std::vector<uint32_t>> members;  // per object: the live members (units_ indices), member order
+        for (const FleetEntry& e : reg) {
+            if (e.group != a) continue;
+            mv::fleet::FleetObject o;
+            std::vector<uint32_t> mem;
+            if (e.unit != 0xFFFFFFFFu) {
+                const Unit& u = units_[e.unit];
+                if (u.container != 0xFFFFFFFFu || !u.alive || !st.alive(u.h)) continue;  // 0x39b1a0: team members skipped
+                o.ship_class = types.get(u.type, objects::tags::Ship_Class);
+                o.box = fleet_box(u.type);
+            } else {
+                const Container& ct = containers_[e.container];
+                if (ct.removed || !st.alive(ct.h)) continue;
+                for (uint32_t k = 0; k < units_.size(); ++k)
+                    if (units_[k].container == e.container && units_[k].alive && st.alive(units_[k].h)) mem.push_back(k);
+                if (mem.empty()) continue;
+                o.team = true;
+                o.ship_class = types.get(units_[mem.front()].type, objects::tags::Ship_Class);  // 0x4ec820: the first member's
+                for (const uint32_t k : mem) o.members.push_back(fleet_box(units_[k].type));
+                o.offsets_team = fleet_offsets(ct.type);          // team +0x50: Create_Team_Type, else the company type
+                o.offsets_company = fleet_offsets(ct.squad_type); // team +0x58: the company type
+                o.units_team = ct.type < types.size() ? static_cast<uint32_t>(types.get(ct.type, objects::tags::Squadron_Units).size()) : 0u;
+                o.units_company =
+                    ct.squad_type < types.size() ? static_cast<uint32_t>(types.get(ct.squad_type, objects::tags::Squadron_Units).size()) : 0u;
+            }
+            objs.push_back(std::move(o));
+            refs.push_back(e);
+            members.push_back(std::move(mem));
+        }
+        if (objs.empty()) continue;
+        Vec3 face = mk.facing;
+        if (face.x == 0.0f && face.y == 0.0f) face = Vec3{1.0f, 0.0f, 0.0f};
+        const float yaw = mv::norm_deg(mv::heading_deg(mv::V2{face.x, face.y}));  // the anchor's yaw (+0x8c) [M: 0..360]
+        const std::vector<mv::fleet::Placed> placed = mv::fleet::place_group(objs, mv::V2{mk.pos.x, mk.pos.y}, yaw);
+        for (const mv::fleet::Placed& p : placed) {
+            const FleetEntry& e = refs[p.index];
+            if (e.unit != 0xFFFFFFFFu) {
+                const Unit& u = units_[e.unit];
+                const Vec3 at{p.pos.x, p.pos.y, st.position(u.h).z};
+                (void)teleport(mode, u.id, at, face);
+                ++stats_.fleet_placed;
+                if (mv_adopt(mode, u.h, rng, true)) ++stats_.fleet_adopts;
+                continue;
+            }
+            const Container& ct = containers_[e.container];
+            st.set_position(ct.h, Vec3{p.pos.x, p.pos.y, st.position(ct.h).z});
+            st.set_facing(ct.h, face);
+            ++stats_.fleet_placed;
+            if (mv_adopt(mode, ct.h, rng, true)) ++stats_.fleet_adopts;
+            const std::vector<uint32_t>& mem = members[p.index];
+            for (size_t j = 0; j < mem.size() && j < p.members.size(); ++j) {
+                const Unit& m = units_[mem[j]];
+                (void)teleport(mode, m.id, Vec3{p.members[j].x, p.members[j].y, st.position(m.h).z}, face);
+            }
+        }
+        bt_used_ = true;
+    }
+}
+
+// cu8l t03 (CU8K_T03_T08_T09_RE §1.9, §4 items 4 / 5): after every group is placed, per registration entry in registration
+// order (placed or not), the object's LOCOMOTOR vf82(0): TeamLocomotor 0x62f800 (a TEAM container) leaves its coordinator
+// and takes the movement lock - the first +1 splits and adopts: one int(1, FPS) - and calls every member's vf82 (Fighter
+// 0x5cb020 / SimpleSpace: the hyperspace arrival, no draw); SimpleSpace 0x6251d0 (a ship) leaves its coordinator and
+// starts the arrival (state 5, lock +1 [port: from here]), no draw; Fighter 0x5cb020: the arrival, no lock, no draw;
+// Starship / Fleet / plain: nothing. The arrivals then run in arrival_service.
+void TacticalBattle::bt_fleet_arrival(TacticalMode& mode, SimRng& rng, const std::vector<FleetEntry>& reg) {
+    const objects::ObjectStore& st = mode.primary();
+    auto token_is = [this](uint32_t type, std::string_view want) { return ascii_iequals(mv_locomotor_token(type), want); };
+    auto has_rec = [this](objects::ObjectId id, uint32_t container) {
+        return std::any_of(arrivals_.begin(), arrivals_.end(),
+                           [&](const ArrivalRec& r) { return r.id == id && r.container == container; });
+    };
+    // A unit's vf82(0): SimpleSpace / Fighter start the arrival; a ship outside a team composes at its finish.
+    auto arrive = [&](const Unit& u) {
+        if (!u.alive || u.retreated || !st.alive(u.h)) return;
+        const bool ship = token_is(u.type, "SIMPLE_SPACE_LOCOMOTOR");
+        if (!ship && !token_is(u.type, "FIGHTER_LOCOMOTOR")) return;
+        if (ship && movement_ && u.movable) (void)movement_->stop_and_leave(u.id);  // suspend, leave the coordinator
+        if (has_rec(u.id, 0xFFFFFFFFu)) return;
+        ArrivalRec r;
+        r.id = u.id;
+        r.timer = kArrivalState5;
+        r.composes = ship && u.container == 0xFFFFFFFFu;
+        arrivals_.push_back(r);
+        ++stats_.fleet_arrivals;
+    };
+    for (const FleetEntry& e : reg) {
+        if (e.unit != 0xFFFFFFFFu) {
+            arrive(units_[e.unit]);
+            continue;
+        }
+        const Container& ct = containers_[e.container];
+        if (ct.removed || !st.alive(ct.h) || !token_is(static_cast<uint32_t>(st.type(ct.h)), "TEAM_LOCOMOTOR")) continue;
+        // 0x62f800: leave; lock 0 -> 1 (0x3a8e50): split from any formation and adopt (the container is outside the
+        // movement system: one draw when the predicate admits it).
+        if (mv_adopt(mode, ct.h, rng, true)) ++stats_.fleet_lock_adopts;
+        if (!has_rec(ct.id, e.container)) {
+            ArrivalRec r;
+            r.id = ct.id;
+            r.container = e.container;
+            r.composes = true;
+            arrivals_.push_back(r);
+        }
+        for (const Unit& m : units_)
+            if (m.container == e.container) arrive(m);
+    }
+    // Serviced in object order (ascending id): units first, then the containers.
+    std::stable_sort(arrivals_.begin(), arrivals_.end(), [](const ArrivalRec& x, const ArrivalRec& y) {
+        const bool cx = x.container != 0xFFFFFFFFu, cy = y.container != 0xFFFFFFFFu;
+        return cx != cy ? !cx : x.id < y.id;
+    });
+}
+
+bool TacticalBattle::arrival_locked(objects::ObjectId key) const {
+    for (const ArrivalRec& r : arrivals_)
+        if (r.id == key && (r.container != 0xFFFFFFFFu || r.composes)) return true;
+    return false;
+}
+
+// cu8l t03: the arrival timers (L1_S4_REMAINING §3.4 "Hyperspace in", CU8K_T03_T08_T09_RE §1.9 "What follows"). [port] f
+// (the arrival distance's place between the min / max of all arrivals) is 0.5, the value for equal distances: the
+// arrival start points (vf +0x2a0) are not modelled. The hyperspace hold (P9 = 2) freezes the timers after the first
+// frame's draw [M]. A ship outside a team finishes with a new coordinator holding where it is (hold_from_birth: one space
+// composition at this tick's step 10; [port] an order the unit took meanwhile keeps running); a squadron container once
+// none of its members' records is left (finished or gone): the same for its live members (one composition).
+void TacticalBattle::arrival_service(TacticalMode& mode, SimRng& rng) {
+    if (arrivals_.empty()) return;
+    const objects::ObjectStore& st = mode.primary();
+    const bool held = arrival_held();
+    constexpr float kF = 0.5f;
+    const int32_t steps = 5 * static_cast<int32_t>(4.0f * kF);
+    std::vector<ArrivalRec> keep;
+    keep.reserve(arrivals_.size());
+    std::vector<objects::ObjectId> one;
+    std::vector<uint32_t> finished;  // aitac t05: reinforcement participants whose unit finished its arrival this tick
+    for (ArrivalRec& r : arrivals_) {
+        if (r.container != 0xFFFFFFFFu) {
+            keep.push_back(r);
+            continue;
+        }
+        const Unit* u = unit_by_id(r.id);
+        if (!u || !u->alive || u->retreated || !st.alive(u->h)) {
+            if (r.reinforce >= 0) finished.push_back(static_cast<uint32_t>(r.reinforce));
+            continue;
+        }
+        if (r.timer == kArrivalState5) {
+            r.timer = kArrivalState4;
+        } else if (r.timer == kArrivalState4) {
+            r.timer = std::clamp(rng.range_int(1, 4) + steps, 0, 24);
+        } else if (!held && ++r.timer > 149) {
+            if (r.composes && movement_ && u->movable) {
+                one.assign(1, r.id);
+                if (movement_->hold_from_birth(one)) ++stats_.fleet_arrival_ends;
+            }
+            if (r.reinforce >= 0) finished.push_back(static_cast<uint32_t>(r.reinforce));
+            continue;
+        }
+        // aud1 t05 (AUDIO.md §9.6): the arrival sound at state 4's timer 35 (presentation log, no sim reader).
+        if (r.timer == 35 && !held)
+            hyperspace_sfx_.push_back({HyperspaceSfx::Kind::Arrive, u->id, u->type, st.owner(u->h), st.position(u->h)});
+        keep.push_back(r);
+    }
+    arrivals_.swap(keep);
+    keep.clear();
+    for (const uint32_t p : finished) space_reinforce_arrived(p);
+    for (const ArrivalRec& r : arrivals_) {
+        if (r.container == 0xFFFFFFFFu) {
+            keep.push_back(r);
+            continue;
+        }
+        bool waiting = false, any = false;
+        std::vector<objects::ObjectId> live;
+        for (const Unit& m : units_) {
+            if (m.container != r.container || !m.alive || m.retreated) continue;
+            any = true;
+            if (m.movable) live.push_back(m.id);
+            for (const ArrivalRec& x : arrivals_)
+                waiting = waiting || (x.container == 0xFFFFFFFFu && x.id == m.id);
+        }
+        if (waiting) {
+            keep.push_back(r);
+            continue;
+        }
+        if (any && movement_ && !live.empty() && movement_->hold_from_birth(live)) ++stats_.fleet_arrival_ends;  // 0x630390: lock -1, new coordinator
+    }
+    arrivals_.swap(keep);
+}
+
+// aitac t05 (AI_TACTICAL §7.4.1 [H]): a space reinforcement (0x2bf2d0) calls the new unit's locomotor vf82(1): the
+// hyperspace arrival from state 4 with the timer at 0 (no draw, unlike the start fleet's vf82(0)); the ship leaves its
+// coordinator (movement-locked) until the finish at the 150th update gives it a new one holding its position, and the
+// finish raises signal 0x19 for the AI's reinforce block (a squadron: from its container after the last fighter).
+// [port] The arrival's hidden / INVULNERABLE window (to timer 35) is not modelled; the 0x19 record names every unit of
+// the participant once none of its arrivals is left (LandingUnload with no landing object).
+void TacticalBattle::space_reinforce_arrivals(size_t first, uint32_t participant) {
+    bool any = false;
+    for (size_t k = first; k < units_.size(); ++k) {
+        const Unit& u = units_[k];
+        const std::string_view loco = mv_locomotor_token(u.type);
+        const bool ship = ascii_iequals(loco, "SIMPLE_SPACE_LOCOMOTOR");
+        if (!ship && !ascii_iequals(loco, "FIGHTER_LOCOMOTOR")) continue;
+        if (ship && movement_ && u.movable) (void)movement_->stop_and_leave(u.id);
+        ArrivalRec r;
+        r.id = u.id;
+        r.timer = 0;
+        r.composes = ship && u.container == 0xFFFFFFFFu;
+        r.reinforce = static_cast<int32_t>(participant);
+        arrivals_.push_back(r);
+        any = true;
+    }
+    if (!any) space_reinforce_arrived(participant);  // nothing arrives through the state machine: the record at once
+}
+
+void TacticalBattle::space_reinforce_arrived(uint32_t participant) {
+    for (const ArrivalRec& r : arrivals_)
+        if (r.reinforce == static_cast<int32_t>(participant)) return;
+    if (participant >= parts_.size()) return;
+    const Participant& p = parts_[participant];
+    LandingUnload rec;
+    rec.galactic_id = p.galactic_id;
+    rec.owner = p.owner;
+    rec.carried_type = p.type;
+    for (const Unit& u : units_)
+        if (u.participant == participant && u.alive && !u.retreated) rec.units.push_back(u.id);
+    landings_unloaded_.push_back(std::move(rec));
 }
 
 // ---- build pads: attachment bone, kill list, persistence (REMAINING_GAPS §6.5) --------------------------------------
@@ -1132,7 +2155,7 @@ Vec3 TacticalBattle::bt_pad_attach_point(const TacticalMode& mode, objects::Obje
     const objects::GameObjectTypes& types = catalog_->types();
     const objects::TypeIndex t = st.type(pad);
     if (t >= types.size()) return p;
-    const std::string_view bone = trim(types.get_string(t, "Tactical_Build_Attachment_Bone_Name"));
+    const std::string_view bone = ascii_trim(types.get(t, objects::tags::Tactical_Build_Attachment_Bone_Name));
     if (bone.empty()) return p;
     Vec3 out = p;
     return model_bone_point(st, pad, bone, out) > 0 ? out : p;
@@ -1146,9 +2169,7 @@ int TacticalBattle::model_bone_point(const objects::ObjectStore& st, objects::Ob
     if (t >= types.size()) return -1;
     const BattleCatalog::ModelInfo* mi = catalog_->model_info(static_cast<uint32_t>(t), space_, true);
     if (!mi) return -1;
-    std::string upper(trim(bone));
-    for (char& c : upper) c = (c >= 'a' && c <= 'z') ? static_cast<char>(c - 'a' + 'A') : c;
-    const int32_t b = mi->find(upper);
+    const int32_t b = mi->find(ascii_upper(ascii_trim(bone)));
     if (b < 0 || static_cast<size_t>(b) >= mi->bone_pos.size()) return 0;
     const Vec3 p = st.position(h);
     float s = types.columns().scale_factor[t];
@@ -1180,8 +2201,12 @@ void TacticalBattle::bt_kill_silently(TacticalMode& mode, objects::ObjectHandle 
         --parts_[u->participant].alive;
         hg_unit_removed(id);  // hangars / engine loops
         abilities_->remove(id);
+        s4_hover_death(id, st.position(h), st.facing(h));  // s78n t20 batch 2: before the mover (and its hover state) goes
         if (u->movable) movement_->remove_unit(id);
-        else movement_->object_removed(id);  // s78f review: fighter formation blocks naming it
+        else {
+            (void)movement_->remove_unit(id);  // s78n t23 step 0: a registered mine obstacle (no-op otherwise)
+            movement_->object_removed(id);     // s78f review: fighter formation blocks naming it
+        }
         unit_gone(mode, *u);
     }
     mode.destroy(h);
@@ -1218,7 +2243,9 @@ void TacticalBattle::bt_pad_restore(TacticalMode& mode) {
         sp.facing = st.facing(ph);
         const objects::ObjectHandle bh = mode.spawn(sp);
         if (!st.alive(bh)) continue;
+        hg_spawn_off_ = skirmish_land() || skirmish_map();  // bkg3 b0028: a pre-built structure copies the pad's byte
         bt_adopt_built(mode, bh, rec->owner, 1.0f, bt_rng_);
+        hg_spawn_off_ = false;
         PadState* s = pad_state(st.id(ph), true);
         pads_mode_ = &mode;
         s->built = st.id(bh);
@@ -1236,6 +2263,11 @@ void TacticalBattle::bt_pad_restore(TacticalMode& mode) {
 // ---- land skirmish base (t50) ---------------------------------------------------------------------------------------
 
 int32_t TacticalBattle::skirmish_slot_player(int32_t slot) const {
+    if (!cfg_.skirmish_slots.empty()) {  // skm2 t02: the host's slot list
+        if (slot < 0 || slot >= skirmish_slot_count()) return -1;
+        const int32_t p = cfg_.skirmish_slots[static_cast<size_t>(slot)].player;
+        return p >= 0 && bt_owner_valid(p) ? p : -1;
+    }
     // [M] a skirmish's slots are its two battle sides' players in ascending player order (the host builds the galaxy with
     // the human first; the headless runs with the first AI first), so slot 0 / 1 = "Player_0" / "Team_00" and "Player_1" / "Team_01".
     int32_t ids[2] = {req_.info.defender, req_.info.attacker};
@@ -1247,55 +2279,106 @@ int32_t TacticalBattle::skirmish_slot_player(int32_t slot) const {
     return slot >= 0 && slot < n ? out[slot] : -1;
 }
 
+int32_t TacticalBattle::skirmish_slot_count() const {
+    if (!cfg_.skirmish_slots.empty()) return static_cast<int32_t>(std::min<size_t>(cfg_.skirmish_slots.size(), kMaxSides));
+    return 2;
+}
+
+int32_t TacticalBattle::skirmish_slot_of(int32_t player) const {
+    if (player < 0) return -1;
+    for (int32_t s = 0; s < skirmish_slot_count(); ++s)
+        if (skirmish_slot_player(s) == player) return s;
+    return -1;
+}
+
+int32_t TacticalBattle::skirmish_team(int32_t player) const {
+    const int32_t s = skirmish_slot_of(player);
+    return s >= 0 && !cfg_.skirmish_slots.empty() ? cfg_.skirmish_slots[static_cast<size_t>(s)].team : -1;
+}
+
+uint8_t TacticalBattle::side_count() const {
+    return skirmish_map() ? static_cast<uint8_t>(std::max(2, skirmish_slot_count())) : uint8_t{2};
+}
+
+uint8_t TacticalBattle::owner_side(int32_t owner) const {
+    if (owner == req_.info.defender) return 0;
+    // The slot list as configured (the constructor assigns sides before the battle's player count is known).
+    if (skirmish_map() && owner >= 0)
+        for (size_t s = 2; s < cfg_.skirmish_slots.size() && s < kMaxSides; ++s)
+            if (cfg_.skirmish_slots[s].player == owner) return static_cast<uint8_t>(s);
+    return 1;
+}
+
 float TacticalBattle::skirmish_land_unit_cap(int32_t player) const {
     if (!galaxy_ || player < 0 || static_cast<size_t>(player) >= galaxy_->players().size()) return -1.0f;
     int32_t count = 0;
-    for (int32_t slot = 0; slot < 2; ++slot) count += skirmish_slot_player(slot) >= 0 ? 1 : 0;
+    for (int32_t slot = 0; slot < skirmish_slot_count(); ++slot) count += skirmish_slot_player(slot) >= 0 ? 1 : 0;
     return rules_->faction(galaxy_->players()[static_cast<size_t>(player)].faction).unit_cap_for_players(static_cast<float>(count));
 }
 
+objects::TypeIndex TacticalBattle::bt_skirmish_preplaced(const objects::ObjectStore& st, objects::ObjectHandle ph) const {
+    const objects::GameObjectTypes& types = catalog_->types();
+    if (!st.active(ph) || !st.has_behavior(ph, pad_behavior()) ||
+        !types.get(st.type(ph), objects::tags::Respects_Skirmish_Pre_Build_Bases_Option))
+        return objects::kNone;
+    const int32_t owner = st.owner(ph);
+    if (owner < 0 || skirmish_slot_of(owner) < 0) return objects::kNone;  // skm2 t02: every slot
+    if (pad_contents(st.id(ph)) != objects::kNoObjectId) return objects::kNone;
+    const uint32_t f = galaxy_->players()[static_cast<size_t>(owner)].faction;
+    if (f >= galaxy_->rules().factions.size()) return objects::kNone;
+    const std::string& faction = galaxy_->rules().factions[f].name;
+    objects::TypeIndex uc = objects::kNone;
+    bool in_row = false;
+    for (const std::string_view tok : types.get(st.type(ph), pad_list_tag())) {
+        const objects::TypeIndex x = types.raw().find(tok);
+        if (x == objects::kNone || x >= types.size()) {
+            in_row = iequal_trim(tok, faction);
+            continue;
+        }
+        if (in_row && uc == objects::kNone && types.has_behavior(x, objects::BehaviorSet::Union, uc_behavior())) uc = x;
+    }
+    return uc;
+}
+
+void TacticalBattle::bt_skirmish_pad_sell(const objects::ObjectStore& st) {
+    // tru3 t06 (SKIRMISH_SETUP 2.6, ABILITIES_HARDPOINTS §4.15 "Build pads" [H]): pad vf13 0x42df80 in a skirmish whose
+    // pre-built-bases option (flag 0x8) is off plays Pad_Sell (0x75; 0xFFFF, one-shot, blend 0, speed 1) on each empty pad
+    // that holds a pre-placed type, instead of building it. [port] The pads' AnimWorld rows exist from the first tick
+    // (not at map load), so the battle plays it in the first tick's animation service (r3h [port] (5): index 0). The pads
+    // are found again here (stateless: a save loaded before the first tick plays it as the unbroken run does).
+    if (frame_ != 1 || !skirmish_land() || !cfg_.skirmish_options.set || cfg_.skirmish_options.prebuilt_base) return;
+    if (pad_behavior() == objects::kNoBehavior || uc_behavior() == objects::kNoBehavior) return;
+    for (const objects::ObjectHandle ph : st.all_objects())
+        if (bt_skirmish_preplaced(st, ph) != objects::kNone) {
+            play_battle_clip(st.id(ph), 0x75, false, 1.0f, 0.0f);
+        }
+}
+
 void TacticalBattle::bt_skirmish_base(TacticalMode& mode) {
-    // t50 [M]: MP_Default_Pre_Built_Base (GameConstants, shipped yes) with a pad type that respects the option
-    // (Respects_Skirmish_Pre_Build_Bases_Option, L1_S4_REMAINING §3.6 "pre-placed types spawn at start"): the pads of the
-    // MultiplayerStructureMarkers "Team_00_Command Center" and "Team_00_Barracks" start built, for the two slots' factions, at
-    // no charge: the pad's first buildable under-construction type of the owner's faction row, as its Tactical_Buildable_Constructed
-    // type. The other pads (factories, research, power, communications array, generic and resource pads) start empty. The retail
-    // pre-placed type itself is not decoded (.ted mini 0x2B is 3 on exactly the base pads); which pads it builds is the open item.
+    // SKIRMISH_SETUP 2.6 [H]: pad vf13 0x42df80 creates the pad's map-saved pre-placed type (data pack +0x18) for the pad owner at
+    // the build bone with the pad orientation (an under-construction type -> its Tactical_Buildable_Constructed), in skirmish only
+    // with the pre-built-bases option (MP_Default_Pre_Built_Base, shipped yes) and the pad type's
+    // Respects_Skirmish_Pre_Build_Bases_Option (+0xe5, default true). skai t08 (SKAI_T06_LAND_RUNS 2, retail Utapau frame 0):
+    // every pad of each slot starts built (Command Center, Barracks, Light / Heavy Vehicle Factory, Research Facility, Base
+    // Shield, both Turbolaser Towers, Communications Array, Power Generator); the five <FACTION>_BUILD_PAD of a slot (the only
+    // types with the flag false) and every Neutral pad start empty. [port] The pre-placed type itself is not decoded from the
+    // map: an owned slot pad whose type respects the option gets the first under-construction type of its owner's faction row
+    // (the same structure for every shipped base pad).
     if (!skirmish_land() || !combat_ || pad_behavior() == objects::kNoBehavior || uc_behavior() == objects::kNoBehavior) return;
     const objects::GameObjectTypes& types = catalog_->types();
-    std::vector<objects::TypeIndex> pre;
-    for (const char* name : {"Team_00_Command Center", "Team_00_Barracks"}) {
-        const objects::TypeIndex mt = types.resolve_name(name);
-        if (mt == objects::kNone || mt >= types.size()) continue;
-        for (const std::string_view tok : types.get_list(mt, "Marker_For_Specific_Object_Type")) {
-            const objects::TypeIndex x = types.resolve_name(trim(tok));
-            if (x != objects::kNone && x < types.size()) pre.push_back(x);
-        }
-    }
-    if (pre.empty()) return;
     objects::ObjectStore& st = mode.primary();
     std::vector<objects::ObjectHandle> pads;
+    // skm1 t02: the option flag 0x8 off (BattleConfig::skirmish_options) - no pad pre-builds (every skirmish pad respects it or
+    // is skipped here); tru3 t06: those pads play Pad_Sell instead (bt_skirmish_pad_sell, at the first tick).
+    const bool prebuild = !cfg_.skirmish_options.set || cfg_.skirmish_options.prebuilt_base;
     for (const objects::ObjectHandle h : st.all_objects())
-        if (st.active(h) && st.has_behavior(h, pad_behavior()) && std::find(pre.begin(), pre.end(), st.type(h)) != pre.end()) pads.push_back(h);
+        if (prebuild && st.active(h) && st.has_behavior(h, pad_behavior()) && types.get(st.type(h), objects::tags::Respects_Skirmish_Pre_Build_Bases_Option))
+            pads.push_back(h);
     for (const objects::ObjectHandle ph : pads) {
         const int32_t owner = st.owner(ph);
-        if (owner < 0 || (owner != skirmish_slot_player(0) && owner != skirmish_slot_player(1))) continue;
-        if (pad_contents(st.id(ph)) != objects::kNoObjectId) continue;
-        const uint32_t f = galaxy_->players()[static_cast<size_t>(owner)].faction;
-        if (f >= galaxy_->rules().factions.size()) continue;
-        const std::string& faction = galaxy_->rules().factions[f].name;
-        objects::TypeIndex uc = objects::kNone;
-        bool in_row = false;
-        for (const std::string_view tok : types.get_list(st.type(ph), pad_list_tag())) {
-            const objects::TypeIndex x = types.raw().find(tok);
-            if (x == objects::kNone || x >= types.size()) {
-                in_row = iequal_trim(tok, faction);
-                continue;
-            }
-            if (in_row && uc == objects::kNone && types.has_behavior(x, objects::BehaviorSet::Union, uc_behavior())) uc = x;
-        }
+        const objects::TypeIndex uc = bt_skirmish_preplaced(st, ph);
         if (uc == objects::kNone) continue;
-        const objects::TypeIndex ft = types.resolve_name(types.get_string(uc, "Tactical_Buildable_Constructed"));
+        const objects::TypeIndex ft = types.resolve_name(types.get(uc, objects::tags::Tactical_Buildable_Constructed));
         if (ft == objects::kNone || ft >= types.size() ||
             std::find(types_used_.begin(), types_used_.end(), static_cast<uint32_t>(ft)) == types_used_.end())
             continue;
@@ -1307,7 +2390,14 @@ void TacticalBattle::bt_skirmish_base(TacticalMode& mode) {
         sp.facing = st.facing(ph);
         const objects::ObjectHandle bh = mode.spawn(sp);
         if (!st.alive(bh)) continue;
+        hg_spawn_off_ = skirmish_land() || skirmish_map();  // bkg3 b0028: copied from the pad
         bt_adopt_built(mode, bh, owner, 1.0f, bt_rng_);
+        hg_spawn_off_ = false;
+        // skai t15 (SKAI_T15_TARGET_CHOICE Q5 [H]): the pad pre-builds its structure (0x42df80 -> 0x4f5950) before the
+        // skirmish start deletes and rebuilds the threat grid (0xeed80: 0x365540 / 0x3b86f0), and UNIT_AI registers once,
+        // so the structure stays out of every AI owner list (force sums, DistanceToNearest, Find_Nearest) all battle; its
+        // cells are projected again at its first service [M]. Structures built later register normally.
+        if (st.alive(bh)) st.set_flag(bh, objects::kFlagNoAiOwnerList);
         PadState* s = pad_state(st.id(ph), true);
         pads_mode_ = &mode;
         s->built = st.id(bh);
@@ -1317,43 +2407,94 @@ void TacticalBattle::bt_skirmish_base(TacticalMode& mode) {
     }
     for (const objects::ObjectHandle h : st.all_objects())
         if (st.active(h) && st.has_behavior(h, pad_behavior()) &&
-            (st.owner(h) == skirmish_slot_player(0) || st.owner(h) == skirmish_slot_player(1)))
+            skirmish_slot_of(st.owner(h)) >= 0)
             ++stats_.skirmish_pads;
 }
 
-void TacticalBattle::bt_skirmish_anchors() {
+uint8_t TacticalBattle::bt_skirmish_anchors() {
     // t50 [M]: a land skirmish side starts at its slot's map marker: "Player_<slot>_Spawn_Point_Marker" owned by the slot's player
     // (the explicit-faction MP maps carry one per faction and slot), else "Team_0<slot>_Spawn_Point_Marker" /
     // "Team_0<slot>_Base_Position_Marker" (the team maps; the first in map order). No marker: the fallback anchor stays.
-    if (!skirmish_land() && !skirmish_map()) return;
+    if (!skirmish_land() && !skirmish_map()) return 0;
     const objects::GameObjectTypes& types = catalog_->types();
-    for (uint8_t side = 0; side < 2; ++side) {
+    uint8_t found = 0;
+    for (uint8_t side = 0; side < side_count(); ++side) {  // skm2 t02: every slot
         const int32_t player = side_player(side);
-        int32_t slot = -1;
-        for (int32_t k = 0; k < 2; ++k)
-            if (skirmish_slot_player(k) == player) slot = k;
+        const int32_t slot = skirmish_slot_of(player);
         if (slot < 0) continue;
-        const std::string player_marker = "Player_" + std::to_string(slot) + "_Spawn_Point_Marker";
-        const std::string team_spawn = "Team_0" + std::to_string(slot) + "_Spawn_Point_Marker";
-        const std::string team_base = "Team_0" + std::to_string(slot) + "_Base_Position_Marker";
+        // skm2 t02 (SKIRMISH_SETUP §2.2 team game, TACTICAL_GAPS §4.2.2): the team markers are the slot's team's (tt = the
+        // team, else the slot), and a team's k-th slot (k = its index among the team's slots) takes the k-th match.
+        const int32_t team = skirmish_team(player) >= 0 ? skirmish_team(player) : slot;
+        int32_t k_in_team = 0;
+        for (int32_t s = 0; s < slot; ++s) {
+            const int32_t ps = skirmish_slot_player(s);
+            k_in_team += ps >= 0 && (skirmish_team(ps) >= 0 ? skirmish_team(ps) : s) == team ? 1 : 0;
+        }
+        char tt[8];
+        std::snprintf(tt, sizeof tt, "%02d", static_cast<int>(team));
+        // skm2 t02 (TACTICAL_GAPS §4.2.2, 0x2a4fc0): with the slot list, a free-for-all game (no +0xb5) takes PLAYER_<k>, k = the
+        // slot's index among the slots of its faction, owned by a player of that faction; a team game only TEAM_tt markers.
+        // [port] either falls back to the next kind when the map has none (no slot list: the two-slot order as before).
+        const bool slots = !cfg_.skirmish_slots.empty();
+        const bool team_game = slots && cfg_.skirmish_team_game;
+        const auto& gps = galaxy_->players();
+        const uint32_t faction = static_cast<size_t>(player) < gps.size() ? gps[static_cast<size_t>(player)].faction : galactic::kNoIndex;
+        int32_t k_in_faction = 0;
+        for (int32_t s = 0; s < slot; ++s) {
+            const int32_t ps = skirmish_slot_player(s);
+            k_in_faction += ps >= 0 && static_cast<size_t>(ps) < gps.size() && gps[static_cast<size_t>(ps)].faction == faction ? 1 : 0;
+        }
+        const auto owner_faction = [&gps](int32_t o) {
+            return o >= 0 && static_cast<size_t>(o) < gps.size() ? gps[static_cast<size_t>(o)].faction : galactic::kNoIndex;
+        };
+        const std::string player_marker = "Player_" + std::to_string(slots ? k_in_faction : slot) + "_Spawn_Point_Marker";
+        const std::string team_spawn = std::string("Team_") + tt + "_Spawn_Point_Marker";
+        const std::string team_base = std::string("Team_") + tt + "_Base_Position_Marker";
         const MapMarker* pick = nullptr;
+        // skai t07 (SKAI_T06_LAND_RUNS 2 [H, trace]: retail Utapau puts both start companies of a slot on the LAST of its three
+        // TEAM_tt_SPAWN_POINT_MARKERs in id order, 93302 / 93300) [M: why the last]. Land takes the last match in map order
+        // (the port's ids follow it); [port] a space skirmish keeps the first (its retail-checked station / fleet layout).
+        // skm2 t02 [port]: the team's k-th slot steps k matches back from that one (land) or on from it (space), wrapping.
+        std::vector<const MapMarker*> matches;
         for (const std::string* want : {&player_marker, &team_spawn, &team_base}) {
+            matches.clear();
             for (const MapMarker& m : bt_markers_) {
                 if (m.type == objects::kNone || m.type >= types.size()) continue;
-                if (!iequal_trim(types.raw().types().name[m.type], *want)) continue;
-                if (want == &player_marker && m.owner != player) continue;
-                pick = &m;
-                break;
+                if (!iequal_trim(types.name(m.type), *want)) continue;
+                if (want == &player_marker && (team_game || (slots ? owner_faction(m.owner) != faction : m.owner != player))) continue;
+                matches.push_back(&m);
             }
-            if (pick) break;
+            if (matches.empty()) continue;
+            const size_t k = want == &player_marker ? 0u : static_cast<size_t>(k_in_team) % matches.size();
+            pick = space_ ? matches[k] : matches[matches.size() - 1 - k];
+            break;
         }
         if (pick) {
             anchor_[side] = Vec3{pick->pos.x, pick->pos.y, 0.0f};
             // s78i t02 (TACTICAL_COMBAT §3.1.1 "other spawns", Creating_Starting_Forces_For_Skirmish): the side's mode
             // +0x288 record = that spawn marker's facing; no marker -> the record stays zero (yaw 0).
             drop_facing_[side] = pick->facing;
+            // s78n t20 (SKIRMISH_SETUP §2.2 [H]: each start company is placed at the spawn marker "with the marker
+            // orientation"): on land the start rows (slot_position) face the marker's way.
+            // [port] land only: a space skirmish keeps the older anchors (its station / fleet placement reads them, and the
+            // retail-checked space parity scenario depends on it).
+            if (!space_) {
+                facing_[side] = pick->facing;
+                found = static_cast<uint8_t>(found | (1u << side));
+            } else if (side >= 2) {
+                // skm2 t02 [port]: a space slot 2.. (no older anchor rule) faces the playable box's centre from its marker.
+                float mn[2], mx[2];
+                if (map_.playable_box(mn, mx)) {
+                    const float dx = 0.5f * (mn[0] + mx[0]) - anchor_[side].x, dy = 0.5f * (mn[1] + mx[1]) - anchor_[side].y;
+                    const float len = dmath::sqrt(dx * dx + dy * dy);
+                    if (len > 0.0f) facing_[side] = Vec3{dx / len, dy / len, 0.0f};
+                }
+            }
+            stats_.skirmish_marked[side] = true;
+            stats_.skirmish_marker[side] = anchor_[side];
         }
     }
+    return found;
 }
 
 void TacticalBattle::bt_shield_stamps(const TacticalMode& mode) {
@@ -1363,21 +2504,24 @@ void TacticalBattle::bt_shield_stamps(const TacticalMode& mode) {
     const objects::ObjectStore& st = mode.primary();
     const objects::GameObjectTypes& types = catalog_->types();
     mv::PassabilityGrid& grid = movement_->grid();
-    // Gone: unstamp (ascending id).
+    // tru1 t02 (TRU1_A_RE_ANSWERS A1, Set_State 0x56b540): the disc is stamped while the shield is on.
+    auto on = [&](objects::ObjectId id) { return !combat_ || !combat_->has_unit(id) || combat_->base_shield_active(id); };
+    // Gone or off: unstamp (ascending id).
     std::erase_if(bt_shields_, [&](objects::ObjectId id) {
-        if (st.alive(st.find(id))) return false;
+        if (st.alive(st.find(id)) && on(id)) return false;
         grid.unstamp_secondary(id);
         return true;
     });
     // New: the store's object list order, inserted sorted.
     for (const objects::ObjectHandle h : st.all_objects()) {
         if (!st.active(h) || !st.has_behavior(h, kBaseShield)) continue;
-        const float r = types.get_float(st.type(h), "Base_Shield_Radius");
+        const float r = types.get(st.type(h), objects::tags::Base_Shield_Radius);
         // MOVEMENT §1.1 step 3: the occupant's SecondaryOccupationPassability (+0x1694; shipped "Shield" on the 740-radius
         // generators) over the shield radius [inferred footprint]. Types without the field are no secondary occupants.
-        const auto bits = static_cast<uint32_t>(types.get_mask(st.type(h), "SecondaryOccupationPassability"));
+        const auto bits = static_cast<uint32_t>(types.get(st.type(h), objects::tags::SecondaryOccupationPassability));
         if (!(r > 0.0f) || bits == 0) continue;
         const objects::ObjectId id = st.id(h);
+        if (!on(id)) continue;
         const auto it = std::lower_bound(bt_shields_.begin(), bt_shields_.end(), id);
         if (it != bt_shields_.end() && *it == id) continue;
         const Vec3 c = st.position(h);

@@ -25,6 +25,7 @@ sys.dont_write_bytecode = True
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 sys.path.insert(0, os.path.dirname(HERE))
+sys.path.insert(0, os.path.join(os.path.dirname(HERE), 'common'))
 import ted_owners  # noqa: E402
 from build_probe import dat_read, dat_bytes  # noqa: E402
 
@@ -206,8 +207,7 @@ def hook_text(types, popup):
     return src
 
 
-def crlf(text):
-    return text.replace('\r\n', '\n').replace('\n', '\r\n').encode('latin-1')
+from payload import crlf  # noqa: E402,F401  (common/payload.py)
 
 
 def write(path, data):

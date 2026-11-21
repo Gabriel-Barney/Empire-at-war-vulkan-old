@@ -283,7 +283,7 @@ in .data (docs/re/xml_field_tables.md).
 
 | Handler | Behaviour |
 |---|---|
-| **DEPLOY 0x3a1ce0** [H flow, M names] | Gates: Force block, garrison count, no other mode active, all team members pass `Can_Activate`, locomotor not busy. The unit stops (0x426d50 + 0x39bcb0). on → deploy 0x391260 (adds `DeployedBehavior`); off → undeploy 0x3ac100(obj, 0). Gates failing: on returns false; off still notifies targeting (vf +0xd8) and undeploys. No countdown; `Is_Active` = deployed state |
+| **DEPLOY 0x3a1ce0** [H flow, M names] | Gates: Force block, garrison count, no other mode active, all team members pass `Can_Activate`, locomotor not busy. The unit stops (0x426d50 + 0x39bcb0). on → deploy request 0x391260 (`DeployedBehavior` is added later, by 0x39fec0 when the Deploy clip ends, and removed by 0x3a0580 when the Undeploy clip starts: B0173_DEPLOYED_BEHAVIOR_RE); off → undeploy 0x3ac100(obj, 0). Gates failing: on returns false; off still notifies targeting (vf +0xd8) and undeploys. No countdown; `Is_Active` = deployed state |
 | **JET_PACK 0x3a38d0** | Same gates. 2-D distance to the point ≤ record `Effective_Radius` (+0x20; skipped when negative). Then, for a `Uses_Multiple_Locomotors` (type +0x74) unit, the locomotor swap to the secondary (0x3a9910; not a garrison release, MOVEMENT §3.1.1). Issues a **move** (0x2a7b80) of the unit / team to the point; the jump itself is the JETPACK locomotor (REMAINING_GAPS §4.3). Countdown: start recharge when `Expiration_Seconds` = 0, else start active. No RNG |
 | **BARRAGE 0x3a1930** | Needs BARRAGE behaviour (0x1d) and data (obj +0x178). on, none running (data +0xc = 0): **refused when the point is fogged for the owner** (`FOW_Point_Test` force 1); otherwise start at the point (0x5920b0). on while running → true (re-target exception). off: early-deactivate if active and not recharging, stop (0x592420) |
 | **SPREAD_OUT 0x3a3500** | Team gates. on → start active (0x42fde0), off → early-deactivate (0x42f320). Every member: +0x448 := on, reset to default idle (§6.2 → Idle Crouch); re-layout the formation (0x422040) and clear container locomotor +0x2a4. Spacing in team slot geometry not traced [M]. Effects: `Mod_Multiplier` SPEED 0.5, TAKE_DAMAGE 0.5 |
@@ -391,7 +391,9 @@ timer, not a combat test.
   (CD +0x108, `Depleted_Shield_Disable_Time`) and the nebula lockout (CD +0x104).
 - **The only writer of CD +0x110** is the behaviour update 0x636260, which is the `Disable_Force_Abilities_Range`
   emitter (type +0x53c, read as a float here although xml_field_tables lists the tag as int [M]). Every update it queries objects within that 3-D range of the emitter that
-  are not owned by the emitter's owner (GOM query 0x2a9ff0 mode 2 [M: "other owners"]). For each object that is
+  are not owned by the emitter's owner (GOM query 0x2a9ff0; corrected 2026-11-07, CU8F_T01_T02_T07_RE.md §3.1: the
+  first argument is the behaviour filter 0x02 SELECTABLE, not a "mode 2", and only objects that carry the
+  DISABLE_FORCE_ABILITIES behaviour emit, so `Rebel_Mobile_Shield_Generator` below does not). For each object that is
   alive (+0x3a0 bits 0x40, 0x80 and 0x02 clear), not a projectile (+0x33a = −1), has a model and a type, and owns at
   least one unit ability whose info-table entry has the **F (Force power)** column set (0x3986b0 × 0x43fa30 over
   types 0..0x4c), it stamps CD +0x110 := NOW.
@@ -455,6 +457,28 @@ Damage_Percentage +0x188, Damage_Interval_In_Secs +0x18c) [H]
   _DAT_140b15ad8; state 2 does `Take_Damage(kind 3, D)` every interval, timed in float seconds from
   DAT_140b0a320 / FPS [M: mode or global frame — **probe**: does it pause with the game]. Remove → animation
   0x27. Telekinesis starts recharge 13; Earthquake's recharge is not started here.
+- **trl2 t03 reading (2026-11-20, decompile + disassembly) [H]:**
+  - The ramp constants are GameConstants fields: the GameConstants object is the static at 0x140b15800 (its
+    constructor 0x2c4370 runs from the static initialiser 0x173e0), so _DAT_140b15ad8 = GC +0x2d8
+    `Earthquake_Transition_Time` (FoC 2.0 s) and _DAT_140b15ac4 = GC +0x2c4 `Telekinesis_Transition_Time` (FoC 0.75 s)
+    (MCX4_T15_RE_ANSWERS "GameConstants.Earthquake_Transition_Time family"). No direct write exists: the XML loader
+    fills the object.
+  - Begin (state := 1, ramp := 0, start := now as frame / FPS in float); 0x633700 (Telekinesis: 0x63fa30) stores D
+    (+0x40), the interval (+0x44) and the source (+0x4c); the next damage time (+0x48) starts at 0.
+  - State 1 service: ramp = (now − start) / Transition_Time; at ramp ≥ 1 — or not a number: the `maxss` / `comiss`
+    pair takes the ≥ 1 branch for a NaN — state := 2, start := now, and **when D > 0 the next damage time := now**.
+    No damage in state 1, so the first hit lands on the first state-2 service (the service after the ramp ends), then
+    every Damage_Interval_In_Secs (next += interval) while next ≤ now and next ≠ 0.
+  - "Already affected" = the target behaviour's state is 1 or 2 (0x6331b0 / 0x63efa0; state 3, the ramp-out after a
+    removal, is free). Earthquake tests it in its accepts 0x6f7510 (also: enemy, filter, EARTHQUAKE_TARGET slot byte
+    obj +0x363 ≠ −1, the hero-clash pairing, a model); Telekinesis's accepts 0x6fe400 needs TELEKINESIS_TARGET (obj
+    +0x362 ≠ −1; else a "rejected as a target" warning), not dead (+0x3a0 & 0x40), type +0x41, enemy, filter, pairing,
+    model, and its apply 0x6fe1b0 tests "already affected" after the remove-previous step.
+  - Port (trl2 t03): the state lives on the user's effect (an applied effect of the class aimed at the target is
+    "affected"; Earthquake's accepts counts the user's own effect too - a repeat order on the target it already quakes is
+    refused and the quake goes on - while Telekinesis's apply test runs after the own effect was removed); the
+    target-behaviour service runs at the
+    special's update (every FPS / 10 frames) [port].
 
 **2.3.5 Grenade_Attack** (Activation_Min/Max +0x1a0/+0x1a4, Requires_Direct_Player_Command +0x1a8,
 Grenade_Type +0x1b0, Toss_Anim +0x1c0, Spawn_Frame +0x1c4, Spawn_Bone +0x1c8, Explode_Timer +0x1e8) [H]
@@ -592,7 +616,9 @@ container contribution through 0x4160a0 can also accept).
     range (> 0).
   - Melee units (`Targeting_Max_Attack_Distance` ≤ `Melee_Cutoff_Range`, 0x372210) against a team container:
     redo against the member nearest the attacker (0x404fc0).
-  - E without LAND_OBSTACLE (obj +0x346 = 0xFF): +10 for a moving team (locomotor vf +0x230); otherwise the
+  - E without LAND_OBSTACLE (obj +0x346 = 0xFF): +10 for a target with TEAM whose locomotor vf +0x230 is true,
+    i.e. **every land squad container, moving or not** (vf +0x230 is a class constant, MOVEMENT §4.7.1;
+    TACTICAL_COMBAT §5.4.2, s78m t07); otherwise the
     target footprint half-extent along the line of sight: |dot(target facing, direction)| > 0.7071 → X extent
     (0x396a30), else Y extent (0x396b70); each = `Custom_Hard_X/YExtent` × type +0x658 (deployed variants when
     deployed), fallback |model bbox max x/y| × +0x658. With a hardpoint argument: 0x397780 (team radius, else
@@ -601,7 +627,9 @@ container contribution through 0x4160a0 can also accept).
     cell is occupied by the target (0x59efa0), snaps to the cell grid, E = √200 ≈ 14.14.
 - **Slot 45 → slot 46 (0x5683a0):** same geometry with r = slot 41 (0x566eb0) = `Targeting_Min_Attack_Distance`
   (type +0x504) or the pending ability's vfunc +0xd0 (`Activation_Min_Range`); false when r ≤ 0; forwards to
-  the nearest member of a squad-member target's container.
+  the nearest member of a squad-member target's container. Not quite the same geometry (TACTICAL_COMBAT §5.4.4
+  item 1, 2026-11-10): the facing test is unnormalised (so E is in practice the X half-extent), a LAND_OBSTACLE
+  target gets no E, and a land squad container's E is its joint-box half-extent, not +10.
 - **Port:** replace "XY ≤ R + target radius" by R + orientation-dependent footprint half-extent, and add the
   min-range rejection (only types with `Targeting_Min_Attack_Distance` > 0).
   **A1j t04 (2026-11-02):** the extent getters are 0x371e70 (X: `Custom_Hard_XExtent` +0x16bc) and 0x372040 (Y:
@@ -1115,15 +1143,19 @@ already entered orbit (0x4338d0, slot −2), so ground units usually just go up 
 - `Destroyed_Space_Tactical_Map` (planet type +0x6b0): only ctor / dtor / copy (0x2c4370 / 0x2c5b30 /
   0x36c000); no gameplay reader [M]. Corruption maps come through §4.8.
 - Picker table 0x140b311a8, built at boot (0x47cb40) from `Data\Art\Maps\*.TED`, `Data\CustomMaps\*.TED` and the
-  mod paths; per map (0x47b030) a 0xf0-byte entry: +0x00 name, +0x80 path, +0xa0 kind (1 land, 2 space), +0xa4
-  terrain, +0xa8 faction, +0xac player count, +0xb0 max base level [M], +0xb4 / +0xb5 flags.
-- Query from 0x28fda0 (kind, terrain, faction, base level, 2, planet map, 0, 0, 0, 0): kind and terrain equal
-  (terrain bit 31 = any), faction equal or −1, +0xb0 ≥ base level, +0xac ≥ 2, +0xb4 = 0. Game type 4 adds a
+  mod paths; per map (0x47b030) a 0xf0-byte entry: +0x00 path (the picker's answer), +0x80 mode tag (mini `0A`,
+  upper-cased), +0xa0 kind (1 land, 2 space), +0xa4 terrain, +0xa8 faction, +0xac player count, +0xb0 max base level
+  [M], +0xb4 custom flag / +0xb5 has start positions. Fields come from the file's chunk 0 minis (CU8F_T03_T05_RE §1.2,
+  corrected 2026-11-07: the entry has no separate path field at +0x80).
+- Query from 0x28fda0 (kind, terrain, faction, base level, 2, planet map, 0, 0, 0, 0): kind equal; terrain equal when
+  the query's bit 31 is clear, **not equal** to (terrain & 0x7fffffff) when it is set (so 0xffffffff = any; corrected
+  2026-11-07 per CU8F_T03_T05_RE §1.3, earlier read as "bit 31 = any"); query faction −1 or equal (−1 only when the
+  defender id is −1; a candidate value is never a wildcard), +0xb0 ≥ base level, +0xac ≥ 2, +0xb4 = 0. Game type 4 adds a
   `CONTROL` path filter and `Quickmatch_Map_Exclusion_List` (GC +0x119c0). Matches in table order; a matching
   preferred name stops collection after it. Result = one `int(0, n − 1)` from the **free RNG** (QPC-seeded);
-  no match → empty entry.
-- **The original pick is not deterministic.** Port: a seeded deterministic choice; parity only needs a valid
-  map, which is then stored on the planet. TR gives 1386 planets fixed `Land/Space_Tactical_Map`, so the
+  no match → empty entry. The answer is stored on the planet every time, an empty one included (CU8F_T03_T05_RE §1.4).
+- **The original pick is not deterministic.** Port: a seeded deterministic choice (docs/PHASE4.md, cu8f t03); parity
+  only needs a valid map. TR gives 1386 planets fixed `Land/Space_Tactical_Map`, so the
   picker is rare there.
 
 ### 4.11 Pending-dialog command path (item 11) [H MP, M SP, L state 1]
@@ -1220,6 +1252,7 @@ as ready; keep it.
 - Port: replace the `(uint32)trunc(XY distance)` default in zone_reachability.hpp.
 
 ### 6.2 "Garrison container → idle animation" is presence-induced idle [H]
+> r3g t06 (2026-11-16): the port feeds SPREAD_OUT (+0x448) to step (1): R3G_ANIM_TIMED_RE.md §6. Cable states / phase fields (r3g t04): §4 there.
 Default idle type (0x395920): (1) SPREAD_OUT active → **71 Idle Crouch**; (2) else, when the object's IDLE data
 (obj +0xd8 → +0x18 map presence-object id → remaining frames +0x14) is non-empty, pick a winner (strictly
 larger remaining wins; on ≤ an allied presence object, 0x2823e0, replaces a non-allied best), and the idle =
@@ -1395,8 +1428,9 @@ resolve pass 0x50a780 runs.
   source (owner included, 0x39a2c0), a permanent true entry keyed by the source; remove erases them. Holders: FoC
   `Power_Generator_E/R`, `Hutt_Power_Generator`, `U_Ground_Palace`; TR `Power_Generator`.
 - Readers: energy pool 0x56c030 (energy 0); turrets 0x632270 (do not act); gravity control field 0x61c700;
-  lobbing super-weapon 0x4ea3f0 and the FIRE_LOBBING gate in 0x39b480; shield 0x56bb00
-  (`Shield_Requires_Base_Power` +0x8c); GUI warning 0x2e0570; reinforcement prevention (0x3b6170, via POWERED).
+  lobbing super-weapon 0x4ea3f0 and the FIRE_LOBBING gate in 0x39b480; the **base shield** 0x56bb00
+  (`Shield_Requires_Base_Power` +0x8c, BaseShield_Evaluate_State; the SHIELDED regeneration 0x549250 does not read
+  base power, TACTICAL_COMBAT §3.7, cmb3 t07; the port's SHIELDED gate was removed in cmb3 t07); GUI warning 0x2e0570; reinforcement prevention (0x3b6170, via POWERED).
 - Users: FoC `Ground_Magnepulse_Cannon`, `Template_Ground_Turbolaser_Tower`; TR `Template_Base_Shield`,
   `Template_Planetary_Shield`, `Template_Turbolaser_Tower` and variants.
 - **Port: the "Requires_Base_Power passes" stand-in is wrong for TR** — towers and shields are dead without a

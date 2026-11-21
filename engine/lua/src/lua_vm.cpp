@@ -72,8 +72,11 @@ bool load_script(lua_State* L, const LuaVm::Impl& vm, std::string_view name, boo
     }
 }
 
-// require(name) with 5.0 semantics (_LOADED table, _REQUIREDNAME), files through the FileProvider.
-// _LOADED[name] is set to true BEFORE the chunk runs (guards cyclic requires; 5.0 sets it after).
+// require(name), stock Lua 5.0.2 (mcx6 t07, LUA_API.md "require and _LOADED"), files through the FileProvider:
+// _LOADED[name] truthy -> that value, nothing loaded; else the file is found (read_script: LUA_PATH order) and compiled,
+// _REQUIREDNAME is saved, set to the name for the run and restored after it, a nil result becomes true, and only then
+// _LOADED[name] := the result. A chunk that raises leaves no entry (a later require tries again); a cycle loads the file
+// again (5.0.2 ends it with the C stack error).
 int l_require(lua_State* L) {
     char err[640];
     if (lua_type(L, 1) != LUA_TSTRING) return raise(L, "require: expected a script name");
@@ -93,18 +96,40 @@ int l_require(lua_State* L) {
     lua_pop(L, 1);
     if (!load_script(L, *vm_of(L), std::string_view(lua_tostring(L, 1), lua_strlen(L, 1)), false, err, sizeof err))
         return raise(L, err);
+    if (vm_of(L)->options.legacy_require) {  // pre-mcx6 (LuaVmOptions::legacy_require): only to rebuild old saves' VMs
+        lua_pushvalue(L, 1);
+        lua_pushboolean(L, 1);
+        lua_rawset(L, 2);
+        lua_pushstring(L, "_REQUIREDNAME");
+        lua_pushvalue(L, 1);
+        lua_rawset(L, LUA_GLOBALSINDEX);
+        lua_call(L, 0, 1);
+        if (!lua_toboolean(L, -1)) {
+            lua_pop(L, 1);
+            lua_pushboolean(L, 1);
+        }
+        lua_pushvalue(L, 1);
+        lua_pushvalue(L, -2);
+        lua_rawset(L, 2);
+        return 1;
+    }
+    // stack: name, _LOADED, chunk
+    lua_pushstring(L, "_REQUIREDNAME");  // save the previous name below the chunk (lua_getglobal)
+    lua_gettable(L, LUA_GLOBALSINDEX);
+    lua_insert(L, -2);
+    lua_pushstring(L, "_REQUIREDNAME");  // set the new one (lua_setglobal)
     lua_pushvalue(L, 1);
-    lua_pushboolean(L, 1);
-    lua_rawset(L, 2);
-    lua_pushstring(L, "_REQUIREDNAME");
-    lua_pushvalue(L, 1);
-    lua_rawset(L, LUA_GLOBALSINDEX);
-    lua_call(L, 0, 1);
-    if (!lua_toboolean(L, -1)) {
+    lua_settable(L, LUA_GLOBALSINDEX);
+    lua_call(L, 0, 1);                   // name, _LOADED, previous, result
+    lua_insert(L, -2);                   // name, _LOADED, result, previous
+    lua_pushstring(L, "_REQUIREDNAME");  // restore the previous name
+    lua_insert(L, -2);
+    lua_settable(L, LUA_GLOBALSINDEX);
+    if (lua_isnil(L, -1)) {  // a nil (or no) result becomes true; false stays false
         lua_pop(L, 1);
         lua_pushboolean(L, 1);
     }
-    lua_pushvalue(L, 1);
+    lua_pushvalue(L, 1);  // mark it loaded, after the successful run
     lua_pushvalue(L, -2);
     lua_rawset(L, 2);
     return 1;
@@ -206,6 +231,36 @@ void gc_hook(lua_State*, int end) {
 
 }  // namespace
 
+namespace detail {
+
+namespace {
+void runaway_hook(lua_State* L, lua_Debug* ar) {
+    if (ar->event != LUA_HOOKCOUNT) return;
+    // Spent budgets stay spent: from now on every instruction of this state raises again, until the entry that armed the
+    // budget puts the hook back. So a Lua pcall, or a host call nested in the run that catches the error, cannot keep
+    // an endless loop going.
+    lua_sethook(L, runaway_hook, LUA_MASKCOUNT, 1);
+    luaL_error(L, "%s: the script ran its instruction budget without yielding and was stopped", kRunawayTag.data());
+}
+}  // namespace
+
+BudgetSave arm_script_budget(lua_State* L, int budget) {
+    BudgetSave saved{lua_gethook(L), lua_gethookmask(L), lua_gethookcount(L), false};
+    // A nested entry on a state whose budget is already armed (a host call made from inside a running script) counts
+    // against the outer budget: re-arming would give the outer run a fresh budget after every nested call.
+    if (budget > 0 && saved.hook != runaway_hook) {
+        lua_sethook(L, runaway_hook, LUA_MASKCOUNT, budget);
+        saved.armed = true;
+    }
+    return saved;
+}
+
+void restore_script_budget(lua_State* L, const BudgetSave& saved) {
+    if (saved.armed) lua_sethook(L, saved.hook, saved.mask, saved.count);
+}
+
+}  // namespace detail
+
 // ---------------------------------------------------------------- Impl
 
 void LuaVm::Impl::message(std::string line) { messages.push_back(std::move(line)); }
@@ -261,7 +316,7 @@ LuaVm::LuaVm(const LuaHost& host_in, LuaVmOptions options_in)
     vm.owner = this;
     vm.host = host_in;
     vm.options = std::move(options_in);
-    vm.unbound.assign(detail::counter_slots(), 0);
+    vm.unbound.assign(binding_table().size(), 0);
     lua_State* L = lua_open();
     if (!L) {
         std::fprintf(stderr, "alamo lua: cannot create a Lua state\n");
@@ -332,9 +387,10 @@ bool LuaVm::run(std::string_view chunk, std::string_view chunk_name, std::string
     std::string_view data = chunk;
     const std::string name = "@" + std::string(chunk_name);
     int st = lua_load(L, reader_chunk, &data, name.c_str());
-    if (st == 0) st = lua_pcall(L, 0, 0, 0);
+    if (st == 0) st = protected_call(L, 0, 0);
     if (st != 0) {
-        if (err) *err = lua_tostring(L, -1) ? lua_tostring(L, -1) : "error";
+        const char* m = lua_tostring(L, -1);
+        if (err) *err = m ? m : "error";
         lua_pop(L, 1);
         return false;
     }
@@ -349,8 +405,10 @@ bool LuaVm::require(std::string_view name, std::string* err) {
     lua_pushstring(L, "require");
     lua_rawget(L, LUA_GLOBALSINDEX);
     lua_pushlstring(L, name.data(), name.size());
-    if (lua_pcall(L, 1, 0, 0) != 0) {
-        if (err) *err = lua_tostring(L, -1) ? lua_tostring(L, -1) : "error";
+    const int st = protected_call(L, 1, 0);
+    if (st != 0) {
+        const char* m = lua_tostring(L, -1);
+        if (err) *err = m ? m : "error";
         lua_pop(L, 1);
         return false;
     }
@@ -369,8 +427,10 @@ bool LuaVm::call(std::string_view global_function, std::string* err) {
         if (err) *err = std::string(global_function) + " is not a global function";
         return false;
     }
-    if (lua_pcall(L, 0, 0, 0) != 0) {
-        if (err) *err = lua_tostring(L, -1) ? lua_tostring(L, -1) : "error";
+    const int st = protected_call(L, 0, 0);
+    if (st != 0) {
+        const char* m = lua_tostring(L, -1);
+        if (err) *err = m ? m : "error";
         lua_pop(L, 1);
         return false;
     }
@@ -435,10 +495,13 @@ size_t LuaVm::service_threads() {
         const int nargs = t.started ? 0 : t.nargs;
         t.started = true;
         vm.current_thread = id;
+        const detail::BudgetSave saved = detail::arm_script_budget(t.co, vm.options.script_budget);  // per resume
         const int st = lua_resume(t.co, nargs);
+        detail::restore_script_budget(t.co, saved);
         vm.current_thread = -1;
         if (st != 0) {
             const char* m = lua_tostring(t.co, -1);
+            if (m && detail::is_runaway_error(m)) ++vm.runaways;
             vm.errors.push_back("thread " + std::to_string(id) + " (" + t.function + "): " + (m ? m : "error"));
             log::write(log::Level::Warn, "lua", vm.errors.back());
             t.killed = true;
@@ -563,6 +626,23 @@ const std::vector<std::string>& LuaVm::errors() const {
     return impl_->errors;
 }
 
+uint32_t LuaVm::runaway_count() const {
+    check_owner();
+    return impl_->runaways;
+}
+
+int LuaVm::protected_call(lua_State* L, int nargs, int nresults) {
+    check_owner();
+    const detail::BudgetSave saved = detail::arm_script_budget(L, impl_->options.script_budget);
+    const int st = lua_pcall(L, nargs, nresults, 0);
+    detail::restore_script_budget(L, saved);
+    if (st != 0) {
+        const char* m = lua_tostring(L, -1);
+        if (m && detail::is_runaway_error(m)) ++impl_->runaways;
+    }
+    return st;
+}
+
 std::vector<UnboundHit> LuaVm::unbound_hits() const {
     check_owner();
     std::vector<UnboundHit> out;
@@ -571,13 +651,8 @@ std::vector<UnboundHit> LuaVm::unbound_hits() const {
         if (impl_->unbound[i] == 0) continue;
         UnboundHit h;
         h.count = impl_->unbound[i];
-        if (i < table.size()) {
-            h.name = table[i].kind == BindingKind::Global ? std::string(table[i].name)
-                                                          : std::string(table[i].cls) + "." + table[i].name;
-        } else {
-            for (uint32_t s = 0; s < detail::method_slots().size(); ++s)
-                if (detail::extra_counter_slot(s) == i) h.name = detail::method_slots()[s].label;
-        }
+        h.name = table[i].kind == BindingKind::Global ? std::string(table[i].name)
+                                                      : std::string(table[i].cls) + "." + table[i].name;
         out.push_back(std::move(h));
     }
     std::sort(out.begin(), out.end(), [](const UnboundHit& a, const UnboundHit& b) { return a.name < b.name; });
@@ -707,13 +782,7 @@ const std::string& LuaVm::save_error() const {
 
 LuaVm::HeapInfo LuaVm::heap_info() const {
     check_owner();
-    const detail::HeapStats s = detail::heap_stats(impl_->L);
-    HeapInfo h;
-    h.serial = s.serial;
-    h.bytes = s.bytes;
-    h.threshold = s.threshold;
-    h.strings = s.strings;
-    return h;
+    return detail::heap_stats(impl_->L);
 }
 
 bool LuaVm::gc_busy() const {

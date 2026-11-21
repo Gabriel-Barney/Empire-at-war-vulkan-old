@@ -1,7 +1,9 @@
 #include "alamo/tactical/hangar/hangar_system.hpp"
+#include "alamo/core/frames.hpp"
 
 #include <algorithm>
 
+#include "alamo/core/ascii.hpp"
 #include "alamo/core/dmath.hpp"
 #include "alamo/core/sim_crc.hpp"
 #include "alamo/tactical/abilities/ability_system.hpp"
@@ -11,14 +13,8 @@ namespace alamo::tactical::hangar {
 
 namespace {
 
-std::string_view trim(std::string_view s) {
-    while (!s.empty() && (s.front() == ' ' || s.front() == '\t' || s.front() == '\r' || s.front() == '\n')) s.remove_prefix(1);
-    while (!s.empty() && (s.back() == ' ' || s.back() == '\t' || s.back() == '\r' || s.back() == '\n')) s.remove_suffix(1);
-    return s;
-}
-
 bool parse_int(std::string_view s, int32_t& out) {
-    s = trim(s);
+    s = ascii_trim(s);
     if (s.empty()) return false;
     bool neg = false;
     size_t i = 0;
@@ -55,14 +51,16 @@ void unit_xy(Vec3 f, float& fx, float& fy) {
 // Clamped to frame 0 (a negative delay would otherwise wrap).
 uint32_t to_frame(int64_t f) { return f < 0 ? 0u : static_cast<uint32_t>(f); }
 
+constexpr int32_t kAnimStructureOpen = 68, kAnimStructureHold = 69, kAnimStructureClose = 70;  // r3g t03
+
 }  // namespace
 
 bool parse_type_count(std::string_view text, std::string& type, int32_t& count) {
-    text = trim(text);
+    text = ascii_trim(text);
     size_t cut = text.find(',');
     if (cut == std::string_view::npos) cut = text.find_last_of(" \t");
     if (cut == std::string_view::npos) return false;
-    const std::string_view t = trim(text.substr(0, cut));
+    const std::string_view t = ascii_trim(text.substr(0, cut));
     if (t.empty() || !parse_int(text.substr(cut + 1), count)) return false;
     type.assign(t);
     return true;
@@ -75,7 +73,7 @@ SpawnList parse_spawn_list(std::span<const std::string_view> tokens, const std::
         int32_t n = 0;
         if (parse_type_count(tokens[i], t, n)) {
         } else if (i + 1 < tokens.size() && parse_int(tokens[i + 1], n)) {
-            t.assign(trim(tokens[i]));
+            t.assign(ascii_trim(tokens[i]));
             ++i;
         } else {
             continue;
@@ -158,6 +156,7 @@ bool HangarSystem::bind_launch(uint32_t serial, ObjectId object) {
         for (Spawned& s : c.spawned)
             if (s.serial == serial && s.id == kNoObject) {
                 s.id = object;
+                if (c.leaving_serial == serial) c.leaving = object;  // r3g t03: +0x58, listened for signal 10
                 return true;
             }
     return false;
@@ -171,6 +170,8 @@ void HangarSystem::squadron_removed(ObjectId object, uint32_t frame) {
         if (it == c.spawned.end()) continue;
         const int32_t type = it->type;
         c.spawned.erase(it);
+        // r3g t03 (0x593760, land): the unit still leaving the structure is gone -> Close first.
+        if (cfg_.land && c.leaving == object && c.state == 2) land_close(c, frame);
         // The first entry of the removed object's type; "full" over the entries up to and including it (all when none
         // matched), read before the decrement.
         int32_t matched = -1;
@@ -186,7 +187,7 @@ void HangarSystem::squadron_removed(ObjectId object, uint32_t frame) {
         if (matched >= 0) c.entries[static_cast<size_t>(matched)].live -= 1;
         if (full && c.state == 0) {  // truncate first, then add
             const float d = descs_[c.desc].delay_seconds * static_cast<float>(cfg_.fps);
-            c.next = to_frame(static_cast<int64_t>(static_cast<int32_t>(d)) + static_cast<int64_t>(frame));
+            c.next = to_frame(static_cast<int64_t>(frames_trunc(d)) + static_cast<int64_t>(frame));
         }
         events_.push_back(HangarEvent{HangarEventKind::SquadronLost, c.id, object, matched, frame});
         return;
@@ -203,7 +204,7 @@ void HangarSystem::deploy_squad(ObjectId id, uint32_t frame, float recharge_seco
     c->state = 0;
     c->deploy_latch = 1;
     const float d = (recharge_seconds - 1.0f) * static_cast<float>(cfg_.fps);
-    c->next = to_frame(static_cast<int64_t>(frame) + static_cast<int64_t>(static_cast<int32_t>(d)));
+    c->next = to_frame(static_cast<int64_t>(frame) + static_cast<int64_t>(frames_trunc(d)));
 }
 
 // ---- service ----
@@ -253,19 +254,21 @@ bool HangarSystem::can_spawn(Carrier& c, uint32_t frame, SimRng& rng) {
     if (defend_on(c)) return false;                                                    // 4
     if (c.state != 0 || c.next > frame) return false;                                  // 5
     // 6 (space): erase destroyed bays (destroyable and health <= 0); disabled bays stay. Empty -> never again.
-    const combat::CombatData& cd = combat_->data();
-    const combat::UnitDesc& ud = cd.units[combat_->desc_index(c.id)];
-    c.bays.erase(std::remove_if(c.bays.begin(), c.bays.end(),
-                                [&](uint32_t i) {
-                                    if (combat_->hardpoint_destroyed(c.id, i)) return true;
-                                    const bool destroyable = i < ud.hardpoints.size() && cd.hardpoints[ud.hardpoints[i]].destroyable;
-                                    return destroyable && !(combat_->hardpoint_health(c.id, i) > 0.0f);
-                                }),
-                 c.bays.end());
-    if (c.bays.empty()) {
-        if (!c.bays_gone) events_.push_back(HangarEvent{HangarEventKind::BaysGone, c.id, kNoObject, 0, frame});
-        c.bays_gone = 1;
-        return false;
+    if (!cfg_.land) {
+        const combat::CombatData& cd = combat_->data();
+        const combat::UnitDesc& ud = cd.units[combat_->desc_index(c.id)];
+        c.bays.erase(std::remove_if(c.bays.begin(), c.bays.end(),
+                                    [&](uint32_t i) {
+                                        if (combat_->hardpoint_destroyed(c.id, i)) return true;
+                                        const bool destroyable = i < ud.hardpoints.size() && cd.hardpoints[ud.hardpoints[i]].destroyable;
+                                        return destroyable && !(combat_->hardpoint_health(c.id, i) > 0.0f);
+                                    }),
+                     c.bays.end());
+        if (c.bays.empty()) {
+            if (!c.bays_gone) events_.push_back(HangarEvent{HangarEventKind::BaysGone, c.id, kNoObject, 0, frame});
+            c.bays_gone = 1;
+            return false;
+        }
     }
     // 7: entry draw (>= 2 entries), circular scan.
     if (c.enabled && !c.entries.empty()) {
@@ -302,19 +305,22 @@ void HangarSystem::emit(Carrier& c, int32_t type, int32_t entry, bool pending, u
     const combat::CombatData& cd = combat_->data();
     const combat::UnitDesc& ud = cd.units[combat_->desc_index(c.id)];
     float flyout = 0.0f;
-    Vec3 local;
+    Vec3 local, local_x{1.0f, 0.0f, 0.0f};
     if (bay < ud.hardpoints.size()) {
         const combat::HardpointDesc& hd = cd.hardpoints[ud.hardpoints[bay]];
         flyout = hd.fighter_bay_flyout_distance;
         local = hd.attach_offset;
+        // trl2 t06 (§2.5 "Spawn position"): D runs along the bay bone's X axis - the attachment bone's bind-pose X axis
+        // in the unit frame when the model gave one (refixf t06 attach frame), else the unit's forward axis.
+        if (hd.has_attach_frame) local_x = hd.attach_x;
     }
     Vec3 p0, x;
-    if (!(host_.bay_bone && host_.bay_bone(c.id, bay, p0, x))) {  // [port] attachment offset, carrier facing
+    if (!(host_.bay_bone && host_.bay_bone(c.id, bay, p0, x))) {  // [port] bind pose turned by the carrier's yaw
         const Vec3 pos = combat_->position(c.id);
         float fx = 1.0f, fy = 0.0f;
         unit_xy(combat_->facing(c.id), fx, fy);
         p0 = Vec3{pos.x + (local.x * fx - local.y * fy), pos.y + (local.x * fy + local.y * fx), pos.z + local.z};
-        x = Vec3{fx, fy, 0.0f};
+        x = Vec3{local_x.x * fx - local_x.y * fy, local_x.x * fy + local_x.y * fx, local_x.z};
     }
     q.origin = p0;
     q.flyout = Vec3{p0.x + x.x * flyout, p0.y + x.y * flyout, p0.z + x.z * flyout};
@@ -344,7 +350,7 @@ void HangarSystem::emit(Carrier& c, int32_t type, int32_t entry, bool pending, u
 void HangarSystem::launch(Carrier& c, uint32_t frame, SimRng& rng) {
     // §2.5 (space, state 0).
     const float df = static_cast<float>(frame) + static_cast<float>(cfg_.fps) * descs_[c.desc].delay_seconds;
-    const uint32_t next = to_frame(static_cast<int64_t>(static_cast<int32_t>(df)));  // float sum, then truncate
+    const uint32_t next = to_frame(static_cast<int64_t>(frames_trunc(df)));  // float sum, then truncate
     if (has_deploy_squad(c) && !combat_->ai_player(c.owner) && !c.deploy_latch) {
         c.state = 4;
         c.next = next;
@@ -386,7 +392,7 @@ void HangarSystem::launch(Carrier& c, uint32_t frame, SimRng& rng) {
     c.next = next;
 }
 
-void HangarSystem::update(uint32_t frame, SimRng& rng) {
+void HangarSystem::update(uint32_t frame, SimRng& rng, const StreamOf* stream_of) {
     // Dead carriers: tracking stops; spawned units stay.
     for (size_t i = 0; i < carriers_.size();) {
         if (!combat_->alive(carriers_[i].id)) {
@@ -399,10 +405,189 @@ void HangarSystem::update(uint32_t frame, SimRng& rng) {
     // Services, newest object first (descending id).
     for (size_t k = carriers_.size(); k-- > 0;) {
         Carrier& c = carriers_[k];
-        if (c.due > frame) continue;
-        c.due = frame + cfg_.service_interval;
-        if (c.entries.empty()) build(c, frame);
-        if (c.state == 0 && can_spawn(c, frame, rng)) launch(c, frame, rng);
+        // r3g t03: Spawn_Garrison_On_Load (vf13 0x594400 -> 0x593960) runs once, before the first service, while the
+        // entry list is still empty [M: vf13's trigger; the port runs it at the first update after the add].
+        const bool load = cfg_.land && c.entries.empty() && descs_[c.desc].garrison_on_load;
+        const bool due = c.due <= frame;
+        if (!load && !due) continue;
+        if (stream_of && *stream_of) {  // SP5 t03: this carrier's own stream
+            SimRng own = (*stream_of)(c.id);
+            service(c, frame, own, load, due);
+        } else {
+            service(c, frame, rng, load, due);
+        }
+    }
+}
+
+void HangarSystem::service(Carrier& c, uint32_t frame, SimRng& rng, bool load, bool due) {
+    if (load) garrison_on_load(c, frame, rng);
+    if (!due) return;
+    c.due = frame + cfg_.service_interval;
+    if (c.entries.empty()) build(c, frame);
+    if (cfg_.land) land_service(c, frame, rng);
+    else if (c.state == 0 && can_spawn(c, frame, rng)) launch(c, frame, rng);
+}
+
+// ---- r3g t03: land structures (STATION_HANGARS_SOUND §2.5 "Land", §2.7; 0x594880 / 0x593760 / 0x593960) ----
+
+uint32_t HangarSystem::delay_frame(const Carrier& c, uint32_t frame) const {
+    const float df = static_cast<float>(cfg_.fps) * descs_[c.desc].delay_seconds + static_cast<float>(frame);
+    return to_frame(static_cast<int64_t>(frames_trunc(df)));  // float sum, then truncate
+}
+
+int32_t HangarSystem::pick_bone(const Carrier& c, SimRng& rng) const {
+    const uint32_t n = descs_[c.desc].land_bones;
+    if (n == 0) return -1;
+    return n >= 2 ? rng.range_int(0, static_cast<int32_t>(n) - 1) : 0;
+}
+
+void HangarSystem::emit_land(Carrier& c, int32_t type, int32_t entry, uint32_t frame, bool leaving, int32_t bone) {
+    const HangarDesc& d = descs_[c.desc];
+    LaunchRequest q;
+    q.serial = serial_++;
+    q.carrier = c.id;
+    q.owner = c.spawn_player;
+    q.type = type;
+    q.entry = entry;
+    q.land = true;
+    q.leaving = leaving;
+    Vec3 pos = combat_->position(c.id), face = combat_->facing(c.id);
+    float dist = d.default_flyout;
+    if (bone >= 0) {
+        Vec3 bp, bf;
+        if (host_.land_bone && host_.land_bone(c.id, static_cast<uint32_t>(bone), bp, bf)) {
+            pos = bp;
+            face = bf;
+        }
+        if (static_cast<size_t>(bone) < d.land_flyouts.size()) dist = d.land_flyouts[static_cast<size_t>(bone)];
+    }
+    float fx = 1.0f, fy = 0.0f;
+    unit_xy(face, fx, fy);
+    q.origin = pos;
+    q.facing = Vec3{fx, fy, 0.0f};
+    q.direction = q.facing;
+    q.flyout = Vec3{pos.x + fx * dist, pos.y + fy * dist, pos.z};
+    requests_.push_back(q);
+    Spawned sp;
+    sp.serial = q.serial;
+    sp.type = type;
+    sp.entry = entry;
+    c.spawned.push_back(sp);
+    if (leaving) {
+        c.leaving_serial = q.serial;
+        c.leaving = kNoObject;
+    }
+    events_.push_back(HangarEvent{HangarEventKind::Launched, c.id, kNoObject, entry, frame});
+}
+
+bool HangarSystem::pick_spawn(Carrier& c, uint32_t frame, SimRng& rng) {
+    // 0x594600 (land): with +0x3CB, a synced entry draw (>= 2 entries) and a circular scan; the first eligible entry
+    // whose spawn succeeds (0x594dc0: the bone draw, then the object) - remaining -1 when > 0, live +1, the
+    // community-property rotation. [port] the spawn itself is the host's; a failed one rolls back in clear_requests.
+    if (!c.enabled || c.entries.empty()) return false;
+    const size_t n = c.entries.size();
+    const size_t r = n >= 2 ? static_cast<size_t>(rng.range_int(0, static_cast<int32_t>(n) - 1)) : 0;
+    for (size_t k = 0; k < n; ++k) {
+        const size_t i = (r + k) % n;
+        Entry& e = c.entries[i];
+        if (!eligible(c, e) || e.type < 0) continue;
+        emit_land(c, e.type, static_cast<int32_t>(i), frame, true, pick_bone(c, rng));
+        if (e.remaining > 0) {
+            e.remaining -= 1;
+            c.spawned.back().spent = 1;
+        }
+        e.live += 1;
+        if (cfg_.skirmish && descs_[c.desc].community_property) {
+            const auto players = static_cast<int32_t>(combat_->player_count());
+            for (int32_t k2 = 1; k2 <= players; ++k2) {
+                const int32_t p = (c.spawn_player + k2) % players;
+                if (allied(c.owner, p)) {
+                    c.spawn_player = p;
+                    break;
+                }
+            }
+        }
+        return true;
+    }
+    return false;
+}
+
+void HangarSystem::land_service(Carrier& c, uint32_t frame, SimRng& rng) {
+    // 0x594880, land (mode 1). Clip ends are seen at this 30-frame service.
+    uint32_t fin = 0;
+    switch (c.state) {
+        case 0:
+            if (!can_spawn(c, frame, rng)) return;
+            if (host_.clip && host_.clip(c.id, kAnimStructureOpen, false, fin)) {  // Structure Open -> state 1
+                c.state = 1;
+                c.clip_end = to_frame(static_cast<int64_t>(frame) + fin);
+                return;
+            }
+            if (pick_spawn(c, frame, rng)) c.state = 2;  // no Open clip: out at once (no Hold)
+            return;
+        case 1:
+            if (frame < c.clip_end) return;  // Open still playing (mode != finished)
+            if (pick_spawn(c, frame, rng)) {
+                if (host_.clip) (void)host_.clip(c.id, kAnimStructureHold, true, fin);  // Hold, looping
+                c.state = 2;
+            }
+            return;
+        case 3:
+            if (frame < c.clip_end) return;  // Close still playing
+            c.state = 0;
+            c.next = delay_frame(c, frame);
+            return;
+        default: return;  // 2: waits for unit_left / squadron_removed; 4: manual (DEPLOY_SQUAD)
+    }
+}
+
+void HangarSystem::land_close(Carrier& c, uint32_t frame) {
+    // 0x593760: stop listening, +0x58 := none; Structure Close -> state 3, else state 0 with next := int(now + FPS x delay).
+    c.leaving = kNoObject;
+    c.leaving_serial = 0;
+    uint32_t fin = 0;
+    if (host_.clip && host_.clip(c.id, kAnimStructureClose, false, fin)) {
+        c.state = 3;
+        c.clip_end = to_frame(static_cast<int64_t>(frame) + fin);
+        return;
+    }
+    c.state = 0;
+    c.next = delay_frame(c, frame);
+}
+
+void HangarSystem::unit_left(ObjectId object, uint32_t frame) {
+    if (object == kNoObject) return;
+    for (Carrier& c : carriers_)
+        if (c.state == 2 && c.leaving == object) {
+            land_close(c, frame);
+            return;
+        }
+}
+
+std::vector<ObjectId> HangarSystem::leaving_units() const {
+    std::vector<ObjectId> out;
+    for (const Carrier& c : carriers_)
+        if (c.state == 2 && c.leaving != kNoObject) out.push_back(c.leaving);
+    return out;
+}
+
+void HangarSystem::garrison_on_load(Carrier& c, uint32_t frame, SimRng& rng) {
+    // 0x593960: not in skirmish; the list (0x594b30), can-spawn (its draws), +0x3CB; one bone pick, then every entry x
+    // its max-alive count at that point (live +1, remaining -1 when > 0 per unit). No leaving unit, no Open / Close.
+    build(c, frame);
+    if (cfg_.skirmish || !c.enabled || !can_spawn(c, frame, rng)) return;
+    const int32_t bone = pick_bone(c, rng);
+    for (size_t i = 0; i < c.entries.size(); ++i) {
+        const int32_t count = c.entries[i].max;
+        for (int32_t k = 0; k < count && c.entries[i].type >= 0; ++k) {
+            emit_land(c, c.entries[i].type, static_cast<int32_t>(i), frame, false, bone);
+            Entry& e = c.entries[i];
+            e.live += 1;
+            if (e.remaining > 0) {
+                e.remaining -= 1;
+                c.spawned.back().spent = 1;
+            }
+        }
     }
 }
 
@@ -413,6 +598,10 @@ void HangarSystem::clear_requests() {
             if (s.id != kNoObject) {
                 ++i;
                 continue;
+            }
+            if (c.leaving_serial == s.serial) {  // r3g t03: the leaving unit failed to spawn [port: back to state 0]
+                c.leaving_serial = 0;
+                if (c.state == 2) c.state = 0;
             }
             if (s.entry >= 0 && static_cast<size_t>(s.entry) < c.entries.size()) {  // the spawn failed: roll back
                 Entry& e = c.entries[static_cast<size_t>(s.entry)];
@@ -438,7 +627,7 @@ bool HangarSystem::deploy_ready(ObjectId id) const {
 }
 uint8_t HangarSystem::state(ObjectId id) const {
     const Carrier* c = carrier(id);
-    return c ? c->state : 0;
+    return c ? c->state : uint8_t{0};
 }
 uint32_t HangarSystem::entry_count(ObjectId id) const {
     const Carrier* c = carrier(id);
@@ -496,6 +685,11 @@ void HangarSystem::hash(StateHasher& h) const {
         h.u8(c.state);
         h.u8(c.enabled);
         h.u8(c.deploy_latch);
+        if (cfg_.land) {  // r3g t03 (space carriers hash as before)
+            h.u32(c.clip_end);
+            h.u32(c.leaving_serial);
+            h.i32(c.leaving);
+        }
         h.u32(static_cast<uint32_t>(c.bays.size()));
         for (const uint32_t b : c.bays) h.u32(b);
         h.u32(static_cast<uint32_t>(c.entries.size()));

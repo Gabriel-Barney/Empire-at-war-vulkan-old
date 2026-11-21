@@ -10,6 +10,7 @@
 //   4. FoC data (ALAMO_FOC_DATA = folder with loose Data\XML; skipped when unset): the tables and a palace / mining
 //      income check on Sandbox_Heart_Of_The_Maw_Underworld.
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
@@ -25,25 +26,19 @@
 #include "alamo/core/sim_crc.hpp"
 #include "alamo/data/game_database.hpp"
 #include "alamo/galactic/campaign.hpp"
+#include "alamo/galactic/conflicts.hpp"
 #include "alamo/objects/game_object_types.hpp"
 #include "alamo/objects/object_types.hpp"
 #include "foc_data.hpp"
-#include "thread_parallel_for.hpp"
+#include "alamo/test/thread_parallel_for.hpp"
+#include "alamo/test/support.hpp"
 
 using namespace alamo;
 using namespace alamo::galactic;
 using commands::RejectReason;
 
-static int g_fail = 0;
-static int g_checks = 0;
-#define CHECK(c)                                                     \
-    do {                                                             \
-        ++g_checks;                                                  \
-        if (!(c)) {                                                  \
-            std::printf("FAIL %s:%d: %s\n", __FILE__, __LINE__, #c); \
-            ++g_fail;                                                \
-        }                                                            \
-    } while (0)
+using ::alamo::test::g_fail;
+using ::alamo::test::g_checks;
 
 namespace {
 
@@ -431,7 +426,7 @@ void test_black_market() {
               d->value == static_cast<int32_t>(commands::quantize(kQuantDuration, 90.0f)) && d->object == static_cast<int32_t>(w.oid(ty)));
         const float c0 = s.credits(pUnd);
         commands::CommandPipeline pipe;
-        pipe.set_handler(s.command_handler());
+        pipe.set_handler([&](uint64_t tick, const commands::Command& c) { return s.handle_command(tick, c); });
         pipe.begin_tick(0);
         pipe.submit(static_cast<uint8_t>(pUnd), commands::CommandSource::Player,
                     black_market_purchase_event(w.pid(rA), w.oid(ty), special_name_crc("Generic_Tech"), 800.0f, 90.0f));
@@ -695,7 +690,7 @@ void test_tech_unlocks() {
         make_sliceable(w.rules, tFrigate, 1);
         make_sliceable(w.rules, tDS2, 1);
         make_sliceable(w.rules, tMerc, 2);
-        CHECK(s.initial_build_locks() && s.build_locked(pEmp, tFrigate));
+        CHECK(s.build_locked(pEmp, tFrigate));
         CHECK((s.slice_candidates(pEmp) == V{tFrigate, tDS2}));  // Tech_Level <= tech (tMerc is tech 2)
         s.lock_type(pEmp, tFrigate, true);
         CHECK(s.type_locked(pEmp, tFrigate) && s.build_locked(pEmp, tFrigate) && (s.slice_candidates(pEmp) == V{tDS2}));
@@ -722,7 +717,8 @@ void test_tech_unlocks() {
         GalacticSim& s = w.sim;
         make_sliceable(w.rules, tFrigate, 1);
         make_sliceable(w.rules, tDS2, 2);
-        CHECK(w.rules.constants.good_side_name == "REBEL");
+        CHECK(w.rules.constants.good_side_name.empty());  // modc t03: no built-in faction name
+        w.rules.constants.good_side_name = "REBEL";       // as FoC's GameConstants.xml
         s.buildable_unit_reward(pReb, tFrigate, tMerc);
         CHECK(s.type_unlocked(pReb, tFrigate) && s.type_locked(pReb, tMerc));
         CHECK(s.players()[pReb].tech_level == 2 && (s.players()[pReb].unlocked_types == V{tFrigate}));  // tDS2 is not < 2
@@ -809,6 +805,65 @@ void test_tech_unlocks() {
         CHECK(w.planet(rB).corruption == kCorruptionRacketeering && w.planet(rB).corruption_removing);
         w.run(301);
         CHECK(w.planet(rB).corruption == kCorruptionNone && !s.type_unlocked(pUnd, tMerc));
+    }
+    // mcx4 t09 (docs/re/MCX4_T09_RE_ANSWERS.md Q1): Corruption_1_Success_Credit_Bonus, Corruption_2_Success_Credit_Bonus,
+    // Corruption_3_Success_Credit_Bonus. The bonus of the first choice slot whose type is the completed type is paid as a
+    // float (notify 0) to the first Benefits_From_Corruption player on a normal completion (not the planet owner, not the
+    // player that started it); a removal pays nothing; the capture path pays the type-3 slot at completion.
+    // ledger: verifies GameObjectType.Corruption_1_Success_Credit_Bonus
+    // ledger: verifies GameObjectType.Corruption_2_Success_Credit_Bonus
+    // ledger: verifies GameObjectType.Corruption_3_Success_Credit_Bonus
+    {
+        const auto run_gain = [](bool bonus, int32_t starter) {
+            World w;
+            GalacticSim& s = w.sim;
+            std::vector<CorruptionChoiceDef>& ch = w.rules.special.types[tPB].corruption;
+            if (bonus) {
+                ch[0].success_credit_bonus = 500.0f;  // slot 1, Piracy
+                ch[1].success_credit_bonus = 77.0f;   // slot 2, Intimidation
+            }
+            CorruptionChoiceDef dup = ch[0];  // a repeated Piracy slot: slot 1's value is paid
+            dup.slot = 4;
+            dup.success_credit_bonus = bonus ? 9000.0f : 0.0f;
+            ch.push_back(dup);
+            CHECK(s.corruption_credit_bonus(rB, 1) == (bonus ? 500.0f : 0.0f) && s.corruption_credit_bonus(rB, 5) == 0.0f &&
+                  s.corruption_credit_bonus(rB, kCorruptionNone) == 0.0f);
+            CHECK(s.first_corruption_player() == pUnd);
+            CHECK(s.begin_corruption_gain(rB, 1, starter, 5.0f));
+            const float before[3] = {s.credits(pEmp), s.credits(pReb), s.credits(pUnd)};
+            w.run(160);
+            CHECK(w.planet(rB).corruption == 1);
+            const float mid[3] = {s.credits(pEmp), s.credits(pReb), s.credits(pUnd)};
+            CHECK(s.begin_corruption_removal(rB, 5.0f));
+            w.run(160);
+            CHECK(w.planet(rB).corruption == kCorruptionNone);
+            return std::array<float, 9>{before[0], before[1], before[2], mid[0], mid[1], mid[2],
+                                        s.credits(pEmp), s.credits(pReb), s.credits(pUnd)};
+        };
+        for (const int32_t starter : {pUnd, pReb}) {
+            const std::array<float, 9> a = run_gain(false, starter), b = run_gain(true, starter);
+            for (size_t i = 0; i < 3; ++i) CHECK(a[i] == b[i]);
+            CHECK(a[3] == b[3] && a[4] == b[4] && std::fabs((b[5] - a[5]) - 500.0f) < 0.01f);  // Underworld only
+            CHECK(a[6] == b[6] && a[7] == b[7] && std::fabs((b[8] - a[8]) - 500.0f) < 0.01f);  // removal: nothing more
+        }
+        // Capture path 0x3fb040 (GRC 4.3): the Underworld taking a clean planet is paid the type-3 slot's bonus at the
+        // completion 10 s later, not at the capture.
+        const auto capture = [](bool bonus) {
+            World w;
+            GalacticSim& s = w.sim;
+            CorruptionChoiceDef c3;
+            c3.slot = 4;
+            c3.type = kCorruptionRacketeering;
+            c3.success_credit_bonus = bonus ? 300.0f : 0.0f;
+            w.rules.special.types[tPB].corruption.push_back(c3);
+            CHECK(s.change_owner(w.planet(rB).object, pUnd));
+            const float at_capture = s.credits(pUnd);
+            w.run(301);
+            CHECK(w.planet(rB).corruption == kCorruptionRacketeering);
+            return std::array<float, 2>{at_capture, s.credits(pUnd)};
+        };
+        const std::array<float, 2> c0 = capture(false), c1 = capture(true);
+        CHECK(c0[0] == c1[0] && std::fabs((c1[1] - c0[1]) - 300.0f) < 0.01f);
     }
 }
 
@@ -898,6 +953,36 @@ void test_slicer() {
         CHECK(w.last(GalacticEventKind::Slice)->value == k && w.last(GalacticEventKind::Slice)->type == tFrigate);
         CHECK(s.credits(pReb) == (k == 3 ? c0 - 100.0f : c0));
         CHECK(s.respawns_pending(rB).size() == 1 && s.respawns_pending(rB)[0].due == due_after(s.frame(), k == 1 ? 2.0f * r : r));
+    }
+    {  // a2m t15 (REMAINING_GAPS 1.3 steps 2, 4, 6, 8; A2M_T08_T10_T14_RE t14.5) draw counts of the applies that slice nothing.
+        // A gate failure (own planet: the accept; no candidates at max tech) makes no draw; an AI with no affordable
+        // entry draws R only (the lists exist, tech <= 4), no pick, no despawn; without respawn lists it makes no draw.
+        for (int variant = 0; variant < 4; ++variant) {
+            World w;
+            GalacticSim& s = w.sim;
+            const uint32_t ab = add_slicer(w, 0.0f);
+            if (variant == 3) {
+                w.rules.special.abilities[ab].slice_min_respawn.clear();
+                w.rules.special.abilities[ab].slice_max_respawn.clear();
+            }
+            PlanetIndex at = rB;
+            if (variant == 0) at = rC;  // the Rebel's own planet
+            if (variant == 1) {  // every candidate taken, tech at max: the recursion stops with a message
+                s.unlock_type(pReb, tFrigate, 2);
+                s.unlock_type(pReb, tDS2, 2);
+                while (s.raise_tech_level(pReb)) {}
+            }
+            if (variant >= 2) s.add_credits(pReb, 50.0f - s.credits(pReb), false);  // both entries (100 / 400) too dear
+            const ObjectHandle sl = s.spawn_unit(pReb, at, tMerc);
+            const std::vector<uint32_t> unlocked = s.players()[pReb].unlocked_types;
+            const float c0 = s.credits(pReb);
+            SimRng expect = w.rng;
+            if (variant == 2) (void)expect.inline_range_float(20.0f, 20.0f);  // R at tech 1, drawn even with Min == Max
+            CHECK(!s.ground_activated_trigger(sl, at));
+            std::printf("slicer variant %d: draws %s, alive %d\n", variant, w.rng == expect ? "as expected" : "DIFFER",
+                        w.store.alive(sl) ? 1 : 0);
+            CHECK(w.rng == expect && w.store.alive(sl) && s.credits(pReb) == c0 && s.players()[pReb].unlocked_types == unlocked);
+        }
     }
     {  // Human slicer (Underworld): the dialog (SpecialDialog, other_player = kind 2), then command kind 2.
         World w(true);
@@ -1099,7 +1184,7 @@ std::vector<std::pair<unsigned, ParallelFor>> worker_configs() {
     std::vector<std::pair<unsigned, ParallelFor>> v;
     v.push_back({0u, ParallelFor(serial_for)});
     const unsigned hw = std::max(2u, std::thread::hardware_concurrency());
-    for (unsigned n : {1u, 4u, hw}) v.push_back({n, testing::make_thread_parallel_for(n)});
+    for (unsigned n : {1u, 4u, hw}) v.push_back({n, ::alamo::test::make_thread_parallel_for(n)});
     return v;
 }
 
@@ -1111,7 +1196,7 @@ CrcLog run_scripted(const ParallelFor& pf, int32_t frames) {
     s.register_crc(reg, "galactic");
     reg.add("rng", [&w](StateHasher& h) { w.rng.hash(h); });
     commands::CommandPipeline pipe;
-    pipe.set_handler(s.command_handler());
+    pipe.set_handler([&](uint64_t tick, const commands::Command& c) { return s.handle_command(tick, c); });
     CrcLog log;
     log.systems = reg.names();
     ObjectHandle emp_hero, sab, halt, ig;
@@ -1184,21 +1269,7 @@ void test_determinism() {
 
 // ---- 4. FoC data ------------------------------------------------------------------------------------------------------
 
-std::string env_or(const char* name) {
-#ifdef _MSC_VER
-    char* v = nullptr;
-    size_t len = 0;
-    std::string out;
-    if (_dupenv_s(&v, &len, name) == 0 && v) {
-        out = v;
-        std::free(v);
-    }
-    return out;
-#else
-    const char* v = std::getenv(name);
-    return v ? std::string(v) : std::string();
-#endif
-}
+using ::alamo::test::env_or_empty;
 
 const SpecialAbilityDef* find_ability(const GalacticRules& r, uint32_t type, SpecialAbilityClass cls) {
     for (uint32_t a : r.special.type(type).abilities)
@@ -1207,7 +1278,7 @@ const SpecialAbilityDef* find_ability(const GalacticRules& r, uint32_t type, Spe
 }
 
 void test_foc() {
-    const std::string root = env_or("ALAMO_FOC_DATA");
+    const std::string root = env_or_empty("ALAMO_FOC_DATA");
     std::string how;
     std::unique_ptr<FileProvider> provider = testing::open_foc_data(root, how);
     if (!provider) {
@@ -1235,6 +1306,121 @@ void test_foc() {
         CHECK(i.uncommon_price_multiplier == 5.5f && i.tech_level >= 1 && i.tech_level <= 5 && !i.ability_crcs.empty());
     }
     CHECK(s.items.size() == 10 && emp == 5 && reb == 5 && mn == 1000 && mx == 4800);
+    {  // mcx4 t09 (MCX4_T09_RE_ANSWERS Q1): FoC's Corruption_1_Success_Credit_Bonus, a Kidnapping slot on nine planets.
+        const auto bonus1 = [&](const char* planet) {
+            const uint32_t t = rules.find_type(planet);
+            const std::vector<CorruptionChoiceDef>& ch = s.type(t).corruption;
+            return t != kNoIndex && !ch.empty() && ch[0].slot == 1 && ch[0].type == 2 ? ch[0].success_credit_bonus : -1.0f;
+        };
+        CHECK(bonus1("Bestine") == 10000.0f && bonus1("Thyferra") == 7500.0f && bonus1("NalHutta") == 8000.0f);
+    }
+    {  // a2m r2: the Underworld's Racketeering upgrade carries the salvage bounty; conflict-rule bounty values of the traced
+       // battles (docs/re/A2M_R2_UW_BOUNTY_TRACE.md §1).
+        const uint32_t uw = rules.find_faction("Underworld");
+        const uint32_t up = rules.find_type("Underworld_Racketeering_Corruption_Upgrade");
+        CHECK(uw != kNoIndex && up != kNoIndex);
+        if (uw != kNoIndex && up != kNoIndex) {
+            const std::vector<uint32_t>& ups = rules.factions[uw].automatic_corruption_upgrades;
+            CHECK(ups.size() == 8 && ups[kCorruptionRacketeering] == up && ups[0] == rules.find_type("Generic_Intimidation_Corruption_Upgrade"));
+            const std::vector<uint32_t>& b = s.type(up).bounty;
+            CHECK(b.size() == 1);
+            if (b.size() == 1) {
+                const BountyAbilityDef& d = s.bounty[b[0]];
+                CHECK(d.name == "Underworld_Racketeering_Salvage_Effect" && d.percentage == 1.0f && d.stacking_category == 1 &&
+                      !d.apply_to_all_allies);
+                CHECK(d.target_factions == (std::vector<uint32_t>{rules.find_faction("Empire"), rules.find_faction("Rebel"),
+                                                                  rules.find_faction("Hutts"), rules.find_faction("Pirates")}));
+            }
+        }
+        {  // the tactical UL_Bounty_Upgrade: 1.2; "Hutt" names no faction and is dropped
+            const std::vector<uint32_t>& ub = s.type(rules.find_type("UL_Bounty_Upgrade")).bounty;
+            CHECK(ub.size() == 1 && s.bounty[ub.empty() ? 0 : ub[0]].percentage == 1.2f &&
+                  s.bounty[ub.empty() ? 0 : ub[0]].target_factions.size() == 4);
+        }
+        ConflictRules cr;
+        CHECK(load_conflict_rules(*provider, db, types, rules, cr, &diag));
+        // By the typed view's name resolution (the index objects and Company_Transport_Unit use).
+        const auto bounty = [&](const char* n) { return cr.type(static_cast<uint32_t>(types.resolve_name(n))).bounty; };
+        CHECK(bounty("Marauder_Missile_Cruiser") == 50 && bounty("Corellian_Corvette") == 50 && bounty("X-Wing") == 15 &&
+              bounty("Y-Wing") == 15);
+        CHECK(bounty("Gallofree_Transport") == 50 && bounty("Squad_Plex_Soldier") == 5 && bounty("Squad_Rebel_Trooper") == 5 &&
+              bounty("T2B_Tank") == 50);
+        const uint32_t inf = rules.find_type("Rebel_Infantry_Squad");
+        CHECK(inf != kNoIndex && rules.types[inf].company_transport == rules.find_type("Gallofree_Transport"));
+        int64_t members = 0;
+        if (inf != kNoIndex)
+            for (const auto& [mt, n] : cr.type(inf).members) members += static_cast<int64_t>(cr.type(mt).bounty) * n;
+        CHECK(members == 15 * 5);  // 7497: 15 Rebel trooper squads
+        // A2M_R2_RE_B §2.2: the largest category default (Corvette 50 | SpaceHero 500).
+        CHECK(bounty("Sundered_Heart") == 500);
+        std::printf("bounty: Sundered_Heart %d, X-wing squadron %d, infantry squad %d\n", bounty("Sundered_Heart"),
+                    bounty("Rebel_X-Wing_Squadron"), bounty("Rebel_Infantry_Squad"));
+        CHECK(cr.nalhutta_types.size() == 2);  // NalHutta, NalHutta_Story (§2.3 case B)
+        // mcx4 t09 (MCX4_T09_RE_ANSWERS Q3 / Q5): AlwaysBypassAutoResolve is No; Prevents_Story_Campaign_Autoresolve on the
+        // Death Star and three named Star Destroyers.
+        const auto prevents = [&](const char* n) { return cr.type(static_cast<uint32_t>(types.resolve_name(n))).prevents_story_autoresolve; };
+        CHECK(!cr.always_bypass_autoresolve && prevents("Death_Star") && prevents("Accuser_Star_Destroyer") &&
+              !prevents("Star_Destroyer"));
+        // mcx4 t06 (MCX4_T09_RE_ANSWERS Q9): FoC's Combat_Bonus abilities set Unit_Strength_Category but no file sets
+        // Unit_Strength_Factor, so no type gives an auto-resolve strength pair (the bonus is 1 in every vanilla battle).
+        size_t pairs = 0;
+        for (const ConflictTypeInfo& ti : cr.types) pairs += ti.strength_bonus.size();
+        CHECK(pairs == 0);
+        {  // mcx4 t09 (docs/re/MCX4_T09_RE_ANSWERS.md Q6): the galaxy-map ability button kind / label by FoC's lists.
+           // ledger: verifies GameConstants.Activated_Destroy_Planet_Ability_Names
+           // ledger: verifies GameConstants.Activated_Neutralize_Hero_Ability_Names
+           // ledger: verifies GameConstants.Activated_Remove_Corruption_Ability_Names
+           // ledger: verifies GameConstants.Activated_Siphon_Credits_Ability_Names
+           // ledger: verifies GameConstants.Activated_Slice_Ability_Names
+           // ledger: verifies GameConstants.Activated_System_Spy_Ability_Names
+            CHECK(s.activated_slice.size() == 2 && s.activated_destroy_planet.size() == 1 && s.activated_system_spy.size() == 1 &&
+                  s.activated_neutralize_hero.size() == 5 && s.activated_siphon_credits.size() == 2 &&
+                  s.activated_remove_corruption.size() == 7);
+            // Activated_Slice_Ability_Names, Activated_Destroy_Planet_Ability_Names, Activated_System_Spy_Ability_Names,
+            // Activated_Neutralize_Hero_Ability_Names, Activated_Siphon_Credits_Ability_Names,
+            // Activated_Remove_Corruption_Ability_Names (FoC GameConstants.xml).
+            const auto kind = [&](const char* n) { return activated_ability_slot_of(s, rules.find_type(n)).kind; };
+            const auto label = [&](const char* n) { return std::string(activated_ability_slot_of(s, rules.find_type(n)).label); };
+            CHECK(kind("Death_Star") == 6 && label("Death_Star") == "TEXT_TOOLTIP_ABILITY_DESTROY_PLANET_NAME");
+            CHECK(kind("Generic_Probe_Droid") == 3 && label("Generic_Probe_Droid") == "TEXT_ABILITY_SLOT_SPY");
+            CHECK(kind("Han_Solo") == 5 && kind("Mon_Mothma") == 8 && kind("Boba_Fett") == 4 && kind("Tyber_Zann") == 9);
+            CHECK(kind("IG-88") == 4);  // Neutralize (4) is tested before Hack_Super_Weapon (10)
+            CHECK(kind("Star_Destroyer") == -1);
+        }
+        {  // mcx4 t09 (docs/re/MCX4_T09_RE_ANSWERS.md Q7): Build_Countdown_Timer on the Death Star only, with its
+           // Build_Speech_Countdowns prefix; the speech events and the HUD timer text.
+           // ledger: verifies GameObjectType.Build_Countdown_Timer
+            uint32_t timers = 0;
+            for (const TypeInfo& ti : rules.types) timers += ti.build_countdown_timer ? 1u : 0u;
+            const uint32_t ds = rules.find_type("Death_Star");
+            const uint32_t isd = rules.find_type("Star_Destroyer");
+            CHECK(timers >= 1 && ds != kNoIndex && rules.types[ds].build_countdown_timer &&  // >= 1: variants inherit it
+                  rules.types[ds].build_speech_countdowns == "Speech_Death_Star_Build_" && isd != kNoIndex &&
+                  !rules.types[isd].build_countdown_timer);
+            std::printf("build countdown: %u types with Build_Countdown_Timer\n", timers);
+            const std::string& pre = rules.types[ds].build_speech_countdowns;
+            CHECK(econ::build_countdown_speech(pre, 120.0f, 119.5f) == "Speech_Death_Star_Build_2_Minutes");
+            CHECK(econ::build_countdown_speech(pre, 61.0f, 60.5f).empty());
+            CHECK(econ::build_countdown_speech(pre, 60.2f, 59.8f) == "Speech_Death_Star_Build_60_Seconds");
+            CHECK(econ::build_countdown_speech(pre, 35.0f, 34.9f).empty());
+            CHECK(econ::build_countdown_speech(pre, 30.1f, 29.9f) == "Speech_Death_Star_Build_30_Seconds");
+            CHECK(econ::build_countdown_speech(pre, 5.2f, 4.9f) == "Speech_Death_Star_Build_5_Seconds");
+            CHECK(econ::build_countdown_speech("", 5.2f, 4.9f).empty());
+            CHECK(econ::build_countdown_text(119.5f) == "2:00" && econ::build_countdown_text(5.2f) == "0:06");
+        }
+        // mcx4 t05 (MCX4_RE_ANSWERS_TACTICAL §9): FoC's Respawn_Whole_Team_When_Killed members (both droids, Luke_XWing);
+        // Droids_Team is a company.
+        const auto whole = [&](const char* n) { return cr.type(static_cast<uint32_t>(types.resolve_name(n))).respawn_whole_team; };
+        CHECK(whole("Droid_R2D2"));
+        CHECK(whole("Luke_XWing"));
+        CHECK(whole("Droid_C3P0") && !whole("Star_Destroyer"));  // both droids carry the flag
+        CHECK(cr.type(static_cast<uint32_t>(types.resolve_name("Droids_Team"))).company &&
+              !cr.type(static_cast<uint32_t>(types.resolve_name("Red_Squadron"))).company);
+        // mcx4 t05 (MCX4_T10_RE_ANSWERS §8): FoC's two Respawn_Tied_To_Structure lines (the generic bounty hunters) sit
+        // inside an XML comment, so no FoC type has the tag; only a mod's does.
+        const auto tied = [&](const char* n) { return rules.types[static_cast<uint32_t>(types.resolve_name(n))].respawn_tied_to_structure; };
+        CHECK(tied("Generic_Bounty_Hunter_E") == kNoIndex && tied("Generic_Bounty_Hunter_R") == kNoIndex);
+    }
     CHECK(s.items[0].name == "Buzz_Droid_Tech" && s.items[0].ability_crcs[0] == special_name_crc("Buzz_Droids_Viper") &&
           s.find_item(special_name_crc("Buzz_Droid_Tech")) == 0);
     // Hero abilities (P4 1.2 vanilla users).

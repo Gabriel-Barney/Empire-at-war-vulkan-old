@@ -1,0 +1,4 @@
+<?xml version="1.0" encoding="utf-8"?>
+<SubObjects>
+  <Planet Name="Sub_Zeta"><Behavior>PLANET</Behavior><Galactic_Position>500, 0, 0</Galactic_Position></Planet>
+</SubObjects>

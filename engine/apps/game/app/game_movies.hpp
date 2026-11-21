@@ -5,6 +5,7 @@
 // support (or without audio) the player runs on Clock::Wall and the movie is silent.
 #pragma once
 #include <cstdint>
+#include <functional>
 #include <memory>
 #include <string>
 #include <string_view>
@@ -16,6 +17,7 @@
 
 namespace alamo::video {
 class MoviePlayer;
+class CaptionTrack;
 }
 
 namespace alamo::game {
@@ -47,7 +49,19 @@ public:
     // Movies.xml music flags of the open movie (STRATEGIC_GAPS §7.3 / §7.4): Has_Credits (+0xD0, the movie-music flag ->
     // music mode 14), Halt_Game_Music (+0xD4) and the MusicEvent_Frame cues (mode 17, fired by update()).
     bool has_credits() const { return has_credits_; }
+    // mcx4 t14 (MCX4_PRES_RE_ANSWERS_3 Q6, Bink player 0x44d920 / 0x44f130): Pause_Game_While_Playing of the open movie -
+    // the game mode is paused from the movie's start to its stop.
+    bool pauses_game() const { return pause_game_; }
     bool halt_music() const { return halt_music_; }
+    // ui5 t02 / t12 (AUDIO.md §3.4): the open movie's Movies.xml captions, stepped by update() on the movie's frame
+    // clock. `shows` is the text check (false for a missing text or "[TBL]"; unset: every caption shows). caption() is the
+    // text id on screen now ("" = none); drawing it, and only with the subtitles option on, is the host's.
+    void set_caption_filter(std::function<bool(std::string_view)> shows) { caption_shows_ = std::move(shows); }
+    std::string_view caption() const;
+    // storyb t13: the open movie's Movies.xml Text_Crawl_Name ("" = none) and the movie frame counted from its
+    // Text_Crawl_Start_Frame (-1 before that frame, or without a crawl).
+    const std::string& text_crawl() const { return crawl_name_; }
+    int32_t text_crawl_frame() const;
     // Frame size of the open movie (0 when none).
     uint32_t width() const { return width_; }
     uint32_t height() const { return height_; }
@@ -60,6 +74,7 @@ private:
     bool alpha_ = false;
     bool cannot_skip_ = false;
     bool has_credits_ = false, halt_music_ = false;
+    bool pause_game_ = false;  // mcx4 t14: Pause_Game_While_Playing
     bool music_started_ = false;                    // this slot told the audio host a movie began (stop() ends it)
     GameAudioHost* audio_ = nullptr;                // valid between open() and stop()
     struct Cue {
@@ -67,10 +82,20 @@ private:
         std::string event;
     };
     std::vector<Cue> cues_;                         // MusicEvent_Frame, in file order
+    // mcx4 t13 (MCX4_T13_RE_ANSWERS "Movie.SFXEvent_Frame family"): the SFX / speech cue lists (one XML line each, list
+    // order) and the last Bink frame number their check covered.
+    std::vector<int64_t> sfx_frames_, speech_frames_;
+    std::vector<std::string> sfx_events_, speech_events_;
+    int64_t cue_frame_ = 0;
     size_t next_cue_ = 0;
     double fps_ = 30.0;
+    std::unique_ptr<video::CaptionTrack> captions_;  // ui5 t12
+    std::function<bool(std::string_view)> caption_shows_;
+    int64_t caption_frame_ = 1;                      // last Bink frame number stepped (frames count from 1)
     uint32_t width_ = 0, height_ = 0;
     std::string name_;
+    std::string crawl_name_;   // storyb t13
+    int32_t crawl_start_ = 0;
 };
 
 }  // namespace alamo::game

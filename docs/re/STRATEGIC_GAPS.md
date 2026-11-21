@@ -126,7 +126,8 @@ by the GUI tooltip and Lua); steps without a code just fail.
     reason **6**. (−1 = unlimited for both.)
 24. Final: (planet surface accessible (0x375220: `Planet_Surface_Accessible`, overridden by planet data +0x2C8) **or** T is
     not 0x5B / 0x5D / 0x5F **or** `Is_Generic_Hero` (+0x14)) **and** (no planet data, or not
-    `Build_Requires_Initial_Placement` (+0xC3), or T is in planet data +0x110 list).
+    `Build_Requires_Initial_Placement` (+0xC3), or T is in planet data +0x110 list). The +0x110 list is filled at load
+    from the campaign's `Special_Case_Production` (`MCX4_RE_ANSWERS_GALACTIC.md` Q1).
 
 **0x375220 `Is_Surface_Accessible(type, obj)` and destroyed planets (2026-10-31).** The override is inside the function, not
 in callers: it returns false when obj ≠ null, obj +0xB8 (planet data) ≠ null and data +0x2C8 (destroyed) = 1; otherwise the
@@ -167,6 +168,17 @@ Polled tests (0x344710, per mode tick; a player whose faction is not `Is_Playabl
 | 9 Control_Named_Planets | every named planet's objects belong to P (galactic only) |
 | 10 Cycles_Elapsed | fiscal cycles (galactic mode +0x370) > threshold (galactic only) |
 | 3, 6, 7 | **not polled**: event-driven, below |
+
+> **Correction 2026-11-09 (q6 t15, `Q6_T15_RETAIL_RUN.md`) [H]:** "per mode tick" is wrong. 0 / 1 / 4 / 5 / 9 are tested
+> only when a planet's owner changes (0x3fb040, every player in PlayerList order, first pass wins; a planet's first
+> owner set tests nothing). 10 is tested at each week rollover, 8 every 30 frames (0x4b2ef0) and 2 in Add_Credits
+> 0x27f370. Setup 0x289a90 gives each non-neutral player outside the `Starting_Active_Player` faction the AI list
+> **plus an implicit type 1** (countdown 30, no filter) when that list is non-empty. In type 1, a planet does not block
+> when its owner and P are both AI-controlled non-humans (+0x360 set, +0x62 = 0). In multiplayer galactic (0x35f6b0),
+> non-human owners never block and an AI P never passes. So the original's only galactic "elimination" is this: an AI
+> wins at an owner change that leaves no human enemy with a planet. It counts planets only, and has no latch and no
+> per-tick check. Retail: a human who owns nothing goes on while no planet changes owner (ELIM A, C), and loses when
+> its last planet goes (ELIM B).
 
 Event-driven super-weapon victories (all go through 0x343b90, which logs "VICTORY - Victory type %d…" and starts a
 countdown in frames):
@@ -463,7 +475,7 @@ Per input update (0x2ee40, called once per main-loop iteration — frame-rate de
   and |vy| < 0.1, v := 0.
 - Else: v += `Scroll_Acceleration_Factor` (0.08) × T per update, clamped per component so it never passes T (toward T's
   sign). The tactical camera (0x2d0820) or the galactic camera then scrolls by v.
-- **`Camera_Stop_Left` / `_Right`** are read only by 0x3c8d0 (clamp the space camera's x to [−50, 50]), which has **no
+- **`Camera_Stop_Left` / `_Right`** (`Camera_Stop_Right`) are read only by 0x3c8d0 (clamp the space camera's x to [−50, 50]), which has **no
   caller and no pointer** → unused. `Camera_Z_Position` has no reader. `Galactic_Scroll_Plane` (+0x1C8) is copied into
   the galactic camera (0x3c2c00, camera +8) [M: scroll plane height].
 - Answered in **P1_CAMERA_INPUT.md** (2026-10-28): the scroll plane is the look-at z, T is in speed × dt units with the

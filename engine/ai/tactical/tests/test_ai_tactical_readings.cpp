@@ -14,18 +14,12 @@
 #include "alamo/ai/tactical/perception_world.hpp"
 #include "alamo/ai/tactical/threat_grid.hpp"
 #include "alamo/core/sim_rng.hpp"
+#include "alamo/test/support.hpp"
 
 using namespace alamo;
 using namespace alamo::ai::tactical;
 
-static int g_fail = 0;
-#define CHECK(c)                                                         \
-    do {                                                                 \
-        if (!(c)) {                                                      \
-            std::printf("FAIL %s:%d: %s\n", __FILE__, __LINE__, #c);     \
-            ++g_fail;                                                    \
-        }                                                                \
-    } while (0)
+using ::alamo::test::g_fail;
 
 // ---------------------------------------------------------------- 13 nFow
 static ThreatGridConfig land_cfg() {
@@ -130,7 +124,7 @@ static void test_unit_ai_stamps() {
     g.init(TacticalMode::Land, w.map, 2, land_cfg());
 
     // stamp F - 250 at F = 1000: the first service (F = 1000) runs the check, then 1050, 1350, ...
-    CHECK(g.register_object(w, 1, 1000, 750));
+    CHECK(g.register_object(w, 1, 750));
     nudge(w.objects[0]);
     CHECK(g.service_object(w, 1, 1000));   // first service: check, moved -> re-projected; stamp 1050
     nudge(w.objects[0]);
@@ -141,14 +135,14 @@ static void test_unit_ai_stamps() {
     CHECK(g.service_object(w, 1, 1350));
 
     // an unmoved object: the check runs but nothing is re-projected; the stamp still advances
-    CHECK(g.register_object(w, 2, 1000, 1000));
+    CHECK(g.register_object(w, 2, 1000));
     CHECK(!g.service_object(w, 2, 1000));  // check at the first service, same transform; stamp 1300
     nudge(w.objects[1]);
     CHECK(!g.service_object(w, 2, 1299));
     CHECK(g.service_object(w, 2, 1300));
 
     // catch-up: a stamp far behind advances one step (300) per service, not re-based on F
-    CHECK(g.register_object(w, 3, 1000, 400));
+    CHECK(g.register_object(w, 3, 400));
     nudge(w.objects[2]);
     CHECK(g.service_object(w, 3, 1000));   // 400 -> 700
     nudge(w.objects[2]);
@@ -162,7 +156,7 @@ static void test_unit_ai_stamps() {
     // a stamp before frame 0 (object created at F < 300)
     TacticalPerceptionGrid z;
     z.init(TacticalMode::Land, w.map, 2, land_cfg());
-    CHECK(z.register_object(w, 4, 0, -300));
+    CHECK(z.register_object(w, 4, -300));
     nudge(w.objects[3]);
     CHECK(z.service_object(w, 4, 0));   // -300 -> 0
     nudge(w.objects[3]);
@@ -170,14 +164,6 @@ static void test_unit_ai_stamps() {
     nudge(w.objects[3]);
     CHECK(!z.service_object(w, 4, 2));
     CHECK(z.service_object(w, 4, 300));
-
-    // [port] legacy 3-argument form: stamp = registration + 300
-    TacticalPerceptionGrid l;
-    l.init(TacticalMode::Land, w.map, 2, land_cfg());
-    CHECK(l.register_object(w, 1, 10));
-    nudge(w.objects[0]);
-    CHECK(!l.service_object(w, 1, 10) && !l.service_object(w, 1, 309));
-    CHECK(l.service_object(w, 1, 310));
 }
 
 // ---------------------------------------------------------------- 15 destroyed objects [port]
@@ -195,7 +181,7 @@ static void test_destroy_memory() {
     w.object_fogged = [](int32_t p, int32_t id) { return p == 1 && id == 2; };
     TacticalPerceptionGrid g;
     g.init(TacticalMode::Land, w.map, 2, land_cfg());
-    CHECK(g.register_object(w, 1, 0, 0) && g.register_object(w, 2, 0, 0));
+    CHECK(g.register_object(w, 1, 0) && g.register_object(w, 2, 0));
     const auto c1 = static_cast<uint32_t>(g.cell_clamped(300.0f, 300.0f));
     const auto c2 = static_cast<uint32_t>(g.cell_clamped(600.0f, 600.0f));
     // both players remember both cells
@@ -216,8 +202,49 @@ static void test_destroy_memory() {
     // the memory lists hold no stale slot: a new object reusing the slot is not remembered
     w.objects.push_back(make_unit(3, 1, 900.0f, 900.0f));
     w.index();
-    CHECK(g.register_object(w, 3, 2, 2));
+    CHECK(g.register_object(w, 3, 2));
     CHECK(g.memory_entries(0, c1).empty() && g.memory_entries(0, c2).empty());
+}
+
+// ---------------------------------------------------------------- mcx6 t06: the attack position's square (0x4f5390)
+// LUA_API.md "Attack position 0x4f5390": the four d x d squares around T, corners (x, y), (x - d, y), (x - d, y - d),
+// (x, y - d); the lowest enemy force of `self` wins, the first on a tie; the result is that square's centre (z = 0).
+static void test_attack_position_square() {
+    PerceptionWorld w = make_world();
+    w.objects.push_back(make_unit(1, 1, 700.0f, 690.0f));  // player 1's unit up and right of T: hostile to player 0
+    w.index();
+    TacticalPerceptionGrid g;
+    g.init(TacticalMode::Land, w.map, 2, land_cfg());
+    CHECK(g.register_object(w, 1, 0));
+    const Vec3f t{600.0f, 600.0f, 37.0f};
+    const float d = 60.0f;
+    // the squares' forces as the grid answers them, independently of the function
+    float force[4];
+    const float cx[4] = {600.0f, 540.0f, 540.0f, 600.0f}, cy[4] = {600.0f, 600.0f, 540.0f, 540.0f};
+    GridQuery q;
+    q.self = 0;
+    q.ally = false;
+    std::vector<uint32_t> cells;
+    for (int k = 0; k < 4; ++k) {
+        g.rect_cells({cx[k], cy[k], cx[k] + d, cy[k] + d}, cells);
+        force[k] = g.cells_force(w, cells, q);
+    }
+    int want = 0;
+    for (int k = 1; k < 4; ++k)
+        if (force[k] < force[want]) want = k;
+    const AttackSquare a = attack_position_square(g, w, 0, t, d);
+    std::printf("attack position square: forces %.2f %.2f %.2f %.2f -> %d (%.1f, %.1f)\n", static_cast<double>(force[0]),
+                static_cast<double>(force[1]), static_cast<double>(force[2]), static_cast<double>(force[3]), a.index,
+                static_cast<double>(a.centre.x), static_cast<double>(a.centre.y));
+    CHECK(force[0] > 0.0f && force[0] > force[2]);  // the enemy's footprint reaches the first square, not the third
+    CHECK(a.index == want && a.index != 0 && a.threat == force[want]);
+    CHECK(a.centre.x == cx[want] + 30.0f && a.centre.y == cy[want] + 30.0f && a.centre.z == 0.0f);
+    // the owner's own unit is no threat to it: every square 0, the first wins the tie
+    const AttackSquare own = attack_position_square(g, w, 1, t, d);
+    CHECK(own.index == 0 && own.threat == 0.0f && own.centre.x == 630.0f && own.centre.y == 630.0f);
+    // d = 0: four empty squares at T, the first wins
+    const AttackSquare zero = attack_position_square(g, w, 0, t, 0.0f);
+    CHECK(zero.centre.x == 600.0f && zero.centre.y == 600.0f);
 }
 
 // ---------------------------------------------------------------- 6 free-store admission
@@ -382,6 +409,7 @@ int main() {
     test_fow_rounding();
     test_unit_ai_stamps();
     test_destroy_memory();
+    test_attack_position_square();  // mcx6 t06
     test_admission();
     test_service_timing();
     if (g_fail) {

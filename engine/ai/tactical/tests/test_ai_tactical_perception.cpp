@@ -23,7 +23,7 @@
 
 #include "alamo/ai/ai_budget.hpp"
 #include "alamo/ai/ai_types.hpp"
-#include "thread_parallel_for.hpp"
+#include "alamo/test/thread_parallel_for.hpp"
 #include "alamo/ai/perception_equations.hpp"
 #include "alamo/ai/tactical/perception_cache.hpp"
 #include "alamo/ai/tactical/perception_lua.hpp"
@@ -33,8 +33,11 @@
 #include "alamo/ai/tactical/zone_reachability.hpp"
 #include "alamo/core/bytes.hpp"
 #include "alamo/core/dmath.hpp"
+#include "alamo/core/file_provider.hpp"
 #include "alamo/core/sim_crc.hpp"
 #include "alamo/core/sim_rng.hpp"
+#include "alamo/objects/enums.hpp"  // A2k t06
+#include "alamo/test/support.hpp"
 
 #if defined(ALAMO_AI_TACTICAL_HAVE_VFS)
 #include "alamo/vfs/vfs.hpp"
@@ -44,19 +47,12 @@ using namespace alamo;
 using namespace alamo::ai;
 using namespace alamo::ai::tactical;
 
-static int g_fail = 0;
-#define CHECK(c)                                                         \
-    do {                                                                 \
-        if (!(c)) {                                                      \
-            std::printf("FAIL %s:%d: %s\n", __FILE__, __LINE__, #c);     \
-            ++g_fail;                                                    \
-        }                                                                \
-    } while (0)
+using ::alamo::test::g_fail;
 
 static bool near_eq(double a, double b, double eps = 1e-4) { return std::fabs(a - b) <= eps * std::max(1.0, std::fabs(b)); }
 
 static ParallelFor make_thread_pf(unsigned threads) {
-    return ::alamo::ai::tactical::testing::make_thread_parallel_for(threads);  // persistent pool, thread_parallel_for.hpp
+    return ::alamo::test::make_thread_parallel_for(threads);  // persistent pool, alamo/test/thread_parallel_for.hpp
 }
 
 // Test category table (the default resolver is the objects module's GameObjectCategoryType).
@@ -70,10 +66,9 @@ static uint64_t test_category(std::string_view n) {
     return 0;
 }
 
-static TacticalPerceptionConfig test_config(bool quirk = true) {
+static TacticalPerceptionConfig test_config() {
     TacticalPerceptionConfig c;
     c.category_mask = test_category;
-    c.memory_counted_when_not_fogged = quirk;
     return c;
 }
 
@@ -271,10 +266,10 @@ static void test_grid_projection() {
     TacticalPerceptionGrid g;
     g.init(TacticalMode::Land, w.map, 4, threat_grid_config(TacticalMode::Land, c));
     // stamps as drawn at creation frame 10 (A1_READINGS §14: F + Get_Int(0, 300) - 300, here Get_Int = 300)
-    CHECK(g.register_object(w, 1, 10, 10));
-    CHECK(!g.register_object(w, 1, 10, 10));  // once
-    CHECK(g.register_object(w, 2, 10, 10));
-    CHECK(!g.register_object(w, 3, 10, 10));
+    CHECK(g.register_object(w, 1, 10));
+    CHECK(!g.register_object(w, 1, 10));  // once
+    CHECK(g.register_object(w, 2, 10));
+    CHECK(!g.register_object(w, 3, 10));
     CHECK(g.entry_count() == 3);          // trooper whole + tank 2 hard points
     // trooper: v = 100 * 60 * 60 / (4 * 50^2) = 36 in 6 cells, hostile to players 0 and 2 (relation 1)
     const uint32_t c010 = 0 * 20 + 10;
@@ -329,7 +324,7 @@ static void test_grid_projection() {
     w.objects.push_back(tiny);
     w.objects.push_back(huge);
     w.index();
-    CHECK(g.register_object(w, 4, 10, 10) && g.register_object(w, 5, 10, 10));
+    CHECK(g.register_object(w, 4, 10) && g.register_object(w, 5, 10));
     const float hd = g.half_diagonal();
     const auto ct = static_cast<uint32_t>(g.cell_clamped(300.0f, 300.0f));
     CHECK(g.threat(0, ct) == 10.0f * 3600.0f / (4.0f * hd * hd));
@@ -363,11 +358,8 @@ static void test_grid_projection() {
     q = GridQuery();
     q.self = 0;
     q.ally = false;
-    CHECK(g.cell_force(w, c010, q) == f36 + f36);  // live + memory (AI never fogged): counted twice [M]
-    q.memory_counted_when_not_fogged = false;
-    CHECK(g.cell_force(w, c010, q) == f36);
+    CHECK(g.cell_force(w, c010, q) == f36 + f36);  // live + memory (AI never fogged): counted twice [H]
     // concentration / bitfield count memory only while fogged
-    q.memory_counted_when_not_fogged = true;
     const uint32_t ctr = static_cast<uint32_t>(g.cell_clamped(30.0f, 570.0f));
     const uint32_t one[] = {ctr};
     CHECK(g.cells_concentration(w, one, q) == 10.0f);  // §16: the type's AI_Combat_Power (trooper 10), not the object's 100
@@ -387,7 +379,7 @@ static void test_grid_projection() {
     w.object_fogged = [&](int32_t p, int32_t id) { return fog_on && p == 1 && id == 2; };
     TacticalPerceptionGrid h;
     h.init(TacticalMode::Land, w.map, 4, threat_grid_config(TacticalMode::Land, c));
-    CHECK(h.register_object(w, 2, 0, 0));
+    CHECK(h.register_object(w, 2, 0));
     const auto tcell = static_cast<uint32_t>(h.cell_clamped(-300.0f, -301.0f));
     CHECK(h.snapshot(1, tcell) == 0.0f);  // TEAM/HIDE objects do not touch the snapshot
     h.refog(1, tcell, 50);  // human remembers the tank
@@ -396,10 +388,8 @@ static void test_grid_projection() {
     GridQuery hq;
     hq.self = 1;
     hq.ally = false;
-    // live entry skipped (fogged); memory entry: documented test also skips it while fogged
+    // live entry skipped (fogged); memory entry: the [H] test also skips it while fogged
     CHECK(h.cell_force(w, tcell, hq) == 0.0f);
-    hq.memory_counted_when_not_fogged = false;
-    CHECK(h.cell_force(w, tcell, hq) > 0.0f);
     CHECK(!h.cell_visible(w, 1, tcell) && h.cell_visible(w, 0, tcell));
     // point danger: AI player 0 -> live layer scaled to 800^2
     const Vec3f tp{-300.0f, -301.0f, 0.0f};
@@ -415,6 +405,15 @@ static void test_grid_projection() {
     CHECK(h.on_owner_changed(w, 2));
     CHECK(h.player_objects(0).empty() && h.player_objects(1).size() == 1);
     CHECK(h.threat(1, tcell) == 0.0f && h.threat(0, tcell) > 0.0f);
+    // skai t22 (SKAI_T22_SPACE_AI_RE Part 3): registered without its owner-list entry (a skirmish start station), the
+    // object is projected into the cells and the threat layer as usual but is in no owner list.
+    TacticalPerceptionGrid k;
+    k.init(TacticalMode::Land, w.map, 4, threat_grid_config(TacticalMode::Land, c));
+    w.objects[1].no_owner_list = true;
+    CHECK(k.register_object(w, 2, 0));
+    w.objects[1].no_owner_list = false;
+    CHECK(k.is_registered(2) && k.player_objects(0).empty() && k.player_objects(1).empty());
+    CHECK(!k.live_entries(tcell).empty() && k.threat(0, tcell) == h.threat(0, tcell));
 }
 
 // ---------------------------------------------------------------------------------- tokens
@@ -447,6 +446,7 @@ struct Fixture {
         PerceptionObject barracks = make_obj(17, 0, kBarracks, O - 100.0f, O + 20.0f, 50.0f, 0.0f);
         barracks.built_structure = true;
         barracks.dummy_ground_structure = true;
+        barracks.no_owner_list = true;  // skai t15: pre-built at the start (out of the grid owner list)
         w.objects.push_back(barracks);
         w.objects[0].zone = 2;
         w.objects[1].zone = 2;
@@ -459,7 +459,7 @@ struct Fixture {
         w.index();
         TacticalAiConstants c;
         p.init(TacticalMode::Land, c, w.map, 4, zones, test_config());
-        for (const PerceptionObject& o : w.objects) p.grid().register_object(w, o.id, 1, 1);
+        for (const PerceptionObject& o : w.objects) p.grid().register_object(w, o.id, 1);
         h_tank = p.register_unit(w, 10);
         h_trooper = p.register_unit(w, 11);
         h_pad = p.register_unit(w, 12);
@@ -501,18 +501,27 @@ static void test_tokens() {
     // ---- Game ----
     CHECK(f.val("Game.Age") == static_cast<double>(30.0f * (1.0f / 30.0f)));
     CHECK(f.val("Game.IsCampaignGame") == 0.0);
-    // Game.ForceUnnormalized: every player's grid objects, health-scaled: 100+10+0+300+100+10+50 = 570
-    CHECK(f.val("Game.ForceUnnormalized") == 570.0);
+    // mcx8 t09 (docs/re/AI_GALACTIC_TOKENS.md §4, 0x6e1fb0 on the base Game evaluator [H]): battles read the game
+    // settings flags too: 1.0 by default, 0.0 when an advanced option was changed with random events off.
+    CHECK(f.val("Game.InterventionsEnabled") == 1.0);
+    {
+        Fixture off;
+        off.w.interventions_enabled = false;
+        CHECK(off.val("Game.InterventionsEnabled") == 0.0);
+    }
+    // Game.ForceUnnormalized: every player's grid objects, health-scaled: 100+10+0+300+100+10 = 520 (b0422 / skai t12: the
+    // DUMMY_GROUND_STRUCTURE barracks 17 (50) is not in the per-player grid lists)
+    CHECK(f.val("Game.ForceUnnormalized") == 520.0);
     CHECK(f.val("Game.ForceUnnormalized {Parameter_Category = GameObjectCategoryType[Vehicle]}") == 200.0);
     // ---- Player (omniscient grid lists) ----
-    // Empire friendly = Empire (100+0+300+50) + Underworld ally (100) = 550; enemy = Rebel 10 + neutral-relation player 3 (10)
-    CHECK(f.val("Variable_Self.FriendlyForceUnnormalized") == 550.0);
+    // Empire friendly = Empire (100+0+300, the barracks left out) + Underworld ally (100) = 500; enemy = Rebel 10 + neutral-relation player 3 (10)
+    CHECK(f.val("Variable_Self.FriendlyForceUnnormalized") == 500.0);
     CHECK(f.val("Variable_Self.EnemyForceUnnormalized") == 20.0);
-    CHECK(f.val("Variable_Self.ForceUnnormalized") == 550.0);
-    CHECK(f.val("Variable_Self.LandedForceUnnormalized") == 550.0);
+    CHECK(f.val("Variable_Self.ForceUnnormalized") == 500.0);
+    CHECK(f.val("Variable_Self.LandedForceUnnormalized") == 500.0);
     CHECK(f.val("Variable_Enemy.FriendlyForceUnnormalized") == 10.0);
     CHECK(f.val("Variable_Self.FriendlyForceUnnormalized {Parameter_Category = GameObjectCategoryType[Vehicle | LandHero]}") == 500.0);
-    CHECK(near_eq(f.val("Variable_Self.FriendlyForce"), 550.0 / 570.0, 1e-12));
+    CHECK(near_eq(f.val("Variable_Self.FriendlyForce"), 500.0 / 520.0, 1e-12));
     CHECK(f.val("Variable_Self.ForceNBTD") == 1.0);  // same sum twice (vanilla quirk)
     CHECK(f.val("Variable_Self.ForceUnnormalized", 3) == 0.0);  // neutral faction: nothing
     CHECK(f.val("Variable_Self.IsFaction {Parameter_Faction = \"EMPIRE\"}") == 1.0);
@@ -565,9 +574,9 @@ static void test_tokens() {
     // ---- unit targets ----
     CHECK(f.val("Variable_Target.Health", 0, f.h_tank) == 1.0);
     CHECK(f.val("Variable_Target.ForceUnnormalized", 0, f.h_tank) == 100.0);
-    CHECK(near_eq(f.val("Variable_Target.Force", 0, f.h_tank), 100.0 / 570.0, 1e-12));
+    CHECK(near_eq(f.val("Variable_Target.Force", 0, f.h_tank), 100.0 / 520.0, 1e-12));
     CHECK(f.val("Variable_Target.Force {Parameter_Category = GameObjectCategoryType[Infantry]}", 0, f.h_tank) == 0.0);
-    CHECK(near_eq(f.val("Variable_Target.ForceNBTP", 0, f.h_tank), 100.0 / 550.0, 1e-12));
+    CHECK(near_eq(f.val("Variable_Target.ForceNBTP", 0, f.h_tank), 100.0 / 500.0, 1e-12));
     CHECK(near_eq(f.val("Variable_Target.ForceNBTD", 1, f.h_trooper), 1.0, 1e-12));  // 10 / rebel friendly 10
     CHECK(f.val("Variable_Target.IsBuildPad", 0, f.h_pad) == 1.0);
     CHECK(f.val("Variable_Target.HasBuiltObject", 0, f.h_pad) == 1.0);
@@ -604,7 +613,7 @@ static void test_tokens() {
     const double enemy_zone = f.val("Variable_Target.EnemyForceUnnormalized", 0, f.h_zone2);
     CHECK(enemy_zone > 0.0);
     CHECK(f.val("Variable_Target.EnemyForceUnnormalized", 0, f.h_outside) == 0.0);
-    CHECK(near_eq(f.val("Variable_Target.EnemyForce", 0, f.h_zone2), enemy_zone <= 570.0 ? enemy_zone / 570.0 : 1.0, 1e-9));
+    CHECK(near_eq(f.val("Variable_Target.EnemyForce", 0, f.h_zone2), enemy_zone <= 520.0 ? enemy_zone / 520.0 : 1.0, 1e-9));
     const double tank_loc_enemy = f.val("Variable_Target.Location.EnemyForceUnnormalized", 0, f.h_tank);
     CHECK(tank_loc_enemy == enemy_zone);  // unit location = its current zone
     CHECK(f.val("Variable_Target.Location.EnemyForceUnnormalized", 0, f.h_hero) == 0.0);  // outside every zone
@@ -714,7 +723,7 @@ static void test_duplicate_zone_names() {
     f.zones[3].name = "ZONE2";  // repeats zone 2's name ("Zone2") in another case
     TacticalAiConstants c;
     f.p.init(TacticalMode::Land, c, f.w.map, 4, f.zones, test_config());
-    for (const PerceptionObject& o : f.w.objects) f.p.grid().register_object(f.w, o.id, 1, 1);
+    for (const PerceptionObject& o : f.w.objects) f.p.grid().register_object(f.w, o.id, 1);
     const int32_t h3 = f.p.register_zone(3);  // the later zone registered first: it owns the shared name id
     const int32_t h2 = f.p.register_zone(2);
     const int32_t h4 = f.p.register_zone(4);
@@ -898,6 +907,22 @@ static void test_lua_functions() {
     CHECK(!is_good_against(ct, "Empire_Tank", 0x2, 0x2));
     CHECK(is_good_against(ct, "Empire_Tank", 0x2, 0x3));  // max over the bits
     CHECK(!is_good_against(ct, "Rebel_Trooper", 0x1, 0x1));
+    // a2l t03 (A2L_T03_RE_ANSWERS Q6.4): the weight is 0x5f1f90 (ai_weight: the mean of the matching weights != 1.0), not
+    // the first match, and a row is selected by its exact key 1 << bit.
+    ct.rows[0].friendly.push_back({"Heavy", 0x4, 0.25f});
+    CHECK(!is_good_against(ct, "Empire_Tank", 0x2 | 0x4, 0x1));  // mean(1.5, 0.25) = 0.875 (first match: 1.5)
+    CHECK(is_good_against(ct, "Empire_Tank", 0x2, 0x1));
+    row.enemy = "Mixed";
+    row.enemy_mask = 0x8 | 0x10;  // not a single-bit key: no bit of the target selects it
+    row.friendly = {{"Vehicle", 0x2, 3.0f}};
+    ct.rows.push_back(row);
+    CHECK(!is_good_against(ct, "Empire_Tank", 0x2, 0x8));
+    galactic::ContrastTable typed;  // an exact type entry wins at once
+    row.enemy = "Infantry";
+    row.enemy_mask = 0x1;
+    row.friendly = {{"Vehicle", 0x2, 0.5f}, {"Empire_Tank", 0, 2.0f}};
+    typed.rows.push_back(row);
+    CHECK(is_good_against(typed, "Empire_Tank", 0x2, 0x1) && !is_good_against(typed, "Other_Tank", 0x2, 0x1));
     // Get_Most_Defended_Position: allied force of `player`, ties -> one Get_Float01 draw each
     PerceptionWorld lw = land_world();
     lw.objects.push_back(make_obj(1, 0, kTank, -570.0f, 570.0f, 100.0f, 10.0f));   // cell 0 only
@@ -906,7 +931,7 @@ static void test_lua_functions() {
     lw.index();
     TacticalPerceptionGrid g;
     g.init(TacticalMode::Land, lw.map, 4, threat_grid_config(TacticalMode::Land, TacticalAiConstants()));
-    for (int32_t id = 1; id <= 3; ++id) CHECK(g.register_object(lw, id, 0, 0));
+    for (int32_t id = 1; id <= 3; ++id) CHECK(g.register_object(lw, id, 0));
     const uint32_t cells[] = {0, 1, 2, 3};
     SimRng rng(77), ref(77);
     const DefendedPosition d = most_defended_position_cells(g, lw, cells, 0, rng);
@@ -985,7 +1010,7 @@ static uint64_t scenario_crc(const ParallelFor& pf, TacticalMode mode, uint32_t 
         }
         w.objects.push_back(o);
         w.index();
-        p->grid().register_object(w, o.id, w.frame, draw_unit_ai_stamps(rng, w.frame).reprojection_check);
+        p->grid().register_object(w, o.id, draw_unit_ai_stamps(rng, w.frame).reprojection_check);
         p->register_unit(w, o.id);
     };
     for (int i = 0; i < 40; ++i) spawn();
@@ -1203,7 +1228,7 @@ static void test_real_data() {
         w.index();
         std::vector<int32_t> handles;
         for (const PerceptionObject& o : w.objects) {
-            p.grid().register_object(w, o.id, 1, 1);
+            p.grid().register_object(w, o.id, 1);
             handles.push_back(p.register_unit(w, o.id));
         }
         if (mode == TacticalMode::Land)
@@ -1313,16 +1338,16 @@ static void test_a1g_readings() {
             return f.val("Variable_Self.FriendlyForceUnnormalized");
         };
         f.w.skirmish_or_mp = true;  // (a) skirmish: the landing object itself, its type's power (Empire_Tank 100)
-        CHECK(friendly() == 650.0);
+        CHECK(friendly() == 600.0);
         f.w.skirmish_or_mp = false;  // (b) campaign, parent found: the parent's type (Star_Destroyer 2000)
-        CHECK(friendly() == 2550.0);
+        CHECK(friendly() == 2500.0);
         f.w.objects.back().parent_object = 501;  // (c) campaign, parent not found: skipped
-        CHECK(friendly() == 550.0);
+        CHECK(friendly() == 500.0);
         f.w.objects.back().parent_object = -1;  // no parent id: the object itself
-        CHECK(friendly() == 650.0);
+        CHECK(friendly() == 600.0);
         f.w.objects.back().parent_object = 500;
         f.w.parent_rep_type = nullptr;  // no resolver: never found
-        CHECK(friendly() == 550.0);
+        CHECK(friendly() == 500.0);
         f.p.cache().clear();
         CHECK(f.val("Variable_Self.FriendlyForceUnnormalized {Parameter_Category = GameObjectCategoryType[Infantry]}") == 0.0);
         // (d) a1h t08 (§32.2): a reinforcement's landing object carries its company type (transport +0x48, the host's
@@ -1330,12 +1355,12 @@ static void test_a1g_readings() {
         f.w.parent_rep_type = [](int32_t id) { return id == 500 ? int32_t{kStarDestroyer} : -1; };
         f.w.objects.back().rep_type = kStarDestroyer;
         f.w.objects.back().parent_object = -1;
-        CHECK(friendly() == 2550.0);  // campaign, no parent id: the carried type (Star_Destroyer 2000)
+        CHECK(friendly() == 2500.0);  // campaign, no parent id: the carried type (Star_Destroyer 2000)
         f.w.skirmish_or_mp = true;
         f.w.objects.back().parent_object = 500;
-        CHECK(friendly() == 2550.0);  // skirmish: the landing object's own carried type, the parent is not read
+        CHECK(friendly() == 2500.0);  // skirmish: the landing object's own carried type, the parent is not read
         f.w.objects.back().rep_type = -1;  // a cinematic transport (none carried): its own type
-        CHECK(friendly() == 650.0);
+        CHECK(friendly() == 600.0);
     }
     {  // §30.4: IsValidBombingTarget fails inside any active base shield (host callback, 3-D); IsInside*Shield stay 0
         Fixture f;
@@ -1365,6 +1390,44 @@ static void test_a1g_readings() {
     std::printf("a1g readings: OK\n");
 }
 
+// A2k t06: the name -> mask config from the data-loaded GameObjectCategoryType converter (mod categories get bits).
+static void test_category_mask_from_enums() {
+    class OneFile final : public FileProvider {
+    public:
+        std::string text;
+        bool read(std::string_view path, std::vector<uint8_t>& out) const override {
+            out.clear();
+            if (normalize_path(path) != normalize_path("Data\\XML\\Enum\\GameObjectCategoryType.xml")) return false;
+            out.assign(text.begin(), text.end());
+            return true;
+        }
+        bool exists(std::string_view path) const override {
+            return normalize_path(path) == normalize_path("Data\\XML\\Enum\\GameObjectCategoryType.xml");
+        }
+        std::string origin(std::string_view path) const override { return exists(path) ? "mem" : ""; }
+    };
+    OneFile f;
+    f.text = "<?xml version=\"1.0\"?>\n<EnumDefinition>\n<Infantry>1</Infantry>\n<Capital>40</Capital>\n"
+             "<Mod_Walker>8000000000</Mod_Walker>\n</EnumDefinition>\n";
+    objects::EnumRegistry mod;
+    mod.load_dynamic(f);
+    const objects::EnumRegistry vanilla;
+    const auto m = category_mask_from(mod);
+    const auto v = category_mask_from(vanilla);
+    CHECK(m("Mod_Walker") == 0x8000000000ull && m(" mod_walker") == 0x8000000000ull && m("Capital") == 0x40 && m("Frigate") == 0);
+    CHECK(v("Mod_Walker") == 0 && v("Capital") == 0x20 && v("Infantry") == 0x80);
+    // Built-in registry = the default config's table bit for bit (the shipped table).
+    const TacticalPerception def;
+    for (const char* n : {"Fighter", "Capital", "Super", "Infantry", "Structure", "Hero", "All", "None", "Nope"})
+        CHECK(v(n) == def.config().category_mask(n));
+    // init keeps a supplied table.
+    TacticalPerception p;
+    TacticalPerceptionConfig c;
+    c.category_mask = m;
+    p.init(TacticalMode::Space, TacticalAiConstants{}, Rect2{0.0f, 0.0f, 100.0f, 100.0f}, 2, {}, c);
+    CHECK(p.config().category_mask("Mod_Walker") == 0x8000000000ull);
+}
+
 int main(int argc, char** argv) {
     const char* golden = nullptr;
     const char* write_golden = nullptr;
@@ -1382,6 +1445,7 @@ int main(int argc, char** argv) {
     test_zone_threat();
     test_lua_functions();
     test_a1g_readings();
+    test_category_mask_from_enums();  // A2k t06
     test_scenario(golden, write_golden);
     test_scenario_save();
 #if defined(ALAMO_AI_TACTICAL_HAVE_VFS)

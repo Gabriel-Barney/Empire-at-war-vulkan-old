@@ -31,6 +31,8 @@
 #include "alamo/ui/render_bridge.hpp"
 #include "alamo/ui/selection_blob.hpp"
 #include "alamo/ui/tactical_hud.hpp"
+#include "alamo/test/support.hpp"
+#include "alamo/render/test/gpu.hpp"
 #include "hud_test_data.hpp"
 #ifdef ALAMO_UI_HAVE_VFS
 #include <cstdlib>
@@ -47,14 +49,7 @@
 
 using namespace alamo;
 
-static int g_fail = 0;
-#define CHECK(c)                                                     \
-    do {                                                             \
-        if (!(c)) {                                                  \
-            std::printf("FAIL %s:%d: %s\n", __FILE__, __LINE__, #c); \
-            ++g_fail;                                                \
-        }                                                            \
-    } while (0)
+using ::alamo::test::g_fail;
 
 namespace {
 
@@ -91,17 +86,15 @@ void test_cpu() {
     const render::Instance in = ui::selection_blob_instance(dummy, b);
     CHECK(in.model == &dummy && near(in.transform.m[0][0], 25) && near(in.transform.m[1][3], 20) &&
           near(in.transform.m[2][3], 30 + ui::kSpaceBlobLift));
-    // Land: terrain shadow blobs with the material index by name.
-    std::vector<terrain::ShadowBlobMaterial> mats = terrain::builtin_blob_materials();
-    terrain::ShadowBlobMaterial land = mat;
-    land.name = "Selection_Rebel_Land";
-    mats.push_back(land);
-    ui::SelectionBlob lb = b;
-    lb.land = true;
-    lb.material = "selection_rebel_land";
-    const ui::SelectionBlob two[2] = {b, lb};
-    const auto sb = ui::land_selection_blobs(two, mats);
-    CHECK(sb.size() == 1 && sb[0].material == mats.size() - 1 && near(sb[0].width, 50) && near(sb[0].position[0], 10));
+    {  // vis1 t03: land circles lie on the ground's local slope (z = 0.1 x + 0.2 y + 5): footprint kept, axes sheared
+        const std::function<float(float, float)> ground = [](float x, float y) { return 0.1f * x + 0.2f * y + 5.0f; };
+        const render::Instance g = ui::selection_blob_ground_instance(dummy, b, ground);
+        CHECK(near(g.transform.m[0][0], 25) && near(g.transform.m[1][1], 25) && near(g.transform.m[2][0], 0.1f * 25) &&
+              near(g.transform.m[2][1], 0.2f * 25) && near(g.transform.m[2][3], 1.0f + 4.0f + 5.0f + ui::kSpaceBlobLift) &&
+              near(g.transform.m[0][3], 10) && near(g.transform.m[1][3], 20));
+        const render::Instance flat = ui::selection_blob_ground_instance(dummy, b, nullptr);
+        CHECK(near(flat.transform.m[2][3], 30 + ui::kSpaceBlobLift) && near(flat.transform.m[2][0], 0));
+    }
 
 #ifdef ALAMO_UI_HAVE_OBJECTS
     // Snapshot bridge: dying / faded objects skipped, selection by binary search, groups, hover, team colour.
@@ -138,40 +131,12 @@ void test_cpu() {
 }
 
 // ------------------------------------------------------------------------------------------------ GPU
-struct Gpu {
-    rhi::Context ctx;
-    rhi::Allocator alloc;
-    rhi::Uploader up;
-    rhi::FrameRing ring;
+struct Gpu : render::test::GpuCore {
     render::Renderer renderer;
     ui::HudRenderer hud;
 };
 
-struct Offscreen {
-    rhi::Image color, depth;
-    rhi::Buffer readback;
-    uint32_t w = 0, h = 0;
-    bool create(Gpu& g, uint32_t width, uint32_t height) {
-        w = width;
-        h = height;
-        rhi::ImageDesc cd;
-        cd.format = rhi::Format::RGBA8;
-        cd.width = w;
-        cd.height = h;
-        cd.usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT;
-        rhi::ImageDesc dd = cd;
-        dd.format = rhi::Format::D32F;
-        dd.usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT;
-        return g.alloc.create_image(cd, color) && g.alloc.create_image(dd, depth) &&
-               g.alloc.create_buffer(static_cast<VkDeviceSize>(w) * h * 4, VK_BUFFER_USAGE_TRANSFER_DST_BIT,
-                                     rhi::MemoryUsage::Readback, readback);
-    }
-    void destroy(Gpu& g) {
-        g.alloc.destroy(color);
-        g.alloc.destroy(depth);
-        g.alloc.destroy(readback);
-    }
-};
+using Offscreen = render::test::OffscreenWithDepth;  // alamo/render/offscreen.hpp
 
 // Unit box (+-0.5), effect-less (unlit stand-in), grey levels per face (render::debug_box_model lives in
 // alamo_render_sim, which this test does not link).
@@ -524,7 +489,7 @@ void test_gpu_real(Gpu& g, const std::string& src_dir, bool strict) {
                                  ss.pending_pipeline == 0 && ss.translation_pending == 0 && ss.draws > 0 && box.resident();
             if (settled || k == 63) break;
             rr.wait_translations();
-            rr.pipelines().wait_idle();
+            rr.wait_pipelines();
         }
         g.alloc.invalidate(o.readback.alloc);
         const auto* px = static_cast<const uint8_t*>(o.readback.mapped());
@@ -722,7 +687,7 @@ void test_gpu_galactic_faceplate(Gpu& g, const std::string& src_dir) {
             const bool settled = ss.pending_pipeline == 0 && ss.translation_pending == 0 && ss.draws > 0 && drawer.resident();
             if (settled || k == 63) break;
             rr.wait_translations();
-            rr.pipelines().wait_idle();
+            rr.wait_pipelines();
         }
         g.alloc.invalidate(o.readback.alloc);
         const auto* px = static_cast<const uint8_t*>(o.readback.mapped());

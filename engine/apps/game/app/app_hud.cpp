@@ -1,23 +1,29 @@
 // alamo_game App: galactic / tactical HUD frame building (split from game_main.cpp).
 #include "game_app.hpp"
 
+#include "alamo/assets/texture.hpp"
+#include "alamo/sim/map_spawn.hpp"  // ui4 t04: TypeCrcIndex for the land-map UI markers
+#include "alamo/terrain/ted.hpp"
+
 namespace alamo_game_app {
 
 // ------------------------------------------------------------------------------------------------ HUD frames
-// g_planet_fleet faction symbol index of `player` (0 rebel, 1 empire, 2 pirate, 3 underworld, 4 hutt) by faction name
-// [port]; -1 unknown.
+// g_planet_fleet faction-emblem index of `player`: GALAXY_MAP_PRESENTATION §1.4, 0x3d18f0 maps the faction NAME to the
+// Icon_Alternate list - Rebel 0, Empire 1, Pirate 2, Underworld 3, any other faction 4 (a retail hard-code, so a mod's
+// factions get emblem 4 as in the original; modc t20: exact names, any case, instead of the port's old substring match;
+// [M] which of the strings "Pirate" / "Pirates" 0x3d18f0 compares - both are in the string table). -1 = no player.
 int32_t App::galactic_faction_icon(const galactic::GalacticSim& g, int32_t player) const {
     if (player < 0 || static_cast<size_t>(player) >= g.players().size()) return -1;
     const uint32_t fi = g.players()[static_cast<size_t>(player)].faction;
     if (fi >= g.rules().factions.size()) return -1;
-    std::string n = g.rules().factions[fi].name;
-    for (char& c : n) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
-    if (n.find("rebel") != std::string::npos) return 0;
-    if (n.find("empire") != std::string::npos) return 1;
-    if (n.find("pirate") != std::string::npos) return 2;
-    if (n.find("underworld") != std::string::npos) return 3;
-    if (n.find("hutt") != std::string::npos) return 4;
-    return -1;
+    const std::string_view n = g.rules().factions[fi].name;
+    // [name-ok-begin: retail hard-code, GALAXY_MAP_PRESENTATION.md §1.4 0x3d18f0 (emblem index by faction name)]
+    if (ascii_iequals(n, "Rebel")) return 0;
+    if (ascii_iequals(n, "Empire")) return 1;
+    if (ascii_iequals(n, "Pirate") || ascii_iequals(n, "Pirates")) return 2;
+    if (ascii_iequals(n, "Underworld")) return 3;
+    // [name-ok-end]
+    return 4;
 }
 
 // R2 t01: the owner faction's colour from the Factions.xml table (render::load_faction_colors), not a guess: text = true
@@ -40,10 +46,10 @@ ui::Rgba8 App::faction_rgba(const galactic::GalacticSim& g, int32_t player, bool
 // planet (surface and orbit), and one stack per fleet (count = members, 1..5) plus one land-force stack per owner.
 // GALAXY_MAP_PRESENTATION §1.4 (0x3d15b0): the representative unit of a fleet / land force - every unit competes on max
 // tactical health (Tactical_Health; a hero needs >=, a non-hero >); with the hero filter (b_filters3) on, the hero with the
-// lowest Ranking_In_Category wins. [port] the hero filter state is not fed to the host yet (off); transports'
+// lowest Ranking_In_Category wins (ui4 t03: GalacticHud::filter_bits fed back as hero_filter_); transports'
 // cargo is already in the fleet contents.
 std::string App::representative_icon(std::span<const objects::ObjectHandle> units, bool hero_filter) const {
-    const galactic::GalacticSim* g = session_ ? session_->galaxy() : nullptr;
+    const galactic::GalacticSim* g = galaxy();
     if (!g) return {};
     const objects::ObjectStore& st = g->store();
     objects::TypeIndex best = objects::kNone, hero = objects::kNone;
@@ -74,7 +80,7 @@ std::string App::representative_icon(std::span<const objects::ObjectHandle> unit
 void App::planet_icons(const galactic::GalacticSim& g, PlanetIndex row, ui::GalacticPlanetInfo& out) const {
     const objects::ObjectStore& st = g.store();
     const galactic::PlanetState& ps = g.planets()[row];
-    auto icon = [this](objects::TypeIndex t) { return t < ui_.hud_types.size() ? ui_.hud_types[t].icon_name : std::string(); };
+    auto icon = [this](objects::TypeIndex t) { return type_icon(t); };
     auto is_hero = [this](objects::TypeIndex t) { return t < ui_.hud_types.size() && ui_.hud_types[t].is_hero; };
     // GRC 2 / REMAINING_GAPS §6.3 (can_see_planet_info for the local player): other players' forces show only as far as
     // the planet's visibility allows - fleet stacks with FleetPresence (one stack per owner unless NumFleets), their
@@ -105,6 +111,7 @@ void App::planet_icons(const galactic::GalacticSim& g, PlanetIndex row, ui::Gala
             out.hero_rebel = out.hero_rebel || fx == 0;
             out.hero_empire = out.hero_empire || fx == 1;
             out.hero_underworld = out.hero_underworld || fx == 3;
+            if (!friendly(st.owner(h)) && out.enemy_hero < 0) out.enemy_hero = fx == 1 ? 1 : 0;  // ui4 t03 g_enemy_hero
             continue;
         }
         ++land[st.owner(h)];
@@ -115,6 +122,13 @@ void App::planet_icons(const galactic::GalacticSim& g, PlanetIndex row, ui::Gala
         }
     }
     if (best_t != objects::kNone) out.garrison_icon = icon(best_t);
+    // mcx4 t14 (MCX4_PRES_RE_ANSWERS_3 Q2): the name label's class from the live ground structures, when the local player
+    // sees the ground base info (0x50b840); else class 0.
+    if (g.can_see_groundbase_info(me, row)) {
+        size_t n = 0;
+        for (const objects::ObjectHandle h : ps.structures) n += st.alive(h) ? 1u : 0u;
+        out.label_class = ui::planet_label_class(n, hud_consts_.medium_planet_structures, hud_consts_.large_planet_structures);
+    }
     // GALAXY_MAP_PRESENTATION §1.3 / §1.4: one button per orbiting fleet - unit count, the representative unit's icon,
     // stealth (every unit galactic-stealthed) / raid (ConflictManager::raid_force) badges, enemy flag; the fleet's own
     // orbit slot comes from the sim (FleetState::slot, playtest 3 t07; -1 = first free; the ui moves enemy fleets to
@@ -132,7 +146,14 @@ void App::planet_icons(const galactic::GalacticSim& g, PlanetIndex row, ui::Gala
         s.owner_color = faction_rgba(g, owner, false, ui::Rgba8{});  // §1.4 secondary colour (white when the table has none)
         s.units = contents ? static_cast<uint32_t>(live.size()) : 1u;
         s.count = std::clamp<uint32_t>(s.units, 1, 5);
-        if (contents || most_powerful) s.icon = representative_icon(live);
+        if (contents || most_powerful) s.icon = representative_icon(live, hero_filter_);  // ui4 t03: b_filters3
+        // ui4 t03 g_enemy_hero: a seen enemy hero in orbit too [port] (Icon_Alternate 1 = i_icon_empire_hero).
+        if (contents && !friendly(owner) && out.enemy_hero < 0)
+            for (const objects::ObjectHandle m : live)
+                if (is_hero(st.type(m))) {
+                    out.enemy_hero = galactic_faction_icon(g, owner) == 1 ? 1 : 0;
+                    break;
+                }
         s.enemy = owner != me;
         s.stealth = all_stealth;
         s.raid = !s.stealth && cm && cm->raid_force(owner, live);
@@ -182,9 +203,239 @@ void App::planet_icons(const galactic::GalacticSim& g, PlanetIndex row, ui::Gala
             std::vector<objects::ObjectHandle> units;
             for (const objects::ObjectHandle h : ps.surface)
                 if (st.alive(h) && st.owner(h) == owner) units.push_back(h);
-            s.icon = representative_icon(units);
+            s.icon = representative_icon(units, hero_filter_);
         }
         out.stacks.push_back(std::move(s));
+    }
+}
+
+// ui4 t03 / t10 (GALAXY_MAP_PRESENTATION §1.7, 0x3ec380): the status icons and the corruption line of planet `row` for the
+// local player. g_build: the local player owns the planet and one of its production queues has an entry. g_smuggler /
+// g_smuggled: an income siphon runs there, by the local player / by another player (every viewer sees it).
+// g_corruption_icon: a corrupted planet shows GameConstants Corruption_Planet_Icon[type] (with b_filters2); an
+// uncorrupted one shows entry 8 (i_icon_corruption_info) when the local faction has Benefits_From_Corruption.
+// g_corruption_text: while a corruption transition runs, (int)(fraction x 100) in TEXT_CORRUPTION_PERCENT /
+// TEXT_CORRUPTION_REMOVE_PERCENT (GALACTIC_REVEAL_CORRUPTION §4.6), shown to every viewer.
+bool App::local_benefits_from_corruption(const galactic::GalacticSim& g) const {
+    const int32_t me = local_player();
+    if (me < 0 || static_cast<size_t>(me) >= g.players().size()) return false;
+    const uint32_t fx = g.players()[static_cast<size_t>(me)].faction;
+    return fx < g.rules().factions.size() && g.rules().factions[fx].benefits_from_corruption;
+}
+
+// ---- ui4 t04: the planet map (GALACTIC_PLANET_MAP) -------------------------------------------------------------------
+// §1.1: a selected planet in galactic mode with an accessible surface; for a planet the local player does not own, ground
+// the local player may see (GroundCompanyContents: the corruption bypass, the Planet_Groundbase_Stealth gate, the
+// visibility bit) - then `foreign` is set.
+bool App::planet_map_allowed(bool& foreign) const {
+    foreign = false;
+    const galactic::GalacticSim* g = galaxy();
+    if (!g || screen() != Screen::Galactic || selected_planet_ == 0) return false;
+    const PlanetIndex row = planet_index(*g, selected_planet_);
+    if (row == kInvalidPlanet || !g->surface_accessible(row)) return false;
+    const int32_t me = local_player();
+    if (g->planets()[row].owner == me) return true;
+    using PI = galactic::GalacticSim::PlanetInfo;
+    if (!g->can_see_planet_info(me, row, PI::GroundCompanyContents)) return false;
+    foreign = true;
+    return true;
+}
+
+void App::set_planet_map(bool open) {
+    bool foreign = false;
+    // §1.1 condition 2: no FoC ability dialog (corruption, sabotage, black market / slice, hack) open. A refused open does
+    // nothing (no sound, no text).
+    const bool dialog = corruption_.open() || sabotage_.open() || market_.open() || slice_.open() || hack_.open();
+    if (open && (planet_map_open_ || dialog || !gview_.camera().zoomed() || !planet_map_allowed(foreign))) return;
+    planet_map_open_ = open;
+    planet_map_planet_ = open ? selected_planet_ : 0u;
+    map_marker_sent_.clear();
+}
+
+const App::PlanetMapMarkers& App::planet_map_markers(objects::TypeIndex planet_type) {
+    auto [it, fresh] = planet_map_markers_.try_emplace(planet_type);
+    if (!fresh || planet_type == objects::kNone || planet_type >= data_.types.size() || !data_.files) return it->second;
+    const std::string_view map = ascii_trim(data_.types.get_string(planet_type, "Land_Tactical_Map"));
+    if (map.empty()) return it->second;
+    terrain::MapData md;
+    terrain::ParseOptions po;
+    po.objects = false;
+    po.zones = false;
+    if (!terrain::load_map(*data_.files, map, md, nullptr, po)) return it->second;
+    it->second.world_width = md.info.world_width;
+    const sim::TypeCrcIndex index(data_.types);
+    const auto& names = data_.types.raw().types().name;
+    for (const terrain::PreviewObject& o : md.preview_objects) {
+        const objects::TypeIndex t = index.find(o.type_crc);
+        if (t == objects::kNone || t >= names.size()) continue;
+        game::PlanetMapMarker m;
+        m.id = static_cast<int32_t>(o.object_id);
+        m.x = o.position.x;
+        m.y = o.position.y;
+        for (const std::string_view tok : data_.types.get_list(t, "Marker_For_Specific_Object_Type"))
+            if (const objects::TypeIndex x = data_.types.resolve_name(ascii_trim(tok)); x != objects::kNone) m.specific.push_back(x);
+        m.cls = game::classify_map_marker(names[t], !m.specific.empty());
+        if (m.cls != game::MapMarkerClass::None) it->second.markers.push_back(std::move(m));
+    }
+    return it->second;
+}
+
+void App::planet_map_feed(ui::GalacticPlanetMap& m) {
+    const galactic::GalacticSim* g = galaxy();
+    if (!g) return;
+    const PlanetIndex row = planet_index(*g, selected_planet_);
+    if (row == kInvalidPlanet) return;
+    const galactic::PlanetState& ps = g->planets()[row];
+    const objects::ObjectStore& st = g->store();
+    const int32_t me = local_player();
+    planet_map_allowed(m.foreign);
+    m.planet = selected_planet_;
+    const auto pt = static_cast<objects::TypeIndex>(ps.type);
+    auto icon = [&](uint32_t t) { return t < ui_.hud_types.size() ? ui_.hud_types[t].icon_name : std::string(); };
+    if (pt != objects::kNone && pt < data_.types.size()) {  // §3.1 picture, §1.2 step 6 icons
+        m.picture = ui::planet_info_map_icon(ascii_trim(data_.types.get_string(pt, "Land_Tactical_Map")));
+        m.weather_icon = std::string(data_.types.get_string(pt, "Encyclopedia_Weather_Icon"));
+        m.ability_icon = std::string(data_.types.get_string(pt, "Planet_Ability_Icon"));
+    }
+    m.images = &hud_images_;
+    // §4: pads from the markers, the structures (§4.4) and the owner's landed units (§4.5).
+    const PlanetMapMarkers& mk = planet_map_markers(pt);
+    std::vector<game::PlanetMapPad> pads = game::planet_map_pads(mk.markers);
+    std::vector<game::PlanetMapStructure> structures;
+    int32_t live_structures = 0;
+    for (const objects::ObjectHandle h : ps.structures) {
+        if (!st.alive(h)) continue;
+        ++live_structures;
+        const objects::TypeIndex t = st.type(h);
+        game::PlanetMapStructure s;
+        s.object = static_cast<uint32_t>(st.id(h));
+        s.type = t;
+        const std::string_view base = ascii_trim(data_.types.get_string(t, "Base_Position"));
+        s.base = ascii_iequals(base, "In_Base") ? uint8_t{1} : ascii_iequals(base, "Out_Base") ? uint8_t{2} : uint8_t{0};
+        if (const galactic::GalacticSim::StructureSlot* sl = g->structure_slot(st.id(h))) s.marker = sl->marker;
+        const objects::TypeIndex other =
+            data_.types.resolve_name(ascii_trim(data_.types.get_string(t, "Place_Other_Type_At_Every_Specific_Marker_Position")));
+        s.place_other = other != objects::kNone ? other : game::kNoMapType;
+        for (const std::string_view tok : data_.types.get_list(t, "Tactical_Additional_Structure_Type"))
+            if (const objects::TypeIndex x = data_.types.resolve_name(ascii_trim(tok)); x != objects::kNone) s.additional.push_back(x);
+        structures.push_back(std::move(s));
+    }
+    std::vector<game::MapMarkerSend> sends;  // ui4 t13: the SetMarkerID commands of this rebuild (§4.4 step 3, §4.5)
+    game::place_map_structures(
+        pads, structures,
+        [this](uint32_t t) {
+            return t < data_.types.size() ? data_.types.get_float(static_cast<objects::TypeIndex>(t), "Base_Shield_Radius") : 0.0f;
+        },
+        &sends);
+    std::vector<uint32_t> units, unit_types;
+    std::vector<int32_t> unit_markers;
+    for (const objects::ObjectHandle h : ps.surface)
+        if (st.alive(h) && st.owner(h) == ps.owner) {
+            units.push_back(static_cast<uint32_t>(st.id(h)));
+            unit_types.push_back(st.type(h));
+            const galactic::GalacticSim::StructureSlot* sl = g->structure_slot(st.id(h));
+            unit_markers.push_back(sl ? sl->marker : -1);
+        }
+    game::place_map_units(pads, units, unit_types, unit_markers, &sends);
+    // [port] each change once: the feed runs every frame and the command lands a tick later (retail sends on each rebuild).
+    // An entry is dropped as soon as the object's marker in the sim changes at all (this send applied, or another one such as
+    // a pad drop), so a later change back is sent again.
+    auto sim_marker = [g](uint32_t object) {
+        const galactic::GalacticSim::StructureSlot* sl = g->structure_slot(static_cast<objects::ObjectId>(object));
+        return sl ? sl->marker : -1;
+    };
+    for (auto it = map_marker_sent_.begin(); it != map_marker_sent_.end();) {
+        if (sim_marker(it->first) != it->second.before) it = map_marker_sent_.erase(it);
+        else ++it;
+    }
+    for (const game::MapMarkerSend& e : sends) {
+        const auto it = map_marker_sent_.find(e.object);
+        if (it != map_marker_sent_.end() && it->second.sent == e.marker) continue;
+        map_marker_sent_[e.object] = {e.marker, sim_marker(e.object)};
+        submit(commands::ev::set_marker_id(e.object, e.marker), false);
+    }
+    for (const game::PlanetMapPad& p : pads) {
+        ui::GalacticMapPad q;
+        q.unit_pad = p.group == game::MapPadGroup::Unit;
+        q.index = p.index;
+        q.uv = {p.x, p.y};
+        q.icon = p.type != game::kNoMapType ? icon(p.type) : std::string();
+        q.object = p.holds_type ? 0u : p.object;
+        q.tag = p.tag;
+        q.marker = p.marker;
+        q.alt = p.cls == game::MapMarkerClass::Bunker ? 0 : p.cls == game::MapMarkerClass::BuildPad ? 1 : -1;  // §4.2
+        q.dimmed = p.dimmed;
+        q.shield = mk.world_width > 0.0f ? 2.0f * p.shield_radius / mk.world_width : 0.0f;
+        m.pads.push_back(std::move(q));
+    }
+    // §5: the local player's ground units in orbit (their fleets in orbit-slot order), stacked by type.
+    std::vector<const galactic::FleetState*> fleets;
+    for (const galactic::FleetState& fl : g->fleets())
+        if (fl.alive && fl.planet == row && fl.owner == me) fleets.push_back(&fl);
+    std::stable_sort(fleets.begin(), fleets.end(), [](const galactic::FleetState* a, const galactic::FleetState* b) {
+        return static_cast<uint32_t>(a->slot) < static_cast<uint32_t>(b->slot);  // slot -1 last
+    });
+    std::vector<game::MapOrbitUnit> orbit;
+    for (const galactic::FleetState* fl : fleets) {
+        if (!st.alive(fl->object)) continue;
+        for (const objects::ObjectHandle h : fl->contents) {
+            if (!st.alive(h)) continue;
+            const objects::TypeIndex t = st.type(h);
+            if (t >= g->rules().types.size() || g->rules().types[t].kind != galactic::UnitKind::GroundUnit) continue;
+            orbit.push_back({static_cast<uint32_t>(st.id(h)), static_cast<uint32_t>(st.id(fl->object)), t});
+        }
+    }
+    for (const game::MapOrbitStack& o : game::map_orbit_stacks(orbit)) m.orbit.push_back({o.unit, o.fleet, o.count, icon(o.type)});
+    // §7 caps; §5 surface full (0x3f9530 >= Max_Ground_Forces_On_Planet; [port] the land refusal's own rule, so a planet in
+    // battle takes more).
+    m.units = g->surface_forces(row);
+    m.surface_full = !ps.in_battle && m.units >= g->rules().constants.max_ground_forces_on_planet;
+    m.unit_cap = game::kMapUnitPads;  // §7 [M]: the organiser's garrison pad count
+    m.structures = g->ground_base_level(row) < 1 ? 0 : live_structures;
+    m.structure_cap = ps.type < g->rules().types.size() ? g->rules().types[ps.type].ground_structure_slots : -1;
+}
+
+void App::planet_status(const galactic::GalacticSim& g, PlanetIndex row, ui::GalacticPlanetInfo& out) const {
+    const galactic::PlanetState& ps = g.planets()[row];
+    const int32_t me = local_player();
+    if (ps.owner == me)
+        for (uint32_t q = 0; q < 2 && !out.building; ++q) out.building = !g.queue_of(row, q).empty();
+    const bool siphon = ps.siphon_player != galactic::kNoPlayer && g.frame() < ps.siphon_until;
+    out.smuggler = siphon && ps.siphon_player == me;
+    out.smuggled = siphon && ps.siphon_player != me;
+    out.corrupted = g.corrupted(row);
+    {
+        if (!corruption_icons_loaded_) {  // GameConstants Corruption_Planet_Icon (8 types, then the info icon)
+            corruption_icons_loaded_ = true;
+            if (const data::XmlNode& gc = data_.db.constants().element) {
+                std::string word;
+                for (const char c : std::string(gc.child_text("Corruption_Planet_Icon")) + " ") {
+                    if (c == ' ' || c == '\t' || c == '\r' || c == '\n' || c == ',') {
+                        if (!word.empty()) corruption_planet_icons_.push_back(std::move(word));
+                        word.clear();
+                    } else {
+                        word.push_back(c);
+                    }
+                }
+            }
+        }
+        const int32_t idx = out.corrupted ? static_cast<int32_t>(ps.corruption) : (local_benefits_from_corruption(g) ? 8 : -1);
+        if (idx >= 0 && static_cast<size_t>(idx) < corruption_planet_icons_.size()) out.corruption_icon = corruption_planet_icons_[static_cast<size_t>(idx)];
+    }
+    if (g.corruption_transition_active(row)) {
+        const auto pct = static_cast<int32_t>(g.corruption_transition_fraction(row) * 100.0f);
+        const char* key = ps.corruption_removing ? "TEXT_CORRUPTION_REMOVE_PERCENT" : "TEXT_CORRUPTION_PERCENT";
+        const std::u16string* t = ui_.text.find(key);
+        std::u32string line = t ? ui::utf16_to_utf32(*t) : std::u32string();
+        std::u32string num;
+        for (const char c : std::to_string(pct)) num.push_back(static_cast<char32_t>(c));
+        // The text carries a printf field (%d / %s) [M]; without one the number and '%' are appended.
+        size_t at = std::u32string::npos;
+        for (const std::u32string_view f : {std::u32string_view(U"%d"), std::u32string_view(U"%s"), std::u32string_view(U"%i")})
+            if (at == std::u32string::npos) at = line.find(f);
+        if (at != std::u32string::npos) line.replace(at, 2, num);
+        else line += (line.empty() ? U"" : U" ") + num + U"%";
+        out.corruption_text = std::move(line);
     }
 }
 
@@ -260,7 +511,7 @@ std::u32string App::battle_place_name(PlanetIndex planet) const {
 // QA t16 (UI.md §5.1 step 1, §5.2): fills the load dialog from the planet type's text, as IDD_PLANET_INFO (GALACTIC_DIALOGS
 // §9.2) [inferred: the same fields; the fill function of the load dialog is not traced field by field]. QA t11: the sim
 // is held until it has been presented (end_load_intro_frame); no load moved off this thread.
-bool App::open_battle_load(PlanetIndex planet, bool space) {
+bool App::open_battle_load(PlanetIndex planet, bool space, bool mission) {
     if (ui_.load.is_open()) return true;
     if (!session_) return false;
     const bool skirmish = session_->spec().kind == SessionKind::Skirmish;
@@ -307,7 +558,13 @@ bool App::open_battle_load(PlanetIndex planet, bool space) {
     info.map_icon = std::move(d.map_icon);
     info.native_icon = std::move(d.native_icon);
     info.begin_button = !session_->spec().attract;  // OI host: the attract demo starts as soon as it is loaded
-    const ui::LoadScreenKind kind = skirmish ? ui::LoadScreenKind::Skirmish : space ? ui::LoadScreenKind::SpaceBattle : ui::LoadScreenKind::LandBattle;
+    // UI.md §5.1 "Which dialog" (ui5 t10): `mission` (a SET_TACTICAL_MAP override or a save taken in the battle) takes the
+    // Mission pair (a skirmish save too: retail's load path clears the skirmish flag), a skirmish start the skirmish
+    // dialog, every other battle the Battle pair.
+    const ui::LoadScreenKind kind = mission    ? (space ? ui::LoadScreenKind::SpaceMission : ui::LoadScreenKind::LandMission)
+                                    : skirmish ? ui::LoadScreenKind::Skirmish
+                                    : space    ? ui::LoadScreenKind::SpaceBattle
+                                              : ui::LoadScreenKind::LandBattle;
     screens_.close_planet_info();  // GALACTIC_DIALOGS §9.4: IDD_PLANET_INFO never survives into a battle
     ui_.load.set_progress_source([this] { return bview_.active() ? bview_.load_progress() : 0.0f; });
     if (!ui_.load.open(ui_.gui, kind, info)) return false;
@@ -330,7 +587,7 @@ void App::end_load_intro_frame() {
         if (load_intro_frames_ == 0) std::printf("load screen: %u frames presented before the blocking load\n", load_intro_shown_);
         return;
     }
-    if (screen_ == Screen::Galactic && ui_.load.is_open() && session_ && !session_->in_battle() &&
+    if (screen() == Screen::Galactic && ui_.load.is_open() && session_ && !session_->in_battle() &&
         session_->host().frame() > load_open_tick_ + kLoadIntroMaxTicks) {
         ui_.load.close();
         audio_.music(MusicScene::Galactic, local_faction());
@@ -339,8 +596,9 @@ void App::end_load_intro_frame() {
 
 void App::build_galactic_hud(ui::GalacticHudFrame& f, std::vector<ui::GalacticPlanetInfo>& planets) {
     const uint32_t w = targets_.width, h = targets_.height;
-    const galactic::GalacticSim* g = session_ ? session_->galaxy() : nullptr;
+    const galactic::GalacticSim* g = galaxy();
     f.view = ui::make_view(gview_.camera_params(w, h), w, h);
+    f.objectives_open = story_present_.objectives_shown();  // ui2 t06: ENABLE_OBJECTIVE_DISPLAY
     planets.clear();
     for (const render::GalacticPlanetSnap& p : gview_.frame().planets) {
         if (!(p.flags & render::kGalPlanet) || (p.flags & render::kGalHidden) || p.id == objects::kNoObjectId) continue;
@@ -375,7 +633,20 @@ void App::build_galactic_hud(ui::GalacticHudFrame& f, std::vector<ui::GalacticPl
         i.political_control = p.control;
         i.space_level = p.starbase_level > 0 ? p.starbase_level : -1;
         i.ground_level = p.ground_level > 0 ? p.ground_level : -1;
+        // ui4 t10 (GALAXY_MAP_PRESENTATION §1.7): the pip rows' lengths - the planet type's Max_Space_Base (0x372780) and
+        // Special_Structures_Land (0x372740) [port: the per-planet overrides of planet data +0x230 / +0x238 are not kept].
+        if (g && p.row < g->planets().size() && g->planets()[p.row].type < g->rules().types.size()) {
+            const galactic::TypeInfo& pt = g->rules().types[g->planets()[p.row].type];
+            i.space_max = std::min(pt.max_space_base, 5);
+            i.ground_max = std::min(pt.ground_structure_slots, 9);
+        }
         i.conflict = (p.flags & render::kGalInBattle) != 0;
+        // ui4 t03 [port]: weather / ability icons from the planet type (b_filters2), the status icons and the corruption line.
+        if (p.type != objects::kNone && p.type < data_.types.size()) {
+            i.weather_icon = std::string(data_.types.get_string(p.type, "Encyclopedia_Weather_Icon"));
+            i.ability_icon = std::string(data_.types.get_string(p.type, "Planet_Ability_Icon"));
+        }
+        if (g && p.row < g->planets().size()) planet_status(*g, p.row, i);
         if (g && p.row < g->planets().size()) {  // OI host: REMAINING_GAPS §6.3 display gates for the local player
             i.starbase_info = g->can_see_starbase_info(local_player(), p.row);
             i.groundbase_info = g->can_see_groundbase_info(local_player(), p.row);
@@ -386,6 +657,11 @@ void App::build_galactic_hud(ui::GalacticHudFrame& f, std::vector<ui::GalacticPl
                 i.political_control = -1.0f;
             // Text_Planetary_Income (GALACTIC_DIALOGS §5.3), behind the same gate as the planet tooltips. GalacticSim::planet_income
             // refreshes the sim's lists, so the host only reads: the last fiscal cycle's entries, else Planet_Credit_Value [port].
+            {
+                const galactic::PlanetState& ps0 = g->planets()[p.row];
+                // §1.7 g_planet_value without the income visibility: the planet base value.
+                if (ps0.type < g->rules().types.size()) i.credits = ps0.destroyed ? g->rules().types[ps0.type].destroyed_credit_value : ps0.base_value;
+            }
             if (!i.fogged && g->can_see_planet_info(local_player(), p.row, galactic::GalacticSim::PlanetInfo::CreditIncome)) {
                 const galactic::PlanetState& ps = g->planets()[p.row];
                 float sum = ps.income.empty() && ps.type < g->rules().types.size() ? static_cast<float>(g->rules().types[ps.type].credit_value) : 0.0f;
@@ -394,13 +670,14 @@ void App::build_galactic_hud(ui::GalacticHudFrame& f, std::vector<ui::GalacticPl
                 const float net = g->frame() <= ps.halt_until ? 0.0f
                                   : galactic::econ::income_finish(sum, ps.min_income_set, ps.min_income, ps.max_income_set, ps.max_income, false, 0.0f, &siphoned);
                 i.income = static_cast<int64_t>(std::lround(net));
-                // g_planet_value: TEXT_TOOLTIP_CREDIT_FILTER "credit value of planets" = the planet base value (GALACTIC_ECONOMY §1.4)
-                // [M: which number the text prints is read from the tooltip, no capture with the filter on].
-                if (ps.type < g->rules().types.size()) i.credits = ps.destroyed ? g->rules().types[ps.type].destroyed_credit_value : ps.base_value;
+                // §1.7 g_planet_value with the income visibility (0x50b2a0): the planet's income (Planet_Income, gross 0) [port: the
+                // last fiscal cycle's net, as Text_Planetary_Income].
+                i.credits = static_cast<int32_t>(std::max<int64_t>(0, i.income));
             }
         }
         planets.push_back(std::move(i));
     }
+    hero_filter_ = (ui_.galactic_hud.filter_bits() & ui::kFilterHero) != 0;  // read by planet_icons next frame
     f.planets = planets;
     hud_planet_ids_.clear();
     for (const ui::GalacticPlanetInfo& i : planets) hud_planet_ids_.push_back(i.planet);
@@ -434,8 +711,15 @@ void App::build_galactic_hud(ui::GalacticHudFrame& f, std::vector<ui::GalacticPl
     // GALACTIC_DIALOGS §4: the advanced planet map is the FoC planet map entered by the organiser's advanced_planetary
     // ("Base Layout") button - not the zoomed planet view. [port] it closes when the close-up or the selection ends; the
     // map screen itself is not built yet (only map_shell is shown).
-    if (planet_map_open_ && (!gview_.camera().zoomed() || selected_planet_ == 0)) planet_map_open_ = false;
+    // ui4 t04 (GALACTIC_PLANET_MAP §1.3): closed when the close-up or the selection ends, another planet is selected, or a
+    // foreign planet's ground can no longer be seen (the per-frame check of 0x3e4cb0).
+    if (planet_map_open_) {
+        bool foreign = false;
+        if (!gview_.camera().zoomed() || selected_planet_ == 0 || selected_planet_ != planet_map_planet_ || !planet_map_allowed(foreign))
+            set_planet_map(false);
+    }
     f.advanced_map_open = planet_map_open_;
+    if (planet_map_open_) planet_map_feed(f.planet_map);
     if (f.advanced_map_open != map_shell_open_) {
         map_shell_open_ = f.advanced_map_open;
         for (const ui::ShellSet::Shell& s : ui_.galactic_shells.shells())
@@ -446,7 +730,8 @@ void App::build_galactic_hud(ui::GalacticHudFrame& f, std::vector<ui::GalacticPl
     // GALACTIC_DIALOGS §1 banner, §2.1 holocron flash, screen text ([port] each line 6 s, the last second fading).
     if (choice_open_) {
         f.battle.active = true;
-        f.battle.single = prompt_.story_pending;
+        f.battle.single = prompt_.story_pending || prompt_.no_autoresolve;
+        f.battle.color = hud_consts_.battle_pending_color;  // mcx4 t15: Battle_Pending_Message_Color
         f.battle.space = !prompt_.land;
         f.battle.planet = prompt_.planet_name;
         f.battle.left = {prompt_.left.icon, prompt_.left.units, static_cast<int32_t>(prompt_.left.stacks)};
@@ -505,6 +790,7 @@ void App::build_galactic_hud(ui::GalacticHudFrame& f, std::vector<ui::GalacticPl
             gf.fleet = st.alive(fl.object) ? static_cast<uint32_t>(st.id(fl.object)) : 0u;
             gf.slot = fl.slot;
             gf.enemy = fl.owner != me;
+            gf.name = ui::utf8_to_utf32(gs->object_name(fl.object));  // [port: Gabriel] fleet / ship names
             bool all_stealth = true;
             for (const objects::ObjectHandle m : fl.contents) {
                 if (!st.alive(m)) continue;
@@ -514,37 +800,45 @@ void App::build_galactic_hud(ui::GalacticHudFrame& f, std::vector<ui::GalacticPl
                     continue;
                 }
                 const objects::TypeIndex t = st.type(m);
-                gf.units.push_back({static_cast<uint32_t>(st.id(m)), t < types->size() ? (*types)[t].icon_name : std::string(), 1, false, t});
+                gf.units.push_back({static_cast<uint32_t>(st.id(m)), t < types->size() ? (*types)[t].icon_name : std::string(), 1, false, t,
+                                    ui::utf8_to_utf32(gs->object_name(m))});
             }
             if (gf.units.empty() || gf.fleet == 0 || (!own && all_stealth)) continue;
             out.push_back(std::move(gf));
         }
     };
     // OI host: build bar = GalacticSim::buildable (type-index order) at the planet for the local player; cost =
-    // Build_Cost_Credits [port: no cost modifiers], enabled = affordable [port], structure = ground / orbital structure or
-    // starbase (b_Create_NN); production_disabled = the player's production-disabled list (REMAINING_GAPS §1.5).
-    f.providers.build_options = [s, types](uint32_t planet, std::vector<ui::GalacticBuildOption>& out) {
+    // GalacticSim::build_cost_for at the planet (ui4 t02, A2K_T01 §1: planet / player price modifiers such as the Emperor's
+    // discount, the corruption price multiplier, the tech-upgrade multiplier), block = GalacticSim::can_enqueue's reason
+    // (queue full, pop cap, funds; const reads, no side effects), enabled = no block, queued = the local player's entries of
+    // the type in the planet's queues; structure = ground / orbital structure or starbase (b_Create_NN);
+    // production_disabled = the player's production-disabled list (REMAINING_GAPS §1.5).
+    // ui4 t12 (GALACTIC_DIALOGS §5.1.1): row = GUI_Row 0 -> 0 (lower pads), else 1 (upper pads).
+    f.providers.build_options = [s, types, otypes = &data_.types](uint32_t planet, std::vector<ui::GalacticBuildOption>& out) {
         const galactic::GalacticSim* gs = s ? s->galaxy() : nullptr;
         if (!gs) return;
         const PlanetIndex pi = planet_index(*gs, planet);
         if (pi == kInvalidPlanet) return;
-        const int32_t me = s->local_player();
-        const float credits = gs->credits(me);
-        for (const uint32_t t : gs->buildable(pi, me)) {
-            if (t >= gs->rules().types.size() || t > 0xFFFFu) continue;
-            const galactic::TypeInfo& ti = gs->rules().types[t];
-            ui::GalacticBuildOption o;
-            o.type_index = static_cast<uint16_t>(t);
-            o.icon = t < types->size() ? (*types)[t].icon_name : std::string();
-            o.cost = ti.build_cost;
-            o.enabled = static_cast<float>(ti.build_cost) <= credits;
-            o.structure = galactic::is_ground_structure_type(ti) || galactic::is_orbital_structure_type(ti) || galactic::is_star_base_type(ti);
-            o.production_disabled = gs->production_disabled(me, t);
-            // GALACTIC_DIALOGS §5.1: the space tab = space-queue units, starbases and orbital structures.
-            o.space = gs->queue_kind(t) == galactic::kSpaceQueue || galactic::is_star_base_type(ti) || galactic::is_orbital_structure_type(ti);
-            out.push_back(std::move(o));
-        }
+        out = galactic_build_options(*gs, s->local_player(), pi,
+                                     [types](uint32_t t) { return t < types->size() ? (*types)[t].icon_name : std::string(); });
+        // mcx4 t14 (§5.1.1 step 1): a type with no Build_Tab_* flag is never listed.
+        std::erase_if(out, [otypes](const ui::GalacticBuildOption& o) {
+            const auto t = static_cast<objects::TypeIndex>(o.type_index);
+            return o.type_index >= otypes->size() ||
+                   !game::galactic_build_listed([otypes, t](std::string_view tag) { return otypes->get_bool(t, tag); });
+        });
+        for (ui::GalacticBuildOption& o : out)
+            o.row = otypes->get_int(static_cast<objects::TypeIndex>(o.type_index), "GUI_Row") == 0 ? 0 : 1;
     };
+    // §5.1.1 (0x3e8a80): an inaccessible (or destroyed) surface forces the space tab.
+    if (g && selected_planet_ != 0)
+        if (const PlanetIndex spi = planet_index(*g, selected_planet_); spi != kInvalidPlanet) {
+            f.land_tab_allowed = g->surface_accessible(spi);
+            // ui4 t10 (§1.7): Text_Land_Fleet's gates - a destroyed planet, the ground forces' visibility (0x50ba40).
+            f.planet_destroyed = g->planets()[spi].destroyed;
+            f.ground_forces_unknown = g->planets()[spi].owner != local_player() &&
+                                      !g->can_see_planet_info(local_player(), spi, galactic::GalacticSim::PlanetInfo::GroundCompanyContents);
+        }
     // GALACTIC_DIALOGS §5.2: the selected planet's build queues (the local player's entries, head first): space queue on
     // queue00..04, ground queue on queue05..09 (HudQueueEntry::land); the head's timer gives the dial. A click cancels
     // through Production {cancel, queue, index} at the planet.
@@ -576,7 +870,7 @@ void App::build_galactic_hud(ui::GalacticHudFrame& f, std::vector<ui::GalacticPl
     };
     // OI host: g_special_ability rows = the local player's Ground_Activated special-ability units at the planet.
     f.providers.special_abilities = [this](uint32_t planet, std::vector<ui::GalacticSpecialAbility>& out) {
-        const galactic::GalacticSim* gs = session_ ? session_->galaxy() : nullptr;
+        const galactic::GalacticSim* gs = galaxy();
         if (!gs) return;
         const objects::ObjectStore& st = gs->store();
         for (const objects::ObjectHandle h : special_units(*gs, planet_index(*gs, planet))) {
@@ -584,6 +878,13 @@ void App::build_galactic_hud(ui::GalacticHudFrame& f, std::vector<ui::GalacticPl
             r.hero = static_cast<uint32_t>(st.id(h));
             const objects::TypeIndex t = st.type(h);
             r.text = type_label(data_, ui_.text, t);
+            // mcx4 t14 (MCX4_T09_RE_ANSWERS Q6, 0x3d2020 / 0x3e8890): the activated-ability slot's label names the button
+            // (TEXT_ABILITY_SLOT_SLICE, ...); a kind without a label keeps the unit's name.
+            if (const galactic::ActivatedAbilitySlot slot = gs->activated_ability_slot(h, planet_index(*gs, planet));
+                slot.kind >= 0 && slot.label && slot.label[0] != '\0') {
+                r.text.clear();
+                r.text_key = slot.label;
+            }
             if (t < ui_.hud_types.size()) r.icon = ui_.hud_types[t].icon_name;
             out.push_back(std::move(r));
         }
@@ -597,13 +898,22 @@ void App::build_tactical_hud() {
     hf.world.view = ui::make_view(bview_.camera_params(w, h), w, h);
     hf.world.land = !bview_.space();
     hf.world.local_player = local_player();
+    // UI.md selection circle: the owner faction's Land_ / Space_Mode_Selection_Blob_Material_Name (modc t20: by data).
+    if (const galactic::GalacticSim* gs = galaxy())
+        hf.world.selection_material = [gs](int32_t owner, bool land, bool) {
+            if (owner < 0 || static_cast<size_t>(owner) >= gs->players().size()) return std::string();
+            const uint32_t f = gs->players()[static_cast<size_t>(owner)].faction;
+            if (f >= gs->rules().factions.size()) return std::string();
+            const galactic::FactionRules& fr = gs->rules().factions[f];
+            return land ? fr.land_selection_blob : fr.space_selection_blob;
+        };
     if (tm && tm->bounds().max.x - tm->bounds().min.x < 1.0e5f) {
         hf.map_min_x = tm->bounds().min.x;
         hf.map_min_y = tm->bounds().min.y;
         hf.map_max_x = tm->bounds().max.x;
         hf.map_max_y = tm->bounds().max.y;
     }
-    if (const galactic::GalacticSim* g = session_ ? session_->galaxy() : nullptr) {
+    if (const galactic::GalacticSim* g = galaxy()) {
         hf.credits = static_cast<int64_t>(g->credits(local_player()));
         // ui ask 7: the battle's planet, tech level and population (used / space unit cap).
         hf.tech = g->players()[static_cast<size_t>(local_player())].tech_level;
@@ -615,11 +925,16 @@ void App::build_tactical_hud() {
                                      : planet_label(data_, ui_.text, *g, b->request().info.planet);
             }
             hf.pop = static_cast<int32_t>(std::lround(b->population_used(local_player())));
+            // [port: Gabriel 2026-11-13] fleet cohesion: the battle's setting (space only; O toggles it)
+            if (bview_.space())
+                hf.cohesion_text = b->fleet_cohesion(static_cast<uint8_t>(local_player())) ? U"Fleet cohesion: Tight (O)"
+                                                                                           : U"Fleet cohesion: Loose (O)";
             const float cap = b->population_cap(local_player());
             hf.pop_cap = cap >= 0.0f ? static_cast<int32_t>(std::lround(cap)) : -1;
         }
     }
-    // ui pass 2: the mission objectives box - the story's objectives, else the skirmish win condition [port text].
+    // ui pass 2: the mission objectives box - the story's objectives, else the skirmish win condition: ui3 t07 the retail
+    // TEXT_TACTICAL_PRIMARY_SPACE_ATTACK / _LAND_ATTACK (the HUD numbers the lines itself).
     hud_objectives_.clear();
 #if defined(ALAMO_SIM_HAVE_STORY) && defined(ALAMO_UI_HAVE_LUA)
     if (const sim::StorySession* story = session_ ? session_->host().story() : nullptr)
@@ -627,7 +942,7 @@ void App::build_tactical_hud() {
 #endif
     if (hud_objectives_.empty() && session_ && session_->spec().kind == SessionKind::Skirmish) {
         ui::HudObjective o;
-        o.text = bview_.space() ? U"1. Destroy all enemy space forces to win." : U"1. Destroy all enemy land forces to win.";
+        o.text_key = bview_.space() ? "TEXT_TACTICAL_PRIMARY_SPACE_ATTACK" : "TEXT_TACTICAL_PRIMARY_LAND_ATTACK";
         hud_objectives_.push_back(std::move(o));
     }
     hf.objectives = hud_objectives_;
@@ -643,7 +958,7 @@ void App::build_tactical_hud() {
     // ui asks 3 / 4: the bracket radius from the model's bounding sphere x scale; one unit icon per squadron / unit.
     ui::hud_units_from_frame(bview_.frame(), sel, {}, 0, [this](objects::TypeIndex t) { return bview_.type_radius(t); }, units);
     tactical_hover(hf, units);
-    if (const sim::TacticalBattle* b = session_ ? session_->battle() : nullptr) {
+    if (const sim::TacticalBattle* b = battle()) {
         std::vector<ui::UnitIconLink> icons;  // QA U7: one marker per squadron, at its centre
         for (const sim::TacticalBattle::IconLink& l : b->icon_links())
             icons.push_back({static_cast<uint32_t>(l.unit), static_cast<uint32_t>(l.squad)});
@@ -655,6 +970,8 @@ void App::build_tactical_hud() {
     if (!radar_.empty()) hf.radar_image = &radar_;
     hf.radar_events = &radar_events_;
     hf.radar_settings = &radar_settings_;
+    hf.radar_colorize_selected = hud_consts_.radar_colorize_selected;  // mcx4 t15: Radar_Colorize_Selected_Units
+    hf.radar_selected_color = hud_consts_.radar_selected_color;        // Radar_Selected_Units_Color
     hf.radar_event_models = ui_.radar_models_ok;  // the event .alo models go through ui_.radar_drawer (Models2 step)
     radar_events_.update(dt_);
     queues_.clear();
@@ -663,7 +980,28 @@ void App::build_tactical_hud() {
         const auto it = std::lower_bound(objs.begin(), objs.end(), id, [](const render::SnapshotObject& x, objects::ObjectId v) { return x.id < v; });
         return it != objs.end() && it->id == id ? &*it : nullptr;
     };
-    if (const sim::TacticalBattle* b = session_ ? session_->battle() : nullptr)
+    // mcx4 t14 (MCX4_T14_RE_ANSWERS "GameObjectType.End_Control_Transition_Radar_Event"): a capture point changing hands
+    // raises its type's radar event at the point when the local player is friendly to the old or the new owner.
+    if (const sim::TacticalBattle* b = battle())
+        if (const tactical::garrison::CapturePointSystem* cps = b->captures()) {
+            const auto& cs = b->combat();
+            const int32_t me = local_player();
+            const auto friendly = [&cs, me](int32_t o) { return me >= 0 && o >= 0 && (o == me || !cs.is_enemy(me, o)); };
+            for (size_t i = 0; i < cps->point_count(); ++i) {
+                const auto pid = cps->point_at(i);
+                const int32_t now = cps->owner(pid);
+                const auto [it, fresh] = capture_owner_seen_.try_emplace(static_cast<int64_t>(pid), now);
+                const int32_t was = it->second;
+                it->second = now;
+                if (fresh || !control_transition_ping(was, now, friendly(was), friendly(now))) continue;
+                const render::SnapshotObject* o = obj_of(static_cast<objects::ObjectId>(pid));
+                if (!o || o->type >= data_.types.size()) continue;
+                // ledger: consumes GameObjectType.End_Control_Transition_Radar_Event
+                const std::string_view ev = ascii_trim(data_.types.get_string(o->type, "End_Control_Transition_Radar_Event"));
+                if (!ev.empty()) radar_events_.add(radar_settings_, std::string(ev), o->position.x, o->position.y);
+            }
+        }
+    if (const sim::TacticalBattle* b = battle())
         for (const uint32_t id : sel) {
             const auto q = b->queued_orders(static_cast<objects::ObjectId>(id));
             const render::SnapshotObject* o = obj_of(static_cast<objects::ObjectId>(id));
@@ -694,16 +1032,52 @@ void App::build_tactical_hud() {
     // current movement goal, then those points (sim const reads between ticks). [port] goal height = the unit's.
     // [port] A plain move draws no line (playtest video R1: with a whole fleet selected, one 3 px dotted line per fighter
     // covered the battle and read as laser fire); the original's waypoint line belongs to the Alt-queued path (UI.md 1.5).
+    // [port: Gabriel, 2026-11-13] With Camera and Controls > Show Unit Path Lines on, every moving unit of the local
+    // player, selected or not, gets a line along its planned path (land: the walked path at terrain height; space: the
+    // flown curve of its waypoint track at the unit's height; no path yet: straight to the goal), then its queued move
+    // points: a thin solid line, no destination marker (Gabriel's EaW Remake screenshots, 2026-11-13). One line per
+    // squadron / company: only the unit standing for its marker (icon_links, unit == squad).
     waypoints_.clear();
-    if (const sim::TacticalBattle* b = session_ ? session_->battle() : nullptr)
-        for (const uint32_t id : sel) {
+    const bool path_lines = camera_.show_path_lines;
+    const terrain::MapData* ground = !bview_.space() && bview_.scene() ? &bview_.scene()->map() : nullptr;
+    std::vector<uint32_t> line_units;
+    if (const sim::TacticalBattle* b = battle(); b && path_lines) {
+        for (const sim::TacticalBattle::IconLink& k : b->icon_links())
+            if (k.unit == k.squad) line_units.push_back(static_cast<uint32_t>(k.unit));
+    } else {
+        line_units = sel;
+    }
+    if (const sim::TacticalBattle* b = battle())
+        for (const uint32_t id : line_units) {
             const auto oid = static_cast<objects::ObjectId>(id);
             const render::SnapshotObject* o = obj_of(oid);
             if (!o || o->owner != local_player() || !b->movement().has_unit(oid)) continue;
             const tactical::movement::UnitView v = b->movement().view(oid);
             if (!v.has_goal || v.arrived) continue;
             ui::HudWaypointLine l;
-            l.points.push_back({o->position.x, o->position.y, o->position.z});
+            const ui::Vec3 here{o->position.x, o->position.y, o->position.z};
+            if (path_lines) {
+                auto at = [&](float x, float y) {
+                    return ui::Vec3{x, y, ground ? ground->terrain.sample_height(x, y) + 1.0f : o->position.z};
+                };
+                std::vector<ui::Vec3> path;
+                for (const tactical::movement::V2 p : b->movement().land_path(oid)) path.push_back(at(p.x, p.y));
+                // Space: the flown Hermite curve (turns included), sampled every 40 units / 10 degrees at most.
+                if (path.empty())
+                    for (const tactical::movement::V2 p : tactical::movement::sample_space_path(b->movement().space_path(oid), 40.0f))
+                        path.push_back(at(p.x, p.y));
+                l.points = ui::remaining_route(here, path, at(v.goal.x, v.goal.y));
+                l.color = v.atk_target >= 0 ? ui::kPathLineAttack : ui::kPathLineMove;
+                l.width_px = ui::kPathLineWidthPx;
+                for (const sim::TacticalBattle::QueuedOrder& e : b->queued_orders(oid)) {
+                    if (e.kind != sim::TacticalBattle::QueuedOrder::Kind::Move) continue;
+                    const ui::Vec3 p = at(e.x, e.y);
+                    if (p.x != l.points.back().x || p.y != l.points.back().y) l.points.push_back(p);
+                }
+                if (l.points.size() > 1) waypoints_.push_back(std::move(l));
+                continue;
+            }
+            l.points.push_back(here);
             l.points.push_back({v.goal.x, v.goal.y, o->position.z});
             for (const sim::TacticalBattle::QueuedOrder& e : b->queued_orders(oid)) {
                 if (e.kind != sim::TacticalBattle::QueuedOrder::Kind::Move) continue;
@@ -716,7 +1090,7 @@ void App::build_tactical_hud() {
     // Reinforcement pad: the local player's undeployed reserves (TacticalBattle::reserves, const read between ticks).
     const GameSession* sess = session_.get();
     const std::vector<ui::HudTypeInfo>* htypes = &ui_.hud_types;
-    hf.providers.reinforcements = [sess, htypes](std::vector<ui::HudReinforcement>& out) {
+    hf.providers.reinforcements = [this, sess, htypes](std::vector<ui::HudReinforcement>& out) {
         const sim::TacticalBattle* b = sess ? sess->battle() : nullptr;
         if (!b) return;
         for (const sim::TacticalBattle::Reserve& r : b->reserves(sess->local_player())) {
@@ -724,6 +1098,7 @@ void App::build_tactical_hud() {
             e.unit = static_cast<uint32_t>(r.galactic_id);
             e.icon = r.type < htypes->size() ? (*htypes)[r.type].icon_name : std::string();
             e.count = r.units;
+            e.available = reinforce_available(r.galactic_id);  // ui3 t04: the unit cap / retreat / hold gate of order_reinforce
             out.push_back(std::move(e));
         }
     };
@@ -734,7 +1109,7 @@ void App::build_tactical_hud() {
     // screen centre, where they took the right clicks meant for the world (Thrawn's Revenge land smoke: a select-all
     // holding the Rebel barracks, the camera on an enemy). A builder in front of the camera is drawn as before.
     build_opts_.clear();
-    if (const sim::TacticalBattle* b = session_ ? session_->battle() : nullptr; b && tm && b->production_enabled()) {
+    if (const sim::TacticalBattle* b = battle(); b && tm && b->production_enabled()) {
         const objects::ObjectStore& st = tm->primary();
         for (const uint32_t id : orders_.selection()) {
             if (id > 0x7FFFFFFFu) continue;
@@ -756,6 +1131,10 @@ void App::build_tactical_hud() {
                 e.cost = o.cost;
                 e.queued = o.queued;
                 e.block = static_cast<ui::HudBuildOption::Block>(o.block);
+                // ui3 t07: a buyable option's tooltip = the type's name text (Text_ID) [port: the original's unit tooltip
+                // also draws the price / icon rows of tooltip_price / tooltip_icon]
+                if (static_cast<size_t>(o.type) < data_.types.size())
+                    e.tooltip_key = std::string(ascii_trim(data_.types.get_string(static_cast<objects::TypeIndex>(o.type), "Text_ID")));
                 build_opts_.push_back(std::move(e));
             }
             break;
@@ -785,7 +1164,7 @@ void App::build_tactical_hud() {
     };
 #ifdef ALAMO_UI_HAVE_ABILITIES
     // Command bar ability buttons (special_button_NN) of the selection: S9 read-only queries between ticks.
-    if (const sim::TacticalBattle* b = session_ ? session_->battle() : nullptr)
+    if (const sim::TacticalBattle* b = battle())
         hf.providers.abilities = ui::s9_ability_provider(b->abilities(), [b] { return b->frame(); });
 #endif
     hf.hardpoints = hud_hardpoints_;
@@ -794,7 +1173,7 @@ void App::build_tactical_hud() {
     // HUD_GAPS §5: order buttons from the local player's own selected units; story / Lua Lock_Controls disables all.
     {
         std::vector<OrderUnitState> st;
-        const sim::TacticalBattle* b = session_ ? session_->battle() : nullptr;
+        const sim::TacticalBattle* b = battle();
         for (const uint32_t id : sel) {
             const render::SnapshotObject* o = obj_of(static_cast<objects::ObjectId>(id));
             if (!o) continue;
@@ -806,6 +1185,19 @@ void App::build_tactical_hud() {
         }
         hf.order_buttons = order_buttons(st, local_player(), story_controls_locked());
     }
+    // cu9g t03 (HUD_GAPS §9): the land b_special_weapon = the bombing-run button (disabled, icon 3, tooltip 3, cooldown dial).
+    if (const sim::TacticalBattle* tb = battle()) {
+        hf.bombing_run = bombing_run_button(!bview_.space(), story_controls_locked(), tb->bombing_run_available(local_player()),
+                                            tb->bombing_run_cooldown_fraction(local_player()));
+        if (bview_.space()) {  // ui1 t04 (HUD_GAPS §9.1): the space special-weapon button
+            int32_t icon = -1;
+            float ready = 0.0f;
+            space_weapon(icon, ready);
+            hf.bombing_run = space_weapon_button(true, icon, tb->special_weapons_allowed(local_player()), story_controls_locked(), ready);
+        }
+    }
+    fill_wings(hf);            // [port: Gabriel] squadron wing buttons
+    fill_command_buttons(hf);  // ui3 t03 / t04: b_retreat / b_reinforcement / beacon / movie mode, reinforcement texts
     hud_units_ = units;
     // FIXPASS_GALACTIC §4.2: the advisor *_LOOP Bink in Movie_tactical (the HUD's own component), only while it plays.
     hf.advisor_page = advisor_loop_shown() ? static_cast<int32_t>(kAdvisorPage) : -1;
@@ -856,7 +1248,7 @@ void App::tactical_hover(ui::TacticalHudFrame& hf, std::vector<ui::HudUnit>& uni
     for (ui::HudUnit& u : units) u.hovered = hover != 0 && u.id == hover;
     hud_hardpoints_.clear();
     hud_hp_refs_.clear();
-    const sim::TacticalBattle* b = session_ ? session_->battle() : nullptr;
+    const sim::TacticalBattle* b = battle();
     if (!b || hover == 0 || !bview_.space()) return;
     const tactical::combat::CombatSystem& cs = b->combat();
     const auto id = static_cast<tactical::combat::ObjectId>(hover);
@@ -919,6 +1311,9 @@ bool App::reticle_orders(const ui::OrderContext& ctx, std::vector<commands::Even
         e.set("object", ref.ship).set("hardpoint", ref.index).set("player", static_cast<uint32_t>(local_player()));
         cmds.push_back(std::move(e));
         ++reticle_orders_;
+        // mcx4 t13 (MCX4_T13_RE_ANSWERS "Faction.SFXEvent_HUD_Repairing", cursor action 0x41f70 [H]): the click that queues
+        // the repair plays the local faction's line, 2D, once.
+        audio_.faction_sfx("SFXEvent_HUD_Repairing");  // ledger: consumes Faction.SFXEvent_HUD_Repairing
         return true;
     }
     for (commands::EventData& e : cmds) {
@@ -953,7 +1348,7 @@ bool App::reticle_orders(const ui::OrderContext& ctx, std::vector<commands::Even
 
 // HUD_GAPS §1.4: OR of CombatSystem::can_repair_hardpoints over the local player's selected units.
 bool App::selection_can_repair() const {
-    const sim::TacticalBattle* b = session_ ? session_->battle() : nullptr;
+    const sim::TacticalBattle* b = battle();
     if (!b) return false;
     for (const uint32_t u : orders_.selection()) {
         const auto uid = static_cast<tactical::combat::ObjectId>(u);

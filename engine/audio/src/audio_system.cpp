@@ -41,6 +41,11 @@ bool NullBackend::playing(uint32_t voice) const {
     return it != voices_.end() && it->second.active;
 }
 
+void NullBackend::pause(uint32_t voice, bool paused) {
+    auto it = voices_.find(voice);
+    if (it != voices_.end()) it->second.paused = paused;
+}
+
 bool NullBackend::start_stream(uint32_t voice, const PcmStreamFormat& format, PcmPullFn pull, const VoiceParams& p) {
     voices_.erase(voice);
     StreamVoice s;
@@ -77,7 +82,7 @@ void NullBackend::advance(double seconds) {
     }
     for (auto& kv : voices_) {
         Voice& v = kv.second;
-        if (!v.active) continue;
+        if (!v.active || v.paused) continue;
         v.position += seconds * static_cast<double>(v.params.pitch);
         if (v.position >= v.length) {
             if (v.params.loop && v.length > 0.0) v.position = std::fmod(v.position, v.length);
@@ -314,8 +319,16 @@ float AudioSystem::stream_gain(uint32_t handle) const {
 }
 
 void AudioSystem::push(LogEntry e) {
+    if (cfg_.log_limit == 0) return;
+    // At the limit, drop the oldest half: amortised O(1) per entry and the capacity stays put (no regrowth copies).
+    if (log_.size() >= cfg_.log_limit) log_.erase(log_.begin(), log_.begin() + static_cast<ptrdiff_t>(log_.size() - cfg_.log_limit / 2));
     e.time_us = now_us_;
     log_.push_back(std::move(e));
+}
+
+void AudioSystem::set_log_limit(size_t limit) {
+    cfg_.log_limit = limit;
+    if (log_.size() > limit) log_.erase(log_.begin(), log_.begin() + static_cast<ptrdiff_t>(log_.size() - limit));
 }
 
 std::string AudioSystem::log_text() const {
@@ -594,14 +607,16 @@ VoiceParams AudioSystem::voice_params(const Instance& in) const {
     g *= in.fading ? in.fade_level : 1.0f;
     g *= in.fade_in_level;
     if (in.type == 3 && !in.audible) g = 0.0f;  // visibility factor
+    if (in.is3d()) g *= scale_3d_ * (attract_ ? 0.0f : 1.0f);
+    // §1.6 / §3.2 ducking (+ movie streams): the cap applies to the voice gain the game hands Miles; aud2 t06: the 3D
+    // distance attenuation (Miles' own rolloff in the original) comes on top of the capped gain.
+    if (ducking_active() && !modal_dialog_) g = std::min(g, cfg_.speech_duck_cap);
     if (in.is3d()) {
-        g *= scale_3d_ * (attract_ ? 0.0f : 1.0f);
         g *= attenuation(distance_to_listener(in.pos), e.volume_saturation_distance);
         vp.pan = pan_for(in.pos);
     } else {
         vp.pan = std::clamp(static_cast<float>(in.pan) / 100.0f * 2.0f - 1.0f, -1.0f, 1.0f);
     }
-    if (ducking_active() && !modal_dialog_) g = std::min(g, cfg_.speech_duck_cap);  // §3.2 ducking (+ movie streams)
     vp.gain = g;
     vp.pitch = static_cast<float>(in.pitch) / 100.0f;
     vp.loop = in.voice_loop;
@@ -701,6 +716,21 @@ std::string AudioSystem::pick_sample(Instance& in, int stage) {
 // Starts stage 3 (pre), 5 (primary) or 7 (post). false = no voice (the cycle's rest is skipped).
 bool AudioSystem::start_stage(Instance& in, int stage) {
     const std::string sample = pick_sample(in, stage);
+    // §1.7 / §5 (b0282): the sample is loaded before a voice is taken; a missing / undecodable one skips the stage
+    // without taking, stealing or counting a voice (the wait state sees no voice and moves on).
+    const SampleRef ref{in.is3d() ? Bus::Sfx3D : Bus::Sfx2D, sample};
+    if (!backend_->load(ref)) {
+        LogEntry le;
+        le.op = LogOp::SfxVoice;
+        le.event = ev(in).name;
+        le.sample = sample;
+        le.handle = in.handle;
+        le.owner = in.owner;
+        le.reason = "sample_missing";
+        push(std::move(le));
+        in.voice = 0;
+        return true;
+    }
     if (!get_voice(in)) {
         LogEntry le;
         le.op = LogOp::SfxNoVoice;
@@ -714,7 +744,7 @@ bool AudioSystem::start_stage(Instance& in, int stage) {
     in.voice_loop = stage == 5 && ev(in).play_count == -1;
     in.fade_in_level = in.fade_in_seconds > 0.0f ? 0.0f : 1.0f;
     const VoiceParams vp = voice_params(in);
-    const bool ok = backend_->start(in.voice, SampleRef{in.is3d() ? Bus::Sfx3D : Bus::Sfx2D, sample}, vp);
+    const bool ok = backend_->start(in.voice, ref, vp);
     LogEntry le;
     le.op = LogOp::SfxVoice;
     le.event = ev(in).name;
@@ -864,7 +894,8 @@ void AudioSystem::update_sfx(int64_t dt_us) {
             if (in.state == 0 || in.owner == 0) continue;
             if (auto o = object_query_(in.owner)) {
                 in.pos = o->position;
-                in.audible = o->audible || cinematic_;
+                // §1.6 (b0280): a cinematic skips only the fog test; hidden / stealthed / garrisoned objects stay muted.
+                in.audible = !o->hidden && (o->audible || cinematic_);
             }
         }
     }
@@ -1026,7 +1057,20 @@ void AudioSystem::start_music_file(MusicEntry& e) {
     e.state = 2;
 }
 
+void AudioSystem::pause_music() {
+    if (music_pause_++ != 0) return;
+    for (const Stream* s : {&music_previous_, &music_current_})
+        if (s->voice) backend_->pause(s->voice, true);
+}
+
+void AudioSystem::resume_music() {
+    if (music_pause_ == 0 || --music_pause_ != 0) return;
+    for (const Stream* s : {&music_previous_, &music_current_})
+        if (s->voice) backend_->pause(s->voice, false);
+}
+
 void AudioSystem::update_music(int64_t dt_us) {
+    if (music_pause_ > 0) return;  // aud2 t04: the paused manager does not update (§2.3)
     const double secs = static_cast<double>(dt_us) / kUsPerSecond;
     // Playlist manager (§2.2): 1 start file -> 2 playing -> 3 ended.
     for (int guard = 0; guard < 4 && !music_queue_.empty(); ++guard) {
@@ -1087,7 +1131,12 @@ void AudioSystem::resume_mode_based_music(bool force) {
 void AudioSystem::notify_combat(bool involves_local_player) {
     if (!involves_local_player) return;
     peace_ticks_ = 0;
-    if (music_mode_ == music_mode::kTacticalBattle || !music_resolver_) return;
+    // aud1 t06 (AUDIO.md §9.2, 0x28f020): the unforced battle switch refuses in modes 7, 8 (TSW), 11 (splash), 12 (Lua
+    // Play_Music), 13 (front end) and during the attract demo; mode 16 (battle end) is not excluded. The peace counter is
+    // reset either way.
+    if (music_mode_ == music_mode::kTacticalBattle || music_mode_ == music_mode::kSuperWeapon || music_mode_ == music_mode::kSplash ||
+        music_mode_ == music_mode::kLua || music_mode_ == music_mode::kFrontEnd || attract_ || !music_resolver_)
+        return;
     const std::string name = music_resolver_(music_mode::kTacticalBattle, *rng_);
     if (!name.empty()) play_music(name, music_mode::kTacticalBattle);
 }

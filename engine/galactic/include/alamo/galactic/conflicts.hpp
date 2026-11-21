@@ -45,6 +45,7 @@
 #pragma once
 #include <cstdint>
 #include <functional>
+#include <span>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -68,9 +69,21 @@ struct ConflictTypeInfo {
     uint64_t categories = 0;                  // CategoryMask
     int32_t population = 0;                   // Population_Value
     int32_t space_population_override = -1;   // Space_Override_Population_Value (-1 = not set)
+    int32_t land_population_override = -1;    // Land_Override_Population_Value (-1 = not set; trl2 t02, pop(T, 1) 0x373500)
     bool hero = false;                        // Is_Named_Hero
     bool super_killer = false;                // Is_Super_Weapon_Killer [L field name]
+    // trl2 t07 (BATTLE_TRANSITIONS §2.3 rule 1, bit 0x2c of table 2 [H]): TACTICAL_SUPER_WEAPON in the space behaviours;
+    // such a unit always goes to the space battle's start force.
+    bool super_weapon = false;
+    bool prevents_story_autoresolve = false;  // Prevents_Story_Campaign_Autoresolve (MCX4_T09_RE_ANSWERS Q5)
+    std::vector<std::pair<uint8_t, float>> strength_bonus;  // Unit_Strength_* pairs of <Abilities> (Q9; ArCombatant)
+    // mcx4 t05 (MCX4_RE_ANSWERS_TACTICAL §9 / §13): Respawn_Whole_Team_When_Killed (type +0x16) on a company member: its
+    // death kills the whole company (the TRANSPORT branch of 0x48eb10), which then respawns. `company`: the type lists
+    // Company_Units (a galactic transport; Squadron_Units holders take the TEAM branch, which does not read the flag).
+    bool respawn_whole_team = false;
+    bool company = false;
     std::vector<std::pair<uint32_t, int32_t>> members;  // Squadron_Units / Company_Units: (type, count), first-seen order
+    int32_t bounty = 0;                       // a2m r2: the type's own bounty, rounded (bounty.hpp type_bounty)
     uint32_t lower_starbase = kNoIndex;       // next lower starbase level type (last name digit - 1) [M]
     // planet types
     std::string space_map, land_map;          // Space_Tactical_Map / Land_Tactical_Map (trimmed)
@@ -80,6 +93,18 @@ struct ConflictFactionInfo {
     float space_unit_cap = 20.0f;             // Space_Tactical_Unit_Cap (+0x2cd0)
     float space_retreat_countdown = 10.0f;    // Space_Retreat_Countdown_Seconds (+0x20b0)
     float land_retreat_countdown = 10.0f;     // Land_Retreat_Countdown_Seconds (+0x2190)
+    // Space_ / Land_Retreat_Units_Damaged_Mod_Factor (+0x20b8 / +0x2198; TACTICAL_COMBAT §3.6 step 9). FoC: Rebel / Empire
+    // 4.0 / 2.0, Underworld 2.0 / 2.0; 1.0 [port] for factions without the tag (none of them retreats).
+    float space_retreat_damage_mod = 1.0f;
+    float land_retreat_damage_mod = 1.0f;
+    // trn1 t06 (MOVEMENT §3.4 item 6, 0x376990): Space_ / Land_Retreat_Pursue_Max_Speed_Mod_Factor (+0x20b4 / +0x2194;
+    // faction ctor default 1.0 [H]): the speed factor of this faction's units while another player retreats. FoC: Rebel /
+    // Empire 3.0 / 2.0, Underworld 2.0 / 2.0.
+    float space_retreat_pursue = 1.0f;
+    float land_retreat_pursue = 1.0f;
+    // s78n t14 part B (FIGHTER_FLYING §7.1, 0x5c8890): Scatters_From_Crushers (+0x2f88): the faction's infantry squads flee
+    // from a hostile crusher's collision path. FoC: true for every faction entry but the Empire; [port] false when unset.
+    bool scatters_from_crushers = false;
     int32_t map_faction = 0;                  // random-map faction index: Rebel 0, Empire 1, Pirates 2, Underworld 4, Hutts 5
     // Land_Skirmish_Unit_Cap_By_Player_Count (+0x2cd8): (player count, unit cap) keys in file order (shipped 0,10, 1,10, 8,5).
     // t50 / skai: unit_cap_for_players() evaluates it (SKIRMISH_SETUP §6: linear, 0 outside the keys, integer part).
@@ -91,6 +116,7 @@ struct ConflictRules {
     ContrastTable contrast;
     float overrun_multiple = 0.0f;            // Overrun_Auto_Resolve_Multiple (vanilla commented out: 0 = off)
     bool queue_tactical_battles = true;       // Strategic_Queue_Tactical_Battles
+    bool always_bypass_autoresolve = false;   // AlwaysBypassAutoResolve (MCX4_T09_RE_ANSWERS Q3: the banner only)
     float space_auto_resolve_delay = 0.01f;   // Space_Auto_Resolve_Delay_Seconds
     float land_auto_resolve_delay = 0.01f;    // Land_Auto_Resolve_Delay_Seconds
     float space_retreat_allowed = 30.0f;      // Space_Retreat_Allowed_Countdown_Seconds
@@ -98,6 +124,8 @@ struct ConflictRules {
     bool land_base_destruction_forces_retreat = false;   // Land_Base_Destruction_Forces_Retreat
     bool space_station_destruction_forces_retreat = false;  // Space_Station_Destruction_Forces_Retreat
     uint64_t super_category = 0;              // GameObjectCategoryType "Super"
+    // a2m r2 (A2M_R2_RE_B §2.3 case B): the NalHutta / NalHutta_Story types (0x407e00 by name), resolved ones only.
+    std::vector<uint32_t> nalhutta_types;
     // OI galactic (TACTICAL_GAPS 4.2): land force split 0x2bc6a0.
     std::vector<std::string> preferred_pathfinder_types;  // Preferred_Pathfinder_Types (GC +0x119f0), order kept
     std::string raid_required_faction;                     // Raid_Force_Required_Faction (+0x11750), empty = any
@@ -114,6 +142,19 @@ struct ConflictRules {
 // Data\Scripts\Library\PGAICommands.lua (contrast table). Missing pieces keep the defaults (diagnostics).
 bool load_conflict_rules(const FileProvider& provider, const data::GameDatabase& db, const objects::GameObjectTypes& types,
                          const GalacticRules& galactic, ConflictRules& out, std::vector<std::string>* diagnostics = nullptr);
+
+// The auto-resolve combatant of one object of type `type` owned by `owner` (BT §4.3): its Squadron_Units / Company_Units
+// members first (count x AI_Combat_Power each), then its own piece unless it is a container in a space battle. Used by
+// ConflictManager::auto_setup and the auto-resolve parity check (bkc1 t08, tests/autoresolve_parity.cpp).
+// mcx4 t05 (docs/re/MCX4_RE_ANSWERS_TACTICAL.md §9 / §13): a company (Company_Units holder: the TRANSPORT branch of
+// 0x48eb10) that survived a battle is lost as a whole when one of its dead members has Respawn_Whole_Team_When_Killed;
+// the battle end then removes it and schedules its respawn. Only a hero member counts (0x3a01f0); squadron holders
+// (TEAM branch) never are.
+bool company_team_lost(const ConflictRules& rules, uint32_t company_type, std::span<const uint32_t> dead_member_types);
+
+// survivors: a company's survivor record (mcx4 t22), nullptr = its full Company_Units.
+ArCombatant make_ar_combatant(const GalacticRules& galactic, const ConflictRules& rules, uint32_t type, int32_t owner,
+                              bool space, const std::vector<uint32_t>* survivors = nullptr);
 
 // ---- records ---------------------------------------------------------------------------------------------------
 enum class ConflictKind : uint8_t { Land = 1, Space = 2 };
@@ -156,12 +197,18 @@ struct BattleRequest {
     // one battle in which the original's conflict state GOM+0x618 is 9 (set by 0x28f590): nothing built there is
     // persisted, nothing destroyed or sold there is removed from the planet's records.
     bool sandbox = false;
+    // ui5 t10 (UI.md §5.1 "Which dialog"): a STORY_LOAD_TACTICAL_MAP + SET_TACTICAL_MAP override replaced `map` (the
+    // retail "story map" flag 0x140a61d3b): the battle-load screen is the Mission pair. Presentation only: not saved, not
+    // hashed.
+    bool story_map = false;
 };
 struct BattleResult {
     int32_t winner = kNoPlayer;
     uint8_t victory = kVictoryAllDestroyed;
     int32_t retreated = kNoPlayer;      // the player the retreat coordinator reports
     std::vector<ObjectHandle> destroyed;  // galactic objects whose tactical counterparts all died
+    // mcx4 t22: companies that came out with members lost - (galactic object, the surviving member types)
+    std::vector<std::pair<ObjectHandle, std::vector<uint32_t>>> survivors;
     bool starbase_destroyed = false;
 };
 
@@ -207,14 +254,41 @@ public:
     std::function<bool(const BattleRequest&)> start_battle;
     // Raises (true) / releases (false) one level of the galactic pause. Absent: GalacticSim push/pop_pause.
     std::function<void(bool)> pause;
-    // Random map picker 0x47bf40 (space, terrain index, defender map-faction index, base level). Empty
-    // answer = fallback map. Absent: fallback map.
-    std::function<std::string(bool space, int32_t terrain, int32_t faction, int32_t base_level)> pick_map;
+    // Random map picker 0x47bf40 (space, terrain index, defender map-faction index or -1 when the defender id is -1,
+    // base level, preferred = the planet's stored pick +0x1e0; CU8F_T03_T05_RE §1.3). Called whenever the planet type names
+    // no map; its answer is stored back on the planet every time, an empty one included (§1.4). Empty answer = fallback
+    // map. Absent: no candidates (empty answer, stored back).
+    std::function<std::string(bool space, int32_t terrain, int32_t faction, int32_t base_level, const std::string& preferred)>
+        pick_map;
     // OI galactic: the auto-resolve survival roll (STRATEGIC_GAPS 1.1, 0x60a140 -> learning writer 0x58a9a0): once per
     // combatant of a written-back auto-resolve, combatant order, with its owner, galactic store type (the callee applies
     // the company-leader substitution) and whether it survived. Absent: nothing. The host wires it to
     // GalacticAiWorld::record_auto_resolve_survival (engine/ai); it must not change the galactic sim.
     std::function<void(int32_t owner, uint32_t type, bool survived)> on_survival_roll;
+    // mcx6 t03 (STORY.md §5 "Battle composition", BT §1.6 step 1): the decide state (4) of a SPACE conflict whose attacker
+    // or defender is the local player calls this first, before the overrun check and the fight / auto-resolve / ask
+    // choice (retail 0x2b92e0 -> the story manager's orbit record 0x449f10, single player only [port: the port is single
+    // player]). Land conflicts never call it. A host callback, not a galactic event, so the event stream is unchanged.
+    // Absent: nothing. It must not change the conflict queues.
+    std::function<void(const ConflictInfo&)> on_space_decide;
+    // mcx4 t07 (MCX4_RE_ANSWERS_GALACTIC Q7.6): the story manager's global auto-resolve lock 0x4472a0 (flag +0x41 or the
+    // RESTRICT_AUTORESOLVE planet list) for the conflict's planet. The host wires it to the running story session.
+    // Absent: the campaign's Is_Autoresolve_Allowed false (GalacticSim::campaign_autoresolve_disabled), the value +0x41
+    // starts with.
+    std::function<bool(const ConflictInfo&)> story_lock;
+    // The story lock 0x4472a0 of a conflict: story_lock, or the campaign flag. It suppresses the overrun check (single
+    // player: 0x2b92e0 / 0x2b76a0; AI vs AI still auto-resolves).
+    bool story_locked(const ConflictInfo& c) const;
+    // The human's auto-resolve lock, the one-button test of the battle-pending banner 0x3ca480: story_locked(); or
+    // AlwaysBypassAutoResolve (MCX4_T09_RE_ANSWERS Q3); or, in a story campaign, the conflict's (planet, land / space) pair
+    // in Autoresolve_Exclusion_Locations (Q7.4: 0x4471b0) or a space conflict with a Prevents_Story_Campaign_Autoresolve
+    // unit (Q5, story_autoresolve_unit). Only story_locked() touches the overrun check. The host makes the human fight a
+    // locked conflict.
+    bool autoresolve_locked(const ConflictInfo& c) const;
+    // Q5 (0x2affb0): a unit of either side in orbit of the conflict planet (fleet contents and their squadron members)
+    // whose type has Prevents_Story_Campaign_Autoresolve. [port] Retail also keeps a sticky fleet flag (fleet data +0x95,
+    // set when such a unit joins, never cleared): not modelled, the test reads the fleets' current contents.
+    bool story_autoresolve_unit(const ConflictInfo& c) const;
 
     // ---- ConflictHooks ----
     void on_space_conflict(PlanetIndex planet, int32_t attacker) override;
@@ -288,8 +362,6 @@ public:
     bool battle_active() const { return state_ == ConflictState::InBattle; }
     const BattleRequest& active_request() const { return request_; }
     const std::vector<ConflictLogEntry>& log() const { return log_; }
-    const std::vector<std::string>& planet_maps() const { return planet_map_; }
-    const AutoResolveResult& last_auto_resolve() const { return last_ar_; }
     // Space force split 0x2bd500 (§2.3 rule 4) for one player's units (list order).
     void split_space_forces(int32_t player, const std::vector<ObjectHandle>& units, BattleForces& out) const;
     // story t07: 0x2bd500 with a forced type / the flagship flag (rules 2 / 3, BT §2.3): the first unit of `forced_type`
@@ -319,8 +391,8 @@ public:
     // OI galactic: retreat destination finders (TACTICAL_GAPS 4.5). Candidates = planets newest first (reverse row order),
     // smallest squared 3-D distance (double, strict <); filters in order: orbit controller = player (starbase owner when
     // level > 0, else the first idle combat fleet in orbit), ground-base / starbase owner = player, owner neutral, any.
-    // Fleets: every filter excludes `from` (the battle planet). `came_from` is not used any more (kept for callers).
-    PlanetIndex retreat_destination(int32_t player, PlanetIndex from, PlanetIndex came_from = kInvalidPlanet) const;
+    // Fleets: every filter excludes `from` (the battle planet).
+    PlanetIndex retreat_destination(int32_t player, PlanetIndex from) const;
     // Ground (0x2ba850): the first two filters without exclusion (flag clear: controller then ground base; set: the
     // other order), so `from` itself wins when the player controls its orbit (the units just go up into orbit).
     PlanetIndex retreat_destination_ground(int32_t player, PlanetIndex from, bool flag = false) const;
@@ -344,13 +416,17 @@ private:
     bool validate(const ConflictInfo& c) const;
     void drop_head(ConflictKind kind, bool log_it);
     void pop_head(ConflictKind kind);
+    void reset_machine();  // back to Idle: no force / retreat / choice, no auto-resolve in flight
+    ConflictLogEntry log_entry(const ConflictInfo& c, uint8_t how) const;  // tick, frame, kind, planet, sides, how
     void raise_pause();
     void release_pause();
     bool human(int32_t player) const;
     void apply_choice(BattleChoice c, const ConflictInfo& head);
     // participants
-    std::vector<ObjectHandle> orbit_units(PlanetIndex planet, int32_t player, bool space_only) const;
-    std::vector<ObjectHandle> orbit_cargo(PlanetIndex planet, int32_t player) const;
+    // The live contents of `player`'s idle (non-moving) fleets in orbit whose type kind passes `keep` (fleet order).
+    std::vector<ObjectHandle> orbit_contents(PlanetIndex planet, int32_t player, bool (*keep)(UnitKind)) const;
+    std::vector<ObjectHandle> orbit_units(PlanetIndex planet, int32_t player) const;  // space kinds
+    std::vector<ObjectHandle> orbit_cargo(PlanetIndex planet, int32_t player) const;  // ground units
     std::vector<ObjectHandle> surface_units(PlanetIndex planet, int32_t player) const;
     bool can_fight_space(ObjectHandle h) const;
     float unit_power(ObjectHandle h) const;
@@ -358,6 +434,13 @@ private:
     // auto-resolve
     void auto_setup(const ConflictInfo& head);
     void auto_finish(const ConflictInfo& head);
+    // ref5 t02: one object lost in a battle, for every resolve path (a fought battle's end, a corruption mission's end, the
+    // tactical Auto-resolve button, a galactic auto-resolve): the hero's respawn first (mcx4 t05), then the removal. Decided in
+    // tactical mode (`tactical_mode`): destroy_object, whose "hero defeated" notification raises STORY_DEFEAT_HERO; a galactic
+    // auto-resolve: destroy_object_auto_resolve, which raises none (Q4). The starbase is the callers' (a planet level).
+    void battle_loss(ObjectHandle h, PlanetIndex planet, bool tactical_mode);
+    // a2m r2: the Bounty_On_Faction credits for the auto-resolve's destroyed objects (before they are removed).
+    void pay_auto_resolve_bounty(const ConflictInfo& head);
     ArCombatant combatant_of(ObjectHandle h, bool space) const;
     // battle
     enum class Linked : uint8_t { No, Plain, Sandbox };  // start_linked's force rule (BT §2.9.5)

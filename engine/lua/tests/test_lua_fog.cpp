@@ -11,6 +11,8 @@
 #include <string>
 
 #include "alamo/core/file_provider.hpp"
+#include "alamo/core/host_fs.hpp"
+#include "alamo/lua/ai_bridge.hpp"
 #include "alamo/lua/bindings.hpp"
 #include "alamo/lua/fog_bridge.hpp"
 #include "alamo/lua/lua_vm.hpp"
@@ -19,6 +21,7 @@
 #include "alamo/objects/game_object_types.hpp"
 #include "alamo/objects/object_store.hpp"
 #include "alamo/objects/object_types.hpp"
+#include "alamo/test/support.hpp"
 #include "vm_internal.hpp"
 
 #include <lua.h>
@@ -27,14 +30,7 @@ using namespace alamo;
 using namespace alamo::lua;
 namespace fs = std::filesystem;
 
-static int g_fail = 0;
-#define CHECK(c)                                                     \
-    do {                                                             \
-        if (!(c)) {                                                  \
-            std::printf("FAIL %s:%d: %s\n", __FILE__, __LINE__, #c); \
-            ++g_fail;                                                \
-        }                                                            \
-    } while (0)
+using ::alamo::test::g_fail;
 
 #ifdef ALAMO_LUA_HAVE_FOG
 static std::string run(LuaVm& vm, const std::string& code) {
@@ -87,10 +83,7 @@ static void test_table() {
 #ifdef ALAMO_LUA_HAVE_FOG
 namespace fw = alamo::tactical::fog;
 
-static void write_file(const fs::path& p, const std::string& s) {
-    fs::create_directories(p.parent_path());
-    std::ofstream(p, std::ios::binary) << s;
-}
+using ::alamo::test::write_file;
 
 struct Db {
     fs::path root;
@@ -247,6 +240,72 @@ static void test_others(const Db& db) {
     CHECK(run(vm, "r = FogOfWar.Reveal_All(p0)") == "" && last_message_has(vm, "Command only valid in a tactical game"));
     CHECK(run(vm, "keep.Undo_Reveal() ok = true") == "" && gtrue(vm, "ok"));
 }
+
+// ref5 t03: an AI host with one region target (6, a position and no object) and one task force (3, its units).
+struct RegionAi final : AiScriptHost {
+    std::vector<objects::ObjectHandle> units;
+    bool tf_valid(int32_t tf) override { return tf == 3; }
+    int32_t tf_force_count(int32_t) override { return static_cast<int32_t>(units.size()); }
+    void tf_set_flag(int32_t, AiTfFlag, bool) override {}
+    int32_t tf_produce_force(int32_t, const AiArg&, bool) override { return -1; }
+    int32_t tf_get_stage(int32_t) override { return -1; }
+    bool tf_all_on_free_store(int32_t) override { return false; }
+    int32_t tf_order(int32_t, AiTfOrder, const AiArg&) override { return -1; }
+    bool tf_is_raid_capable(int32_t) override { return false; }
+    void tf_release_forces(int32_t, double) override {}
+    void tf_release_unit(int32_t, objects::ObjectHandle) override {}
+    std::vector<objects::ObjectHandle> tf_units(int32_t tf) override { return tf == 3 ? units : std::vector<objects::ObjectHandle>{}; }
+    std::string tf_goal_type_name(int32_t) override { return {}; }
+    bool tf_collect_free_units(int32_t, uint64_t) override { return false; }
+    bool status_finished(int32_t) override { return true; }
+    AiStatusResult status_result(int32_t) override { return AiStatusResult::Nil; }
+    bool target_valid(int32_t t) override { return t == 6; }
+    objects::ObjectHandle target_object(int32_t) override { return {}; }
+    bool target_position(int32_t t, Vec3& out) override {
+        if (t != 6) return false;
+        out = {700.0f, 300.0f, 0.0f};
+        return true;
+    }
+    double target_distance(int32_t, const AiArg&) override { return -1.0; }
+    double budget_op(int32_t, AiBudgetOp, double, std::string_view) override { return 0.0; }
+    int32_t budget_wait(int32_t, AiBudgetOp, double) override { return -1; }
+    int32_t free_store_count(int32_t, int) override { return 0; }
+    bool free_store_has(int32_t, objects::ObjectHandle) override { return false; }
+    bool unit_in_transit(objects::ObjectHandle) override { return false; }
+    bool unit_safe(objects::ObjectHandle) override { return true; }
+    bool free_store_move(int32_t, objects::ObjectHandle, const AiArg&) override { return false; }
+    int32_t find_target(int32_t, const AiFindTargetRequest&) override { return -1; }
+    int32_t find_stage_area(int32_t, const AiArg&, const AiArg&, const AiArg&) override { return -1; }
+    AiGlobalValue global_value(std::string_view) override { return {}; }
+    void set_global_value(std::string_view, const AiGlobalValue&) override {}
+};
+
+// ref5 t03: FogOfWar converts its position argument by the one rule every binding family uses (detail::position_arg):
+// a region AI target reveals around its position, a task force around its first live unit, an empty task force is a
+// dead argument.
+static void test_ai_positions(const Db& db) {
+    Env e(db);
+    LuaVm& vm = *e.vm;
+    e.make(db.t("Scout"), 0, {300, 300, 0});
+    const objects::ObjectHandle gone = e.make(db.t("Scout"), 0, {1200, 300, 0});
+    const objects::ObjectHandle far = e.make(db.t("Scout"), 0, {300, 1200, 0});
+    RegionAi ai;
+    attach_ai_host(vm, &ai, 1);
+    set_ai_target_global(vm, "Region", 6);
+    set_task_force_global(vm, "TF", 3, AiTaskForceKind::Land);
+    CHECK(run(vm, "for _, o in Find_All_Objects_Of_Type('Scout') do p0 = o.Get_Owner() end") == "" && !gnil(vm, "p0"));
+    CHECK(e.count0(700, 300) == 0);
+    CHECK(run(vm, "r = FogOfWar.Reveal(p0, Region, 100)") == "" && !gnil(vm, "r"));
+    CHECK(e.count0(700, 300) == 1 && e.count0(780, 300) == 1 && e.count0(900, 300) == 0);
+    // Task force: its first live unit (the dead one is skipped).
+    ai.units = {gone, far};
+    CHECK(e.store.destroy(gone));
+    CHECK(run(vm, "t = FogOfWar.Reveal(p0, TF, 50)") == "" && !gnil(vm, "t"));
+    CHECK(e.count0(300, 1200) == 1 && e.count0(1200, 300) == 0);
+    ai.units.clear();
+    CHECK(run(vm, "n = FogOfWar.Reveal(p0, TF, 50)") == "" && gnil(vm, "n") && last_message_has(vm, "Undable to get a valid position"));
+    attach_ai_host(vm, nullptr, -1);
+}
 #endif
 
 int main() {
@@ -258,6 +317,7 @@ int main() {
         if (db.ok) {
             test_reveal(db);
             test_others(db);
+            test_ai_positions(db);
         }
     }
 #else

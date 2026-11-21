@@ -1,15 +1,15 @@
 #include "game_info.hpp"
 
 #include <algorithm>
-#include <cctype>
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
 #include <iterator>
 
+#include "alamo/core/ascii.hpp"
 #include "alamo/galactic/campaign.hpp"
 #include "alamo/galactic/conflicts.hpp"
-#include "alamo/galactic/corruption.hpp"  // P4 host: corruption mission lines
+#include "alamo/game/hud_feeds.hpp"
 #include "alamo/game/story_script.hpp"
 #include "alamo/tactical/abilities/ability_types.hpp"
 #include "alamo/ui/hud_abilities.hpp"
@@ -61,11 +61,6 @@ std::string icon_of(std::span<const ui::HudTypeInfo> hud_types, objects::TypeInd
 std::vector<std::string> ability_icons(const GameData& d, objects::TypeIndex t) {
     const objects::ObjectTypeDatabase& raw = d.types.raw();
     const objects::FieldColumns& fc = raw.fields();
-    auto ieq = [](std::string_view a, std::string_view b) {
-        return a.size() == b.size() && std::equal(a.begin(), a.end(), b.begin(), [](char x, char y) {
-                   return std::tolower(static_cast<unsigned char>(x)) == std::tolower(static_cast<unsigned char>(y));
-               });
-    };
     std::vector<uint8_t> slots;
     std::vector<std::string> out;
     for (const objects::FieldIndex sub : d.types.get_sub_objects(t, "Unit_Abilities_Data")) {
@@ -73,9 +68,9 @@ std::vector<std::string> ability_icons(const GameData& d, objects::TypeIndex t) 
         std::string alternate;
         for (objects::FieldIndex f = sub + 1; f < fc.size() && fc.depth[f] > fc.depth[sub]; ++f) {
             if (fc.parent[f] != sub) continue;
-            if (ieq(raw.tag_name(f), "Type")) {
+            if (ascii_iequals(raw.tag_name(f), "Type")) {
                 for (const std::string& w : words(fc.text[f])) type = tactical::abilities::ability_type_from_name(w);
-            } else if (ieq(raw.tag_name(f), "Alternate_Icon_Name")) {
+            } else if (ascii_iequals(raw.tag_name(f), "Alternate_Icon_Name")) {
                 for (const std::string& w : words(fc.text[f])) alternate = w;
             }
         }
@@ -103,7 +98,7 @@ std::u32string type_label(const GameData& d, const ui::TextDatabase& text, objec
 
 // ---- encyclopedia -----------------------------------------------------------------------------------------------
 ui::EncyclopediaEntry encyclopedia_entry(const GameData& d, const ui::TextDatabase& text, std::span<const ui::HudTypeInfo> hud_types,
-                                         objects::TypeIndex t) {
+                                         objects::TypeIndex t, bool skirmish_battle) {
     ui::EncyclopediaEntry e;
     if (t == objects::kNone || t >= d.types.size()) return e;
     e.header = type_label(d, text, t);
@@ -115,6 +110,17 @@ ui::EncyclopediaEntry encyclopedia_entry(const GameData& d, const ui::TextDataba
         income.left = U"Income";
         income.right = number(ti->credit_value);
         e.rows.push_back(std::move(income));
+        // mcx4 t14 (MCX4_T14_RE_ANSWERS "GameObjectType.Encyclopedia_Weather_Name family"): the weather name and info
+        // lines. [M] as centred rows after the income.
+        const WeatherLines wl = planet_weather_lines(d.types.get_string(t, "Encyclopedia_Weather_Name"),   // ledger: consumes GameObjectType.Encyclopedia_Weather_Name
+                                                     d.types.get_string(t, "Encyclopedia_Weather_Info"));  // ledger: consumes GameObjectType.Encyclopedia_Weather_Info
+        for (const std::string_view id : {wl.name, wl.info})
+            if (!id.empty())
+                if (const std::u16string* s = text.find(std::string(id))) {
+                    ui::EncyclopediaRow r;
+                    r.center = ui::utf16_to_utf32(*s);
+                    e.rows.push_back(std::move(r));
+                }
     } else {
         // t40 (HUD_GAPS §2.2, captures C3_*tooltip*): class, ability icons and the Strong / Weak icon rows, no stat rows.
         e.population = static_cast<int32_t>(d.types.get_float(t, "Population_Value"));
@@ -133,7 +139,8 @@ ui::EncyclopediaEntry encyclopedia_entry(const GameData& d, const ui::TextDataba
         e.strong_label = text_or(text, "TEXT_GOOD_AGAINST");
         e.weak_label = text_or(text, "TEXT_VULNERABLE_TO");
     }
-    for (const std::string& id : words(d.types.get_string(t, "Encyclopedia_Text"))) {
+    const std::string_view text_tag = encyclopedia_text_tag(skirmish_battle, !words(d.types.get_string(t, "MP_Encyclopedia_Text")).empty());
+    for (const std::string& id : words(d.types.get_string(t, text_tag))) {
         if (!e.description.empty()) e.description += U"\n";
         e.description += text_or(text, id);
     }
@@ -176,9 +183,10 @@ void Holocron::sample(const galactic::GalacticSim& g) {
     }
 }
 
-ui::DroidLogInfo Holocron::droid_log(const GameSession& s, const GameData& d, const ui::TextDatabase& text) const {
-    (void)d;
+ui::DroidLogInfo Holocron::droid_log(const GameSession& s, const GameData& d, const ui::TextDatabase& text,
+                                     std::span<const std::u32string> advisor_rows, std::span<const ui::Rgba8> advisor_colors) const {
     ui::DroidLogInfo out;
+    (void)d;
     const galactic::GalacticSim* g = s.galaxy();
     if (!g) return out;
     std::vector<std::u32string> lines;
@@ -189,12 +197,20 @@ ui::DroidLogInfo Holocron::droid_log(const GameSession& s, const GameData& d, co
             for (const lua::StoryDialogEntry& e : story->model(set).dialog_log())
                 if (!e.dialog.empty()) lines.push_back(text_or(text, e.dialog));
         }
-#else
-    (void)text;
 #endif
-    if (const sim::CampaignBattles* b = s.battles())
-        for (const galactic::ConflictLogEntry& c : b->conflicts().log()) lines.push_back(u32(c.text(*g)));
-    for (auto it = lines.rbegin(); it != lines.rend() && out.entries.size() < 40; ++it) out.entries.push_back(*it);
+    // ui4 t11 (P4_SIM_SYSTEMS §2.7.2): then the rows of every advisor line shown in galactic mode ("Day N", the text, the
+    // separator), oldest first; retail has no battle entry of its own. [port] the last 120 rows.
+    const size_t first = advisor_rows.size() > 120 ? advisor_rows.size() - 120 : 0;
+    out.colors.assign(lines.size(), ui::Rgba8{0, 0, 0, 0});  // story dialog lines: the skin's colours
+    for (size_t i = first; i < advisor_rows.size(); ++i) {
+        lines.push_back(advisor_rows[i]);
+        out.colors.push_back(i < advisor_colors.size() ? advisor_colors[i] : ui::Rgba8{0, 0, 0, 0});
+    }
+    out.entries = std::move(lines);
+    // mcx4 t14 (MCX4_T14_RE_ANSWERS "Faction.Helper_Icon_Name", droid log 0x9db60): the local faction's helper droid picture.
+    if (const int32_t me = s.local_player(); me >= 0 && static_cast<size_t>(me) < g->players().size())
+        if (const uint32_t f = g->players()[static_cast<size_t>(me)].faction; f < d.rules.factions.size())
+            out.picture = std::string(d.rules.factions[f].xml_text("Helper_Icon_Name"));  // ledger: consumes Faction.Helper_Icon_Name
     return out;
 }
 
@@ -207,8 +223,8 @@ ui::DataChartInfo Holocron::chart(const galactic::GalacticSim& g, const GameData
         const uint32_t f = g.players()[static_cast<size_t>(p)].faction;
         std::u32string name = u32("Player " + std::to_string(p));
         if (f < d.rules.factions.size()) {
-            std::string key = "TEXT_FACTION_" + d.rules.factions[f].name;  // the lookup is case-sensitive (GALACTIC_DIALOGS §2.7)
-            for (char& ch : key) ch = static_cast<char>(std::toupper(static_cast<unsigned char>(ch)));
+            // The lookup is case-sensitive (GALACTIC_DIALOGS §2.7).
+            const std::string key = ascii_upper("TEXT_FACTION_" + d.rules.factions[f].name);
             const std::u16string* t = text.find(key);
             name = t ? ui::utf16_to_utf32(*t) : u32(d.rules.factions[f].name);
         }
@@ -224,8 +240,8 @@ ui::TechTreeInfo Holocron::tech_tree(const galactic::GalacticSim& g, const GameD
                                      int32_t player, bool space) const {
     ui::TechTreeInfo t;
     const uint32_t f = g.players()[static_cast<size_t>(player)].faction;
-    const std::string fac = f < d.rules.factions.size() ? d.rules.factions[f].name : std::string();
-    t.faction = fac == "Rebel" ? ui::TechFaction::Rebel : fac == "Empire" ? ui::TechFaction::Empire : ui::TechFaction::BlackMarket;
+    // modc t20: the faction's own Tech_Tree_Dialog_Name (FoC IDD_TECH_TREE_REBEL / _EMPIRE / _BLACKMARKET), not its name.
+    t.dialog = f < d.rules.factions.size() ? d.rules.factions[f].tech_tree_dialog : std::string();
     t.space = space;
     const int32_t level = g.players()[static_cast<size_t>(player)].tech_level;
     const GameData* dp = &d;
@@ -274,12 +290,15 @@ ui::SummaryInfo Holocron::summary(const galactic::GalacticSim& g, const GameData
             if (d.types.get_bool(st.type(h), "Is_Named_Hero") && pr.heroes.size() < 8) pr.heroes.push_back(icon_of(hud_types, st.type(h)));
         };
         for (const objects::ObjectHandle h : p.surface) hero(h);
+        const uint32_t land_units = units;
         ui::SummaryFleetRow fr;
         fr.icon = icon;
         fr.name = name;
+        uint32_t space_fleets = 0;
         for (const uint32_t fi : p.orbit) {
             const galactic::FleetState& f = g.fleets()[fi];
             if (!f.alive || f.owner != player) continue;
+            ++space_fleets;
             for (const objects::ObjectHandle h : f.contents) hero(h);
             if (!f.contents.empty() && fr.fleets.size() < 15) fr.fleets.push_back(icon_of(hud_types, st.type(f.contents.front())));
         }
@@ -302,6 +321,20 @@ ui::SummaryInfo Holocron::summary(const galactic::GalacticSim& g, const GameData
         er.trade = number(trade);
         er.mining = number(mining);
         er.total = number(base + trade + other);
+        // ui4 t07 (HUD_GAPS §10.2): the sort values of the planet's rows, by key. [port] 7 producing = space queue busy +
+        // ground queue busy; 8 upgrades = 0 (the record's upgrade list is not traced); 9 / 10 = own land units / own fleets.
+        std::array<double, ui::kSummarySortKeys> sv{};
+        sv[2] = base;
+        sv[3] = trade;
+        sv[4] = mining;
+        sv[5] = base + trade + other;
+        sv[6] = static_cast<double>(units);
+        sv[7] = (p.queue[1].empty() ? 0.0 : 1.0) + (p.queue[0].empty() ? 0.0 : 1.0);
+        sv[9] = static_cast<double>(land_units);
+        sv[10] = static_cast<double>(space_fleets);
+        s.production.back().sort = sv;
+        s.fleets.back().sort = sv;
+        er.sort = sv;
         s.economy.push_back(std::move(er));
         t_income += base + trade + other;
         t_base += base;
@@ -409,8 +442,7 @@ std::vector<ui::StoryDialogInfo> new_story_dialogs(const GameSession& s, const S
             md.popup = e.popup;
             md.sfx = e.sfx;
             const std::string& pn = e.plot_name;
-            md.random_plot = pn.size() >= 11 && std::equal(pn.begin(), pn.begin() + 11, "random_plot",
-                                                           [](char a, char b) { return std::tolower(static_cast<unsigned char>(a)) == b; });
+            md.random_plot = ascii_istarts_with(pn, "random_plot");
             md.dialog = e.dialog;
             md.tag = e.tag;
             md.chapter = e.chapter;
@@ -484,10 +516,17 @@ HolocronSummaryView holocron_summary(const GameSession& s, const StoryDialogCach
 
 // ---- campaign end -----------------------------------------------------------------------------------------------
 ui::CampaignScoreInfo campaign_score(const GameSession& s, const galactic::GalacticSim& g, const ui::TextDatabase& text, bool victory,
-                                     const BattleTally& tally) {
-    (void)text;
+                                     const BattleTally& tally, const ScoringStats& stats) {
     ui::CampaignScoreInfo c;
     c.victory = victory;
+    if (stats.ok) {
+        auto pct = [](double e) { return static_cast<int32_t>(std::lround(std::clamp(e * 100.0, 0.0, 100.0))); };
+        c.military = pct(stats.military);
+        c.conquest = pct(stats.conquest);
+        c.kill = pct(stats.kill);
+        if (!stats.title_key.empty()) c.rank_title = lookup(text, stats.title_key);
+        return c;
+    }
     const int32_t me = s.local_player();
     uint32_t fought = 0, won = 0;
     if (const sim::CampaignBattles* b = s.battles())
@@ -502,11 +541,6 @@ ui::CampaignScoreInfo campaign_score(const GameSession& s, const galactic::Galac
     c.conquest = planets ? static_cast<int32_t>(std::lround(100.0 * g.planets_owned(me) / planets)) : 0;
     const uint32_t all = tally.kills + tally.losses;
     c.kill = all ? static_cast<int32_t>(std::lround(100.0 * tally.kills / all)) : 0;
-    const int32_t mean = (c.military + c.conquest + c.kill) / 3;
-    c.rank_title = mean >= 80 ? U"Grand Admiral" : mean >= 60 ? U"Admiral" : mean >= 40 ? U"Commodore" : mean >= 20 ? U"Captain" : U"Commander";
-    c.list.push_back(U"Battles fought: " + number(fought) + U", won: " + number(won));
-    c.list.push_back(U"Planets controlled: " + number(g.planets_owned(me)) + U" / " + number(planets));
-    c.list.push_back(U"Enemy units destroyed: " + number(tally.kills) + U", units lost: " + number(tally.losses));
     return c;
 }
 
@@ -555,8 +589,8 @@ SpecialPanelData special_panel(const galactic::GalacticSim& g, const GameData& d
                 if (!it.localized_description.empty()) m.description = text_or(text, it.localized_description);
                 m.cost = static_cast<int32_t>(std::lround(o.price));
                 m.enabled = !o.purchased && o.price <= credits;
-                const std::string fac = it.faction < g.rules().factions.size() ? g.rules().factions[it.faction].name : std::string();
-                m.tech_alt = fac == "Rebel" ? 0 : fac == "Empire" ? 1 : -1;
+                // modc t20: the item faction's Tech_Level_Icon_Name picks the market_tech_level alternate (by prefix).
+                m.tech_icon = it.faction < g.rules().factions.size() ? g.rules().factions[it.faction].tech_level_icon : std::string();
                 out.market.push_back(std::move(m));
             }
             break;
@@ -574,19 +608,36 @@ SpecialPanelData special_panel(const galactic::GalacticSim& g, const GameData& d
             break;
         case galactic::kSpecialCorruption: {
             out.title = U"Corruption";
-            const std::vector<galactic::CorruptionOption> missions = galactic::corruption_options(d.types, ps.type);
+            // mcx4 t14 (MCX4_T14_RE_ANSWERS "GameConstants.Corruption_Choice_Name family"): per choice the icon, name,
+            // benefit text and mission requirement icon from the GameConstants lists.
+            const data::GameConstants& gc = d.db.constants();
+            const auto gcv = [&gc](std::string_view tag) {
+                const auto v = gc.get(tag);
+                return v ? *v : std::string_view();
+            };
+            const CorruptionChoiceArt art = CorruptionChoiceArt::from(
+                gcv("Corruption_Choice_Icon_Name"),                // ledger: consumes GameConstants.Corruption_Choice_Icon_Name
+                gcv("Corruption_Choice_Name"),                     // ledger: consumes GameConstants.Corruption_Choice_Name
+                gcv("Corruption_Choice_Benefit"),                  // ledger: consumes GameConstants.Corruption_Choice_Benefit
+                gcv("Corruption_Mission_Requirement_Icon_Name"));  // ledger: consumes GameConstants.Corruption_Mission_Requirement_Icon_Name
             for (const galactic::CorruptionChoiceDef& c : g.corruption_choices(planet)) {
                 if (out.corruption.size() >= 3) break;
                 const galactic::CorruptionRequirements r = g.corruption_requirements(player, planet, c);
                 ui::CorruptionOption o;
                 o.corruption_type = c.type;
                 o.title = u32(corruption_name(c.type));
+                if (const std::string_view id = CorruptionChoiceArt::at(art.name, c.type); !id.empty() && text.find(id)) o.title = text_or(text, id);
+                o.icon = std::string(CorruptionChoiceArt::at(art.icon, c.type));
+                if (const std::string_view id = CorruptionChoiceArt::at(art.benefit, c.type); !id.empty() && text.find(id))
+                    o.lines.push_back(text_or(text, id));
+                if (const std::string_view ic = CorruptionChoiceArt::at(art.requirement_icon, c.type); !ic.empty())
+                    o.requirements.emplace_back(ic);
                 o.cost = static_cast<int32_t>(std::lround(c.credit_cost));
                 if (r.mission_need > 0) o.lines.push_back(fraction("Missions ", r.mission_have, r.mission_need));
                 if (r.units_need > 0) o.lines.push_back(fraction("Units ", r.units_have, r.units_need));
                 if (r.planets_need > 0) o.lines.push_back(fraction("Planets ", r.planets_have, r.planets_need));
-                if (const galactic::CorruptionOption* m = galactic::find_corruption_option(missions, c.type); m && m->tactical)
-                    o.lines.push_back(u32(m->kind == galactic::ConflictKind::Space ? "Space mission: " : "Land mission: ") + u32(m->map));
+                if (const galactic::CorruptionChoiceDef* m = g.corruption_choice(planet, c.type); m && m->tactical)
+                    o.lines.push_back(u32(m->tactical_space ? "Space mission: " : "Land mission: ") + u32(m->tactical_map));
                 o.enabled = r.all();
                 out.corruption.push_back(std::move(o));
             }

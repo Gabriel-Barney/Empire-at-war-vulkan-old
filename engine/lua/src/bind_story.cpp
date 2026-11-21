@@ -2,12 +2,14 @@
 // They act on the StoryModel attached to the VM (attach_story, include/alamo/lua/story_model.hpp);
 // without one, queries return nil/false and commands do nothing (a message is logged).
 // Contracts and messages: docs/re/LUA_API.md "Binding map" (the original's validation strings).
-// Error discipline: vm_internal.hpp (no Lua error raised from here; Call::fail).
+// Error discipline: vm_internal.hpp (no Lua error raised from here; Call::script_error_stop).
 #include <cstdio>
 #include <string>
 
 #include "alamo/lua/object_bridge.hpp"
+#include "alamo/core/ascii.hpp"
 #include "alamo/lua/story_model.hpp"
+#include "alamo/objects/behaviors.hpp"
 #include "alamo/objects/game_object_types.hpp"
 #include "alamo/objects/object_store.hpp"
 #include "vm_internal.hpp"
@@ -22,13 +24,7 @@ const char kStoryKey[] = "alamo.story";
 const char kStoryGroupKey[] = "alamo.story.group";  // q6 t03: the StoryTable (attach_story_table)
 constexpr uint32_t kNone = 0xFFFFFFFFu;
 
-StoryModel* story(lua_State* L) {
-    lua_pushstring(L, kStoryKey);
-    lua_rawget(L, LUA_REGISTRYINDEX);
-    auto* m = static_cast<StoryModel*>(lua_touserdata(L, -1));
-    lua_pop(L, 1);
-    return m;
-}
+StoryModel* story(lua_State* L) { return detail::registry_ptr<StoryModel>(L, kStoryKey); }
 StoryModel* story(Call& c) { return story(c.L); }
 
 uint32_t cls_plot() {
@@ -40,24 +36,12 @@ uint32_t cls_event() {
     return c;
 }
 
-int push_nil(Call& c) {
-    lua_pushnil(c.L);
-    return 1;
-}
-int push_bool(Call& c, bool b) {
-    lua_pushboolean(c.L, b ? 1 : 0);
-    return 1;
-}
+using detail::push_nil;  // ref5 t03: vm_internal.hpp
+using detail::push_bool;  // ref5 t03: vm_internal.hpp
 
 // q6 t03 (STORY.md §2.4): the story manager's plot table - every player's plot set of the VM's game mode
 // (attach_story_table; nullptr = the VM's own model is the whole table).
-StoryTable* story_table(lua_State* L) {
-    lua_pushstring(L, kStoryGroupKey);
-    lua_rawget(L, LUA_REGISTRYINDEX);
-    auto* t = static_cast<StoryTable*>(lua_touserdata(L, -1));
-    lua_pop(L, 1);
-    return t;
-}
+StoryTable* story_table(lua_State* L) { return detail::registry_ptr<StoryTable>(L, kStoryGroupKey); }
 // The model a plot / event wrapper refers to: Ud::reserved = 0 the VM's own model (attach_story), k > 0 the table's
 // model k - 1 (a plot of another player's plot set found by Get_Story_Plot; the same slots as the q6 t03 plot group,
 // so saved wrappers keep their meaning). nullptr when that model is gone.
@@ -104,12 +88,6 @@ StoryEventState& self_event_state(Call& c) {
 
 void no_story(Call& c, const char* what) { c.vm->message(std::string("[story] ") + what + " ignored: no story attached"); }
 
-std::string upper_ascii(std::string_view s) {
-    std::string out(s);
-    for (char& ch : out) ch = (ch >= 'a' && ch <= 'z') ? static_cast<char>(ch - 'a' + 'A') : ch;
-    return out;
-}
-
 // `(int)(n + 0.5)` (C truncation, so -1.7 -> -1; saturating) printed with "%d" (LUA_API.md "StoryEventWrapper dialog and
 // parameter setters" 2d / the shared converter).
 std::string rounded_int_text(double n) {
@@ -140,7 +118,7 @@ std::string story_text(const StoryModel* m, std::string_view id) {
 
 // A type's localized display name (type +0x140, from its Text_ID through the text table). [M] an empty Text_ID gives "".
 std::string type_display_name(Call& c, const StoryModel* m, objects::TypeIndex t) {
-    const std::string_view id = c.vm->host.types->get_string(t, "Text_ID");
+    const std::string_view id = c.vm->host.types->get_string(t, objects::tags::Text_ID);
     return id.empty() ? std::string() : story_text(m, id);
 }
 
@@ -166,7 +144,7 @@ int g_story_event(Call& c) {
     const bool alive = obj && detail::object_alive(*c.vm, *obj);
     if (alive && c.vm->host.types) {
         const objects::TypeIndex t = c.vm->host.store->type(detail::object_handle(*obj));
-        if (t < c.vm->host.types->raw().type_count()) type_name = std::string(c.vm->host.types->raw().types().name[t]);
+        if (t < c.vm->host.types->raw().type_count()) type_name = std::string(c.vm->host.types->name(t));
     }
     if (StoryTable* t = story_table(c.L); t && t->set_count() != 0) t->story_event(c.string(1), type_name, alive);
     else m->story_event(c.string(1), type_name, alive);
@@ -202,22 +180,41 @@ int g_get_story_plot(Call& c) {
     return 0;
 }
 
-// Check_Story_Flag(player, flag_name, location, reset) -> boolean. [inferred] AI story flags are
-// raised by the host (StoryModel::raise_ai_flag) per (player, name, location); reset clears on read.
+// Check_Story_Flag(player, flag_name, target, reset) -> boolean (docs/re/MCX8_BINDINGS_PLAYERS_STORY.md
+// "Check_Story_Flag") [H]. AI story flags are raised by the host (StoryModel::raise_ai_flag, TRIGGER_AI) per (player,
+// name as given, target object id or -1). Argument 3: a live game object, an AI target's game object, or anything else
+// (nil) = no target; argument 4 must be a boolean; a set flag read with reset true is cleared.
+// [port] the flags live on the story model (one per plot set), not on the player's AI context of the current mode.
 int g_check_story_flag(Call& c) {
     if (c.nargs != 4)
         return c.script_error_stop("Check_AI_Story_Flag -- invalid number of parameters. Expected between 4, got %d.", c.nargs);
     const detail::Ud* player = c.userdata(1, detail::cls_player());
     if (!player) return c.script_error_stop("Check_AI_Story_Flag -- invalid type for parameter 1. Expected player");
     if (!c.is_string(2)) return c.script_error_stop("Check_AI_Story_Flag -- invalid type for parameter 2. Expected string");
-    const detail::Ud* loc = c.userdata(3, detail::cls_game_object());
+    int32_t loc = -1;
+    if (const detail::Ud* o = c.userdata(3, detail::cls_game_object())) {
+        if (!detail::object_alive(*c.vm, *o))
+            return c.script_error_stop("Check_AI_Story_Flag -- target specified is dead; unable to check flag.");
+        loc = o->id;
+    } else if (const detail::AiTargetArg t = detail::ai_target_arg(c, 3); t.is_target) {
+        if (t.dead) return c.script_error_stop("Check_AI_Story_Flag -- target specified is dead; unable to check flag.");
+        if (!t.object) {
+            const std::string id = std::to_string(c.userdata(3, detail::cls_target())->id);  // [port] no target names
+            return c.script_error_stop("Check_AI_Story_Flag -- target %s is not a game object; unable to check story flag.",
+                                       id.c_str());
+        }
+        loc = static_cast<int32_t>(c.vm->host.store->id(t.object));
+    }
+    if (lua_type(c.L, c.idx(4)) != LUA_TBOOLEAN)
+        return c.script_error_stop("Check_AI_Story_Flag -- invalid type for parameter 4; expected boolean.");
     const bool reset = lua_toboolean(c.L, c.idx(4)) != 0;
     StoryModel* m = story(c);
     if (!m) return push_bool(c, false);
-    return push_bool(c, m->check_ai_flag(player->id, c.string(2), loc ? loc->id : -1, reset));
+    return push_bool(c, m->check_ai_flag(player->id, c.string(2), loc, reset));
 }
 
-// Add_Objective(text_id, boolean). [inferred] the boolean is not modelled.
+// Add_Objective(text_id, battle_info) (MCX8_BINDINGS_PLAYERS_STORY.md "Add_Objective") [H]: true = a battle info line,
+// false = a numbered objective (StoryObjective::battle_info).
 int g_add_objective(Call& c) {
     if (c.nargs != 2) return c.script_error_stop("Add_Objective -- invalid number of parameters. Expected 2, got %d.", c.nargs);
     if (!c.is_string(1)) return c.script_error_stop("Add_Objective -- invalid type for parameter 1. Expected string.");
@@ -228,23 +225,64 @@ int g_add_objective(Call& c) {
         no_story(c, "Add_Objective");
         return 0;
     }
-    m->add_objective(c.string(1), true);
+    m->add_objective(c.string(1), lua_toboolean(c.L, c.idx(2)) != 0);
     return 0;
 }
 
-// Add_Radar_Blip(object, name). [inferred] a blip of the same name is replaced.
+bool galactic_mode(const Call& c) { return c.vm->host.store && c.vm->host.store->mode() == objects::ModeKind::Galactic; }
+
+// A live planet object at argument i of a galactic script (the planet type has the PLANET behaviour).
+const detail::Ud* planet_arg(Call& c, int i) {
+    const detail::Ud* o = c.userdata(i, detail::cls_game_object());
+    if (!o || !detail::object_alive(*c.vm, *o)) return nullptr;
+    if (!c.vm->host.store->has_behavior(detail::object_handle(*o), objects::beh::Planet)) return nullptr;
+    return o;
+}
+
+// Position of argument 1 (0x4990b0): a live game object (also followed: `object`), a PositionWrapper, an AI target (its
+// object, else its host position) or a task force (its first live unit [port]): detail::position_arg (ref5 t03). Only a
+// game object argument is followed; an AI target's or task force's object gives its position at the call.
+bool blip_position(Call& c, StoryBlip& out) {
+    Vec3 p{};
+    objects::ObjectHandle h{};
+    if (detail::position_arg(c, 1, p, &h) != detail::PosArg::Ok) return false;
+    if (const detail::Ud* o = c.userdata(1, detail::cls_game_object())) out.object_id = o->id;
+    out.x = p.x;
+    out.y = p.y;
+    out.z = p.z;
+    return true;
+}
+
+// Add_Radar_Blip (MCX8_BINDINGS_PLAYERS_STORY.md "Add_Radar_Blip") [H]. Galactic: Add_Radar_Blip(planet) turns the
+// planet's highlight on. Tactical: Add_Radar_Blip(position source, name) appends a blip (the same name twice: two blips).
 int g_add_radar_blip(Call& c) {
+    if (galactic_mode(c)) {
+        if (c.nargs != 1) return c.script_error_stop("Add_Radar_Blip -- invalid number of parameters.  Expected 1, got %d.", c.nargs);
+        const detail::Ud* planet = planet_arg(c, 1);
+        if (!planet) return c.script_error_stop("Add_Radar_Blip -- invalid type for parameter 1.  Expected planet.");
+        if (StoryModel* m = story(c)) m->add_planet_blip(planet->id);
+        return 0;
+    }
     if (c.nargs != 2) return c.script_error_stop("Add_Radar_Blip -- invalid number of parameters. Expected 2, got %d.", c.nargs);
-    const detail::Ud* o = c.userdata(1, detail::cls_game_object());
-    if (!o || !detail::object_alive(*c.vm, *o))
+    StoryBlip b;
+    if (!c.vm->host.store || !blip_position(c, b))
         return c.script_error_stop("Add_Radar_Blip -- could not deduce a position from parameter 1.");
-    if (!c.is_string(2)) return c.script_error_stop("Add_Radar_Blip -- invalid type for parameter 2. Expected string.");
-    if (StoryModel* m = story(c)) m->add_blip(c.string(2), o->id);
+    if (!c.is_string(2)) return c.script_error_stop("Add_Radar_Blip -- invalid type for parameter 2. Expected strng.");
+    b.name = std::string(c.string(2));
+    if (StoryModel* m = story(c)) m->add_blip(b);
     return 0;
 }
 
+// Remove_Radar_Blip: galactic (planet) turns the planet's highlight off; tactical (name) removes the oldest blip of
+// that name.
 int g_remove_radar_blip(Call& c) {
     if (c.nargs != 1) return c.script_error_stop("Remove_Radar_Blip -- invalid number of parameters. Expected 1, got %d.", c.nargs);
+    if (galactic_mode(c)) {
+        const detail::Ud* planet = planet_arg(c, 1);
+        if (!planet) return c.script_error_stop("Remove_Radar_Blip -- invalid type for parameter 1.  Expected planet.");
+        if (StoryModel* m = story(c)) m->remove_planet_blip(planet->id);
+        return 0;
+    }
     if (!c.is_string(1)) return c.script_error_stop("Remove_Radar_Blip -- invalid type for parameter 1. Expected strng.");
     if (StoryModel* m = story(c)) m->remove_blip(c.string(1));
     return 0;
@@ -328,12 +366,12 @@ bool convert_value(Call& c, int i, std::string& out) {
         if (!detail::object_alive(*c.vm, *o)) return false;
         const objects::TypeIndex t = representative_type(c, *o);
         if (t == objects::kNone) return false;
-        out = upper_ascii(c.vm->host.types->raw().types().name[t]);
+        out = ascii_upper(c.vm->host.types->name(t));
         return true;
     }
     if (const detail::Ud* t = c.userdata(i, detail::cls_type())) {
         if (!c.vm->host.types || t->value >= c.vm->host.types->raw().type_count()) return false;
-        out = upper_ascii(c.vm->host.types->raw().types().name[static_cast<size_t>(t->value)]);
+        out = ascii_upper(c.vm->host.types->name(static_cast<objects::TypeIndex>(t->value)));
         return true;
     }
     const int lt = lua_type(c.L, c.idx(i));
@@ -348,6 +386,7 @@ bool convert_value(Call& c, int i, std::string& out) {
     return false;
 }
 
+// limit: guard Set_Event_Parameter index; above retail's Event_Param1..7
 constexpr int32_t kMaxParamIndex = 64;  // [port] the parameter slots the port keeps (Event_Param1..64)
 
 StoryParam* param_slot(std::vector<StoryParam>& v, int32_t index) {
@@ -407,7 +446,7 @@ int m_event_set_reward_type(Call& c) {
     if (!self_event_valid(c)) return 0;
     if (c.nargs != 1) return c.script_error_stop("%sinvalid number of parameters. Expected 1, got %d.", kWho, c.nargs);
     if (!c.is_string(1)) return c.script_error_stop("%sinvalid type for parameter 1. Expected string.", kWho);
-    self_event(c).reward_type = upper_ascii(c.string(1));
+    self_event(c).reward_type = ascii_upper(c.string(1));
     ++self_event_state(c).lua_edits;
     return 0;
 }
@@ -523,25 +562,13 @@ constexpr detail::ImplEntry kImpl[] = {
 std::span<const detail::ImplEntry> detail::impl_story() { return kImpl; }
 
 void attach_story(LuaVm& vm, StoryModel* model) {
-    lua_State* L = vm.state();
-    lua_pushstring(L, kStoryKey);
-    if (model)
-        lua_pushlightuserdata(L, model);
-    else
-        lua_pushnil(L);
-    lua_rawset(L, LUA_REGISTRYINDEX);
+    detail::set_registry_ptr(vm.state(), kStoryKey, model);
 }
 
 StoryModel* attached_story(LuaVm& vm) { return story(vm.state()); }
 
 void attach_story_table(LuaVm& vm, StoryTable* table) {
-    lua_State* L = vm.state();
-    lua_pushstring(L, kStoryGroupKey);
-    if (table)
-        lua_pushlightuserdata(L, table);
-    else
-        lua_pushnil(L);
-    lua_rawset(L, LUA_REGISTRYINDEX);
+    detail::set_registry_ptr(vm.state(), kStoryGroupKey, table);
 }
 
 }  // namespace alamo::lua

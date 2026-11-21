@@ -31,7 +31,6 @@ inline constexpr uint32_t kPoolCap = 5003;          // particles per emitter (B.
 inline constexpr float kTickSeconds = 0.03f;        // render delta per sim tick (B.4 "Clock")
 inline constexpr float kMaxUpdateSeconds = 1.0f;    // scene Update clamps d to <= 1 s
 inline constexpr float kPrewarmStep = 0.1f;         // skip-time pre-simulation step
-inline constexpr float kEmitterAgeWrap = 14400.0f;  // emitter age wraps (B.4 "Emitter time")
 
 enum Track : uint32_t { kRed = 0, kGreen, kBlue, kAlpha, kScale, kTexture, kRotation, kTrackCount };
 
@@ -78,7 +77,8 @@ struct EmitterDef {
     float initial_delay = 0;    // 0x24
     float stop_time = 0;        // 0x32
     float skip_time = 0;        // 0x33
-    uint32_t spawn_source = 0;  // 0x34
+    uint32_t spawn_source = 0;  // 0x34 (vis1 t04: 1 random vertex, 2 random triangle point, 3 every vertex of the parent mesh)
+    float mesh_normal_offset = 0;  // 0x3C (vis1 t04: offset along the mesh normal x 0.5, sources 1 / 2)
     // Particle life + motion
     float lifetime = 1;         // 0x0F
     float random_lifetime = 0;  // 0x13
@@ -91,7 +91,8 @@ struct EmitterDef {
     bool inherit_velocity = false;   // 0x43
     float inherit_velocity_factor = 0;  // 0x28
     bool affected_by_wind = false;   // 0x31
-    uint32_t ground_behavior = 0;    // 0x2F (not simulated yet, R4 open item)
+    uint32_t ground_behavior = 0;    // 0x2F (vis1 t05: 1 dies on the terrain, 2 bounces; particles.hlsl CSUpdate)
+    float bounciness = 1;            // 0x30 (vis1 t05: bounce v -= n (v.n)(1 + bounciness))
     // Randomisation
     float random_color[4] = {0, 0, 0, 0};  // 0x2C
     bool random_color_uniform = false;     // 0x2D
@@ -129,16 +130,11 @@ struct SystemDef {
     std::string name;             // file name (upper-case, no extension)
     bool leave_particles = false; // 0x900/0x02
     std::vector<EmitterDef> emitters;
-    bool has_heat() const;
-    bool has_non_heat() const;
 };
 using SystemPtr = std::shared_ptr<const SystemDef>;
 
 // Strips a directory ("C:\PROJECTS\...\P_PARTICLE_MASTER.TGA" -> "P_PARTICLE_MASTER.TGA") and upper-cases.
 std::string texture_base_name(std::string_view name);
-
-// Track sample at a life fraction t (0..1): linear between the 32 entries for modes 0/1, the entry below for 2.
-float sample_track(const TrackTable& t, float life_fraction);
 
 // B.4 pool size of one emitter before link multiplication: rate = 0x2A or 0x26 / 0x25; interval I = 0x25 or 1 / rate;
 // pool = ceil(rate x lifetime) when I <= lifetime (weather: lifetime 1 s), else the per-event count; capped.
@@ -160,6 +156,11 @@ struct ProxyName {
     int lod = -1;      // digits after _LOD, -1 if absent
 };
 ProxyName parse_proxy_name(std::string_view name);
+
+// Cache key of a system name: ASCII upper-cased, one trailing ".ALO" cut ("p_smoke.alo" -> "P_SMOKE"). A directory is
+// kept and '/' is not rewritten, so ParticleLibrary::get("Data\Art\Models\P_SMOKE.ALO") does not share the "P_SMOKE"
+// entry (CU2 t03: get's key unchanged); load_system cuts the directory itself before calling this for SystemDef::name.
+std::string system_key(std::string_view name);
 
 // Case-insensitive cache of systems by name ("P_SMOKE" / "p_smoke.alo"): one load per name, misses cached (134 shipped
 // proxies name nothing, B.3). Reads Data\Art\Models\<NAME>.ALO through the FileProvider. Thread-safe.
