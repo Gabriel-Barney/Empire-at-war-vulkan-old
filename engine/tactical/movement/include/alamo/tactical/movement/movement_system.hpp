@@ -304,6 +304,7 @@ struct UnitView {
     int32_t form_rank = 0;
     uint32_t coord_id = 0;
     bool near_end = false;  // mov1 t04: pack +0x28c as of its last rebuild (BKR1 Q5)
+    float end_z = 0.0f;     // mov3 t02: the order path's stored last-waypoint height (LandMotion::end_z, bkm1 t06)
     bool trk_static = false;  // mov2 t04: the tracker's Static flag taken before the last walk (the next plans read it)
     // REMAINING_GAPS §4.3-4.7: special locomotors
     LocomotorKind locomotor = LocomotorKind::Default;  // the active locomotor

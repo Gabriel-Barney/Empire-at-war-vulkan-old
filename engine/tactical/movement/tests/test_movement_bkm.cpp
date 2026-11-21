@@ -55,13 +55,15 @@ void shield(MovementSystem& sys, int32_t x0, int32_t x1, int32_t y0, int32_t y1)
 }
 
 // Any shield cell on the unit's planned path polyline (sampled every 2 units)?
-bool path_crosses_shield(const MovementSystem& sys, ObjectId id) {
+// min_cx: only samples in cells x >= min_cx count (mov3 t02: a start cell on the band does not make a crossing)
+bool path_crosses_shield(const MovementSystem& sys, ObjectId id, int32_t min_cx = -1) {
     const std::span<const V2> p = sys.land_path(id);
     for (size_t i = 0; i + 1 < p.size(); ++i) {
         const float len = distance(p[i], p[i + 1]);
         const int n = std::max(1, static_cast<int>(len / 2.0f));
         for (int k = 0; k <= n; ++k) {
             const V2 q = p[i] + (p[i + 1] - p[i]) * (static_cast<float>(k) / static_cast<float>(n));
+            if (world_to_cell(q.x) < min_cx) continue;
             const uint32_t c = sys.grid().effective(world_to_cell(q.x), world_to_cell(q.y));
             if (c & kPassShield) return true;
         }
@@ -119,7 +121,9 @@ void test_shield_class() {
         CHECK(sys.add_unit(vehicle(1, cell_center(10, 20))));
         SimRng rng(7);
         plan(sys, {1}, cell_center(40, 20), rng);
-        CHECK(path_crosses_shield(sys, 1));
+        // mov3 t02 (b0166): not vacuous - the path crosses the band well past the start cell (x >= 20), going straight
+        // through where WheeledNoShield would have to go round (the band leaves a way round, y 10 .. 30)
+        CHECK(path_crosses_shield(sys, 1, 20));
     }
     {  // (d)
         MovementSystem sys{MovementConfig{}};
@@ -543,6 +547,50 @@ void test_object_goal_validation() {
     CHECK(!b.failed && b.has_goal);  // flag 0x20: no validation, the open unit moves
 }
 
+
+// mov3 t02 (b0166, MOVEMENT §4.2 step 2 item 7 tests 9 / 10 and "Scan" [H]): the recruitment rules test_engagement_recruit
+// does not reach, on split_into_formations directly. Members in a row 30 apart (seed = the one nearest the centroid).
+void test_mov3_recruit_rules() {
+    ::alamo::test::section("mov3_recruit_rules");
+    const MovementConstants k;
+    const auto row = [](uint32_t n) {
+        std::vector<FormationMember> m(n);
+        for (uint32_t i = 0; i < n; ++i) {
+            m[i].id = static_cast<ObjectId>(i + 1);
+            m[i].pos = {30.0f * static_cast<float>(i), 0.0f};
+            m[i].max_speed = 1.0f;
+            m[i].type_name = "MOV3_TANK";
+            m[i].collision_class = kUccVehicle;
+            m[i].engage = 300.0f;
+        }
+        return m;
+    };
+    // K(S) <= E(C): the seed (the middle one) has a minimum distance 220 > E(C) = 200 of candidate 0: candidate 0 stays out
+    std::vector<FormationMember> m = row(3);
+    m[1].min_engage = 220.0f;
+    m[0].engage = 200.0f;
+    const uint32_t b3[] = {0, 1, 2};
+    std::vector<std::vector<uint32_t>> f = split_into_formations(m, b3, k);
+    CHECK(f.size() == 2 && f[0].size() == 2 && f[0][0] == 1 && f[0][1] == 2);
+    // a guard block makes every K 0 (the host's min_engage := 0): all three together
+    m[1].min_engage = 0.0f;
+    CHECK(split_into_formations(m, b3, k).size() == 1);
+    // test 10: a candidate solo by item 6 (attack order: melee, in range, or near the target) is skipped and seeds its own
+    m = row(3);
+    m[2].solo_attack = true;
+    f = split_into_formations(m, b3, k);
+    CHECK(f.size() == 2 && f[1].size() == 1 && f[1][0] == 2);
+    // the scan restarts after each recruit: members at x 0 / 30 / 60 / 90 / 175, seed = the one at 60 (centroid 71);
+    // the member at 175 is 115 from the seed (beyond the vehicle distance 100) and first in the vector, so only the
+    // restart after the member at 90 joins (85 away then) reaches it again
+    m = row(5);
+    m[4].pos = {175.0f, 0.0f};
+    const uint32_t b5[] = {4, 0, 1, 2, 3};  // vector order: 4 first
+    f = split_into_formations(m, b5, k);
+    CHECK(f.size() == 1 && f[0].size() == 5);
+    std::printf("mov3 t02 recruit rules: K(S) <= E(C), guard K 0, solo skip, scan restart ok\n");
+}
+
 }  // namespace
 
 int main() {
@@ -557,5 +605,6 @@ int main() {
     test_secondary_facing();      // bkm1 t08 (b0050)
     test_attack_validation_failure();  // bkm3 t01 (b0076)
     test_object_goal_validation();  // mov2 t06
+    test_mov3_recruit_rules();  // mov3 t02
     return ::alamo::test::report("alamo_tactical_movement_bkm_tests");
 }

@@ -494,6 +494,7 @@ UnitView MovementSystem::view(ObjectId id) const {
     v.form_rank = u->form_rank;
     v.coord_id = u->coord_id;
     v.near_end = u->near_end;
+    v.end_z = u->m.end_z;
     v.trk_static = u->trk_static;
     v.jiggle = u->jiggle;
     v.locomotor = u->d.locomotor;  // §4.3-4.7

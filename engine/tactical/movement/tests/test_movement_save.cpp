@@ -1412,6 +1412,75 @@ void t25_attack_before(World& w, uint32_t f) {
     w.sys.move(o, w.rng, f);
 }
 
+// mov3 t02 (b0166): a save round trip with the bkm1 stored heights and the secondary yaw live - the t25.2 attack approach
+// on sloped ground (z = x / 10: the slot leg's G carries the target's height, LandMotion::end_z, and the members' paths
+// Unit::lane_z) with unit 10 a UseSecondaryFacing type (its Y2 steps while it walks). Every resume point continues
+// identically.
+void test_mov3_heights_save() {
+    Scenario sc;
+    sc.name = "land attack approach on a slope, UseSecondaryFacing (mov3 t02)";
+    sc.build = [](World& w) {
+        PassabilityGrid g;
+        g.init(100, 60);
+        w.sys.set_grid(std::move(g));
+        w.sys.set_height_fn([](float x, float) { return x * 0.1f; });
+        w.rng = SimRng(61);
+        const V2 c = cell_center(55, 30);
+        for (const auto& [id, y] : {std::pair<ObjectId, int32_t>{10, 28}, std::pair<ObjectId, int32_t>{11, 32}}) {  // one formation
+            UnitDesc d = t20_save_vehicle(id, cell_center(5, y));
+            d.hard_x = d.hard_y = 15.0f;
+            d.use_secondary_facing = id == 10;
+            CHECK(w.sys.add_unit(d));
+        }
+        UnitDesc t = t20_save_vehicle(900, c);
+        t.hard_x = t.hard_y = 5.0f;
+        t.owner = 2;
+        CHECK(w.sys.add_unit(t));
+        alamo::test::set_fire_test<V2>(alamo::test::engagement_of(w.sys),
+                                       [c](ObjectId, V2 p, ObjectId, bool, V2, float) { return distance(p, c) <= 255.0f; });
+    };
+    // the t25.2 order with the target's height C z = 40, no fire trim: the slot leg's G carries it (bkm1 t06)
+    sc.before = [](World& w, uint32_t f) {
+        if (f != 1) return;
+        MoveOrder o;
+        o.units = {10, 11};
+        o.destination = cell_center(55, 30);
+        o.attack.target = 900;
+        o.attack.c = o.attack.g = cell_center(55, 30);
+        o.attack.cz = 40.0f;
+        o.attack.trim = false;  // the path ends on G (a trim at 255 cuts before the last segment: z 0)
+        o.attack.t_hx = o.attack.t_hy = 5.0f;
+        for (const ObjectId id : o.units) {
+            LandAttackUnit e;
+            e.id = id;
+            e.range = 250.0f;
+            e.engage = 255.0f;
+            o.attack.units.push_back(e);
+        }
+        w.sys.move(o, w.rng, f);
+    };
+    sc.after = squad_after;
+    sc.frames = 700;
+    World v(sc.cfg);
+    sc.build(v);
+    uint32_t moving_first = 0, moving_last = 0;
+    float end_z = 0.0f;
+    for (uint32_t f = 0; f < sc.frames; ++f) {
+        step(sc, v, f, serial_for);
+        const UnitView a = v.sys.view(10);
+        if (a.atk_rho > 0.0f && a.has_goal && a.speed > 0.0f) {
+            if (moving_first == 0) moving_first = f + 1;
+            moving_last = f + 1;
+            end_z = std::max(end_z, a.end_z);
+        }
+    }
+    CHECK(moving_first > 0 && moving_last > moving_first + 50);
+    std::printf("mov3 t02 heights save: approach frames %u..%u, stored end z %.3f (C z 40), slot legs %u (refused %u)\n",
+                moving_first, moving_last, static_cast<double>(end_z), v.sys.stats().attack_legs, v.sys.stats().attack_leg_refused);
+    CHECK(end_z == 40.0f);  // non-zero: the save below carries it
+    for (const uint32_t at : {moving_first, (moving_first + moving_last) / 2, moving_last}) check_resume(sc, at, 0);
+}
+
 void test_t25_attack() {
     Scenario sc;
     sc.name = "land attack approach (s78n t25.2)";
@@ -2039,6 +2108,7 @@ int main() {
     test_t18_states();              // s78n t18 review
     test_t20_states();              // s78n t20
     test_t25_attack();              // s78n t25.2
+    test_mov3_heights_save();       // mov3 t02
     test_s78o_unit_rejections();    // s78o (b0087)
     test_stale_team_entries();      // s78n t18 review
     test_hidden_after_load();       // s78n t18 review
