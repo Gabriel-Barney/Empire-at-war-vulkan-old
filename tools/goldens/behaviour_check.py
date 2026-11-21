@@ -284,7 +284,7 @@ def check_range(base: str, head: str, scen: list[sr.Scenario], cache: sr.Cache, 
     base_sha = sr.git(ROOT, "rev-parse", base).strip()
     head_sha = sr.git(ROOT, "rev-parse", head).strip()
     declared, missing = range_declarations(base_sha, head_sha)
-    lines = [f"behaviour check (expand, report only) {base_sha[:8]}..{head_sha[:8]}: "
+    lines = [f"behaviour check {base_sha[:8]}..{head_sha[:8]}: "
              + ("declares nothing" if declared is None else "declares none" if not declared else "declares " + ", ".join(declared))
              + (f"; sim commits without a Behaviour: trailer: {', '.join(missing)}" if missing else "")]
     ok, agree, disagree = True, 0, 0

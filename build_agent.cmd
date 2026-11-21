@@ -8,8 +8,8 @@ rem needs the tree spelled out (build_agent.cmd msvc wt lua lua) or a list ("cor
 rem Module list "all": the default ALAMO_ENGINE_MODULES of engine/CMakeLists.txt (configured with -U, like build_msvc.cmd).
 rem Tests: no 4th argument = the fast tier (ctest -LE slow, tests without the "slow" label); a regex runs the matching tests,
 rem slow ones included; "all" runs every test (the gate scripts always do); "changed" (2026-11-13) runs the fast-tier tests
-rem of the engine modules changed against origin/dev (tools\lint\changed_tests.py), the inner loop while you work on one
-rem module; "none" builds without running tests. land_on_dev.cmd still needs the whole fast tier on the merged HEAD.
+rem that depend on a file changed against origin/dev through the build graph (tools\lint\affected_tests.py, wr3 t01:
+rem a tactical change also runs the apps scenario tests that link tactical); "none" builds without running tests.
 rem "configure" (2026-11-19) only configures the tree: no lint, build, tests or build record. It writes the
 rem compile_commands.json clangd reads (.clangd points at build-wt-clang): build_agent.cmd clang all configure.
 rem Repeat check (2026-11-13, tools\lint\build_state.py): when the last run in this tree FAILED on exactly the same source,
@@ -97,7 +97,7 @@ python -I tools\lint\verified_build.py begin %B% --modules "!AMODS!" --tests "!A
   if not exist %B%\tmp mkdir %B%\tmp
   set "TMP=%~dp0%B%\tmp"
   set "TEMP=%~dp0%B%\tmp"
-  if /i "!ATESTS!"=="changed" python -I tools\lint\changed_tests.py %B% "%~dp0%B%\changed_tests.txt" 2>&1
+  if /i "!ATESTS!"=="changed" python -I tools\lint\affected_tests.py %B% "%~dp0%B%\changed_tests.txt" 2>&1
   if /i "!ATESTS!"=="none" (
     echo tests: not run, test filter none
   ) else (

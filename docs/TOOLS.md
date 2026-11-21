@@ -36,7 +36,7 @@ How it is wired:
 | Fuzz targets | `build_fuzz.cmd`, `tools\fuzz\run_fuzz.py` |
 | Launcher (Rust) | `build_launcher.cmd`; by hand `launcher\cargo.cmd <args>` |
 | Read a build result | `python tools\lint\build_summary.py <logs>` (the scripts print it) |
-| Which tests cover my change | `python -I tools\lint\changed_tests.py` |
+| Which tests cover my change | `python -I tools\lint\affected_tests.py <tree> <out file>` (build graph; `--evaluate N`) |
 | Build-tree name or exe path | `python -I tools\lint\build_trees.py name agent wt msvc`, `exe alamo_headless.exe` (Python: `import build_trees`) |
 | Static checks | `python tools\lint\run_tidy.py` (clang-tidy), `check_mod_names.py`, `check_limits.py` (limit tags, §8), `check_mod_system.py` (mod-system shims, ums4), `check_string_literals.py` (hook) |
 | Goldens | `tools\regen_goldens.cmd` (skill `regen-goldens` first; `--mods` for the mod goldens of `tests/goldens/mods`) |

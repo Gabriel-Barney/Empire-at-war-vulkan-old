@@ -113,7 +113,7 @@ findings) join the list above; `spec-review` and `codebase-design`'s design-it-t
    (`ctest -LE slow`); pass a regex as 4th argument for specific tests (slow ones included) or `all`. Never put `>` after `--%`,
    and put nothing after the `--%` command on the same line (PowerShell passes the rest of the line to it).
    - **While iterating, test only what you changed:** `& .\build_agent.cmd --% msvc wt "<modules>" changed` runs the fast-tier
-     tests of the engine modules you changed against `origin/dev` (`tools\lint\changed_tests.py`), `none` only builds. Run the
+     tests that depend on what you changed against `origin/dev` through the build graph (`tools\lint\affected_tests.py`), `none` only builds. Run the
      whole fast tier (no 4th argument, or `all`) once before landing; `land_on_dev.cmd` runs it on the merged HEAD anyway.
    - An identical failing rerun is refused (exit 3, `tools\lint\build_state.py`): it prints the last summary again. Change the
      code first; for a flaky test or a changed environment set `ALAMO_RERUN=1`.
