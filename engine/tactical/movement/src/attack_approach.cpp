@@ -284,6 +284,12 @@ V2 last_dir(std::span<const V2> p) {
         if (length_sq(p[i] - p[i - 1]) > 0.0f) return normalize_retail(p[i] - p[i - 1]);
     return {};
 }
+// cmb3 t03 (b0199, BKR2 Q7 item 4 [H]): the slot leg (0x417520) takes the literal first segment (p[1] - p[0]) and last
+// segment, normalised; a zero segment gives (0, 0), so a zero last segment means no leg and a zero first segment fails the
+// dot test (> 0). Every pathfinder waypoint has z = 0 (MOVEMENT §3.5.2 "Waypoint z" items 1 - 2; G's z is appended only after
+// the leg path), so retail's 3-D unit vectors equal these 2-D ones.
+V2 literal_first_dir(std::span<const V2> p) { return p.size() >= 2 ? normalize_retail(p[1] - p[0]) : V2{}; }
+V2 literal_last_dir(std::span<const V2> p) { return p.size() >= 2 ? normalize_retail(p[p.size() - 1] - p[p.size() - 2]) : V2{}; }
 
 }  // namespace
 
@@ -631,7 +637,7 @@ bool MovementSystem::attack_plan(const MoveOrder& order, const std::vector<uint3
     }
     const uint32_t mask = f.mask;  // s78n t26 review round 2: the formation class 0x4779e0
     if (lead.atk_rho > 0.0f && path.size() >= 2) {
-        const V2 v = last_dir(path);
+        const V2 v = literal_last_dir(path);  // cmb3 t03
         bool taken = false;
         if (length_sq(v) > 0.0f) {
             const float q = slot_leg_reach(grid_, regions_, g, g + rot(v * -1.0f, lead.atk_theta) * lead.atk_rho, mask);
@@ -645,7 +651,7 @@ bool MovementSystem::attack_plan(const MoveOrder& order, const std::vector<uint3
                 LandPathScratch sc;
                 LandPath lp;
                 find_land_path(grid_, regions_, rq, sc, lp);
-                if (lp.ok && lp.points.size() >= 2 && dot(first_dir(lp.points), first_dir(path)) > 0.0f) {
+                if (lp.ok && lp.points.size() >= 2 && dot(literal_first_dir(lp.points), literal_first_dir(path)) > 0.0f) {
                     path = std::move(lp.points);
                     path.push_back(g);
                     // bkm1 t06 (b0051, MOVEMENT §3.5.2 "waypoint z" item 3): G goes in with its xyz, Q' and the rest z = 0;

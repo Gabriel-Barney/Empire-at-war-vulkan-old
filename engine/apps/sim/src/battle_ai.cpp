@@ -2859,10 +2859,14 @@ cmd::RejectReason BattleAi::execute_order(uint8_t player, const cmd::EventData& 
                     // the land attack move on the object itself - kind 3 with flag 0x01, the exact goal, slots, staging and
                     // the fire trim as for an enemy, no lock (the attack block below, kAttackBlockNoLock)
                     point_goal = !b_->space_ && (le32(b, 20) & at::kTfAttackMoveIssueAttack) != 0;
-                    // (not on the caller itself or its container: BKT1_ATTACK_RE §3.1, those stay a move to the point)
-                    bool self = false;
-                    for (const objects::ObjectId id : group.units)
-                        self = self || id == tu->id || b_->attack_mover(id) == tu->id || b_->attack_mover(id) == b_->attack_mover(tu->id);
+                    // (not on the caller itself or its container: BKT1_ATTACK_RE §3.1, those stay a move to the point). cmb3 t01 (b)
+                    // (b0169): the caller is the order's object (payload word 0); a squadmate of the caller, or a member of a
+                    // calling squad container, is neither, so it gets the block. tu is a battle unit, never a container, so
+                    // the caller's container (+0x2b0) cannot be it.
+                    // A task force's further units (after byte 24) are not callers: BKT1 §3.1 is the object's own Move_Internal.
+                    // (review) A squadmate or own-member target is in group.units: the block's item-6 stop (0x40edd0, every
+                    // member can fire from where it stands) ends it at once, so the formation does not chase its own member.
+                    const bool self = tu->id == static_cast<objects::ObjectId>(le32(b, 0));
                     nonhostile_block = !b_->space_ && !point_goal && !self;
                     if (self) point_goal = !b_->space_;
                 } else if (order == lua::LuaOrder::AttackMove && attackable) {
@@ -2893,9 +2897,9 @@ cmd::RejectReason BattleAi::execute_order(uint8_t player, const cmd::EventData& 
                     // lock (TARGETING by geometry: TacticalBattle::attack_can_hit_at); not on the caller or its container
                     // (review: not a TEAM container - its members are the combat units - and not a retreated unit)
                     const auto obj = static_cast<objects::ObjectId>(tw);
-                    bool self = false;
-                    for (const objects::ObjectId id : group.units)
-                        self = self || id == obj || b_->attack_mover(id) == obj;
+                    // cmb3 t01 (b) review: the same caller-only rule as the combat-unit branch (payload word 0 or its container)
+                    const auto caller = static_cast<objects::ObjectId>(le32(b, 0));
+                    const bool self = obj == caller || b_->attack_mover(caller) == obj;
                     const bool combat_object = (tu && (tu->retreated || !tu->alive || b_->combat_->has_unit(tu->id))) ||
                                                b_->team_target(obj) != nullptr || b_->movement_->is_land_team_container(obj);
                     nonhostile_block = !b_->space_ && !self && !combat_object && (le32(b, 20) & at::kTfAttackMoveIssueAttack) == 0;

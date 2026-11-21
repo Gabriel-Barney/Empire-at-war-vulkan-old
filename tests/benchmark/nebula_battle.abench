@@ -1,16 +1,16 @@
 ALAMO_BENCH 2
 name nebula_battle
-version 66
+version 67
 description Explosions and nebula overdraw: _MP_SPACE_DAGOBAH (nebula fields and asteroids around the fight), an idle Empire fleet against the Rebel AI with six times the default fleets, 1 min of battle; the camera starts on the fight, flies into the nebula in front of it and ends inside it
 make --bench-map _MP_SPACE_DAGOBAH --bench-human Empire --bench-ai Rebel --bench-scale 6 --bench-save-after 1200 --bench-seed 1
-save nebula_battle.alsv 226537 d86d8a1731e23eaa
-orders nebula_battle.acmd 72 8cff3960704c71ec
-fingerprint nebula_battle.crc 30974 d5efde43489f3b9b
+save nebula_battle.alsv 226540 e5c1ccddcf2bd497
+orders nebula_battle.acmd 72 c07ff726c09fe2c9
+fingerprint nebula_battle.crc 30974 65b00dcc22767dda
 fingerprint_every 16
 start_tick 1201
 ticks 1800
 workers auto
-final_crc cef2a5ff9f1ebedb
+final_crc 14efafd16a2f4e13
 host game
 mode fixed
 preset bm-high

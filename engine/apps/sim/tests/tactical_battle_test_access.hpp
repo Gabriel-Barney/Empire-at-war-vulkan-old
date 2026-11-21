@@ -33,6 +33,12 @@ struct TacticalBattleTestAccess {
         return static_cast<int>(b.land_attack_order(mode, ids, target, tp, flags, false, rng, guard));
     }
     static tactical::Aabb map_extents(const TacticalBattle& b, const TacticalMode& mode) { return b.map_extents(mode); }
+    // cmb3 t02: attack_target_unseen for battle unit `viewer` (false, false when it is not one).
+    static void target_unseen(TacticalBattle& b, const objects::ObjectStore& st, objects::ObjectId viewer, objects::ObjectId target,
+                              bool& hidden, bool& stealthed) {
+        hidden = stealthed = false;
+        if (const TacticalBattle::Unit* u = b.unit_by_id(viewer)) b.attack_target_unseen(st, *u, target, hidden, stealthed);
+    }
     // s78n t10: the 8 (x, y) points of object `h`'s fog multisample footprint.
     static void fog_footprint(const TacticalBattle& b, const objects::ObjectStore& st, objects::ObjectHandle h, float* xy16) {
         b.fog_footprint_samples(st, h, xy16);

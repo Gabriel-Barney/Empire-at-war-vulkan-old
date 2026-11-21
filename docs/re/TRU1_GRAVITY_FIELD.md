@@ -81,6 +81,12 @@ Walks one player's object tree (or all players with −1) with an XY rectangle o
 ±1e18 (**z is ignored**). Skips objects with obj +0x3a7 set (garrison-style). Accepts an object whose XY position is
 within R, else one whose bounding box overlaps the circle. Stops at the result cap (0x7fffffff here); unsorted.
 
+**Carried units (cmb3 t06, 2026-11-20, read from `re_reference/`) [H].** obj +0x3a7 is the "inside a container" byte:
+the enter-container step 0x37ade0 (garrisons and transports alike) sets it to 1 and leaves the object in its player
+tree (SPACE_AVOIDANCE §2.4); the exits clear it. So a garrisoned or transported unit is in the tree but skipped by the
+query, in **both** branches of §1.3: it is never slowed while carried, and a unit slowed before it was carried keeps
+its slow and its list entry while carried (a non-enemy owner change does not release it until it is out again).
+
 ### 1.6 Other readers of bit 0x40 [H]
 - Walk locomotor `Deploy(true)` (0x61d300, MOVEMENT §3.2): refuses to start a deploy while the bit is set. The DEPLOY
   ability's stop / adopt (0x3a1ce0) has already run. The three Mobile Defense Units are on the affected list, so a
@@ -97,8 +103,10 @@ within R, else one whose bounding box overlaps the circle. Stops at the result c
 ### 1.8 Port notes
 - The slow is one list-5 entry in the victim's own ModifierSet with source (generator id, generator type-name CRC),
   category 0; `TacticalBattle` already multiplies land speed by 1 + list 5.
-- [port] The query uses the unit centre only (the bounding-box overlap is not modelled); garrison-style objects
-  (`AbilityObjectDesc::garrison_style`) are skipped.
+- [port] The query uses the unit centre only (the bounding-box overlap is not modelled); a carried unit (§1.5, the
+  combat flag `kUnitContained`: garrisoned, a vehicle thief inside its vehicle, or Lua `Set_In_Limbo`)
+  is skipped in both branches (cmb3 t06; before it the never-set type flag `garrison_style` stood there, so a carried unit
+  was slowed at its stale position).
 - `Is_Neutral` players are skipped in both branches (the host's `neutral_player` hook: an owner whose faction
   Is_Neutral), so a slowed unit handed to a neutral player keeps the slow.
 - [port] Within one player the units are visited in ascending id (retail: the unsorted object-tree walk of §1.5); this
@@ -132,3 +140,13 @@ FIRE_LOBBING_SUPERWEAPON `Recharge_Seconds` 30, the same as `Projectile_Fire_Rec
 
 Port: the HUD button's ground pick sends command 25 (at position) per selected user [port: the retail cursor code that
 queues command 25 is not traced].
+
+**Routes other than command 25 (cmb3 t05, 2026-11-20, read from `re_reference/`) [H].** `Set_Unit_Ability_Active`
+0x38a350 has no case for 0x2f: after its common gates (Has_Ability, Can_Activate when turning on, not already active,
+the team-container forwarding) the switch's default returns false, so a command 43 (mode on or off) does nothing: no
+handler, no active byte, no recharge, no event. Lua `Activate_Ability` (0x570a50) lists 47 in neither argument family
+and stops the script with "unsupported unit ability" before any command. A command 40 (`TacticalSpecialAbility`) forwards
+to the special ability named by the record's `GUI_Activated_Ability_Name`; neither shipped 47 record (SPECIALSTRUCTURES,
+GROUNDBUILDABLESSKIRMISH) has one, so it finds nothing to run. So 47 fires only through command 25.
+Port: `AbilitySystem::set_active` returns false for 47 after the Has_Ability / Can_Activate / already-active gates and before the container forwarding (same result: a forwarded member would fail) (before t05 it reached the generic
+fallback: an Unhandled event and a recharge start); the Lua binding already refused it.

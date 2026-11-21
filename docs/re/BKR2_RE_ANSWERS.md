@@ -326,7 +326,7 @@ hidden and stealthed: retail returns the frozen point (hidden is tested first), 
 2. **The formation class** [H]. The slot test uses `0x4779e0` (most mask bits inside the members' intersection); the
    path, the slot leg's line test and the plan use F +0x1c4 (the plan class, `0x414720`'s shield switch). **Port: now
    matches** (attack_approach.cpp 346 `f.best`, 554 / 580 `f.mask`, s78n t26 round 2 and bkm1 t03); the PHASE4 t25.2
-   "[port] the lead's mask" note is stale.
+   "[port] the lead's mask" note is stale (retagged in cmb3 t03).
 3. **Reference distance: 3-D** [H]. `0x438c10` takes the mean of `0x41a9b0`'s points with z and the 3-D distance
    (strict <, first wins). **Port: 2-D** (attack_approach.cpp 439): on uneven ground a different reference formation,
    hence different d0 / d1, ring order and slots. S2.
@@ -337,6 +337,12 @@ hidden and stealthed: retail returns the frozen point (hidden is tested first), 
    first / last non-zero 2-D segments. On retail-shaped paths (no repeated node) the non-zero rule picks the same
    segments, so it matches; the 2-D v shortens nothing on slopes (Q' differs by the factor |v_xy|, < 1 % below a 14 %
    grade). S3.
+   *Correction (cmb3 t03, 2026-11-20) [H]:* every pathfinder waypoint has z = 0 (MOVEMENT §3.5.2 "Waypoint z" items 1 -
+   2), and G's xyz is appended only after the leg path is taken, so the first path's last segment and both first
+   segments have z = 0: the 3-D unit vectors equal the 2-D ones, |v_xy| = 1 and there is no slope effect. What remains is
+   literal against first / last non-zero segments: a zero literal last segment means no leg, and a zero literal first
+   segment makes the dot 0 (or NaN), which fails the > 0 test either way. Ported in cmb3 t03 (`literal_first_dir` /
+   `literal_last_dir` in attack_plan; `attack_slots` keeps the s78o non-zero rule for d0 / d1).
 5. **q of the slot leg** [H]: answered by BKR1 Q7 (c) (same-region shortcut, halving above 40, q = 0 when blocked at
    once and start → G still planned); filed as b0184. No new entry.
 6. **A plan failure keeps the block** [H]. On a failed real plan `0x41c1a0` sets F +0x1dc := now and returns 0; the

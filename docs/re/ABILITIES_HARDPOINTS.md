@@ -1111,7 +1111,8 @@ rule gives the measured **23 passes** in 6 s; a single 38-frame clip gives 25, a
 `Redirect_Chance`, +0x17c `Block_Chance`, +0x180 `Reaction_Arc_In_Degrees`, +0x184
 `Max_Projectile_Redirection_Angle_In_Degrees` (range checks in vf29 0x70a0d0). The projectile's damage category must not
 be 1, 2, 3, 4, 6, 8 or 9. A shot from **outside** the reaction arc is not blocked; when the special's turn flag (+0x188)
-is set and the unit's clip is idle-like, the unit turns to 1.01 × the arc edge [M: flag name]. Inside the arc: one
+is set and the unit's clip is idle-like, the unit turns to 1.01 × the arc edge [M: flag name; `Turn_To_Face_Unblockable_Shots`
+per MCX4_T10_RE_ANSWERS §12]. Inside the arc: one
 synced float draw against the projectile's redirect factor × `Redirect_Chance` (redirect, 0x4cca10), else a second draw
 against its block factor × `Block_Chance` (block). After a redirect or block: **a unit whose clip is Move (2) returns
 "not handled"** [M: 0x4cca10 already redirected / blocked the shot; the damage then still lands]; otherwise it plays
@@ -1120,6 +1121,20 @@ finished Idle_Blockblaster (the redirect path also needs 0x397040 false [M]), an
 Absorb_Blaster (vf30 0x6ee840) plays nothing. **Block_Blaster (28) and Redirect_Blaster (29) are played by no
 Play_Animation (103 callers) or ModelClass-play (28 callers) call with a constant type**: they are reachable only
 through a variable type (Lua / cinematic Play_Animation by name, type data) [M: unused by the engine].
+
+*cmb3 t08 (2026-11-20, read from `re_reference/`) [H]:*
+- **The Move-clip "not handled".** The listener runs under `SAP_On_Take_Damage` 0x37d160 → 0x37b580 (style 10): a false
+  return makes the dispatcher go on to the victim's next Take_Damage special ability in list order; only a true one ends
+  the walk and zeroes the damage (§4.6). So after a redirect or block of a victim in the Move clip, the new shot is
+  already out (0x4cca10) and the hit is still offered to the next listener (an `Absorb_Blaster` may take it); with none,
+  the damage lands.
+- **The turn** is the locomotor (behaviour 1) vf +0x218 with a unit direction (cos, sin, 0): the facing order the space
+  targeting service 0x633ae0 also gives for `Auto_Rotate_For_Space_Targeting`; it turns the unit at its locomotor's rate
+  and touches no order. All 52 FoC `Redirect_Blaster_Ability` entries (and the 15 EaW ones) set
+  `Turn_To_Face_Unblockable_Shots` to No, so the turn is inert in shipped data. Port: the facing is snapped
+  (`AbilityHost::face_direction`, [port] - the movement system has no rate-limited facing order; mod data only).
+- **The redirect path's extra test 0x397040** reads obj +0x2a0's byte +0x108 (false without that pack); only the
+  Idle_Blockblaster play depends on it.
 
 **Flame_Attack (PersonalFlameThrowerAbilityClass update 0x705e50).** State (SAP +0x130) 1: turn toward the target
 (locomotor vf +0x2f0) until the facing is within 0.1 rad; then state 2, timer := int(FPS × +0x18c [duration]) and

@@ -1825,9 +1825,13 @@ TacticalBattle::AttackPlan TacticalBattle::land_attack_order(TacticalMode& mode,
     }
     // s78n t25.4, cmb1 t05 retag [H] (BKR1 Q7): a guard block is not staged (G = C; 0x40e260 acts only on a top whose flag 0x02
     // is clear)
-    const Vec3 g = guard ? tp : attack_stage_goal(mode, o.units, target, tp, movers.size());
+    // cmb3 t01 (a) (b0169, BKR2 Q6 / BKT1_ATTACK_RE §1.2.1 [H]): T's goal point is clamped to the playable box (0x583680)
+    // before the staging; a staged sample already passed the staging's map-box test (land vf +0x1f8: the whole terrain,
+    // FOG_OF_WAR §1.2) and is taken as found, so one in the strip outside the playable box is not moved onto its edge
     const tactical::Aabb& bb = mode.bounds();
-    o.destination = {std::clamp(g.x, bb.min.x, bb.max.x), std::clamp(g.y, bb.min.y, bb.max.y)};
+    const Vec3 tcl{std::clamp(tp.x, bb.min.x, bb.max.x), std::clamp(tp.y, bb.min.y, bb.max.y), tp.z};
+    const Vec3 g = guard ? tcl : attack_stage_goal(mode, o.units, target, tcl, movers.size());
+    o.destination = {g.x, g.y};  // (review: a staged sample passed the zone test 0x50eeb0 for M's class, so a path reaches it)
     o.flags = static_cast<uint8_t>(flags & ~kAttackBlockNoLock);  // bkt1 t05: the host-only bit stays here
     o.goal_object = -1;  // land: the block's object is attack.target
     o.attack.target = target;
@@ -2102,9 +2106,8 @@ void TacticalBattle::attack_block_service(TacticalMode& mode, SimRng& rng) {
             pushed = pushed || vj.pushed;
         }
         const Unit* lead = unit_by_id(checked[i].lead);
-        // s78n t26 review round 3 (FIGHTER_FLYING §4.11 E [H]): c (0x40edd0) is false when the object is hidden for
-        // members[0]'s owner or stealthed and members[0]'s type lacks Target_Stealth_Units ([port] the target unit the
-        // lead's order names, tid: a TEAM container through that member)
+        // The fog / stealth terms for the lead (0x41a9b0), read by C 3 below; c and the re-path test take members[0]'s
+        // (cmb3 t01 (c), below). tid: the target unit the lead's order names (a TEAM container through that member).
         bool hidden = false, stealthed = false;
         attack_target_unseen(st, *lead, checked[i].tid, hidden, stealthed);
         // cmb1 t06 (BKR2 Q6 [H], review): stealthed (and not hidden) -> the last-observed point is the formation lead's
@@ -2147,6 +2150,15 @@ void TacticalBattle::attack_block_service(TacticalMode& mode, SimRng& rng) {
         }
         if (!checked[i].due) continue;
         for (const size_t j : g) bi(checked[j].mover)->next = frame_ + 30u;
+        // cmb3 t01 (c) (b0169, FIGHTER_FLYING §4.11 E [H]): c (0x40edd0) and the re-path test 0x4165f0 take the fog / stealth
+        // terms from members[0] (its owner, its type's Target_Stealth_Units) - [port] the formation's first mover's block
+        // lead, as land_attack_order's trim gate takes the first unit - while C 3 above reads the lead (0x41a9b0). They
+        // differ only in a formation that mixes types with and without Target_Stealth_Units.
+        bool hidden0 = hidden, stealthed0 = stealthed;
+        // (review: the object members[0]'s own block names - a TEAM container target: the member its order names)
+        if (checked[g.front()].lead != checked[i].lead || checked[g.front()].tid != checked[i].tid)
+            if (const Unit* m0 = unit_by_id(checked[g.front()].lead))
+                attack_target_unseen(st, *m0, checked[g.front()].tid, hidden0, stealthed0);
         bool can = true;
         for (const size_t j : g) {
             const tc::CanHit c = attack_can_hit_at(checked[j].lead, checked[j].tid, tp);  // cmb2 t06: a marker by geometry
@@ -2154,7 +2166,7 @@ void TacticalBattle::attack_block_service(TacticalMode& mode, SimRng& rng) {
         }
         const float gx = tp.x - ri->gx, gy = tp.y - ri->gy, R = 0.5f * lead->range;
         const bool far = gx * gx + gy * gy > R * R;
-        if (hidden || stealthed) can = false;
+        if (hidden0 || stealthed0) can = false;
         if (!moving) {
             if (pushed) continue;
             checked[i].plan = !can;  // arrived and some member cannot hit (FIGHTER_FLYING §4.11 A)
@@ -2162,7 +2174,7 @@ void TacticalBattle::attack_block_service(TacticalMode& mode, SimRng& rng) {
         }
         // §4.11 C 1 / C 4 [H]: a hidden object - 0x4165f0 is false (no re-path) and c is false (no land stop); step 5 pops
         // nothing (n = 1): the formation walks on along its current path
-        if (hidden) continue;
+        if (hidden0) continue;
         const mv::UnitView lv = movement_->view(checked[i].mover);
         const bool stopping =
             lv.walk_state == mv::LocoState::WalkEndMove || ((ri->flags & mv::kMoveFlagAttackMove) != 0 && !lv.has_goal);
