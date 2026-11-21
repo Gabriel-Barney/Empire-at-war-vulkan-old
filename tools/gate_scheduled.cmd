@@ -75,4 +75,7 @@ call "%WT%\build_gate.cmd"
 set RC=!ERRORLEVEL!
 if exist "%WT%\logs\gate_summary.txt" copy /y "%WT%\logs\gate_summary.txt" "%MAIN%\logs\gate_dev_summary.txt" >nul
 echo %DATE% %TIME% !SHA! dev gate exit !RC!!MISSED!>> "%HIST%"
+rem wr2 t05: attribute each failure of tonight's run to a commit and file it on the roadmap (group ngt1), or update
+rem the task a known failure already has; also sets the roadmap page's build line (tools\gate\nightly_triage.py).
+python -I "%WT%\tools\gate\nightly_triage.py" --sha !SHA! --rc !RC! --logs "%WT%\logs" --main "%MAIN%" --wt "%WT%"
 exit /b !RC!
