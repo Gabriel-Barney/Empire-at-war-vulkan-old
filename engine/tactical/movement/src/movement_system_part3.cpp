@@ -283,8 +283,6 @@ void MovementSystem::hash_units(StateHasher& h) const {
                 bh.f32(u.mslot.end_shift);
                 bh.f32(u.mslot.stop.x);
                 bh.f32(u.mslot.stop.y);
-                bh.f32(u.slot_g.x);
-                bh.f32(u.slot_g.y);
             }
             if (u.lp.secondary) {  // bkm1 t08 (land only): the secondary yaw of a UseSecondaryFacing unit
                 bh.u8(0xED);

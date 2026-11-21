@@ -2136,8 +2136,8 @@ void MovementSystem::set_path_started(Unit& u) const {
         // +0x348, a squad container) is aligned at once when its new path's waypoint 0 fraction is > 0, whatever the
         // angle - a container re-ordered while marching keeps its state and speed (0x13 at full speed) and turns on the
         // move (retail 12 / 12); only one with waypoint 0 at fraction 0 coasts to a stop and starts from 0x16
-        const bool moving = m.speed > 0.0f && (m.state == LocoState::WalkMoving || m.state == LocoState::WalkEndMove);
-        if (moving && !m.path.empty() && wp_frac(m, 0) > 0.0f) {
+        // (MOV2_RE_QUESTIONS Q1: the TEAM test comes before 0x410170's state switch, so any moving state counts)
+        if (m.speed > 0.0f && !m.path.empty() && wp_frac(m, 0) > 0.0f) {
             u.path_started = true;
             u.coast = false;
             return;

@@ -364,6 +364,7 @@ bool around_search(const PassabilityGrid& grid, const MovementConstants& k, cons
     // goal that fails before the graph too - the caller's next goals are accepted against them
     const auto window_obstacles = [&](const CellBox& w) {
         const Box wb = cell_box_world(w);
+        out.windowed = true;
         out.window.clear();
         for (size_t i = 0; i < q.obstacles.size(); ++i)
             if (boxes_overlap(obox[i], wb)) out.window.push_back(static_cast<uint32_t>(i));

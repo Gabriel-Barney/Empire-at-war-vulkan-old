@@ -205,7 +205,7 @@ struct LaneShape {
     float lateral_at(float s) const;
 };
 // mov2 t01 (MOVEMENT §4.3.3 items 1 - 2 [H]): a formation member's slot shape as the member keeps it while it walks the
-// formation path (Unit::slot; LaneShape's spans point into it: shape()). end_shift = the order record's +0x68,
+// formation path (Unit::mslot; LaneShape's spans point into it: shape()). end_shift = the order record's +0x68,
 // cos psi D - sin psi L at the end (lane_end's along-path term; -back without a final facing).
 struct MemberSlot {
     float left = 0.0f;

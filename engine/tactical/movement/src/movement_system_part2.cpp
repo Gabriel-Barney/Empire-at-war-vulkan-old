@@ -991,12 +991,17 @@ bool MovementSystem::path_around(const CollisionObject& c, Unit& u, const Unit* 
         searched = true;
         const bool ok = around_search(grid_, k, q, res);
         quota_used_ += res.complexity;
-        trk.set = true;
-        trk.rects.clear();
-        trk.units.clear();
-        for (const uint32_t wi : res.window) {
-            trk.rects.push_back(rect_grown(obs[wi].shape, q.tracker));
-            trk.units.push_back(obs_units[wi]);
+        // mov2 t08 (MOV2_T05_TERRAIN_STOPS.md [H]: one tracker pointer kept across the goals, rebuilt with each window):
+        // a goal that builds no window leaves the last window's tracker in place ([port] [M]: an empty one would accept
+        // every later candidate)
+        if (res.windowed) {
+            trk.set = true;
+            trk.rects.clear();
+            trk.units.clear();
+            for (const uint32_t wi : res.window) {
+                trk.rects.push_back(rect_grown(obs[wi].shape, q.tracker));
+                trk.units.push_back(obs_units[wi]);
+            }
         }
         // s78n t24 (§5.4.7 "Rejoin candidates" item 3): an A* failure fails the call; an earlier failure tries the next goal
         if (!ok || res.points.size() < 2) return res.graph ? kRejoinFail : kRejoinNext;

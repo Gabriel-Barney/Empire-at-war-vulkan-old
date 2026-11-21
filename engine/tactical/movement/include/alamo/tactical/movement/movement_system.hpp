@@ -1197,12 +1197,11 @@ private:
         // (the plan then makes no search of its own); lane_d = the formation path's summed 3-D length (the walk-deployed
         // cap's d, §3.2.1 item 2). Cleared by the plan. mov2 t01 (MOVEMENT §4.3.3 items 1 - 3 [H], version 37): `lane` is
         // a copy of the formation path itself (retail's record is a copy of W), `mslot` the member's slot shape and end
-        // shift, slot_g = W's last point; slot_on = the order path taken by the plan is that copy (the walk's lane term
+        // shift; slot_on = the order path taken by the plan is that copy (the walk's lane term
         // targets the slot lateral, the end lines move by the end shift, the corner pass runs on formation_lane). Every
         // other path set clears slot_on.
         std::vector<V2> lane;
         MemberSlot mslot;
-        V2 slot_g;
         bool slot_on = false;
         float lane_d = 0.0f;
         float lane_z = 0.0f;  // bkm1 t06 (version 31): the stored height of the lane's last point (LandMotion::end_z when taken)
@@ -1871,7 +1870,7 @@ private:
     // (indexed like idx) = each member as it was before this order's set-up; a failed plan restores it. True: failed.
     bool attack_plan(const MoveOrder& order, const std::vector<uint32_t>& idx, const LandForm& f, uint32_t frame,
                      const std::vector<uint8_t>& kept, std::span<const FormationMember> mem, std::span<const Unit> snap);
-    // s78p (b0049): each member's copy of the formation path `fpath` (Unit::lane, mov2 t01: + Unit::slot) and its goal :=
+    // s78p (b0049): each member's copy of the formation path `fpath` (Unit::lane, mov2 t01: + Unit::mslot) and its goal :=
     // its stop point lane_end
     // - not for air, forced or `kept` members (indexed like idx) or a member without a goal
     // bkm1 t06: fz = the stored height of fpath's last point (a slot-leg G; 0 for any other formation path)

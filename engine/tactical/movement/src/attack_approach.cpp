@@ -793,7 +793,6 @@ void MovementSystem::set_lanes(const std::vector<uint32_t>& idx, const LandForm&
         x.goal = ms.stop;  // its stop point (MOVEMENT §4.3.3; an attack member: around the cut end)
         x.lane.assign(fpath.begin(), fpath.end());
         x.mslot = std::move(ms);
-        x.slot_g = fpath.back();
         x.slot_on = false;  // the plan takes the path
         x.lane_d = d;
         x.lane_z = fz;  // [port] G's stored height (a slot-leg path) stays on the copy's last point

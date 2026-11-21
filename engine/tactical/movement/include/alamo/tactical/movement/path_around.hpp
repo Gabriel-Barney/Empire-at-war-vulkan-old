@@ -142,6 +142,9 @@ struct AroundResult {
     // for this goal - a failure then fails the whole Path Around call (no next goal); a failure before it (start / goal
     // cell, goal inside a grown rectangle, flood fill, no start vertex) moves on to the next goal
     bool graph = false;
+    // mov2 t08 review: a window (and with it `window`, its tracker) was built for this goal; false when the goal failed
+    // before that (start / goal cell, start == goal)
+    bool windowed = false;
 };
 struct CellBox {
     int32_t x0 = 0, y0 = 0, x1 = 0, y1 = 0;

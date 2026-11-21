@@ -970,10 +970,26 @@ void test_mov2_formation_path() {
     // the goals differ (each member's slot point) and none is W's end
     const V2 g1 = sys.view(1).goal, g2 = sys.view(2).goal, g3 = sys.view(3).goal;
     CHECK(!(g1 == g2) && !(g2 == g3) && !(g1 == g3));
+    // while walking the middle of the path, each member holds its slot lateral (its goal's side offset from W's line) by
+    // the lane term alone: the waypoints are W's
+    const V2 wd = normalize_retail(w.back() - w.front());
+    const auto side = [&](V2 p) { return cross(wd, p - w.front()); };
+    float lat_err = 0.0f;
+    uint32_t mid = 0;
     for (; f < 1500; ++f) {
         sys.tick(f, rng, serial_for);
+        for (ObjectId i : ids) {
+            const UnitView v = sys.view(i);
+            const float along = dot(v.pos - w.front(), wd), len = distance(w.front(), w.back());
+            if (along > 0.4f * len && along < 0.7f * len) {
+                lat_err = std::max(lat_err, std::fabs(side(v.pos) - side(v.goal)));
+                ++mid;
+            }
+        }
         if (sys.view(1).arrived && sys.view(2).arrived && sys.view(3).arrived) break;
     }
+    std::printf("mov2 t01 formation path: mid-path lateral error %.3f over %u samples\n", static_cast<double>(lat_err), mid);
+    CHECK(mid > 30 && lat_err < 1.0f);
     float worst = 0.0f;
     for (ObjectId i : ids) {
         const UnitView v = sys.view(i);
@@ -983,7 +999,7 @@ void test_mov2_formation_path() {
     std::printf("mov2 t01 formation path: %zu shared waypoints, all arrived by frame %u, worst %.2f from the slot point\n", w.size(), f,
                 static_cast<double>(worst));
     // stopped within the End Move coast of each slot point (the lane term's dead band 0.1 sideways, the coast along)
-    CHECK(worst < 8.0f);
+    CHECK(worst < 2.0f);
 }
 
 
@@ -1077,6 +1093,8 @@ void test_mov2_head_on_pairs() {
         // the other slows to 0.11 - 0.22 for 27 - 66 frames; port 2026-11-20: 0.107 - 0.153 for 42 - 66 frames, swerve
         // 31 - 47
         const int sw = o.vlow[0] >= o.vlow[1] ? 0 : 1;
+        // Q2 [H]: the pair is decided Path Around (state 1); S detours at full speed, M slows at the slave speed
+        CHECK(o.decided == CollisionState::PathAround);
         CHECK(o.arrived && o.zero[0] == 0 && o.zero[1] == 0);
         CHECK(o.slowed[sw] == 0 && o.side[sw] > 20.0f && o.side[sw] < 50.0f);
         CHECK(o.vlow[1 - sw] > 0.1f && o.vlow[1 - sw] < 0.25f && o.slowed[1 - sw] >= 20 && o.slowed[1 - sw] <= 70);

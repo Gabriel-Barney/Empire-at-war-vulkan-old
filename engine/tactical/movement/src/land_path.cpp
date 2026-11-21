@@ -3,6 +3,7 @@
 #include "alamo/tactical/movement/corridor.hpp"
 
 #include <algorithm>
+#include <cmath>
 #include <limits>
 
 namespace alamo::tactical::movement {
@@ -291,7 +292,9 @@ float lane_end_shift(std::span<const V2> fpath, const LaneShape& shape, float ba
     if (!shape.rotated()) return -back;
     // mcx4 t11 (MOVEMENT §4.3.3 item 2, MCX4_T11_T12_RE_ANSWERS §B4): +0x68 = cos psi D - sin psi L, psi = the full rotation
     // F +0x24c (D = shape.depth = -back, L the slot lateral at the end's arc position)
-    const float l = shape.offset(path_length(fpath) - back);
+    // L' = the slot lateral of row k = min(round((|W| + D') / 30), rows - 1), D' = -back (offset clamps to the last row)
+    const float k = std::round((path_length(fpath) - back) / kCorridorSampleStep);
+    const float l = shape.offset(std::max(0.0f, k) * kCorridorSampleStep);
     return dmath::cos(shape.rot_full) * shape.depth - dmath::sin(shape.rot_full) * l;
 }
 
