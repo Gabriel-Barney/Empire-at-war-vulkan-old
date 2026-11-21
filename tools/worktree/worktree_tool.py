@@ -420,11 +420,10 @@ def cmd_new(ctx: Ctx, name: str, base: str | None = None, fetch: bool = False, s
     out(f"Branch {branch} from {base}.")
     out("Next, in PowerShell (one build tree per worktree: `wt` gives build-wt-msvc / build-wt-clang):")
     out(f'  cd "{target}"')
-    out(f"  python roadmap-store\\roadmap_store.py claim <group> --by {name}")
     out(f'  & .\\build_agent.cmd --% msvc wt "{modules}"     # fast tier; read the summary, not the log')
     out(f'  & .\\build_agent.cmd --% clang wt "{modules}"    # sim code too (everything but render/audio/video/UI)')
     out("  .\\build_asan.cmd                                      # engine/jobs or other threading code")
-    out("Finish: commit, then tools\\land_on_dev.cmd (merges origin/dev in, fast-forwards dev; no PR, main is released from dev).")
+    out('Finish: commit, then python -I tools/gate/land_queue.py submit --note "<what>" (the verifier lands it on dev).')
     out(f"Remove it once it is on dev:  tools\\clean_worktrees.cmd --apply --only {name}")
     return target
 
