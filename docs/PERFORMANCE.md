@@ -1477,3 +1477,35 @@ use the runs where other processes took under 20 % of the CPU: W0 4 before / 3 a
   20 / 4 players). 89 % of slot-10 solves make no synced draw beyond the plan pick. A slice holds too little work to split, so the
   parallel option lies across players (sp4 t01, the galactic AI on the AI lane).
 - Every run matched the regenerated fingerprint.
+
+## Workflow baseline (wr0 t01, 2026-11-21)
+
+Stage 12 (workflow redesign) is judged against these figures; wr6 t06 repeats them over its last 7 days. Made with
+`python -I tools/analysis/workflow_stats.py --from 2026-10-30 --to 2026-11-21 --ref 4385f8a0 --markdown` (drop
+`--markdown` for builds per day, per worktree and the most failing tests). The ref is the main checkout's `dev` the
+redesign analysis read on 2026-11-21; `origin/dev` was then 880 commits further (2,650 commits, 693 merges over the same
+days), so the commit rows describe the history up to 4385f8a0. The build rows count every roadmap build record of the range.
+
+| Figure (2026-10-30 .. 2026-11-21, `4385f8a0` at `4385f8a0`) | Value |
+|---|---|
+| Recorded builds | 5066 (220.3 per day over 23 days) |
+| Failed builds | 1669 (33.0%) |
+| Failed by kind | test 1155, compile 414, golden 83, unfinished 11, configure 3, other 3 |
+| Failed / builds by compiler | --% 2/12 (16.7%), clang 204/1015 (20.1%), clang-asan 19/171 (11.1%), msvc 1444/3868 (37.3%) |
+| Recorded test hours | 150.1 |
+| Worktrees with builds | 99 |
+| Dev commits | 1770 |
+| Merge commits | 544 (30.7%) |
+| Commits touching stored goldens | 227 (12.8%) |
+| Commits touching benchmark scenarios | 86 |
+
+Notes:
+- Records before 2026-11-13 carry no `failure_kind`; the tool derives it from the step exit codes (configure, then build
+  = compile, then ctest = test), so all but 3 of those 949 failures count as test or compile. `--%` rows are a `build_module.cmd` quoting slip.
+- A stored golden is a file under a `testdata/`, `golden/`, `goldens/` or `benchmark/` folder outside `tools/`, `launcher/`
+  and the mod fixture trees (test inputs), counted on non-merge commits. The analysis's ad-hoc count said 228; the stated
+  rule gives 227.
+- Most failing tests over the range: `alamo_tactical_movement_gaps_tests` 168, `alamo_game_smoke_land_golden` 164,
+  `alamo_ai_galactic_tests` 158, `alamo_headless_skirmish_ai_foc_land` 154, `alamo_headless_skirmish_ai_synthetic` 152.
+- Most changed golden files: `game_smoke_land.crc` 116 commits, `skirmish_ai_foc_land_golden.crc` 103,
+  `game_smoke_campaign.crc` 87, `game_smoke_skirmish.crc` 86; benchmark `land_battle.abench` 58.

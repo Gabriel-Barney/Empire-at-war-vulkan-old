@@ -34,10 +34,15 @@ if not defined SHA (
   echo %DATE% %TIME% ? dev gate setup failed: no origin/dev>> "%HIST%"
   exit /b 4
 )
+rem Nights with no history line since the last run (the task did not start): said on this run's line, " (missed N nights
+rem (first..last))" (wr0 t04). The counter is read from origin/dev, since this file runs from a copy in logs\gate_task.
+set "MISSED="
+for /f "delims=" %%M in ('git -C "%MAIN%" show origin/dev:tools/lint/gate_nights.py 2^>nul ^| python -I - missed "%HIST%"') do set "MISSED= (%%M)"
+if defined MISSED echo gate_scheduled:!MISSED!
 rem Nothing landed since the last passing night: skip (a failing commit is gated again, to tell flaky from broken).
 findstr /c:" !SHA! dev gate exit 0" "%HIST%" >nul 2>&1
 if not errorlevel 1 (
-  echo %DATE% %TIME% !SHA! dev gate skipped: this origin/dev commit already passed>> "%HIST%"
+  echo %DATE% %TIME% !SHA! dev gate skipped: this origin/dev commit already passed!MISSED!>> "%HIST%"
   exit /b 3
 )
 
@@ -61,11 +66,11 @@ if errorlevel 1 (
 
 rem ALAMO_GATE_DRY=1 stops here: checks the setup (fetch, worktree, junctions, checkout) without the 10-minute gate.
 if defined ALAMO_GATE_DRY (
-  echo gate_scheduled: dry run, would gate origin/dev !SHA! in %WT%
+  echo gate_scheduled: dry run, would gate origin/dev !SHA! in %WT%!MISSED!
   exit /b 0
 )
 call "%WT%\build_gate.cmd"
 set RC=!ERRORLEVEL!
 if exist "%WT%\logs\gate_summary.txt" copy /y "%WT%\logs\gate_summary.txt" "%MAIN%\logs\gate_dev_summary.txt" >nul
-echo %DATE% %TIME% !SHA! dev gate exit !RC!>> "%HIST%"
+echo %DATE% %TIME% !SHA! dev gate exit !RC!!MISSED!>> "%HIST%"
 exit /b !RC!

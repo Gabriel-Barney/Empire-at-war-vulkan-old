@@ -1,12 +1,14 @@
 ---
 name: run-group
-description: The default workflow for a request to complete roadmap work - "complete all tasks under AUD1", "do sty1", "finish skai", "work the AUDIO box", "clear stage 6", "pick up the next ready groups". This session becomes the coordinator - it resolves the groups, checks prerequisites, claims and the tier focus, splits the work into up to three parallel lanes, asks every approval and open decision up front so Gabriel can walk away, starts each lane as its own session (auto mode) nested under this one with its own worktree, serves what lanes cannot do alone (the Ghidra turn, retail probe runs, questions for Gabriel, waits between lanes), and reports; each lane follows the full lane loop with every skill and tool.
+description: Lane coordinator, run only when Gabriel types /run-group (since 2026-11-21 a roadmap request is worked by the session that got it; docs/DECISIONS.md "Workflow redesign"). This session becomes the coordinator - it resolves the groups, checks prerequisites, claims and the tier focus, splits the work into up to three parallel lanes, asks every approval and open decision up front so Gabriel can walk away, starts each lane as its own session (auto mode) nested under this one with its own worktree, serves what lanes cannot do alone (the Ghidra turn, retail probe runs, questions for Gabriel, waits between lanes), and reports; each lane follows the full lane loop with every skill and tool.
 argument-hint: <group id | box id | stage | "next"> [more ids]
+disable-model-invocation: true
 ---
 
-# Run a group: coordinator and lanes (the default workflow)
+# Run a group: coordinator and lanes (only when Gabriel types it)
 
-A request to complete roadmap work goes through this skill, whatever its wording. **This session is the coordinator**: it plans,
+This skill runs only when Gabriel types `/run-group` (2026-11-21; otherwise a roadmap request is worked by the session that got
+it, CLAUDE.md "Parallel work"). **This session is the coordinator**: it plans,
 starts lanes, serves them and reports; it does not implement tasks itself. **Each lane is its own session** (Gabriel,
 2026-11-15), started by the coordinator with `start_session`, so it shows nested under the coordinator's session, and **with its
 own worktree** made by the app (`use_worktree: true`). It works one group (or one share of a group's tasks) following

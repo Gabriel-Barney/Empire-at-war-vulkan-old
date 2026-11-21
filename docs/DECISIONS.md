@@ -38,6 +38,8 @@ section 4.
   the main session, every agent in `.claude/agents/` and every subagent spawned with the `Agent` tool. Limits come from the
   rules (CLAUDE.md, clean-room, determinism, landing, approval of outward or irreversible actions), not from per-agent tool
   lists. Agents carry no `tools:` allowlist (they inherit every session tool); only `reviewer` is limited, to no file edits.
+- **Superseded on 2026-11-21:** `run-group` runs only when Gabriel types it; a roadmap request is worked by one writing session
+  per checkout ("Workflow redesign" below, interim until wr2; wr4 retires lanes).
 - **`run-group` is the default workflow for task requests** (Gabriel, 2026-11-15): "complete all tasks under AUD1", a box, a stage
   or "next ready group" goes through `.claude/skills/run-group`. The main session is the **coordinator** (Gabriel, same day): it
   plans up to three parallel lanes (one per group, or independent shares of one group's tasks), claims, and starts the lanes;
@@ -499,3 +501,35 @@ their own copies; mods and the retail load order do not change.
     `loader_diagnostic` never change `grade`, `blocking`, `result`, `errors` or `warnings` (`docs/MODS.md` §5.1). Why:
     the before / after corpus sweep showed no grade change, and counting them could block a mod over a warning
     retail tolerates (an odd MEG table).
+
+## Workflow redesign (Gabriel, 2026-11-21)
+
+Gabriel, 2026-11-21, answering wr0 t02 (Stage 12 · Workflow redesign, boxes WR0-WR6), each as proposed. The rules named as
+replaced stay in force until the group that carries the decision out passes its exit test; that group then edits CLAUDE.md
+and the docs it changes.
+- **Derived goldens leave git** (carried out by wr1). Whole-run CRC logs, checkpoint files and benchmark saves that a test can
+  compute are no longer tracked; a behaviour change is checked as a parent-versus-commit run diff against a `Behaviour:` line
+  the commit declares (`Behaviour: none`, or the systems it changes). Replaces "Golden CRC files" in CLAUDE.md "Parallel work",
+  `tools\regen_goldens.cmd` as the way to accept a behaviour change, and the "landing commit names any golden that changed"
+  rule. Kept: the worker-count and MSVC-versus-clang checks (determinism rule 3 is unchanged). Why: 228 of 1,770 dev commits
+  touched stored goldens and they are the files lanes collide on.
+- **Only the verifier pushes `dev`** (wr2). Sessions submit; one serial verifier on a warm tree builds MSVC (plus clang when
+  sim code changed), runs the behaviour diff and fast-forwards `dev`. Replaces `tools\land_on_dev.cmd` pushing `dev` from each
+  session ("Branching" above, CLAUDE.md "Branches", `docs/BUILD.md` "Landing check"). Gabriel still alone merges `dev` into
+  `main`.
+- **One sim writer plus one non-sim writer replace the three-lane coordinator** (wr4). Two fixed checkouts (sim; render, UI,
+  launcher, tools) plus the verifier's; no claims, lanes, coordinator or per-task worktrees; a hook blocks sim edits from the
+  non-sim session. Replaces "`run-group` is the default workflow", "Lanes are sessions" and "Unattended runs" (coordinator
+  form) under "Default tool access" above, the 2026-11-13 three-lane limit, and CLAUDE.md "Parallel work". **Interim, from
+  2026-11-21 until wr2 passes** (wr0 t08): a roadmap request no longer starts lanes; one writing session at a time per
+  checkout does the work and lands it with `tools\land_on_dev.cmd`; `run-group` runs only when Gabriel types it.
+- **Only verifier and nightly results are build records** (wr2, with wr3 for the local iteration loop). Iteration builds stop
+  writing roadmap build records; their results stay in local logs. Replaces "Every build script records its result on the
+  roadmap" (CLAUDE.md "Build and test", `docs/ROADMAP_PROTOCOL.md` "Build records"). Iteration builds then go to a local
+  log that the wr0 statistics tool reads (wr2 t06), so the later figures stay comparable with the wr0 baseline
+  (`docs/PERFORMANCE.md`, "Workflow baseline").
+- **Stage 12 is worked under the current focus** as process work that serves tier 1 and tier 2 (an exception to "Current
+  focus", like Stage 10). Its tasks carry no tier-3 pause.
+- **Stage 12 first** (order). Parity and mod work (Stage 9, Stage 6, other parity groups) pauses until wr1 and wr2 are on
+  `dev`, so no golden-moving work collides with wr1; wr3 and wr5 (no sim results) may run beside wr1 / wr2. Crashes, hangs
+  and save corruption are still fixed. On 2026-11-21 no lane or claim was live (cmb3, mov2, mov3 had landed).

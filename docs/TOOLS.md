@@ -43,6 +43,8 @@ How it is wired:
 | Grade every installed mod and stack (G0-G3) | `tools\modcorpus\run_corpus.cmd` (`tools/modcorpus/README.md`); weekly ASan sweep `tools\modcorpus\asan_sweep.cmd` |
 | Parity against retail baselines | `tools\parity\parity_harness.py` (`tools/parity/README.md`) |
 | Benchmarks, worker sweeps, build times | `tools\benchmark\` (`run_suite.cmd`, `worker_sweep.py`, `build_times.py`) |
+| Workflow figures (builds per day, failed share, test hours, golden-touching and merge commits) | `python -I tools\analysis\workflow_stats.py --from <day> [--to <day>] [--markdown]`; baseline in `docs/PERFORMANCE.md`, "Workflow baseline" |
+| Nightly dev gate: install, missed nights | `tools\install_gate_task.cmd`; history `logs\gate_history.txt`, missed nights `python -I tools\lint\gate_nights.py missed logs\gate_history.txt` (`docs/BUILD.md`, "Scheduled gate") |
 | Land on `dev` | `tools\land_on_dev.cmd` |
 | Worktrees | `tools\new_worktree.cmd <name>`, `worktree_tool.py link`, `tools\clean_worktrees.cmd` |
 | Stop a hung test exe / delete a merged branch | `python -I tools\worktree\stop_tree_procs.py`, `delete_merged_branch.py` |
@@ -87,7 +89,7 @@ pinned setup step in `toolchain\2_setup.cmd` (rule 5), then a row here.
 
 | When | Skill |
 |---|---|
-| **Any request to complete roadmap work** ("complete all tasks under AUD1", a box, "next ready group") | `run-group` (the default workflow: this session coordinates, up to three parallel `lane` agents do the work, each on its group's preset model, effort capped at high) |
+| **Any request to complete roadmap work** ("complete all tasks under AUD1", a box, "next ready group") | this session works it in its own checkout: `start-group`, the work, `finish-group` (CLAUDE.md "Parallel work", since 2026-11-21). `run-group` (lane coordinator, up to three `lane` sessions) only when Gabriel types it |
 | Starting / finishing a roadmap group | `start-group`, `finish-group` |
 | Full build; drive a build to green | `build`, `green-fast-tier` |
 | Ticking the roadmap outside `finish-group` | `phase-status` |

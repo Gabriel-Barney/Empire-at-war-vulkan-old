@@ -88,24 +88,23 @@ headless multithreaded simulation core first, then a Vulkan 1.3 renderer. Any Cl
 
 ## Parallel work
 
-**Default workflow for task requests (Gabriel, 2026-11-15): any request to complete roadmap work ("complete all tasks under
-AUD1", "do aud3", "work the AUDIO box", "next ready group") goes through the `run-group` skill.** The main session becomes the
-**coordinator**: it resolves the group, box or stage, checks `after`, claims and the tier focus, splits the work into at most three
-parallel **lanes** (one per group, or independent shares of one group), and **starts each lane as its own session nested under
-the coordinator's session, with its own app-made worktree** (`start_session`, `use_worktree: true`; Gabriel, 2026-11-15), not as a
-background subagent: a subagent is bound to the coordinator's worktree and hits the worktree write block when it edits another.
-Lane sessions run `re-analyst` and the reviews themselves; the coordinator serves the Ghidra turn (one ReVa session at a time),
-questions for Gabriel and waits between lanes (`lane.md`, "Coordinator protocol"). Each lane follows the lane loop with every skill and tool.
-**Unattended runs (Gabriel, 2026-11-15): Gabriel answers once, then walks away.** The coordinator asks every approval and open
-decision before the first lane starts (`run-group` step 3a) and starts lanes in auto mode; after that, workers take the
-documented default instead of asking and park only what truly needs him. Command spellings that run without a prompt, and the
-wrappers that replace destructive commands: `docs/WORKFLOW_TIPS.md`, "Unattended runs".
+**Default workflow for task requests (Gabriel, 2026-11-21; Stage 12 · Workflow redesign, groups wr0-wr6, is replacing the
+lane workflow): a request to complete roadmap work ("do aud3", "work the AUDIO box") is worked by the session that got it, in
+its own checkout.** One writing session at a time per checkout; it follows the group loop (`/start-group <id>`, the work,
+`/finish-group <id>`) and lands with `tools\land_on_dev.cmd`. It starts no coordinator, lanes or lane sessions; read-only help
+(`re-analyst`, `reviewer`, research, exploration) still runs as subagents. Until wr1 and wr2 are on `dev`, parity and mod groups
+are started only when Gabriel names one; Stage 12 groups go first (crashes, hangs and save corruption are still fixed). The
+`run-group` coordinator still works and runs only when Gabriel types `/run-group`. What each Stage 12 group replaces, and when:
+`docs/DECISIONS.md`, "Workflow redesign".
+**Unattended runs (Gabriel, 2026-11-15): Gabriel answers once, then walks away.** Ask every approval and open decision at the
+start; after that take the documented default instead of asking and park only what truly needs him. Command spellings that run
+without a prompt, and the wrappers that replace destructive commands: `docs/WORKFLOW_TIPS.md`, "Unattended runs".
 
-Real work is done per roadmap group by a `lane` agent (`.claude/agents/lane.md`; `/start-group <id>`, `/finish-group <id>`) in its
-own worktree. Lanes own a group, not a folder: two lanes must not edit the same files, and a landing commit names any golden that changed.
+Under `/run-group`, each group (or share) is a `lane` session (`.claude/agents/lane.md`) in its own worktree. Lanes own a group,
+not a folder: two lanes must not edit the same files, and a landing commit names any golden that changed.
 A change to `engine/core` public headers or the top-level CMake goes through the integrating agent. Single-module
 `engine-module` agents remain for narrow side tasks. Definitions live in `.claude/agents/`.
-Project skills (`.claude/skills/`; triggers in each description): `run-group` (the entry point above) / `start-group` / `finish-group` / `build` / `phase-status`
+Project skills (`.claude/skills/`; triggers in each description): `run-group` (lane coordinator, only when Gabriel types it) / `start-group` / `finish-group` / `build` / `phase-status`
 (the loop), `green-fast-tier` (build, summary, fix iteration after a large edit; speed habits below), `determinism-check` and `regen-goldens` (sim and goldens), `diagnosing-bugs` (an unexplained failure: loop first),
 `research` (cited report in its `docs/` home), `re-question` (ask the binary through `re-analyst`), `probe-kit` (retail checks), `writing-for-agents` (editing any file agents read),
 `codebase-design` / `improve-codebase-architecture` (deep-module vocabulary; architecture review that files tier-3 proposals), `triage` (file findings, clean the backlog), `tdd` (test-first, red then green), `to-tickets` (split work into tasks / groups), `prototype` (throwaway logic demo or UI variants), `grill-with-docs` (interview Gabriel on a plan, record decisions), `spec-review` (standards + spec axes, in `finish-group` next to `/code-review`;
@@ -120,8 +119,8 @@ programs run by name through `tools\tc.cmd <program>`; a `SessionStart` hook lin
 inherit the main session's skills, so each agent preloads
 the ones it always needs in `skills:` (`lane`: determinism-check, diagnosing-bugs; `reviewer`: determinism-check; `engine-module`:
 determinism-check, diagnosing-bugs; `integrator`: build, phase-status, regen-goldens, diagnosing-bugs). A new agent gets `Skill` plus
-its preloads; a new skill's `description` must say when to use it, and only `retro` sets `disable-model-invocation` (Gabriel runs
-it). Agents spawned by the `Agent` tool as `general-purpose` / `claude` already have every tool, `Skill` included; name the skill
+its preloads; a new skill's `description` must say when to use it, and only `retro` and `run-group` set `disable-model-invocation`
+(Gabriel runs them). Agents spawned by the `Agent` tool as `general-purpose` / `claude` already have every tool, `Skill` included; name the skill
 in the prompt if it matters.
 - Worktrees (2026-11-06): `tools\new_worktree.cmd <name> [--base origin/dev]` creates `.claude\worktrees\<name>` on `claude/<name>`
   from `origin/dev` (default since 2026-11-06), with junctions to `Data`, `extracted`, `toolchain` and `roadmap-store`, and syncs
