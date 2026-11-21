@@ -289,6 +289,10 @@ def main(argv: list[str]) -> int:
         return 2
     tree = a.tree if os.path.isabs(a.tree) else os.path.join(ROOT, a.tree)
     g = graph(tree)
+    import test_tiers  # the measured tiers decide what "slow" means (wr3 t03)
+    for name, tier in test_tiers.load_tiers().items():
+        if name in g["tests"]:
+            g["tests"][name]["slow"] = tier == "nightly"
     if a.evaluate:
         return evaluate(g, a.evaluate, a.ref)
     if not a.out:

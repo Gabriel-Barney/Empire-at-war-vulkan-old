@@ -92,9 +92,9 @@ def ensure_group(main: str) -> None:
     if os.path.isfile(os.path.join(main, "roadmap-store", "data", "items", GROUP + ".json")):
         return
     doc = [{"op": "set", "collection": "items", "doc_id": GROUP, "data": {
-        "title": "NGT1 Nightly gate failures", "tag": "NGT1", "node": "PROC", "status": "partly", "preset": "high",
+        "title": "NGT1 Nightly gate and flaky test failures", "tag": "NGT1", "node": "PROC", "status": "partly", "preset": "high",
         "mod": "(any)", "order": 9000, "after": [], "by": "nightly-triage", "updated": time.strftime("%Y-%m-%d"), "cap": 50,
-        "why": "Standing group for failures the nightly deep run attributes and files (wr2 t05, tools/gate/nightly_triage.py).",
+        "why": "Standing group for failures the nightly deep run attributes and files (wr2 t05, tools/gate/nightly_triage.py) and for tests flaky three times in a week (wr3 t05, tools/lint/flaky_retry.py).",
         "exit": "No open [nightly] task: every failure filed here was fixed, or moved to the group that owns its area.",
         "tasks": {}}}]
     with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False, encoding="utf-8") as f:

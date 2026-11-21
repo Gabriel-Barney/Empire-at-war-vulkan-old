@@ -5,7 +5,8 @@ It takes landing-queue entries (tools/gate/land_queue.py) in order, places them 
 worktree `.claude/worktrees/verifier` (warm trees build-verify-msvc / build-verify-clang; no writer uses them), and runs
 the landing checks there:
 
-  1. build_agent.cmd msvc verify all (every module, the fast tier), with the build record on (ALAMO_RECORD_BUILD=1);
+  1. build_agent.cmd msvc verify all (every module, the landing tier with one rotating worker count, ALAMO_WC_SLOT),
+     with the build record on (ALAMO_RECORD_BUILD=1); the test tier budget is reported (test_tiers.py check);
   2. build_agent.cmd clang verify all when the placed commits touch sim code (engine/ except render, audio, video, ui);
   3. tools/lint/golden_merge.py slow origin/dev HEAD (the slow checks of goldens the entries changed);
   4. tools/goldens/behaviour_check.py range origin/dev HEAD (every sim commit declares `Behaviour:` and no undeclared
@@ -73,13 +74,15 @@ def touches_sim(wt: str, base: str, tip: str) -> bool:
 
 def run_checks(wt: str, base_sha: str, log: list[str]) -> bool:
     """The landing checks on wt's HEAD (placed on base_sha). Appends what ran to log; True when every check passed."""
-    env = dict(os.environ, ALAMO_RECORD_BUILD="1", ALAMO_RERUN="1")
+    env = dict(os.environ, ALAMO_RECORD_BUILD="1", ALAMO_RERUN="1", ALAMO_WC_SLOT=str(next_wc_slot(wt)))
     py = os.path.join(wt, "toolchain", "venv", "Scripts", "python.exe")
     py = py if os.path.isfile(py) else "python"
     head = git(wt, "rev-parse", "HEAD").strip()
     steps = [("msvc fast tier", ["cmd", "/d", "/c", os.path.join(wt, "build_agent.cmd"), "msvc", TREE, "all"])]
     if touches_sim(wt, base_sha, head):
         steps.append(("clang fast tier", ["cmd", "/d", "/c", os.path.join(wt, "build_agent.cmd"), "clang", TREE, "all"]))
+    steps.append(("test tier budget (report only)", [py, "-I", os.path.join(wt, "tools", "lint", "test_tiers.py"), "check",
+                                                     "--landing", os.path.join(wt, f"build-{TREE}-msvc", "ctest_junit.xml")]))
     steps.append(("slow golden checks", [py, "-I", os.path.join(wt, "tools", "lint", "golden_merge.py"), "slow", base_sha, "HEAD"]))
     steps.append(("behaviour check", [py, "-I", os.path.join(wt, "tools", "goldens", "behaviour_check.py"), "range",
                                       base_sha, "HEAD", "--build", os.path.join(wt, f"build-{TREE}-msvc")]))
@@ -88,9 +91,26 @@ def run_checks(wt: str, base_sha: str, log: list[str]) -> bool:
         r = subprocess.run(cmd, cwd=wt, env=env, capture_output=True, text=True, errors="replace")
         tail = "\n".join((r.stdout + r.stderr).strip().splitlines()[-25:])
         log.append(f"== {name}: exit {r.returncode} ({time.time() - t0:.0f} s)\n{tail}")
-        if r.returncode != 0:
+        if r.returncode != 0 and "report only" not in name:
             return False
     return True
+
+
+def next_wc_slot(wt: str) -> int:
+    """The worker-count slot of this check (wr3 t04): 0, 1, 2, 3, 0, ... per check run, kept in the verifier worktree,
+    so each count of a four-count group runs at least once in four landings (the nightly run checks them all)."""
+    path = os.path.join(wt, ".verifier_wc_slot")
+    try:
+        with open(path, encoding="utf-8") as f:
+            slot = int(f.read().strip() or 0)
+    except (OSError, ValueError):
+        slot = 0
+    try:
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(str((slot + 1) % 4))
+    except OSError:
+        pass
+    return slot
 
 
 def first_bad(n: int, passes: Callable[[int], bool]) -> int:

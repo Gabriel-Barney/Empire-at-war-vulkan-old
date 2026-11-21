@@ -38,7 +38,7 @@ if errorlevel 3 exit /b 3
   if not exist %BT%\tmp mkdir %BT%\tmp
   set "TMP=%~dp0%BT%\tmp"
   set "TEMP=%~dp0%BT%\tmp"
-  python -I tools\lint\test_slot.py -- ctest --test-dir %BT% --output-on-failure --output-junit "%~dp0%BT%\ctest_junit.xml" -j 4 !SLOWFILTER! -R "%~1" 2>&1
+  python -I tools\lint\test_slot.py -- python -I tools\lint\flaky_retry.py -- ctest --test-dir %BT% --output-on-failure --output-junit "%~dp0%BT%\ctest_junit.xml" -j 4 !SLOWFILTER! -R "%~1" 2>&1
   echo ctest exit !ERRORLEVEL!
   python tools\lint\ctest_skips.py "%~dp0%BT%\ctest_junit.xml"
 )

@@ -45,3 +45,4 @@ __pycache__/
 
 # Command Center launcher build output (launcher\cargo.cmd)
 /launcher/target/
+/.verifier_wc_slot

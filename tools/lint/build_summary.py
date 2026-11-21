@@ -151,13 +151,15 @@ def summarize(paths, tree_name='<tree>', with_cache=True):
         print(f'  ... {len(errs) + len(warns) - MAX_DIAG} more in the log')
     bad |= bool(warns or errs)
 
-    m = TESTS_TOTAL.search(text)
+    m = None
+    for m in TESTS_TOTAL.finditer(text):  # the last block: flaky_retry.py prints one after its retry
+        pass
     if m:
         nfail = int(m.group(1) or 0)
         print(f'tests: {int(m.group(2)) - nfail}/{m.group(2)} passed' + (f', {nfail} FAILED' if nfail else ''))
         if nfail:
             bad = True
-            names = re.findall(r'^\s+\d+ - (\S+) \(([^)]*)\)', text, re.M)
+            names = re.findall(r'^\s+\d+ - (\S+) \(([^)]*)\)', text.rsplit('The following tests FAILED:', 1)[-1], re.M)
             print('FAILED: ' + ', '.join(f'{n} ({r})' for n, r in names))
             outs = failed_test_output(lines)
             heads = test_statuses(lines)
@@ -187,6 +189,9 @@ def summarize(paths, tree_name='<tree>', with_cache=True):
     cache = cache_stats() if with_cache else None
     if cache:
         print(cache)
+    flaky = re.findall(r'^flaky: (\S+) failed, then passed', text, re.M)
+    if flaky:
+        print('flaky (failed, passed on one retry; recorded in logs\\flaky_tests.jsonl): ' + ', '.join(flaky))
     skips = SKIPS.search(text)
     if skips:
         print(skips.group(0))

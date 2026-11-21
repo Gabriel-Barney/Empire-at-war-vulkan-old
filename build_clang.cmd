@@ -37,7 +37,7 @@ python -I tools\lint\build_state.py begin %BT% --modules all --tests all
   if not exist %BT%\tmp mkdir %BT%\tmp
   set "TMP=%~dp0%BT%\tmp"
   set "TEMP=%~dp0%BT%\tmp"
-  python -I tools\lint\test_slot.py -- "%CTEST%" --test-dir %BT% --output-on-failure --output-junit "%~dp0%BT%\ctest_junit.xml" -j 8 2>&1
+  python -I tools\lint\test_slot.py -- python -I tools\lint\flaky_retry.py -- "%CTEST%" --test-dir %BT% --output-on-failure --output-junit "%~dp0%BT%\ctest_junit.xml" -j 8 2>&1
   echo ctest exit !ERRORLEVEL!
   python tools\lint\ctest_skips.py "%~dp0%BT%\ctest_junit.xml"
 )

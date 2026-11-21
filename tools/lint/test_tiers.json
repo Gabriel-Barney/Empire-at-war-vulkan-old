@@ -1,0 +1,1391 @@
+{
+ "budget_s": 180.0,
+ "limit_s": 30.0,
+ "nightly_scale": 2.53,
+ "source": {
+  "landing": "build-verify-msvc",
+  "nightly": "worktrees/build-msvc"
+ },
+ "tests": {
+  "alamo_ai_galactic_tests": {
+   "s": 8.3,
+   "tier": "landing"
+  },
+  "alamo_ai_story_save_size": {
+   "s": 2.5,
+   "tier": "landing"
+  },
+  "alamo_ai_story_save_size_late": {
+   "s": 32.3,
+   "tier": "nightly"
+  },
+  "alamo_ai_tactical_perception_tests": {
+   "s": 0.5,
+   "tier": "landing"
+  },
+  "alamo_ai_tactical_readings_tests": {
+   "s": 0.0,
+   "tier": "landing"
+  },
+  "alamo_ai_tactical_records_tests": {
+   "s": 0.0,
+   "tier": "landing"
+  },
+  "alamo_ai_tactical_tests": {
+   "s": 0.9,
+   "tier": "landing"
+  },
+  "alamo_ai_tactical_world_tests": {
+   "s": 11.6,
+   "tier": "landing"
+  },
+  "alamo_ai_tests": {
+   "s": 3.1,
+   "tier": "landing"
+  },
+  "alamo_ai_tests_tr_seed_roles": {
+   "s": 0.6,
+   "tier": "landing"
+  },
+  "alamo_anim_tests": {
+   "s": 0.8,
+   "tier": "landing"
+  },
+  "alamo_assets_tests": {
+   "s": 2.7,
+   "tier": "landing"
+  },
+  "alamo_audio_game_tests": {
+   "s": 0.5,
+   "tier": "landing"
+  },
+  "alamo_audio_layer_equivalence_tests": {
+   "s": 0.9,
+   "tier": "landing"
+  },
+  "alamo_audio_tests": {
+   "s": 0.2,
+   "tier": "landing"
+  },
+  "alamo_bench_compare_tool": {
+   "s": 0.2,
+   "tier": "landing"
+  },
+  "alamo_commands_tests": {
+   "s": 13.0,
+   "tier": "nightly"
+  },
+  "alamo_core_atomic_file_tests": {
+   "s": 2.8,
+   "tier": "landing"
+  },
+  "alamo_core_compat_issue_tests": {
+   "s": 0.0,
+   "tier": "landing"
+  },
+  "alamo_core_dmath_tests": {
+   "s": 0.1,
+   "tier": "landing"
+  },
+  "alamo_core_frame_casts_lint": {
+   "s": 2.2,
+   "tier": "landing"
+  },
+  "alamo_core_frame_casts_lint_selftest": {
+   "s": 0.1,
+   "tier": "landing"
+  },
+  "alamo_core_limits_lint": {
+   "s": 0.3,
+   "tier": "landing"
+  },
+  "alamo_core_limits_lint_selftest": {
+   "s": 0.1,
+   "tier": "landing"
+  },
+  "alamo_core_mod_names_lint": {
+   "s": 1.9,
+   "tier": "landing"
+  },
+  "alamo_core_mod_names_lint_selftest": {
+   "s": 0.1,
+   "tier": "landing"
+  },
+  "alamo_core_mod_system_lint": {
+   "s": 2.6,
+   "tier": "landing"
+  },
+  "alamo_core_mod_system_lint_selftest": {
+   "s": 0.1,
+   "tier": "landing"
+  },
+  "alamo_core_profile_tests": {
+   "s": 0.0,
+   "tier": "landing"
+  },
+  "alamo_core_save_tests": {
+   "s": 1.0,
+   "tier": "landing"
+  },
+  "alamo_core_sim_math_lint": {
+   "s": 4.8,
+   "tier": "landing"
+  },
+  "alamo_core_sim_math_lint_selftest": {
+   "s": 0.0,
+   "tier": "landing"
+  },
+  "alamo_core_sim_tests": {
+   "s": 0.0,
+   "tier": "landing"
+  },
+  "alamo_core_tests": {
+   "s": 0.2,
+   "tier": "landing"
+  },
+  "alamo_crash_tests": {
+   "s": 1.7,
+   "tier": "landing"
+  },
+  "alamo_data_tests": {
+   "s": 0.3,
+   "tier": "landing"
+  },
+  "alamo_formats_tests": {
+   "s": 0.0,
+   "tier": "landing"
+  },
+  "alamo_fuzz_smoke": {
+   "s": 20.7,
+   "tier": "nightly"
+  },
+  "alamo_galactic_conflict_tests": {
+   "s": 0.1,
+   "tier": "landing"
+  },
+  "alamo_galactic_economy_foc_campaign": {
+   "s": 5.8,
+   "tier": "landing"
+  },
+  "alamo_galactic_economy_synthetic_campaign": {
+   "s": 0.3,
+   "tier": "landing"
+  },
+  "alamo_galactic_economy_tests": {
+   "s": 0.0,
+   "tier": "landing"
+  },
+  "alamo_galactic_galab_tests": {
+   "s": 0.2,
+   "tier": "landing"
+  },
+  "alamo_galactic_save_tests": {
+   "s": 1.5,
+   "tier": "landing"
+  },
+  "alamo_galactic_special_tests": {
+   "s": 0.3,
+   "tier": "landing"
+  },
+  "alamo_galactic_tests": {
+   "s": 2.8,
+   "tier": "landing"
+  },
+  "alamo_galactic_visibility_tests": {
+   "s": 0.2,
+   "tier": "landing"
+  },
+  "alamo_game_asset_audit_tests": {
+   "s": 0.1,
+   "tier": "landing"
+  },
+  "alamo_game_audio_host_tests": {
+   "s": 0.0,
+   "tier": "landing"
+  },
+  "alamo_game_battle_fx_tests": {
+   "s": 0.0,
+   "tier": "landing"
+  },
+  "alamo_game_battle_summary_tests": {
+   "s": 0.3,
+   "tier": "landing"
+  },
+  "alamo_game_bench_fixed": {
+   "s": 4.4,
+   "tier": "nightly"
+  },
+  "alamo_game_bench_fixed_galactic": {
+   "s": 4.3,
+   "tier": "nightly"
+  },
+  "alamo_game_bench_fixed_taa": {
+   "s": 5.4,
+   "tier": "nightly"
+  },
+  "alamo_game_bench_realtime": {
+   "s": 6.2,
+   "tier": "nightly"
+  },
+  "alamo_game_bench_scenario": {
+   "s": 9.0,
+   "tier": "nightly"
+  },
+  "alamo_game_bench_scenario_headless": {
+   "s": 0.0,
+   "tier": "landing"
+  },
+  "alamo_game_bench_scenario_taa": {
+   "s": 8.1,
+   "tier": "nightly"
+  },
+  "alamo_game_bench_scene_nebula_battle": {
+   "s": 3.4,
+   "tier": "nightly"
+  },
+  "alamo_game_bench_scene_space_battle_game": {
+   "s": 3.2,
+   "tier": "nightly"
+  },
+  "alamo_game_bench_scene_water_battle": {
+   "s": 5.3,
+   "tier": "nightly"
+  },
+  "alamo_game_bench_stale_scene": {
+   "s": 1.2,
+   "tier": "landing"
+  },
+  "alamo_game_benchmark_tests": {
+   "s": 0.0,
+   "tier": "landing"
+  },
+  "alamo_game_conformance_stacks_tests": {
+   "s": 0.8,
+   "tier": "landing"
+  },
+  "alamo_game_conformance_values_tests": {
+   "s": 0.1,
+   "tier": "landing"
+  },
+  "alamo_game_display_tests": {
+   "s": 0.3,
+   "tier": "landing"
+  },
+  "alamo_game_list_flags": {
+   "s": 0.1,
+   "tier": "landing"
+  },
+  "alamo_game_mod_check_tests": {
+   "s": 1.9,
+   "tier": "landing"
+  },
+  "alamo_game_mod_faction_tests": {
+   "s": 4.1,
+   "tier": "landing"
+  },
+  "alamo_game_mod_fixture_tests": {
+   "s": 0.1,
+   "tier": "landing"
+  },
+  "alamo_game_mod_picker_tests": {
+   "s": 0.1,
+   "tier": "landing"
+  },
+  "alamo_game_open_tests": {
+   "s": 0.0,
+   "tier": "landing"
+  },
+  "alamo_game_save_export_tests": {
+   "s": 0.9,
+   "tier": "landing"
+  },
+  "alamo_game_save_tests": {
+   "s": 14.9,
+   "tier": "nightly"
+  },
+  "alamo_game_screen_flow_tests": {
+   "s": 0.0,
+   "tier": "landing"
+  },
+  "alamo_game_script_cinematics_tests": {
+   "s": 0.0,
+   "tier": "landing"
+  },
+  "alamo_game_session_spec_tests": {
+   "s": 0.0,
+   "tier": "landing"
+  },
+  "alamo_game_session_tests": {
+   "s": 12.7,
+   "tier": "landing"
+  },
+  "alamo_game_shared_constants_tests": {
+   "s": 0.0,
+   "tier": "landing"
+  },
+  "alamo_game_skirmish_maps_tests": {
+   "s": 0.2,
+   "tier": "landing"
+  },
+  "alamo_game_smoke_campaign": {
+   "s": 7.3,
+   "tier": "nightly"
+  },
+  "alamo_game_smoke_campaign_golden": {
+   "s": 0.5,
+   "tier": "nightly"
+  },
+  "alamo_game_smoke_land": {
+   "s": 25.0,
+   "tier": "nightly"
+  },
+  "alamo_game_smoke_land_golden": {
+   "s": 0.6,
+   "tier": "nightly"
+  },
+  "alamo_game_smoke_saveload": {
+   "s": 7.0,
+   "tier": "nightly"
+  },
+  "alamo_game_smoke_screens": {
+   "s": 7.8,
+   "tier": "nightly"
+  },
+  "alamo_game_smoke_screens_golden": {
+   "s": 0.6,
+   "tier": "nightly"
+  },
+  "alamo_game_smoke_skirmish": {
+   "s": 16.0,
+   "tier": "nightly"
+  },
+  "alamo_game_smoke_skirmish_golden": {
+   "s": 0.6,
+   "tier": "nightly"
+  },
+  "alamo_game_story_camera_tests": {
+   "s": 0.0,
+   "tier": "landing"
+  },
+  "alamo_game_story_present_tests": {
+   "s": 0.0,
+   "tier": "landing"
+  },
+  "alamo_game_world_pick_tests": {
+   "s": 0.0,
+   "tier": "landing"
+  },
+  "alamo_goldens_behaviour_check_selftest": {
+   "s": 0.1,
+   "tier": "landing"
+  },
+  "alamo_goldens_bench_scenarios_selftest": {
+   "s": 0.5,
+   "tier": "landing"
+  },
+  "alamo_goldens_convert_selftest": {
+   "s": 0.1,
+   "tier": "landing"
+  },
+  "alamo_goldens_scenario_results_selftest": {
+   "s": 1.7,
+   "tier": "landing"
+  },
+  "alamo_headless_bench_galactic_late": {
+   "s": 32.3,
+   "tier": "nightly"
+  },
+  "alamo_headless_bench_galactic_late_w1": {
+   "s": 19.4,
+   "tier": "nightly"
+  },
+  "alamo_headless_bench_galactic_late_w15": {
+   "s": 19.6,
+   "tier": "nightly"
+  },
+  "alamo_headless_bench_galactic_late_w16": {
+   "s": 19.6,
+   "tier": "nightly"
+  },
+  "alamo_headless_bench_galactic_late_w4": {
+   "s": 19.6,
+   "tier": "nightly"
+  },
+  "alamo_headless_bench_game_nebula_battle": {
+   "s": 1.7,
+   "tier": "nightly"
+  },
+  "alamo_headless_bench_game_space_battle_game": {
+   "s": 1.4,
+   "tier": "nightly"
+  },
+  "alamo_headless_bench_game_water_battle": {
+   "s": 2.9,
+   "tier": "nightly"
+  },
+  "alamo_headless_bench_land_battle": {
+   "s": 11.3,
+   "tier": "nightly"
+  },
+  "alamo_headless_bench_land_battle_svc": {
+   "s": 10.5,
+   "tier": "nightly"
+  },
+  "alamo_headless_bench_land_battle_svc_w1": {
+   "s": 5.0,
+   "tier": "nightly"
+  },
+  "alamo_headless_bench_land_battle_svc_w15": {
+   "s": 4.9,
+   "tier": "nightly"
+  },
+  "alamo_headless_bench_land_battle_svc_w16": {
+   "s": 4.8,
+   "tier": "nightly"
+  },
+  "alamo_headless_bench_land_battle_svc_w4": {
+   "s": 4.8,
+   "tier": "nightly"
+  },
+  "alamo_headless_bench_land_battle_w1": {
+   "s": 5.2,
+   "tier": "nightly"
+  },
+  "alamo_headless_bench_land_battle_w15": {
+   "s": 4.8,
+   "tier": "nightly"
+  },
+  "alamo_headless_bench_land_battle_w16": {
+   "s": 4.9,
+   "tier": "nightly"
+  },
+  "alamo_headless_bench_land_battle_w4": {
+   "s": 5.0,
+   "tier": "nightly"
+  },
+  "alamo_headless_bench_space_battle": {
+   "s": 2.1,
+   "tier": "nightly"
+  },
+  "alamo_headless_bench_space_battle_game": {
+   "s": 3.1,
+   "tier": "nightly"
+  },
+  "alamo_headless_bench_space_battle_game_w1": {
+   "s": 1.5,
+   "tier": "nightly"
+  },
+  "alamo_headless_bench_space_battle_game_w15": {
+   "s": 1.5,
+   "tier": "nightly"
+  },
+  "alamo_headless_bench_space_battle_game_w16": {
+   "s": 1.4,
+   "tier": "nightly"
+  },
+  "alamo_headless_bench_space_battle_game_w4": {
+   "s": 1.5,
+   "tier": "nightly"
+  },
+  "alamo_headless_bench_space_battle_svc_streams": {
+   "s": 1.9,
+   "tier": "nightly"
+  },
+  "alamo_headless_bench_space_battle_svc_streams_w1": {
+   "s": 1.0,
+   "tier": "nightly"
+  },
+  "alamo_headless_bench_space_battle_svc_streams_w15": {
+   "s": 1.0,
+   "tier": "nightly"
+  },
+  "alamo_headless_bench_space_battle_svc_streams_w16": {
+   "s": 1.0,
+   "tier": "nightly"
+  },
+  "alamo_headless_bench_space_battle_svc_streams_w4": {
+   "s": 0.9,
+   "tier": "nightly"
+  },
+  "alamo_headless_bench_space_battle_w1": {
+   "s": 1.1,
+   "tier": "nightly"
+  },
+  "alamo_headless_bench_space_battle_w15": {
+   "s": 1.0,
+   "tier": "nightly"
+  },
+  "alamo_headless_bench_space_battle_w16": {
+   "s": 1.0,
+   "tier": "nightly"
+  },
+  "alamo_headless_bench_space_battle_w4": {
+   "s": 1.0,
+   "tier": "nightly"
+  },
+  "alamo_headless_bench_synthetic": {
+   "s": 0.4,
+   "tier": "landing"
+  },
+  "alamo_headless_crc_checkpoint": {
+   "s": 0.9,
+   "tier": "landing"
+  },
+  "alamo_headless_eval_uw_infra": {
+   "s": 0.4,
+   "tier": "landing"
+  },
+  "alamo_headless_galactic_ai": {
+   "s": 4.5,
+   "tier": "landing"
+  },
+  "alamo_headless_galactic_ai_human": {
+   "s": 11.2,
+   "tier": "nightly"
+  },
+  "alamo_headless_galactic_ai_human_w1": {
+   "s": 7.5,
+   "tier": "nightly"
+  },
+  "alamo_headless_galactic_ai_human_w15": {
+   "s": 8.2,
+   "tier": "nightly"
+  },
+  "alamo_headless_galactic_ai_human_w16": {
+   "s": 8.5,
+   "tier": "nightly"
+  },
+  "alamo_headless_galactic_ai_human_w4": {
+   "s": 7.5,
+   "tier": "nightly"
+  },
+  "alamo_headless_galactic_trace": {
+   "s": 1.6,
+   "tier": "landing"
+  },
+  "alamo_headless_limits_factions_80_galactic": {
+   "s": 3.9,
+   "tier": "landing"
+  },
+  "alamo_headless_limits_factions_80_galactic_w4": {
+   "s": 2.5,
+   "tier": "nightly"
+  },
+  "alamo_headless_limits_factions_80_land": {
+   "s": 5.9,
+   "tier": "nightly"
+  },
+  "alamo_headless_limits_factions_80_land_w4": {
+   "s": 3.3,
+   "tier": "nightly"
+  },
+  "alamo_headless_limits_factions_80_space": {
+   "s": 2.8,
+   "tier": "landing"
+  },
+  "alamo_headless_limits_factions_80_space_w4": {
+   "s": 0.9,
+   "tier": "nightly"
+  },
+  "alamo_headless_limits_huge_delay_galactic": {
+   "s": 5.9,
+   "tier": "nightly"
+  },
+  "alamo_headless_limits_huge_delay_galactic_w4": {
+   "s": 2.0,
+   "tier": "nightly"
+  },
+  "alamo_headless_limits_huge_delay_land": {
+   "s": 6.1,
+   "tier": "nightly"
+  },
+  "alamo_headless_limits_huge_delay_land_cp": {
+   "s": 15.5,
+   "tier": "nightly"
+  },
+  "alamo_headless_limits_huge_delay_land_cp_w4": {
+   "s": 7.1,
+   "tier": "nightly"
+  },
+  "alamo_headless_limits_huge_delay_land_w4": {
+   "s": 3.4,
+   "tier": "nightly"
+  },
+  "alamo_headless_limits_huge_delay_space": {
+   "s": 2.1,
+   "tier": "landing"
+  },
+  "alamo_headless_limits_huge_delay_space_w4": {
+   "s": 1.3,
+   "tier": "nightly"
+  },
+  "alamo_headless_limits_levels_10_galactic": {
+   "s": 6.9,
+   "tier": "nightly"
+  },
+  "alamo_headless_limits_levels_10_galactic_w4": {
+   "s": 2.2,
+   "tier": "nightly"
+  },
+  "alamo_headless_limits_levels_10_land": {
+   "s": 5.8,
+   "tier": "nightly"
+  },
+  "alamo_headless_limits_levels_10_land_w4": {
+   "s": 3.6,
+   "tier": "nightly"
+  },
+  "alamo_headless_limits_levels_10_space": {
+   "s": 2.5,
+   "tier": "landing"
+  },
+  "alamo_headless_limits_levels_10_space_w4": {
+   "s": 1.1,
+   "tier": "nightly"
+  },
+  "alamo_headless_mod_golden_aol_space": {
+   "s": 4.2,
+   "tier": "nightly"
+  },
+  "alamo_headless_mod_golden_fotr_space": {
+   "s": 2.0,
+   "tier": "nightly"
+  },
+  "alamo_headless_mod_golden_remake_space": {
+   "s": 8.6,
+   "tier": "nightly"
+  },
+  "alamo_headless_mod_golden_tr_space": {
+   "s": 2.2,
+   "tier": "nightly"
+  },
+  "alamo_headless_outcome_foc_land_campaign": {
+   "s": 23.4,
+   "tier": "nightly"
+  },
+  "alamo_headless_outcome_foc_land_empire_underworld": {
+   "s": 224.7,
+   "tier": "nightly"
+  },
+  "alamo_headless_outcome_foc_land_full": {
+   "s": 73.9,
+   "tier": "nightly"
+  },
+  "alamo_headless_outcome_foc_space": {
+   "s": 15.9,
+   "tier": "nightly"
+  },
+  "alamo_headless_outcome_foc_station": {
+   "s": 13.7,
+   "tier": "nightly"
+  },
+  "alamo_headless_replay_golden": {
+   "s": 0.6,
+   "tier": "landing"
+  },
+  "alamo_headless_replay_workers": {
+   "s": 0.2,
+   "tier": "landing"
+  },
+  "alamo_headless_replay_workers_w1": {
+   "s": 0.2,
+   "tier": "landing"
+  },
+  "alamo_headless_replay_workers_w15": {
+   "s": 0.1,
+   "tier": "landing"
+  },
+  "alamo_headless_replay_workers_w16": {
+   "s": 0.1,
+   "tier": "landing"
+  },
+  "alamo_headless_replay_workers_w4": {
+   "s": 0.1,
+   "tier": "landing"
+  },
+  "alamo_headless_save_galactic_battle": {
+   "s": 4.6,
+   "tier": "landing"
+  },
+  "alamo_headless_save_galactic_before_battle": {
+   "s": 3.5,
+   "tier": "landing"
+  },
+  "alamo_headless_save_hotm": {
+   "s": 6.6,
+   "tier": "landing"
+  },
+  "alamo_headless_save_hotm_anim": {
+   "s": 6.8,
+   "tier": "landing"
+  },
+  "alamo_headless_save_hotm_scheduled": {
+   "s": 5.2,
+   "tier": "landing"
+  },
+  "alamo_headless_save_skirmish_anim": {
+   "s": 2.0,
+   "tier": "landing"
+  },
+  "alamo_headless_save_skirmish_foc": {
+   "s": 6.3,
+   "tier": "nightly"
+  },
+  "alamo_headless_save_skirmish_foc_ai_lane": {
+   "s": 10.5,
+   "tier": "nightly"
+  },
+  "alamo_headless_save_skirmish_foc_land": {
+   "s": 15.5,
+   "tier": "nightly"
+  },
+  "alamo_headless_save_skirmish_foc_land_ai_lane": {
+   "s": 63.5,
+   "tier": "nightly"
+  },
+  "alamo_headless_save_skirmish_foc_land_scheduled": {
+   "s": 8.6,
+   "tier": "nightly"
+  },
+  "alamo_headless_save_synthetic": {
+   "s": 0.1,
+   "tier": "landing"
+  },
+  "alamo_headless_save_synthetic_nostory": {
+   "s": 0.1,
+   "tier": "landing"
+  },
+  "alamo_headless_selfcheck": {
+   "s": 2.1,
+   "tier": "landing"
+  },
+  "alamo_headless_skirmish_ai_foc": {
+   "s": 4.9,
+   "tier": "nightly"
+  },
+  "alamo_headless_skirmish_ai_foc_ai_lane": {
+   "s": 4.2,
+   "tier": "landing"
+  },
+  "alamo_headless_skirmish_ai_foc_ai_lane_w1": {
+   "s": 2.2,
+   "tier": "nightly"
+  },
+  "alamo_headless_skirmish_ai_foc_ai_lane_w15": {
+   "s": 2.2,
+   "tier": "nightly"
+  },
+  "alamo_headless_skirmish_ai_foc_ai_lane_w16": {
+   "s": 2.3,
+   "tier": "nightly"
+  },
+  "alamo_headless_skirmish_ai_foc_ai_lane_w4": {
+   "s": 2.2,
+   "tier": "nightly"
+  },
+  "alamo_headless_skirmish_ai_foc_land": {
+   "s": 3.9,
+   "tier": "nightly"
+  },
+  "alamo_headless_skirmish_ai_foc_land_ai_lane": {
+   "s": 27.6,
+   "tier": "nightly"
+  },
+  "alamo_headless_skirmish_ai_foc_land_ai_lane_w1": {
+   "s": 16.4,
+   "tier": "nightly"
+  },
+  "alamo_headless_skirmish_ai_foc_land_ai_lane_w15": {
+   "s": 15.3,
+   "tier": "nightly"
+  },
+  "alamo_headless_skirmish_ai_foc_land_ai_lane_w16": {
+   "s": 15.8,
+   "tier": "nightly"
+  },
+  "alamo_headless_skirmish_ai_foc_land_ai_lane_w4": {
+   "s": 16.2,
+   "tier": "nightly"
+  },
+  "alamo_headless_skirmish_ai_foc_land_campaign": {
+   "s": 3.1,
+   "tier": "nightly"
+  },
+  "alamo_headless_skirmish_ai_foc_land_outcome": {
+   "s": 13.0,
+   "tier": "nightly"
+  },
+  "alamo_headless_skirmish_ai_foc_land_outcome_profiled": {
+   "s": 9.2,
+   "tier": "nightly"
+  },
+  "alamo_headless_skirmish_ai_foc_land_outcome_w1": {
+   "s": 8.7,
+   "tier": "nightly"
+  },
+  "alamo_headless_skirmish_ai_foc_land_outcome_w15": {
+   "s": 8.0,
+   "tier": "nightly"
+  },
+  "alamo_headless_skirmish_ai_foc_land_outcome_w16": {
+   "s": 8.0,
+   "tier": "nightly"
+  },
+  "alamo_headless_skirmish_ai_foc_land_outcome_w4": {
+   "s": 8.8,
+   "tier": "nightly"
+  },
+  "alamo_headless_skirmish_ai_geonosis": {
+   "s": 0.4,
+   "tier": "landing"
+  },
+  "alamo_headless_skirmish_ai_slots_land": {
+   "s": 1.5,
+   "tier": "landing"
+  },
+  "alamo_headless_skirmish_ai_slots_space": {
+   "s": 0.7,
+   "tier": "landing"
+  },
+  "alamo_headless_skirmish_ai_synthetic": {
+   "s": 0.4,
+   "tier": "landing"
+  },
+  "alamo_headless_skirmish_plan_retest": {
+   "s": 0.4,
+   "tier": "landing"
+  },
+  "alamo_headless_skirmish_trace": {
+   "s": 0.6,
+   "tier": "landing"
+  },
+  "alamo_headless_story_esc": {
+   "s": 1.0,
+   "tier": "landing"
+  },
+  "alamo_jobs_crc_tests": {
+   "s": 0.9,
+   "tier": "landing"
+  },
+  "alamo_jobs_tests": {
+   "s": 4.1,
+   "tier": "landing"
+  },
+  "alamo_lua_binding_effects_tests": {
+   "s": 0.0,
+   "tier": "landing"
+  },
+  "alamo_lua_fog_tests": {
+   "s": 0.0,
+   "tier": "landing"
+  },
+  "alamo_lua_gc_tests": {
+   "s": 0.9,
+   "tier": "landing"
+  },
+  "alamo_lua_objects_tests": {
+   "s": 0.0,
+   "tier": "landing"
+  },
+  "alamo_lua_players_tests": {
+   "s": 0.0,
+   "tier": "landing"
+  },
+  "alamo_lua_presentation_tests": {
+   "s": 0.1,
+   "tier": "landing"
+  },
+  "alamo_lua_runaway_tests": {
+   "s": 0.1,
+   "tier": "landing"
+  },
+  "alamo_lua_save_tests": {
+   "s": 1.1,
+   "tier": "landing"
+  },
+  "alamo_lua_script_gaps_tests": {
+   "s": 0.0,
+   "tier": "landing"
+  },
+  "alamo_lua_script_remaining_tests": {
+   "s": 0.0,
+   "tier": "landing"
+  },
+  "alamo_lua_script_save_tests": {
+   "s": 0.0,
+   "tier": "landing"
+  },
+  "alamo_lua_story_tests": {
+   "s": 0.2,
+   "tier": "landing"
+  },
+  "alamo_lua_tactical_tests": {
+   "s": 0.0,
+   "tier": "landing"
+  },
+  "alamo_lua_tests": {
+   "s": 0.5,
+   "tier": "landing"
+  },
+  "alamo_materials_tests": {
+   "s": 1.5,
+   "tier": "landing"
+  },
+  "alamo_mod_check_fixture": {
+   "s": 0.0,
+   "tier": "landing"
+  },
+  "alamo_modcorpus_tests": {
+   "s": 1.1,
+   "tier": "landing"
+  },
+  "alamo_objects_tag_ledger_lint": {
+   "s": 3.1,
+   "tier": "landing"
+  },
+  "alamo_objects_tag_ledger_lint_selftest": {
+   "s": 0.1,
+   "tier": "landing"
+  },
+  "alamo_objects_tag_ledger_tests": {
+   "s": 0.0,
+   "tier": "landing"
+  },
+  "alamo_objects_tag_reads_lint": {
+   "s": 0.5,
+   "tier": "landing"
+  },
+  "alamo_objects_tag_reads_lint_selftest": {
+   "s": 0.0,
+   "tier": "landing"
+  },
+  "alamo_objects_tests": {
+   "s": 0.6,
+   "tier": "landing"
+  },
+  "alamo_play_tests": {
+   "s": 0.0,
+   "tier": "landing"
+  },
+  "alamo_render_anim_tests": {
+   "s": 8.5,
+   "tier": "landing"
+  },
+  "alamo_render_app_sync": {
+   "s": 0.5,
+   "tier": "landing"
+  },
+  "alamo_render_beams_tests": {
+   "s": 0.3,
+   "tier": "landing"
+  },
+  "alamo_render_fsr_tests": {
+   "s": 5.4,
+   "tier": "nightly"
+  },
+  "alamo_render_galactic_headless_check": {
+   "s": 0.6,
+   "tier": "landing"
+  },
+  "alamo_render_galactic_tests": {
+   "s": 1.2,
+   "tier": "landing"
+  },
+  "alamo_render_jam_tests": {
+   "s": 0.0,
+   "tier": "landing"
+  },
+  "alamo_render_particles_showcase": {
+   "s": 0.3,
+   "tier": "landing"
+  },
+  "alamo_render_particles_sim_check": {
+   "s": 0.6,
+   "tier": "landing"
+  },
+  "alamo_render_particles_tests": {
+   "s": 1.9,
+   "tier": "landing"
+  },
+  "alamo_render_r5_tests": {
+   "s": 1.0,
+   "tier": "landing"
+  },
+  "alamo_render_reference_tests": {
+   "s": 0.7,
+   "tier": "landing"
+  },
+  "alamo_render_shadow_tests": {
+   "s": 1.0,
+   "tier": "landing"
+  },
+  "alamo_render_sim_anim_crc_check": {
+   "s": 0.8,
+   "tier": "landing"
+  },
+  "alamo_render_sim_headless_check": {
+   "s": 0.8,
+   "tier": "landing"
+  },
+  "alamo_render_sim_particles_check": {
+   "s": 0.9,
+   "tier": "landing"
+  },
+  "alamo_render_sim_tests": {
+   "s": 0.8,
+   "tier": "landing"
+  },
+  "alamo_render_space_tests": {
+   "s": 0.7,
+   "tier": "landing"
+  },
+  "alamo_render_taa_tests": {
+   "s": 2.3,
+   "tier": "landing"
+  },
+  "alamo_render_tests": {
+   "s": 4.7,
+   "tier": "landing"
+  },
+  "alamo_render_xess_tests": {
+   "s": 4.3,
+   "tier": "landing"
+  },
+  "alamo_rhi_gpu_tests": {
+   "s": 0.6,
+   "tier": "landing"
+  },
+  "alamo_rhi_tests": {
+   "s": 0.1,
+   "tier": "landing"
+  },
+  "alamo_shaderxlat_gpu_tests": {
+   "s": 10.9,
+   "tier": "landing"
+  },
+  "alamo_shaderxlat_tests": {
+   "s": 5.2,
+   "tier": "landing"
+  },
+  "alamo_sim_battle_ai_hero_clash": {
+   "s": 0.1,
+   "tier": "landing"
+  },
+  "alamo_sim_battle_ai_hero_clash_w1": {
+   "s": 0.1,
+   "tier": "landing"
+  },
+  "alamo_sim_battle_ai_hero_clash_w15": {
+   "s": 0.0,
+   "tier": "landing"
+  },
+  "alamo_sim_battle_ai_hero_clash_w16": {
+   "s": 0.1,
+   "tier": "landing"
+  },
+  "alamo_sim_battle_ai_hero_clash_w4": {
+   "s": 0.0,
+   "tier": "landing"
+  },
+  "alamo_sim_battle_ai_tests": {
+   "s": 2.6,
+   "tier": "landing"
+  },
+  "alamo_sim_battle_fighter_tests": {
+   "s": 1.0,
+   "tier": "landing"
+  },
+  "alamo_sim_battle_ledger_lint": {
+   "s": 1.1,
+   "tier": "landing"
+  },
+  "alamo_sim_battle_ledger_lint_selftest": {
+   "s": 2.3,
+   "tier": "landing"
+  },
+  "alamo_sim_battle_story_tests": {
+   "s": 0.5,
+   "tier": "landing"
+  },
+  "alamo_sim_battle_tests": {
+   "s": 28.9,
+   "tier": "landing"
+  },
+  "alamo_sim_bench_tests": {
+   "s": 0.0,
+   "tier": "landing"
+  },
+  "alamo_sim_bkt1_tests": {
+   "s": 0.1,
+   "tier": "landing"
+  },
+  "alamo_sim_fleet_groups_battle": {
+   "s": 0.1,
+   "tier": "landing"
+  },
+  "alamo_sim_fleet_groups_battle_w1": {
+   "s": 0.0,
+   "tier": "landing"
+  },
+  "alamo_sim_fleet_groups_battle_w15": {
+   "s": 0.0,
+   "tier": "landing"
+  },
+  "alamo_sim_fleet_groups_battle_w16": {
+   "s": 0.0,
+   "tier": "landing"
+  },
+  "alamo_sim_fleet_groups_battle_w4": {
+   "s": 0.0,
+   "tier": "landing"
+  },
+  "alamo_sim_fleet_groups_tests": {
+   "s": 0.1,
+   "tier": "landing"
+  },
+  "alamo_sim_l1_tests": {
+   "s": 0.6,
+   "tier": "landing"
+  },
+  "alamo_sim_map1_tests": {
+   "s": 0.1,
+   "tier": "landing"
+  },
+  "alamo_sim_r3g_tests": {
+   "s": 0.2,
+   "tier": "landing"
+  },
+  "alamo_sim_r3h_tests": {
+   "s": 0.1,
+   "tier": "landing"
+  },
+  "alamo_sim_save_continue": {
+   "s": 0.4,
+   "tier": "landing"
+  },
+  "alamo_sim_save_continue_w1": {
+   "s": 0.3,
+   "tier": "landing"
+  },
+  "alamo_sim_save_continue_w4": {
+   "s": 0.4,
+   "tier": "landing"
+  },
+  "alamo_sim_ship_names_tests": {
+   "s": 0.0,
+   "tier": "landing"
+  },
+  "alamo_sim_story_rewards_tests": {
+   "s": 0.1,
+   "tier": "landing"
+  },
+  "alamo_sim_tests": {
+   "s": 2.9,
+   "tier": "landing"
+  },
+  "alamo_sim_tests_every_map": {
+   "s": 11.2,
+   "tier": "nightly"
+  },
+  "alamo_sim_trl2_tests": {
+   "s": 0.2,
+   "tier": "landing"
+  },
+  "alamo_sim_tru1_tests": {
+   "s": 0.2,
+   "tier": "landing"
+  },
+  "alamo_tactical_abilities_tests": {
+   "s": 0.3,
+   "tier": "landing"
+  },
+  "alamo_tactical_combat_tests": {
+   "s": 0.3,
+   "tier": "landing"
+  },
+  "alamo_tactical_fleet_placement_tests": {
+   "s": 0.0,
+   "tier": "landing"
+  },
+  "alamo_tactical_fog_save_tests": {
+   "s": 1.0,
+   "tier": "landing"
+  },
+  "alamo_tactical_fog_tests": {
+   "s": 0.0,
+   "tier": "landing"
+  },
+  "alamo_tactical_garrison_tests": {
+   "s": 0.0,
+   "tier": "landing"
+  },
+  "alamo_tactical_hangar_tests": {
+   "s": 0.1,
+   "tier": "landing"
+  },
+  "alamo_tactical_hyperspace_tests": {
+   "s": 0.0,
+   "tier": "landing"
+  },
+  "alamo_tactical_movement_b2_tests": {
+   "s": 0.1,
+   "tier": "landing"
+  },
+  "alamo_tactical_movement_b3_tests": {
+   "s": 0.2,
+   "tier": "landing"
+  },
+  "alamo_tactical_movement_b4_tests": {
+   "s": 0.1,
+   "tier": "landing"
+  },
+  "alamo_tactical_movement_b5_tests": {
+   "s": 0.1,
+   "tier": "landing"
+  },
+  "alamo_tactical_movement_bkm_tests": {
+   "s": 0.1,
+   "tier": "landing"
+  },
+  "alamo_tactical_movement_cohesion_tests": {
+   "s": 0.0,
+   "tier": "landing"
+  },
+  "alamo_tactical_movement_gaps_tests": {
+   "s": 1.0,
+   "tier": "landing"
+  },
+  "alamo_tactical_movement_mcx4_tests": {
+   "s": 0.0,
+   "tier": "landing"
+  },
+  "alamo_tactical_movement_save_tests": {
+   "s": 5.0,
+   "tier": "landing"
+  },
+  "alamo_tactical_movement_t26_tests": {
+   "s": 0.1,
+   "tier": "landing"
+  },
+  "alamo_tactical_movement_tests": {
+   "s": 16.2,
+   "tier": "landing"
+  },
+  "alamo_tactical_movement_trn1_tests": {
+   "s": 0.0,
+   "tier": "landing"
+  },
+  "alamo_tactical_services_tests": {
+   "s": 0.0,
+   "tier": "landing"
+  },
+  "alamo_tactical_special_weapons_tests": {
+   "s": 0.0,
+   "tier": "landing"
+  },
+  "alamo_tactical_tests": {
+   "s": 1.4,
+   "tier": "landing"
+  },
+  "alamo_tactical_tree_save_tests": {
+   "s": 0.1,
+   "tier": "landing"
+  },
+  "alamo_terrain_tests": {
+   "s": 12.7,
+   "tier": "landing"
+  },
+  "alamo_ui_colour_arrows_tests": {
+   "s": 0.0,
+   "tier": "landing"
+  },
+  "alamo_ui_draw_tests": {
+   "s": 0.6,
+   "tier": "landing"
+  },
+  "alamo_ui_gui_draw_tests": {
+   "s": 1.7,
+   "tier": "landing"
+  },
+  "alamo_ui_gui_tests": {
+   "s": 0.1,
+   "tier": "landing"
+  },
+  "alamo_ui_hud_tests": {
+   "s": 0.4,
+   "tier": "landing"
+  },
+  "alamo_ui_hud_ui3_tests": {
+   "s": 0.0,
+   "tier": "landing"
+  },
+  "alamo_ui_organizer_tests": {
+   "s": 0.0,
+   "tier": "landing"
+  },
+  "alamo_ui_render_bridge_tests": {
+   "s": 0.0,
+   "tier": "landing"
+  },
+  "alamo_ui_screens_tests": {
+   "s": 0.1,
+   "tier": "landing"
+  },
+  "alamo_ui_tests": {
+   "s": 0.0,
+   "tier": "landing"
+  },
+  "alamo_vfs_env_tests": {
+   "s": 0.0,
+   "tier": "landing"
+  },
+  "alamo_vfs_registry_tests": {
+   "s": 0.1,
+   "tier": "landing"
+  },
+  "alamo_vfs_steam_tests": {
+   "s": 0.0,
+   "tier": "landing"
+  },
+  "alamo_vfs_tests": {
+   "s": 0.2,
+   "tier": "landing"
+  },
+  "alamo_video_tests": {
+   "s": 6.4,
+   "tier": "landing"
+  },
+  "meg_selftest": {
+   "s": 0.0,
+   "tier": "landing"
+  },
+  "parity_autoresolve": {
+   "s": 0.3,
+   "tier": "landing"
+  },
+  "parity_autoresolve_selftest": {
+   "s": 0.1,
+   "tier": "landing"
+  },
+  "parity_harness_geonosis_skirmish": {
+   "s": 8.2,
+   "tier": "nightly"
+  },
+  "parity_harness_geonosis_skirmish_seeds": {
+   "s": 10.5,
+   "tier": "nightly"
+  },
+  "parity_harness_hotm_galactic": {
+   "s": 15.7,
+   "tier": "nightly"
+  },
+  "parity_harness_hotm_galactic_seeds": {
+   "s": 24.0,
+   "tier": "nightly"
+  },
+  "parity_harness_selftest": {
+   "s": 0.2,
+   "tier": "landing"
+  }
+ }
+}

@@ -6,7 +6,8 @@ rem CLAUDE.md asks for, so tasks stop leaving a tree per task behind. The second
 rem (tree left out) when it contains a ";", is "all", or is the last argument; so a single module with a test regex
 rem needs the tree spelled out (build_agent.cmd msvc wt lua lua) or a list ("core;lua" lua).
 rem Module list "all": the default ALAMO_ENGINE_MODULES of engine/CMakeLists.txt (configured with -U, like build_msvc.cmd).
-rem Tests: no 4th argument = the fast tier (ctest -LE slow, tests without the "slow" label); a regex runs the matching tests,
+rem Tests: no 4th argument = the landing tier (tools\lint\test_tiers.py: measured tiers, wr3 t03; ALAMO_WC_SLOT rotates
+rem the worker-count checks, t04); a failed test passing one retry is flaky (flaky_retry.py, t05); a regex runs the matching tests,
 rem slow ones included; "all" runs every test (the gate scripts always do); "changed" (2026-11-13) runs the fast-tier tests
 rem that depend on a file changed against origin/dev through the build graph (tools\lint\affected_tests.py, wr3 t01:
 rem a tactical change also runs the apps scenario tests that link tactical); "none" builds without running tests.
@@ -55,7 +56,7 @@ if /i "!ACOMP!"=="clang" (
   set COMPILER=-DCMAKE_CXX_COMPILER=cl
 )
 set FILTER=-R "!ATESTS!"
-if "!ATESTS!"=="" set FILTER=-LE slow
+if "!ATESTS!"=="" set FILTER=--exclude-from-file "%~dp0!B!\tier_exclude.txt"
 if /i "!ATESTS!"=="all" set FILTER=
 if /i "!ATESTS!"=="changed" set FILTER=--tests-from-file "%~dp0!B!\changed_tests.txt"
 if /i "!AMODS!"=="all" (set MODULES=-U ALAMO_ENGINE_MODULES) else set MODULES="-DALAMO_ENGINE_MODULES=!AMODS!"
@@ -97,11 +98,12 @@ python -I tools\lint\verified_build.py begin %B% --modules "!AMODS!" --tests "!A
   if not exist %B%\tmp mkdir %B%\tmp
   set "TMP=%~dp0%B%\tmp"
   set "TEMP=%~dp0%B%\tmp"
+  if "!ATESTS!"=="" python -I tools\lint\test_tiers.py exclude %B% "%~dp0%B%\tier_exclude.txt" 2>&1
   if /i "!ATESTS!"=="changed" python -I tools\lint\affected_tests.py %B% "%~dp0%B%\changed_tests.txt" 2>&1
   if /i "!ATESTS!"=="none" (
     echo tests: not run, test filter none
   ) else (
-    python -I tools\lint\test_slot.py -- ctest --test-dir %B% --output-on-failure --output-junit "%~dp0%B%\ctest_junit.xml" -j 4 !FILTER! 2>&1
+    python -I tools\lint\test_slot.py -- python -I tools\lint\flaky_retry.py -- ctest --test-dir %B% --output-on-failure --output-junit "%~dp0%B%\ctest_junit.xml" -j 4 !FILTER! 2>&1
     echo ctest exit !ERRORLEVEL!
     python tools\lint\ctest_skips.py "%~dp0%B%\ctest_junit.xml"
   )
