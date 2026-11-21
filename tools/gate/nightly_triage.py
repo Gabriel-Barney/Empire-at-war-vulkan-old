@@ -6,7 +6,8 @@ slow tier, the fuzz smoke, the parity harness and seed runs, the worker-count ma
 logs. For each failing test:
   1. a failure already filed last night (state in <main checkout>\logs\nightly_state.json) updates its roadmap task
      ("seen again <date> on <sha>") instead of filing a new one;
-  2. a new failure is attributed: the first commit between the last night it passed and tonight's tip that fails it,
+  2. a new failure is attributed: the first commit between the last night it passed (the last night's commit when the
+     test did not fail then, `last_night` in the state file; else the last fully green night) and tonight's tip that fails it,
      found by bisecting first-parent commits in the gate worktree (build_agent.cmd msvc bisect all "^test$"; at most
      ALAMO_NIGHTLY_BISECTS tests a night, default 3, and 8 steps each; the rest are filed unattributed);
   3. it is filed as an S2 task of the standing group `ngt1` (Nightly gate failures, box PROC) with the summary path.
@@ -79,6 +80,18 @@ def decide(state: dict, failures: dict[str, list[str]]) -> tuple[list[str], list
     new = [t for t in sorted(failures) if t not in state.get("open", {})]
     known = [t for t in sorted(failures) if t in state.get("open", {})]
     return new, known
+
+
+def good_commit(state: dict, test: str) -> str | None:
+    """The newest commit a nightly run is known to have passed `test` on: where it passed again after a failure, else
+    last night's commit when the test did not fail then (a red night for other tests still proves this one), else the
+    last fully green night. None: nothing to bisect from."""
+    last = state.get("last_night") or {}
+    if state.get("last_pass", {}).get(test):
+        return state["last_pass"][test]
+    if last.get("sha") and test not in last.get("failures", []):
+        return last["sha"]
+    return state.get("last_green")
 
 
 # ---------------------------------------------------------------- roadmap writes
@@ -166,7 +179,7 @@ def run(sha: str, rc: int, logs_dir: str, main: str, wt: str | None, dry: bool) 
             update_task(main, state["open"][t]["task"], line)
     for t in new:
         culprit = None
-        good = state["last_pass"].get(t) or state.get("last_green")
+        good = good_commit(state, t)
         if wt and good and budget > 0:
             budget -= 1
             commits = [c for c in git(wt, "rev-list", "--first-parent", "--reverse", f"{good}..{sha}").split() if c]
@@ -193,6 +206,7 @@ def run(sha: str, rc: int, logs_dir: str, main: str, wt: str | None, dry: bool) 
     for t in state["open"]:
         if t not in failures:
             state["last_pass"][t] = sha
+    state["last_night"] = {"sha": sha, "date": date, "failures": sorted(failures)}
     line = (f"nightly gate {date} on {sha[:8]}: " + ("PASS" if rc == 0 and not failures else
             f"FAIL ({len(failures)} test{'s' if len(failures) != 1 else ''}: {', '.join(sorted(failures)[:4])}"
             + (", ..." if len(failures) > 4 else "") + ")"))
@@ -242,6 +256,12 @@ def selftest() -> int:
     state["open"]["t_slow"] = {"task": "t01"}
     new, known = decide(state, {"t_slow": ["msvc"]})
     check(new == [] and known == ["t_slow"], "second night: the same failure updates its task")
+    # the commit to bisect from: a red night still proves the tests that did not fail in it
+    st = {"last_pass": {"t_a": "p1"}, "last_night": {"sha": "n1", "failures": ["t_b"]}, "last_green": "g1"}
+    check(good_commit(st, "t_a") == "p1", "good commit: where the test passed again")
+    check(good_commit(st, "t_new") == "n1", "good commit: last night, when the test did not fail then")
+    check(good_commit(st, "t_b") == "g1", "good commit: the last green night for a test that failed last night")
+    check(good_commit({"open": {}}, "t_new") is None, "good commit: none without a recorded night")
     txt = task_text("t_slow", ["msvc"], "a" * 40, "b" * 40, "subject", "summary.txt", "2026-11-22")
     check(txt.startswith("[nightly] t_slow fails") and "bbbbbbbb (subject)" in txt, f"task text: {txt}")
 
