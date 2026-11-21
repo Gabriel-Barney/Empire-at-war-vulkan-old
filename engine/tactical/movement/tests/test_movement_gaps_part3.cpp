@@ -1999,7 +1999,11 @@ void test_t20_stopped_vs_stopped() {
             UnitDesc x = unit(1, xp, 2, 1.0f, 6.0f, LocomotorKind::Default);
             x.collision_class = cls;
             CHECK(sys.add_unit(x));
-            CHECK(sys.add_unit(unit(2, {xp.x - 4.0f, xp.y}, 2, 0.0f, 3.0f, LocomotorKind::Default)));  // cannot walk
+            // cannot walk: no locomotor (rule 1 makes the other one move). mov3 t04 (BKR2 Q4): a max speed of 0 alone is
+            // no longer immobile - it costs 0 and would be the one picked
+            UnitDesc w = unit(2, {xp.x - 4.0f, xp.y}, 2, 0.0f, 3.0f, LocomotorKind::Default);
+            w.no_locomotor = true;
+            CHECK(sys.add_unit(w));
             SimRng rng(103);
             moved = tal = false;
             angle = 0.0f;
