@@ -46,7 +46,7 @@ echo MODULE_DONE>> %LOG%
 python tools\lint\build_summary.py --state %BT%\build_state.json %LOG%
 set "MRC=!ERRORLEVEL!"
 set "ALAMO_BUILD_EXTRA=%~dp0%BT%\build_state.json"
-python roadmap-store\roadmap_store.py record-build msvc %BT% %LOG%
+python -I tools\lint\record_build.py msvc %BT% %LOG%
 echo full log: %LOG%
 if defined ALAMO_FULL_LOG type %LOG%
 exit /b !MRC!

@@ -44,4 +44,4 @@ python -I tools\lint\build_state.py begin %BT% --modules all --tests all
 echo BUILD_DONE>> logs\clang_configure.txt
 python tools\lint\build_summary.py --state %BT%\build_state.json logs\clang_configure.txt logs\clang_build.txt
 set "ALAMO_BUILD_EXTRA=%~dp0%BT%\build_state.json"
-python roadmap-store\roadmap_store.py record-build clang %BT% logs\clang_configure.txt logs\clang_build.txt
+python -I tools\lint\record_build.py clang %BT% logs\clang_configure.txt logs\clang_build.txt

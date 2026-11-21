@@ -43,4 +43,4 @@ echo BUILD_DONE>> logs\msvc_configure.txt
 python tools\lint\build_summary.py --state %BT%\build_state.json logs\msvc_configure.txt logs\msvc_build.txt
 if not errorlevel 1 python -I tools\lint\verified_build.py pass %BT%
 set "ALAMO_BUILD_EXTRA=%~dp0%BT%\build_state.json"
-python roadmap-store\roadmap_store.py record-build msvc %BT% logs\msvc_configure.txt logs\msvc_build.txt
+python -I tools\lint\record_build.py msvc %BT% logs\msvc_configure.txt logs\msvc_build.txt

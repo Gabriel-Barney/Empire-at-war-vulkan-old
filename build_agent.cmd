@@ -111,7 +111,7 @@ rem Summary first: it adds the outcome (failure kind, golden drift) to %B%\build
 python tools\lint\build_summary.py --state %B%\build_state.json %LOG%
 set "ARC=!ERRORLEVEL!"
 set "ALAMO_BUILD_EXTRA=%~dp0%B%\build_state.json"
-python roadmap-store\roadmap_store.py record-build !ACOMP! %B% %LOG%
+python -I tools\lint\record_build.py !ACOMP! %B% %LOG%
 if "!ARC!"=="0" python -I tools\lint\verified_build.py pass %B%
 echo full log: %LOG%
 if defined ALAMO_FULL_LOG type %LOG%

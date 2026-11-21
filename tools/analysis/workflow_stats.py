@@ -45,9 +45,13 @@ def is_golden(path: str) -> bool:
 
 # ---------------------------------------------------------------- build records
 
-def load_builds(builds_dir: str, day_from: dt.date, day_to: dt.date) -> list[dict]:
+def load_builds(builds_dir: str, day_from: dt.date, day_to: dt.date, local_dir: str | None = None) -> list[dict]:
+    """Roadmap build records plus, since wr2 t06, the iteration builds kept locally (logs/build_records)."""
     out = []
-    for path in sorted(glob.glob(os.path.join(builds_dir, "*.json"))):
+    paths = sorted(glob.glob(os.path.join(builds_dir, "*.json")))
+    if local_dir:
+        paths += sorted(glob.glob(os.path.join(local_dir, "*.json")))
+    for path in paths:
         with open(path, encoding="utf-8") as f:
             rec = json.load(f)
         at = rec.get("at")
@@ -223,12 +227,13 @@ def print_markdown(s: dict) -> None:
     print(f"| Commits touching benchmark scenarios | {g['benchmark_commits']} |")
 
 
-def collect(builds_dir: str, repo: str, ref: str, day_from: dt.date, day_to: dt.date, top: int) -> dict:
+def collect(builds_dir: str, repo: str, ref: str, day_from: dt.date, day_to: dt.date, top: int,
+            local_dir: str | None = None) -> dict:
     sha = subprocess.run(["git", "-C", repo, "rev-parse", ref], check=True, capture_output=True,
                          text=True).stdout.strip()
     return {
         "from": day_from.isoformat(), "to": day_to.isoformat(), "ref": ref, "ref_sha": sha,
-        "builds": build_stats(load_builds(builds_dir, day_from, day_to), day_from, day_to, top),
+        "builds": build_stats(load_builds(builds_dir, day_from, day_to, local_dir), day_from, day_to, top),
         "git": git_stats(git_log(repo, ref, day_from, day_to), top),
     }
 
@@ -322,6 +327,8 @@ def main(argv: list[str]) -> int:
     ap.add_argument("--repo", default=ROOT, help="git repository (default this checkout)")
     ap.add_argument("--builds", default=os.path.join(ROOT, "roadmap-store", "data", "builds"),
                     help="build record folder")
+    ap.add_argument("--local", default=os.path.join(ROOT, "logs", "build_records"),
+                    help="local iteration build records (wr2 t06; default <repo>/logs/build_records; '' for none)")
     ap.add_argument("--top", type=int, default=10, help="rows in the top-N lists")
     out = ap.add_mutually_exclusive_group()
     out.add_argument("--json", action="store_true", help="print every figure as JSON")
@@ -334,7 +341,7 @@ def main(argv: list[str]) -> int:
         ap.error("--from is required")
     day_from = dt.date.fromisoformat(args.day_from)
     day_to = dt.date.fromisoformat(args.day_to) if args.day_to else dt.datetime.now(dt.timezone.utc).date()
-    s = collect(args.builds, args.repo, args.ref, day_from, day_to, args.top)
+    s = collect(args.builds, args.repo, args.ref, day_from, day_to, args.top, args.local or None)
     if args.json:
         print(json.dumps(s, indent=1))
     elif args.markdown:

@@ -69,6 +69,8 @@ if defined ALAMO_GATE_DRY (
   echo gate_scheduled: dry run, would gate origin/dev !SHA! in %WT%!MISSED!
   exit /b 0
 )
+rem wr2 t06: the nightly gate is one of the two runs that still write roadmap build records (tools\lint\record_build.py).
+set "ALAMO_RECORD_BUILD=1"
 call "%WT%\build_gate.cmd"
 set RC=!ERRORLEVEL!
 if exist "%WT%\logs\gate_summary.txt" copy /y "%WT%\logs\gate_summary.txt" "%MAIN%\logs\gate_dev_summary.txt" >nul

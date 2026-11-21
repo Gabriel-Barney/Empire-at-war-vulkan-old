@@ -55,4 +55,4 @@ echo %ALAMO_SANITIZE%| findstr /c:address >nul && set SAN=!SAN! -mllvm -asan-sta
 echo BUILD_DONE>> logs\asan_configure.txt
 python tools\lint\build_summary.py --state %BT%\build_state.json logs\asan_configure.txt logs\asan_build.txt
 set "ALAMO_BUILD_EXTRA=%~dp0%BT%\build_state.json"
-python roadmap-store\roadmap_store.py record-build clang-asan %BT% logs\asan_configure.txt logs\asan_build.txt
+python -I tools\lint\record_build.py clang-asan %BT% logs\asan_configure.txt logs\asan_build.txt
