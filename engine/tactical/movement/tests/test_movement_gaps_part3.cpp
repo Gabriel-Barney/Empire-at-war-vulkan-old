@@ -62,7 +62,7 @@ void test_land_squad_speed_order() {
     // Rebel: 13 steps leave 0.1404, then the rate, then the zero (15 frames)
     path_end("Stormtrooper squad", 0, 0.8f, t18_storm(), 0.05f * mult, 0.8f * mult, 15, true);
     path_end("Rebel squad", 1, 1.1f, rebel, 0.07f * mult, 1.0f * mult, 13, true);
-    const float a = 0.05f * mult, vmax = 0.8f * mult;
+    const float vmax = 0.8f * mult;
     {  // s78n t23 (MOVEMENT §5.4.6): a vehicle crossing the squad's path - Path Around (state 1), the vehicle detours
         MovementSystem sys{MovementConfig{}};
         land_system(sys, 100);

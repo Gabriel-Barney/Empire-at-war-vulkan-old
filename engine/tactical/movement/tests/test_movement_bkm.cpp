@@ -512,7 +512,7 @@ void test_attack_validation_failure() {
 // validated and both get a move. Before mov2 t06 an object move skipped the validation.
 void test_object_goal_validation() {
     ::alamo::test::section("mov2_object_goal_validation");
-    const auto run = [](uint32_t flags, UnitView& a, UnitView& b) {
+    const auto run = [](uint8_t flags, UnitView& a, UnitView& b) {
         MovementSystem sys{MovementConfig{}};
         land_system(sys, 60);
         for (int32_t k = 3; k <= 9; ++k) {

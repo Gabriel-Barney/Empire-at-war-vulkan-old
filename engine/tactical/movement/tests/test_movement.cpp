@@ -1980,8 +1980,8 @@ static void test_land_group() {
     // mov2 t04 (2026-11-17, the corner pass reads the tracker flags taken before the last walk): 2025 frames, all 36 near
     // the destination, 9 terrain records and 9 detours, no stop. mov2 (2026-11-20, MSVC): with the rejoin tracker (t08)
     // alone unit 16 was stopped by a failed detour (1977 frames); with the members walking copies of the formation path
-    // (t01), the 3-D recruitment (t03) and the rest of mov2: 2179 frames, all 36 near, 9 records / 9 detours, no stop.
-    CHECK(ground && frames == 2179 && arrived == 36 && jammed == 0 && cycle);
+    // (t01), the 3-D recruitment (t03) and the rest of mov2: 2072 frames, all 36 near, 9 records / 9 detours, no stop.
+    CHECK(ground && frames == 2072 && arrived == 36 && jammed == 0 && cycle);
     CHECK(near == 36 && stops == 0);
     CHECK(st.terrain_records == 9 && st.terrain_detours == 9);
     CHECK(tlog.stops.empty() && far_ids.empty());
@@ -3534,7 +3534,7 @@ static CrcLog space_crc_run(const ParallelFor& pf) {
 // path (11 accepted goals); MovingVsMoving answers follow the role slots.
 // s78n t26.2 (MOVEMENT §3.5.2 A / B): the speed controller (End Move T = a, 0x15 restarts), the start turn in place.
 // s78n t26 closing review (FIGHTER_FLYING §7.5 item 4): formation mates side-step by their footprint overlap.
-static constexpr uint64_t kGoldenLand = 0x82917414be268681ull;  // mov2 t01 / t03 / t08 / t09: formation path copies, 3-D recruitment, rejoin tracker, squad re-order at speed; mov2 t04: tracker snapshot before the walk; mov1: Starved count, tie-break extent, terrain corners, +0x28c, overtake rank, step 10, SvS kept, tick order; sp6: tree-hash layout (movement / combat / objects hashes); bkm1: lane fallback / stop point, shield-free class, recruitment, stored z, secondary facing; s78p: formation path and lanes; s78n t26 review round 2 (mixed formations, range rank); closing review; t26.4 the move step C; t26.3 the corner pass
+static constexpr uint64_t kGoldenLand = 0xc4a7dca08d4fb971ull;  // mov2 t01 / t03 / t08 / t09: formation path copies, 3-D recruitment, rejoin tracker, squad re-order at speed; mov2 t04: tracker snapshot before the walk; mov1: Starved count, tie-break extent, terrain corners, +0x28c, overtake rank, step 10, SvS kept, tick order; sp6: tree-hash layout (movement / combat / objects hashes); bkm1: lane fallback / stop point, shield-free class, recruitment, stored z, secondary facing; s78p: formation path and lanes; s78n t26 review round 2 (mixed formations, range rank); closing review; t26.4 the move step C; t26.3 the corner pass
 static constexpr uint64_t kGoldenSpace = 0x8fc952146335d9dbull;  // sp6: tree-hash layout (movement / combat / objects hashes)
 
 static void test_determinism() {
