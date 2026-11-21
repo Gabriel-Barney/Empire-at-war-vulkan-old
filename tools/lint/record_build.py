@@ -71,7 +71,7 @@ def selftest() -> int:
         log = os.path.join(tmp, "b.txt")
         with open(log, "w") as f:
             f.write("x\n")
-        p = local_record("msvc", "build-wt-msvc", [log], lambda t: {"status": "fail", "exits": {"build": 2}},
+        p = local_record("msvc", "tree", [log], lambda t: {"status": "fail", "exits": {"build": 2}},
                          lambda path: {}, os.path.join(tmp, "rec"))
         d = json.load(open(p))
         if not (d["local"] and d["status"] == "fail" and d["compiler"] == "msvc" and os.path.basename(p).endswith("-msvc.json")):
