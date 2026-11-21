@@ -68,6 +68,11 @@ target_link_libraries(alamo_ui_hud PUBLIC alamo_ui alamo_core alamo_engine_flags
 if(TARGET alamo_tactical_abilities)  # hud_abilities.hpp abilities_from_s9 (read-only AbilitySystem queries)
   target_link_libraries(alamo_ui_hud PUBLIC alamo_tactical_abilities)
   target_compile_definitions(alamo_ui_hud PUBLIC ALAMO_UI_HAVE_ABILITIES=1)
+else()
+  # targeting.cpp reads the ability type enums only (header-only); without the abilities library (a module list that
+  # leaves out objects) it still needs their headers (wr3 t06: the one include failure the module closure leaves).
+  target_include_directories(alamo_ui_hud PRIVATE ${PROJECT_SOURCE_DIR}/engine/tactical/abilities/include
+                             ${PROJECT_SOURCE_DIR}/engine/tactical/combat/include ${PROJECT_SOURCE_DIR}/engine/tactical/include)
 endif()
 if(TARGET alamo_objects)
   target_sources(alamo_ui_hud PRIVATE src/hud_types.cpp)  # build_hud_type_table (GameObjectTypes)
